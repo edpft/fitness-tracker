@@ -359,7 +359,6 @@ pub async fn hold(
     peloton: &Peloton,
 ) -> Result<(), Failure> {
     let store = Store::open(database).await?;
-    let parameters = store.parameters();
     let plans = store.plans(zone);
 
     // The Monday of the week asked for. A microcycle begins on a Monday and a
@@ -418,9 +417,8 @@ pub async fn hold(
     )
     .map_err(|error| Failure::usage(&error))?;
 
-    let settings = crate::wizard::ready(&parameters).await?;
-    application::prescribe::Authoring::new(plans, parameters)
-        .author(&rewritten, &settings)
+    application::prescribe::Authoring::new(plans)
+        .author(&rewritten)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;
 

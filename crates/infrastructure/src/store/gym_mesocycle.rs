@@ -1,8 +1,8 @@
 //! The gym mesocycles of an authored plan (§ 12).
 //!
-//! Written once and kept, superseded by the plan's `authored_at` like the
-//! parameters beside it. A plan is a record of intent, so nothing regenerates it
-//! and nothing replaces it wholesale.
+//! Written once and kept, superseded by the plan's `authored_at`. A plan is a
+//! record of intent, so nothing regenerates it and nothing replaces it
+//! wholesale.
 //!
 //! **Identity is the plan's** (issue #86). A mesocycle has no name and no
 //! authoring time of its own: it is the *n*th gym mesocycle of a plan, and
@@ -11,12 +11,11 @@
 //!
 //! **Reading uses `rehydrate`, not `new`.** The consistency checks that depend
 //! on nothing but the programme are re-run, because a row edited by hand should
-//! be caught. Linear's ladder check is not: its span comes from the parameters,
-//! so on read it would be asserting that this programme's duration works with
-//! whatever span is in force *now* — not a property of the stored programme.
-//! Leaving it out is also what lets this store answer without reading another
-//! one, so a programme can still be shown when the parameters are what is
-//! broken.
+//! be caught. Linear's ladder check is not: its climb comes from linear
+//! progression, so on read it would be asserting something about a version this
+//! store does not read. Leaving it out is also what lets this store answer
+//! without reading another one, so a programme can still be shown when the
+//! versions are what is broken.
 //!
 //! **One table, three templates, and the row shape is conditional.** A test has
 //! no anchor and no gating role and does have a repetition count; migration 0016
@@ -48,7 +47,10 @@ use domain::{
     provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
     schedule::{Discipline, Relative, SessionRole},
 };
-use jiff::civil::{Date, Weekday};
+use jiff::{
+    Timestamp,
+    civil::{Date, Weekday},
+};
 use sqlx::SqlitePool;
 
 use super::{corrupt, store_error};
@@ -220,8 +222,12 @@ pub(super) async fn in_force(
     .await
     .map_err(|error| store_error(&error))?;
 
+    let planned = first_authored(pool).await?;
     let mut mesocycles = Vec::with_capacity(rows.len());
     for row in rows {
+        let planned_at = *planned
+            .get(&row.plan_name)
+            .ok_or_else(|| corrupt(&"a mesocycle whose plan was never authored"))?;
         let fills = read_fills(pool, row.id).await?;
         let interruptions = read_interruptions(pool, row.id).await?;
 
@@ -244,31 +250,21 @@ pub(super) async fn in_force(
             calendar,
             provided,
         };
+        // What the row asserts, read once: a test takes it as its own, and a
+        // periodised block's entry test as what it measured.
+        let asserted = read_anchor(
+            row.asserted_grams,
+            row.asserted_failed_grams,
+            row.asserted_provenance,
+            row.asserted_from,
+        )?;
         let mesocycle = match row.template.as_str() {
-            "test" => rehydrate_test(
-                common,
-                row.test_reps,
-                read_anchor(
-                    row.asserted_grams,
-                    row.asserted_failed_grams,
-                    row.asserted_provenance,
-                    row.asserted_from,
-                )?,
-            )?,
+            "test" => rehydrate_test(common, row.test_reps, asserted)?,
             template @ ("linear" | "block" | "sbs") => rehydrate_periodisation(
                 common,
                 template,
                 gating_of(row.gating_intensity, row.gating_volume)?,
-                read_entry_test(
-                    row.entry_test_reps,
-                    row.entry_test_light_grams,
-                    read_anchor(
-                        row.asserted_grams,
-                        row.asserted_failed_grams,
-                        row.asserted_provenance,
-                        row.asserted_from,
-                    )?,
-                )?,
+                read_entry_test(row.entry_test_reps, row.entry_test_light_grams, asserted)?,
             )?,
             other => {
                 return Err(corrupt(&format!(
@@ -284,12 +280,41 @@ pub(super) async fn in_force(
                 id: MesocycleId::new(row.id),
                 ordinal: ordinal_in_plan(row.ordinal)?,
                 plan,
+                planned_at,
                 mesocycle,
                 changes,
             },
         ));
     }
     Ok(carried(mesocycles))
+}
+
+/// When each plan was made: its first authoring under its name (#192).
+///
+/// **Not the authoring in force.** Re-authoring a plan edits it — a cycling hold
+/// rewritten, a mesocycle added — and an edit moves it onto no newer version of
+/// the programme or its progressions; only a new plan does. Compared as instants
+/// rather than as text, because a timestamp prints only the fractional digits it
+/// needs.
+async fn first_authored(pool: &SqlitePool) -> Result<BTreeMap<String, Timestamp>, StoreError> {
+    let rows = sqlx::query!(
+        r#"SELECT name AS "name!: String", authored_at AS "authored_at!: String" FROM plan"#
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+    let mut first: BTreeMap<String, Timestamp> = BTreeMap::new();
+    for row in rows {
+        let at: Timestamp = row
+            .authored_at
+            .parse()
+            .map_err(|_| corrupt(&"a plan authored at something that is not an instant"))?;
+        first
+            .entry(row.name)
+            .and_modify(|earliest| *earliest = (*earliest).min(at))
+            .or_insert(at);
+    }
+    Ok(first)
 }
 
 /// Each mesocycle with every change made earlier in its plan, followed by its

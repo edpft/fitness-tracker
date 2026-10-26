@@ -29,7 +29,7 @@ pub mod linear;
 pub mod mesocycle;
 pub mod parameters;
 pub mod prilepin;
-pub mod programming;
+pub mod programme;
 pub mod progression;
 pub mod project;
 pub mod repmax;
@@ -52,10 +52,9 @@ pub mod workout;
 pub use anchor::{Anchor, AnchorProvenance, InvalidAnchor, UnknownProvenance, in_force};
 pub use attempts::Attempts;
 pub use authored::{Authored, AuthoringError};
-// `block::Block` is deliberately not re-exported here: `shape::Block` already
-// holds that name at the crate root, and the two are different things — a group
-// of items in one session, and a periodised plan. Reach the plan through
-// `prescription::block::Block`, which is what its own module doc calls it.
+// `block::Block` is reached through `prescription::block::Block`, which is what
+// its own module doc calls it. A group of items in one session is a `Section`
+// (operator, 2026-10-26), which is what freed the word for periodisation.
 pub use block::{BlockPeriodisation, BlockWeek, EntryTest, InvalidBlock, Phase, WeekPlan};
 pub use change::{FillChange, FillChanges};
 pub use delivery::{
@@ -64,21 +63,19 @@ pub use delivery::{
 };
 pub use ladder::{InvalidLadder, Ladder, Opening};
 pub use linear::{
-    Fill, Linear, Position, Primary, PrimaryPattern, SlotContent, SlotFills, StaticFill,
+    BackOff, Fill, Linear, LinearProgression, Position, Primary, PrimaryPattern, ResetProtocol,
+    SlotContent, SlotFills, StaticFill, TopSetReps,
 };
 pub use mesocycle::{GymMesocycle, InconsistentMesocycle, Progression, check_primary};
-pub use parameters::{GenerationParameters, InvalidPercentage, Percentage, Scales};
-pub use programming::{
-    AccessoryScheme, BackOff, InvalidProgramming, Programming, ResetProtocol, TopSetReps,
-    WarmupStep, programming,
-};
+pub use parameters::{InvalidPercentage, Percentage, Scales};
+pub use programme::{AccessoryScheme, Programme};
 pub use progression::{GatingTopSet, Progress, Reset, progress_after};
 pub use project::{Divergence, ItemPosition, Projection, ProjectionGap, project, satisfies};
 pub use repmax::rep_max;
-pub use rest::{BlockRest, RestScheme, rested};
+pub use rest::{RestScheme, SectionRest, rested};
 pub use sbs::{
-    CompletedSet, InvalidSbs, Sbs, SbsDay, SbsSession, achieved, advance, day, maximum_after,
-    training_max_share, working_load,
+    CompletedSet, InvalidSbs, Sbs, SbsChart, SbsDay, SbsProgression, SbsSession, SbsWeek, achieved,
+    advance, maximum_after, training_max_share, working_load,
 };
 // `SessionRole` is deliberately not re-exported here. It moved to
 // `domain::schedule` on 2026-09-20 (issue #63), because a training slot carries
@@ -90,12 +87,12 @@ pub use schedule::{
     WeekIndex, WeekKind,
 };
 pub use shape::{
-    Block, PrescribedExercise, PrescribedItem, PrescribedSuperset, SlotId, SupersetMember,
+    PrescribedExercise, PrescribedItem, PrescribedSuperset, Section, SlotId, SupersetMember,
     UnknownSlot, WorkoutShape,
 };
 pub use steps::{InvalidLoadSteps, LoadSteps, Step};
 pub use succession::{RECENT_WEEKS, is_recent_enough, weeks_between};
 pub use target::{Prescribed, PrescribedSet, Target};
 pub use test::{Test, Tested};
-pub use warmup::ramp as warmup_ramp;
+pub use warmup::{WarmupStep, ramp as warmup_ramp};
 pub use workout::{DerivedFrom, MesocycleId, PrescribedWorkout};

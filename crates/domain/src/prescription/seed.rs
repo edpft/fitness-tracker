@@ -1,4 +1,5 @@
-//! What this build ships as the operator's generation parameters (§ 14).
+//! What this build ships as the first version of the programme, of each primary
+//! progression (§ 14.1), and of the load scales (§ 14).
 //!
 //! **A seed, never a fallback** (decision 0015). `init` writes these into the
 //! store, dated, and every derivation reads them from there — nothing on the
@@ -28,10 +29,13 @@ use std::collections::BTreeMap;
 
 use crate::{
     gym::exercise::Implement,
-    measure::{Duration, Kg},
+    measure::{Duration, Kg, RepCount},
     prescription::{
-        BlockRest, GenerationParameters, LoadSteps, Percentage, RestScheme, Scales, Step, Target,
+        AccessoryScheme, BackOff, ByIntensity, LinearProgression, LoadSteps, Percentage, Programme,
+        ResetProtocol, RestScheme, SbsChart, SbsDay, SbsProgression, SbsWeek, Scales, SectionRest,
+        SlotId, Step, Target, TopSetReps, WarmupStep,
     },
+    sequence::NonEmpty,
 };
 
 /// A value in this file that will not build.
@@ -63,8 +67,8 @@ fn mass(what: &str, kilos: &str) -> Result<Kg, InvalidSeed> {
 }
 
 /// A rest of one duration.
-const fn exactly(seconds: u64) -> BlockRest {
-    BlockRest {
+const fn exactly(seconds: u64) -> SectionRest {
+    SectionRest {
         between_sets: Target::Exactly(Duration::from_seconds(seconds)),
         after_superset: None,
     }
@@ -75,24 +79,56 @@ const fn exactly(seconds: u64) -> BlockRest {
 /// **The domain holds a span rather than two bounds**, so an inverted range is
 /// not expressible past this point — which is why the seed states `120, 180`
 /// and gets `None` rather than a backwards rest if anyone swaps them.
-fn banded(what: &str, between: (u64, u64), after: (u64, u64)) -> Result<BlockRest, InvalidSeed> {
+fn banded(what: &str, between: (u64, u64), after: (u64, u64)) -> Result<SectionRest, InvalidSeed> {
     let span = |low: u64, high: u64| {
         Target::between(Duration::from_seconds(low), Duration::from_seconds(high))
             .ok_or_else(|| wrong(what, "a rest range runs low-high and must span"))
     };
-    Ok(BlockRest {
+    Ok(SectionRest {
         between_sets: span(between.0, between.1)?,
         after_superset: Some(span(after.0, after.1)?),
     })
 }
 
-/// The set this build ships.
+fn count(what: &str, reps: u32) -> Result<RepCount, InvalidSeed> {
+    RepCount::new(reps).map_err(|error| wrong(what, error))
+}
+
+/// The double-progression scheme a section's non-primary slots run.
+fn scheme(what: &str, reps: (u32, u32), sets: u32) -> Result<AccessoryScheme, InvalidSeed> {
+    Ok(AccessoryScheme {
+        reps: Target::between(count(what, reps.0)?, count(what, reps.1)?)
+            .ok_or_else(|| wrong(what, "a rep range runs low-high and must span"))?,
+        sets: count(what, sets)?,
+    })
+}
+
+/// The operator's own ramp: 4 at 40%, 3 at 60%, 2 at 80%, 1 at 90%, all of the
+/// top set rather than of the anchor. It is a floor rather than the answer — a
+/// work-up toward an eight-repetition maximum runs 8, 8, 6, 5 — and
+/// `warmup::ramp` is where that is applied.
+///
+/// **Shipped once and stored twice**: linear and SBS each define their own ramp
+/// (operator, 2026-10-24), and today the two happen to be the same.
+fn ramp(what: &str) -> Result<NonEmpty<WarmupStep>, InvalidSeed> {
+    let mut steps = Vec::with_capacity(4);
+    for (of_top_set, reps) in [("40%", 4), ("60%", 3), ("80%", 2), ("90%", 1)] {
+        steps.push(WarmupStep {
+            of_top_set: percentage(what, of_top_set)?,
+            reps: count(what, reps)?,
+        });
+    }
+    NonEmpty::new(steps).map_err(|_| wrong(what, "a ramp needs a step"))
+}
+
+/// The load scales this build ships, for a store that knows no kinds yet
+/// (issue #450).
 ///
 /// # Errors
 ///
 /// [`InvalidSeed`] if a value written here does not build, which is a defect in
 /// this build rather than anything the operator can correct.
-pub fn seed() -> Result<GenerationParameters, InvalidSeed> {
+pub fn scales() -> Result<Scales, InvalidSeed> {
     // **A scale, not an increment.** One increment for everything prescribed a
     // dumbbell at 12.5kg and another at 9.5kg — neither of which is a dumbbell.
     // A bare step is uniform; a list is banded, lightest first, and the first
@@ -128,7 +164,97 @@ pub fn seed() -> Result<GenerationParameters, InvalidSeed> {
     .map_err(|error| wrong("dumbbell scale", error))?;
     scales.insert(Implement::Dumbbell, dumbbell);
 
-    Ok(GenerationParameters {
+    Ok(Scales::new(scales))
+}
+
+/// The first version of the programme.
+///
+/// # Errors
+///
+/// [`InvalidSeed`] if a value written here does not build.
+pub fn programme() -> Result<Programme, InvalidSeed> {
+    Ok(Programme {
+        // INFERRED. The two sections' ranges were eyeballed from pull-ups at six
+        // and curls around four to six, and are unconfirmed.
+        strength: scheme("strength scheme", (4, 6), 3)?,
+        hypertrophy: scheme("hypertrophy scheme", (4, 6), 3)?,
+
+        // The wrist pair runs eight to twelve. The operator, 2026-10-22, asked
+        // whether the whole hypertrophy section should: "Only the wrist pair".
+        slots: BTreeMap::from([
+            (SlotId::WristFlexion, scheme("wrist pair", (8, 12), 3)?),
+            (SlotId::WristExtension, scheme("wrist pair", (8, 12), 3)?),
+        ]),
+
+        // How long to rest between sets, section by section. All of it stated by the
+        // operator on 2026-08-23.
+        //
+        // **Zero between the members of a superset is not stated here**, because
+        // it is what a superset is rather than a value to choose: a set another
+        // member follows rests for zero by definition, and `after_superset` is
+        // what the group rests for once it ends.
+        //
+        // `after_superset` absent means the section rests the same however its
+        // work is grouped — which is not the same as resting for zero, and is
+        // why plyometric and power leave it out rather than set it to zero.
+        //
+        // The warm-up ramp is not here either. It instructs no rest at all —
+        // changing the plates is the rest — except for the step into the working
+        // set, which takes the bottom of its section's range. That is a rule
+        // rather than a number, so it lives in `crate::prescription::rest` and
+        // nothing authors it.
+        rest: RestScheme {
+            plyometric: exactly(30),
+            power: exactly(90),
+            strength: banded("strength rest", (120, 180), (90, 150))?,
+            // The same as strength, written out rather than pointing at it. The
+            // operator is not sure the two should agree, and two numbers to
+            // change is the shape that makes disagreeing a one-line edit
+            // instead of a restructuring.
+            hypertrophy: banded("hypertrophy rest", (120, 180), (90, 150))?,
+            // Mobility work runs straight through.
+            mobility: exactly(0),
+        },
+
+        // How long a static hold is held for. The mobility work does not
+        // progress; it is held, and for the same length every time.
+        static_hold: Duration::from_seconds(60),
+    })
+}
+
+/// The first version of linear progression.
+///
+/// # Errors
+///
+/// [`InvalidSeed`] if a value written here does not build.
+pub fn linear() -> Result<LinearProgression, InvalidSeed> {
+    Ok(LinearProgression {
+        warmup: ramp("linear warm-up ramp")?,
+
+        // INFERRED. The primary's top set, per session role, read off every
+        // session since the July test. Well evidenced — they have not varied
+        // within a role — and still not stated.
+        top_set_reps: ByIntensity {
+            lower: TopSetReps::new(count("light top set", 3)?),
+            higher: TopSetReps::new(count("heavy top set", 1)?),
+        },
+
+        // **The primary's back-off sets, per session role — its own pattern,
+        // not the strength section's scheme.** Stated by the operator on
+        // 2026-08-20; the record agrees on every session since the July test.
+        back_off: ByIntensity {
+            higher: BackOff {
+                sets: count("heavy back-off", 2)?,
+                reps: count("heavy back-off", 4)?,
+                of_top_set: percentage("heavy back-off", "85%")?,
+            },
+            lower: BackOff {
+                sets: count("light back-off", 3)?,
+                reps: count("light back-off", 6)?,
+                of_top_set: percentage("light back-off", "85%")?,
+            },
+        },
+
         // The light session's top set, as a percentage of that week's heavy top
         // set. Stated by the operator on 2026-08-18, and the first version of
         // this number was wrong in an instructive way.
@@ -168,68 +294,154 @@ pub fn seed() -> Result<GenerationParameters, InvalidSeed> {
         // and only the first survives either of them being changed.
         entry_drop: percentage("entry drop", "-10%")?,
 
-        // How long to rest between sets, block by block. All of it stated by the
-        // operator on 2026-08-23.
-        //
-        // **Zero between the members of a superset is not stated here**, because
-        // it is what a superset is rather than a value to choose: a set another
-        // member follows rests for zero by definition, and `after_superset` is
-        // what the group rests for once it ends.
-        //
-        // `after_superset` absent means the block rests the same however its
-        // work is grouped — which is not the same as resting for zero, and is
-        // why plyometric and power leave it out rather than set it to zero.
-        //
-        // The warm-up ramp is not here either. It instructs no rest at all —
-        // changing the plates is the rest — except for the step into the working
-        // set, which takes the bottom of its block's range. That is a rule
-        // rather than a number, so it lives in `crate::prescription::rest` and
-        // nothing authors it.
-        rest: RestScheme {
-            plyometric: exactly(30),
-            power: exactly(90),
-            strength: banded("strength rest", (120, 180), (90, 150))?,
-            // The same as strength, written out rather than pointing at it. The
-            // operator is not sure the two should agree, and two numbers to
-            // change is the shape that makes disagreeing a one-line edit
-            // instead of a restructuring.
-            hypertrophy: banded("hypertrophy rest", (120, 180), (90, 150))?,
-            // Mobility work runs straight through.
-            mobility: exactly(0),
+        // From docs/primary-lift-progression.md. The drop and the increment are
+        // chosen as a pair so both land on the plate grid and both cost four
+        // weeks — so a stall has a fixed price whichever reset is in play.
+        first_reset: ResetProtocol {
+            drop: percentage("first reset", "-10%")?,
+            reclimb_per_week: mass("first reset", "5")?,
         },
+        second_reset: ResetProtocol {
+            drop: percentage("second reset", "-5%")?,
+            reclimb_per_week: mass("second reset", "2.5")?,
+        },
+    })
+}
 
-        // How long a static hold is held for. The mobility work does not
-        // progress; it is held, and for the same length every time.
-        static_hold: Duration::from_seconds(60),
-
-        scales: Scales::new(scales),
+/// The first version of SBS: Stronger By Science's two-day intermediate squat
+/// chart, as the operator runs it.
+///
+/// Verified against `Squat 2x Int` in the operator's copy of the workbook, and
+/// recorded in decision 0024.
+///
+/// # Errors
+///
+/// [`InvalidSeed`] if a value written here does not build.
+pub fn sbs() -> Result<SbsProgression, InvalidSeed> {
+    let percentage_day = |sets: u32, reps: u32, share: &str| -> Result<SbsDay, InvalidSeed> {
+        Ok(SbsDay::Percentage {
+            sets: count("SBS chart", sets)?,
+            reps: count("SBS chart", reps)?,
+            share: percentage("SBS chart", share)?,
+        })
+    };
+    let rep_max = |reps: u32, sets: u32, low: u32, high: u32| -> Result<SbsDay, InvalidSeed> {
+        Ok(SbsDay::RepMax {
+            reps: count("SBS chart", reps)?,
+            back_off_sets: count("SBS chart", sets)?,
+            back_off_reps: Target::between(count("SBS chart", low)?, count("SBS chart", high)?)
+                .ok_or_else(|| wrong("SBS chart", "a rep range runs low-high and must span"))?,
+        })
+    };
+    let chart = SbsChart::new([
+        SbsWeek {
+            first: percentage_day(5, 5, "80%")?,
+            second: rep_max(8, 3, 5, 6)?,
+        },
+        SbsWeek {
+            first: percentage_day(4, 3, "85%")?,
+            second: rep_max(5, 3, 3, 4)?,
+        },
+        SbsWeek {
+            first: percentage_day(3, 1, "90%")?,
+            second: rep_max(3, 3, 1, 2)?,
+        },
+        // The operator's transposition of the beginner sheet's taper.
+        SbsWeek {
+            first: percentage_day(3, 3, "75%")?,
+            second: SbsDay::Test {
+                reps: count("SBS chart", 1)?,
+            },
+        },
+    ])
+    .map_err(|error| wrong("SBS chart", error))?;
+    Ok(SbsProgression {
+        warmup: ramp("SBS warm-up ramp")?,
+        chart,
     })
 }
 
 /// The seed's own test.
 ///
 /// **A composed default is invisible to every other test.** The contract suites
-/// and the store suites all take parameters from a fixture, so a value written
+/// and the store suites all take their values from a fixture, so a value written
 /// wrong here would prescribe wrong loads on a real machine and pass everywhere
 /// else — the same class of fault as a base URL that already ended in `/v1`. So
 /// the numbers are pinned where they are written.
 #[cfg(test)]
 mod pinned {
-    use super::seed;
+    use super::{linear, programme, sbs, scales};
+    use crate::prescription::{SbsDay, SbsSession, SlotId};
 
     #[test]
-    fn the_shipped_set_builds() {
-        seed().expect("the shipped parameters build");
+    fn the_programme_is_the_operators() {
+        let seeded = programme().expect("the shipped programme builds");
+
+        assert_eq!(seeded.static_hold.as_seconds(), 60);
+        let range = |slot| {
+            let scheme = seeded.scheme_for(slot);
+            (scheme.sets.as_u32(), scheme.reps.to_string())
+        };
+        assert_eq!(range(SlotId::WristFlexion), (3, "8-12".to_owned()));
+        assert_eq!(range(SlotId::WristExtension), (3, "8-12".to_owned()));
+        assert_eq!(
+            range(SlotId::Biceps),
+            (3, "4-6".to_owned()),
+            "the rest of the hypertrophy section keeps its own"
+        );
+        assert_eq!(range(SlotId::UpperPull), (3, "4-6".to_owned()));
     }
 
     #[test]
-    fn the_numbers_are_the_operators() {
-        let seeded = seed().expect("the shipped parameters build");
+    fn linear_progression_is_the_operators() {
+        let seeded = linear().expect("the shipped linear progression builds");
 
         assert_eq!(seeded.light_of_heavy.to_string(), "85%");
         assert_eq!(seeded.ladder_climb_per_week.to_string(), "2.5");
         assert_eq!(seeded.entry_drop.to_string(), "-10%");
-        assert_eq!(seeded.static_hold.as_seconds(), 60);
+        assert_eq!(seeded.first_reset.drop.to_string(), "-10%");
+        assert_eq!(seeded.first_reset.reclimb_per_week.to_string(), "5");
+        assert_eq!(seeded.second_reset.drop.to_string(), "-5%");
+        assert_eq!(seeded.second_reset.reclimb_per_week.to_string(), "2.5");
+
+        let ramp: Vec<_> = seeded
+            .warmup
+            .iter()
+            .map(|step| (step.of_top_set.to_string(), step.reps.as_u32()))
+            .collect();
+        assert_eq!(
+            ramp,
+            vec![
+                ("40%".to_owned(), 4),
+                ("60%".to_owned(), 3),
+                ("80%".to_owned(), 2),
+                ("90%".to_owned(), 1),
+            ]
+        );
+
+        assert_eq!(seeded.back_off.higher.sets.as_u32(), 2);
+        assert_eq!(seeded.back_off.higher.reps.as_u32(), 4);
+        assert_eq!(seeded.top_set_reps.higher.as_rep_count().as_u32(), 1);
+        assert_eq!(seeded.back_off.lower.sets.as_u32(), 3);
+        assert_eq!(seeded.back_off.lower.reps.as_u32(), 6);
+        assert_eq!(seeded.top_set_reps.lower.as_rep_count().as_u32(), 3);
+    }
+
+    #[test]
+    fn sbs_is_the_published_chart_and_the_operators_ramp() {
+        let seeded = sbs().expect("the shipped SBS builds");
+
+        assert_eq!(seeded.warmup, linear().expect("linear builds").warmup);
+        let Ok(SbsDay::Percentage { sets, reps, share }) = seeded.chart.day(4, SbsSession::First)
+        else {
+            panic!("week 4 opens on a percentage day");
+        };
+        assert_eq!((sets.as_u32(), reps.as_u32()), (3, 3));
+        assert_eq!(share.to_string(), "75%");
+        assert!(matches!(
+            seeded.chart.day(4, SbsSession::Second),
+            Ok(SbsDay::Test { .. })
+        ));
     }
 
     /// **The dumbbell scale is banded and the rest are not**, and getting that
@@ -238,11 +450,10 @@ mod pinned {
     fn every_implement_that_is_loaded_has_a_scale() {
         use crate::{gym::exercise::Implement, measure::Kg};
 
-        let seeded = seed().expect("the shipped parameters build");
+        let seeded = scales().expect("the shipped scales build");
 
         for implement in [Implement::Barbell, Implement::Machine, Implement::Cable] {
             let steps = seeded
-                .scales
                 .for_implement(implement)
                 .expect("a scale for every implement the seed states");
             assert_eq!(steps.bands().count(), 1, "{implement} is a uniform scale");
@@ -250,7 +461,6 @@ mod pinned {
         }
 
         let dumbbells = seeded
-            .scales
             .for_implement(Implement::Dumbbell)
             .expect("a dumbbell scale");
         // Whole kilos to 10kg, twos above it. 9 -> 10 -> 12 in the record.

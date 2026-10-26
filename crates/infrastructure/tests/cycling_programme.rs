@@ -20,19 +20,16 @@ use domain::{
     schedule::{Diary, PartOfDay, Relative, SessionRole, TrainingWeek},
     sequence::NonEmpty,
 };
-use infrastructure::{
-    SqliteCyclingMesocycleStore, SqliteGenerationParameterStore, SqlitePlanStore, connect,
-};
+use infrastructure::{SqliteCyclingMesocycleStore, SqlitePlanStore, connect};
 use jiff::civil::{Date, Weekday, date};
-use support::{corpus, programme as gym};
+use support::corpus;
 
 type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 
-/// The three stores one plan is written and read through.
+/// The two stores one plan is written and read through.
 struct Opened {
     plans: SqlitePlanStore,
     cycling: SqliteCyclingMesocycleStore,
-    parameters: SqliteGenerationParameterStore,
 }
 
 async fn store() -> Fallible<(Opened, tempfile::TempDir)> {
@@ -41,8 +38,7 @@ async fn store() -> Fallible<(Opened, tempfile::TempDir)> {
     Ok((
         Opened {
             plans: SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-            cycling: SqliteCyclingMesocycleStore::new(pool.clone()),
-            parameters: SqliteGenerationParameterStore::new(pool),
+            cycling: SqliteCyclingMesocycleStore::new(pool),
         },
         directory,
     ))
@@ -60,10 +56,9 @@ fn plan(called: &str, mesocycles: Vec<CyclingMesocycle>) -> Fallible<Plan> {
 
 /// Author a plan through the use case, so the overlap rule runs.
 async fn author(opened: &Opened, plan: &Plan) -> Fallible<application::Authored> {
-    let (_, authored) =
-        application::prescribe::Authoring::new(opened.plans.clone(), opened.parameters.clone())
-            .author(plan, &gym::parameters()?)
-            .await?;
+    let (_, authored) = application::prescribe::Authoring::new(opened.plans.clone())
+        .author(plan)
+        .await?;
     Ok(authored)
 }
 

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO sbs_warmup_step (authored_at, position, of_top_set_bp, reps)\n                VALUES (?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "74ae1ce162e621792aaa98a8538bac5527378e28a9781c8e0fa4a8ebd6f7b40e"
+}

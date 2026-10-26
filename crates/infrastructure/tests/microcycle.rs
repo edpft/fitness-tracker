@@ -47,8 +47,8 @@ use domain::{
 };
 use infrastructure::{
     SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore, SqliteDiaryStore,
-    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqlitePlanStore,
-    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, connect,
+    SqliteGymMesocycleStore, SqlitePlanStore, SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore, connect,
 };
 use jiff::civil::{Date, DateTime};
 use sqlx::SqlitePool;
@@ -230,20 +230,15 @@ async fn autumn_on_the_bike() -> Fallible<(SqlitePool, tempfile::TempDir)> {
         NonEmpty::of(week, Vec::new()),
     )?;
 
-    Authoring::new(
-        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGenerationParameterStore::new(pool.clone()),
-    )
-    .author(
-        &Plan::new(
+    programme::design(&pool).await?;
+    Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
+        .author(&Plan::new(
             PlanName::try_from("2026-autumn-bike".to_owned())?,
             jiff::Timestamp::now(),
             None,
             Some(Programme::new(vec![mesocycle])?),
-        )?,
-        &programme::parameters()?,
-    )
-    .await?;
+        )?)
+        .await?;
 
     Ok((pool, directory))
 }
@@ -272,22 +267,17 @@ async fn autumn_together() -> Fallible<(SqlitePool, tempfile::TempDir)> {
     )?;
     let build = test_week.starting_on(Date::constant(2026, 9, 21));
 
-    Authoring::new(
-        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGenerationParameterStore::new(pool.clone()),
-    )
-    .author(
-        &Plan::new(
+    programme::design(&pool).await?;
+    Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
+        .author(&Plan::new(
             PlanName::try_from("2026-autumn".to_owned())?,
             jiff::Timestamp::now(),
             Some(Programme::new(vec![programme::as_programme(
                 programme::programme_from(Date::constant(2026, 9, 14))?,
             )])?),
             Some(Programme::new(vec![test_week, build])?),
-        )?,
-        &programme::parameters()?,
-    )
-    .await?;
+        )?)
+        .await?;
 
     Ok((pool, directory))
 }
@@ -316,12 +306,9 @@ async fn autumn_tested() -> Fallible<(SqlitePool, tempfile::TempDir)> {
     )?;
     let build = test_week.starting_on(Date::constant(2026, 9, 21));
 
-    Authoring::new(
-        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGenerationParameterStore::new(pool.clone()),
-    )
-    .author(
-        &Plan::new(
+    programme::design(&pool).await?;
+    Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
+        .author(&Plan::new(
             PlanName::try_from("2026-autumn".to_owned())?,
             jiff::Timestamp::now(),
             Some(Programme::new(vec![
@@ -329,10 +316,8 @@ async fn autumn_tested() -> Fallible<(SqlitePool, tempfile::TempDir)> {
                 programme::as_programme(programme::programme_from(Date::constant(2026, 9, 21))?),
             ])?),
             Some(Programme::new(vec![test_week, build])?),
-        )?,
-        &programme::parameters()?,
-    )
-    .await?;
+        )?)
+        .await?;
 
     Ok((pool, directory))
 }
@@ -370,15 +355,12 @@ async fn autumn() -> Fallible<(SqlitePool, tempfile::TempDir)> {
     let pool = connect(&directory.path().join("test.db")).await?;
     programme::record_the_week(&pool).await?;
 
-    Authoring::new(
-        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGenerationParameterStore::new(pool.clone()),
-    )
-    .author(
-        &programme::as_plan(programme::programme_from(Date::constant(2026, 9, 14))?)?,
-        &programme::parameters()?,
-    )
-    .await?;
+    programme::design(&pool).await?;
+    Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
+        .author(&programme::as_plan(programme::programme_from(
+            Date::constant(2026, 9, 14),
+        )?)?)
+        .await?;
 
     Ok((pool, directory))
 }
@@ -403,19 +385,11 @@ async fn away_over_the_monday(pool: &SqlitePool) -> Fallible<()> {
 /// A gym prescription for the Friday, issued and delivered.
 async fn gym_delivered_for_the_friday(pool: &SqlitePool) -> Fallible<()> {
     let friday = Date::constant(2026, 9, 18);
-    // The parameters' own timestamp, read back rather than guessed: an issued
-    // prescription names the version it was derived against, and the column is
-    // a foreign key into it.
-    let (authored_at, _) = application::GenerationParameterStore::current(
-        &SqliteGenerationParameterStore::new(pool.clone()),
-    )
-    .await?
-    .ok_or("the plan authored its parameters")?;
 
     let prescriptions =
         SqlitePrescribedWorkoutStore::new(pool.clone(), corpus::zone()?.id().to_owned());
     let id = prescriptions
-        .issue(&programme::a_workout_for(friday, authored_at)?)
+        .issue(&programme::a_workout_for(friday)?)
         .await?;
 
     let destination = hevy()?;

@@ -170,7 +170,7 @@ mod tests {
                 let Some(exercise) = Exercise::named(key) else {
                     panic!("{key} is in the vocabulary")
                 };
-                let held = matches!(slot.block(), crate::prescription::Block::Mobility);
+                let held = matches!(slot.section(), crate::prescription::Section::Mobility);
                 match (held, exercise) {
                     (true, Exercise::Duration(_)) | (false, Exercise::Reps(_)) => {}
                     _ => panic!(

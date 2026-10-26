@@ -13,9 +13,10 @@
 use domain::{
     measure::{Kg, RepCount},
     prescription::{
-        CompletedSet, SbsDay, SbsSession, achieved, advance, day, maximum_after,
+        CompletedSet, SbsChart, SbsDay, SbsSession, achieved, advance, maximum_after,
         parameters::Percentage,
         sbs::{InvalidSbs, WEEKS, training_max_share, working_load},
+        seed,
         target::Target,
     },
 };
@@ -23,6 +24,12 @@ use domain::{
 /// 2.5 kg, the workbook's own rounding and the operator's plate grid.
 const fn increment() -> Kg {
     Kg::from_grams(2_500)
+}
+
+/// The chart this build ships, which is the workbook's (#192: the chart is a
+/// stored version now, and this is its first).
+fn chart() -> Option<SbsChart> {
+    seed::sbs().ok().map(|sbs| sbs.chart)
 }
 
 fn reps(count: u32) -> Option<RepCount> {
@@ -46,12 +53,13 @@ fn sets(recorded: &[(u64, u32)]) -> Option<Vec<CompletedSet>> {
 /// share` and a repetition-maximum day is `reps, back-off sets, low–high`.
 #[test]
 fn the_chart_is_what_the_workbook_states() {
+    let chart = chart().expect("the shipped chart builds");
     let percentage = |week, session, sets: u32, count: u32, points: i32| {
         let Ok(SbsDay::Percentage {
             sets: s,
             reps: r,
             share,
-        }) = day(week, session)
+        }) = chart.day(week, session)
         else {
             panic!("week {week} should be a percentage day");
         };
@@ -72,7 +80,7 @@ fn the_chart_is_what_the_workbook_states() {
             reps: r,
             back_off_sets,
             back_off_reps,
-        }) = day(week, SbsSession::Second)
+        }) = chart.day(week, SbsSession::Second)
         else {
             panic!("week {week} day 2 should be a repetition maximum");
         };
@@ -94,7 +102,7 @@ fn the_chart_is_what_the_workbook_states() {
     rep_max(2, 5, 3, 3, 4);
     rep_max(3, 3, 3, 1, 2);
 
-    let Ok(SbsDay::Test { reps: r }) = day(4, SbsSession::Second) else {
+    let Ok(SbsDay::Test { reps: r }) = chart.day(4, SbsSession::Second) else {
         panic!("week 4 day 2 is the test");
     };
     assert_eq!(r.as_u32(), 1, "and it is a single");
@@ -102,28 +110,34 @@ fn the_chart_is_what_the_workbook_states() {
 
 #[test]
 fn the_cycle_runs_four_weeks_and_no_more() {
+    let chart = chart().expect("the shipped chart builds");
     assert_eq!(WEEKS, 4);
     assert_eq!(
-        day(5, SbsSession::First),
+        chart.day(5, SbsSession::First),
         Err(InvalidSbs::NoSuchWeek { week: 5 }),
     );
     assert_eq!(
-        day(0, SbsSession::Second),
+        chart.day(0, SbsSession::Second),
         Err(InvalidSbs::NoSuchWeek { week: 0 }),
     );
 }
 
 #[test]
 fn only_the_second_session_sets_the_maximum() {
+    let chart = chart().expect("the shipped chart builds");
     for week in 1..=WEEKS {
-        let first = day(week, SbsSession::First).expect("the week is in the chart");
+        let first = chart
+            .day(week, SbsSession::First)
+            .expect("the week is in the chart");
         assert_eq!(
             first.sets_the_maximum(),
             None,
             "week {week} day 1 programmes from the maximum, it does not set one",
         );
 
-        let second = day(week, SbsSession::Second).expect("the week is in the chart");
+        let second = chart
+            .day(week, SbsSession::Second)
+            .expect("the week is in the chart");
         assert!(
             second.sets_the_maximum().is_some(),
             "week {week} day 2 establishes the number week {} programmes from",
@@ -258,9 +272,10 @@ fn a_count_the_table_does_not_name_advances_nothing() {
 /// are not the operator's numbers and nothing is fitted to them.
 #[test]
 fn a_cycle_climbs_off_its_own_repetition_maxima() {
+    let chart = chart().expect("the shipped chart builds");
     let step = increment();
     let load_on = |week: u32, maximum: Kg| -> Kg {
-        let Ok(SbsDay::Percentage { share, .. }) = day(week, SbsSession::First) else {
+        let Ok(SbsDay::Percentage { share, .. }) = chart.day(week, SbsSession::First) else {
             panic!("week {week} day 1 is a percentage day");
         };
         working_load(maximum, share, step).expect("the load computes")
@@ -321,7 +336,8 @@ fn a_cycle_climbs_off_its_own_repetition_maxima() {
 
 #[test]
 fn a_back_off_range_is_a_range() {
-    let Ok(SbsDay::RepMax { back_off_reps, .. }) = day(1, SbsSession::Second) else {
+    let chart = chart().expect("the shipped chart builds");
+    let Ok(SbsDay::RepMax { back_off_reps, .. }) = chart.day(1, SbsSession::Second) else {
         panic!("week 1 day 2 is a repetition maximum");
     };
     assert!(
@@ -338,12 +354,13 @@ fn a_back_off_range_is_a_range() {
 /// set was completed, and this asks what it weighed.
 #[test]
 fn the_maximum_is_what_the_performed_rep_max_days_make_it() {
+    let chart = chart().expect("the shipped chart builds");
     let step = increment();
     let opening = Kg::from_grams(100_000);
 
     // Nothing performed yet — week 1 programmes from the opening, unchanged.
     assert_eq!(
-        maximum_after(opening, &[], step).as_grams(),
+        maximum_after(&chart, opening, &[], step).as_grams(),
         100_000,
         "an untrained cycle stands where it was authored",
     );
@@ -351,14 +368,14 @@ fn the_maximum_is_what_the_performed_rep_max_days_make_it() {
     // Week 1's eight-rep day made 82.5. 82.5 / 0.80 is 103.125 → 105.0.
     let week_one = sets(&[(82_500, 8)]).expect("the sets build");
     assert_eq!(
-        maximum_after(opening, &[(1, week_one.clone())], step).as_grams(),
+        maximum_after(&chart, opening, &[(1, week_one.clone())], step).as_grams(),
         105_000,
     );
 
     // And week 2's five-rep day made 90. Applied in order, on top of the first.
     let week_two = sets(&[(90_000, 5)]).expect("the sets build");
     assert_eq!(
-        maximum_after(opening, &[(1, week_one), (2, week_two)], step).as_grams(),
+        maximum_after(&chart, opening, &[(1, week_one), (2, week_two)], step).as_grams(),
         107_500,
         "90 / 0.85 is 105.88 → 107.5, from the maximum week 1 left behind",
     );
@@ -366,23 +383,25 @@ fn the_maximum_is_what_the_performed_rep_max_days_make_it() {
 
 #[test]
 fn a_week_nobody_trained_leaves_the_maximum_where_it_was() {
+    let chart = chart().expect("the shipped chart builds");
     let step = increment();
     let opening = Kg::from_grams(100_000);
 
     // Week 1 skipped, week 2 trained. The week 2 result still advances, off the
     // opening rather than off a week that never happened.
     let week_two = sets(&[(90_000, 5)]).expect("the sets build");
-    let skipped = maximum_after(opening, &[(2, week_two)], step);
+    let skipped = maximum_after(&chart, opening, &[(2, week_two)], step);
     assert_eq!(skipped.as_grams(), 107_500);
 }
 
 #[test]
 fn a_week_the_chart_does_not_name_advances_nothing() {
+    let chart = chart().expect("the shipped chart builds");
     let step = increment();
     let opening = Kg::from_grams(100_000);
     let anything = sets(&[(90_000, 8)]).expect("the sets build");
     assert_eq!(
-        maximum_after(opening, &[(9, anything)], step).as_grams(),
+        maximum_after(&chart, opening, &[(9, anything)], step).as_grams(),
         100_000,
         "the chart runs four weeks, and a fifth is not one of them",
     );
@@ -394,14 +413,16 @@ fn a_week_the_chart_does_not_name_advances_nothing() {
 /// is 85% *of* is what week 1's rep-max day made.
 #[test]
 fn week_two_is_a_share_of_what_week_one_produced() {
+    let chart = chart().expect("the shipped chart builds");
     let step = increment();
     let maximum = maximum_after(
+        &chart,
         Kg::from_grams(100_000),
         &[(1, sets(&[(82_500, 8)]).expect("the sets build"))],
         step,
     );
 
-    let Ok(SbsDay::Percentage { share, .. }) = day(2, SbsSession::First) else {
+    let Ok(SbsDay::Percentage { share, .. }) = chart.day(2, SbsSession::First) else {
         panic!("week 2 day 1 is a percentage day");
     };
     let load = working_load(maximum, share, step).expect("the load computes");
@@ -422,6 +443,7 @@ fn week_two_is_a_share_of_what_week_one_produced() {
 /// share of a number he had not lifted.
 #[test]
 fn the_rep_max_is_the_heaviest_set_that_reached_the_count() {
+    let chart = chart().expect("the shipped chart builds");
     let performed = sets(&[
         (72_500, 8),
         (75_000, 8),
@@ -433,13 +455,19 @@ fn the_rep_max_is_the_heaviest_set_that_reached_the_count() {
     .expect("the sets build");
 
     assert_eq!(
-        achieved(1, &performed).map(Kg::as_grams),
+        achieved(&chart, 1, &performed).map(Kg::as_grams),
         Some(75_000),
         "the 8RM is the heaviest set taken for eight, not the heaviest set",
     );
 
     assert_eq!(
-        maximum_after(Kg::from_grams(92_500), &[(1, performed)], increment()).as_grams(),
+        maximum_after(
+            &chart,
+            Kg::from_grams(92_500),
+            &[(1, performed)],
+            increment()
+        )
+        .as_grams(),
         95_000,
         "75 / 0.80 is 93.75, raised to the grid at 95",
     );
@@ -448,9 +476,10 @@ fn the_rep_max_is_the_heaviest_set_that_reached_the_count() {
 /// Beating the count is evidence, and the floor it gives is honest.
 #[test]
 fn a_set_past_the_count_still_measures_the_maximum() {
+    let chart = chart().expect("the shipped chart builds");
     let performed = sets(&[(75_000, 9), (77_500, 5)]).expect("the sets build");
     assert_eq!(
-        achieved(1, &performed).map(Kg::as_grams),
+        achieved(&chart, 1, &performed).map(Kg::as_grams),
         Some(75_000),
         "nine at 75 proves the 8RM is at least 75",
     );
@@ -462,10 +491,17 @@ fn a_set_past_the_count_still_measures_the_maximum() {
 /// how much — so the chart declines rather than inventing a discount.
 #[test]
 fn a_day_short_of_the_count_advances_nothing() {
+    let chart = chart().expect("the shipped chart builds");
     let performed = sets(&[(72_500, 7), (75_000, 7)]).expect("the sets build");
-    assert_eq!(achieved(1, &performed), None);
+    assert_eq!(achieved(&chart, 1, &performed), None);
     assert_eq!(
-        maximum_after(Kg::from_grams(92_500), &[(1, performed)], increment()).as_grams(),
+        maximum_after(
+            &chart,
+            Kg::from_grams(92_500),
+            &[(1, performed)],
+            increment()
+        )
+        .as_grams(),
         92_500,
     );
 }
@@ -477,11 +513,21 @@ fn a_day_short_of_the_count_advances_nothing() {
 /// set of any outcome and then skipped the whole day because it had failed.
 #[test]
 fn a_failure_above_a_completed_set_does_not_lose_the_day() {
+    let chart = chart().expect("the shipped chart builds");
     // A failure is not representable: only what went up is handed over.
     let performed = sets(&[(90_000, 1), (95_000, 1)]).expect("the sets build");
-    assert_eq!(achieved(4, &performed).map(Kg::as_grams), Some(95_000));
     assert_eq!(
-        maximum_after(Kg::from_grams(92_500), &[(4, performed)], increment()).as_grams(),
+        achieved(&chart, 4, &performed).map(Kg::as_grams),
+        Some(95_000)
+    );
+    assert_eq!(
+        maximum_after(
+            &chart,
+            Kg::from_grams(92_500),
+            &[(4, performed)],
+            increment()
+        )
+        .as_grams(),
         95_000,
         "a one-rep maximum is its own training maximum",
     );
@@ -491,17 +537,22 @@ fn a_failure_above_a_completed_set_does_not_lose_the_day() {
 /// raise nor lower it.
 #[test]
 fn back_offs_do_not_set_the_maximum() {
+    let chart = chart().expect("the shipped chart builds");
     // Week 2 is a 5RM with back-offs of three to four.
     let performed = sets(&[(85_000, 5), (85_000, 4), (85_000, 3)]).expect("the sets build");
-    assert_eq!(achieved(2, &performed).map(Kg::as_grams), Some(85_000));
+    assert_eq!(
+        achieved(&chart, 2, &performed).map(Kg::as_grams),
+        Some(85_000)
+    );
 }
 
 /// A week whose second session measures nothing has no maximum to give.
 #[test]
 fn only_a_rep_max_day_is_read() {
+    let chart = chart().expect("the shipped chart builds");
     let performed = sets(&[(80_000, 5)]).expect("the sets build");
     assert_eq!(
-        achieved(9, &performed),
+        achieved(&chart, 9, &performed),
         None,
         "the chart runs four weeks, and a ninth is not one of them",
     );

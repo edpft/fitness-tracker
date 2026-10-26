@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT authored_at AS \"authored_at!: String\" FROM sbs_progression",
+  "describe": {
+    "columns": [
+      {
+        "name": "authored_at!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sbs_progression",
+            "name": "authored_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "fbd9018cbcb28b53e0716dd0fe650fdfa2dfa448e6d47fe7dd6cede8ea07621c"
+}

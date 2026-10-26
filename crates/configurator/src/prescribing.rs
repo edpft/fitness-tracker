@@ -45,7 +45,12 @@ pub async fn prescriber(
             impl MesocycleStore + Send + Sync + use<>,
             impl PlanStore + Send + Sync + use<>,
         >,
-        impl application::GenerationParameterStore + Send + Sync + use<>,
+        impl application::GenerationParameterStore
+        + application::ProgrammeStore
+        + application::ProgressionStore
+        + Send
+        + Sync
+        + use<>,
         impl PrescribedWorkoutStore + Send + Sync + use<>,
         impl application::PrescriptionLifecycle + Send + Sync + use<>,
     >,

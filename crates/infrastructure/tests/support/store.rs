@@ -84,12 +84,10 @@ pub async fn with_programme(
         .await?;
     canonicalise(&pool).await?;
 
-    Authoring::new(
-        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGenerationParameterStore::new(pool.clone()),
-    )
-    .author(&programme::as_plan(programme)?, &programme::parameters()?)
-    .await?;
+    programme::design(&pool).await?;
+    Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
+        .author(&programme::as_plan(programme)?)
+        .await?;
 
     Ok((directory, pool))
 }

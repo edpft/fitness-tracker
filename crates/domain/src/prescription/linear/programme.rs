@@ -21,21 +21,20 @@ use crate::{
         anchor::Anchor,
         ladder::{InvalidLadder, Ladder, Opening},
         mesocycle::{InconsistentMesocycle, check_primary},
-        parameters::GenerationParameters,
+        parameters::Scales,
         schedule::Calendar,
         steps::LoadSteps,
     },
     schedule::SessionRole,
 };
 
-use super::template::{PrimaryPattern, SlotFills};
+use super::{
+    progression::LinearProgression,
+    template::{PrimaryPattern, SlotFills},
+};
 
-fn steps_for(
-    exercise: Exercise,
-    parameters: &GenerationParameters,
-) -> Result<&LoadSteps, InvalidLadder> {
-    parameters
-        .scales
+fn steps_for(exercise: Exercise, scales: &Scales) -> Result<&LoadSteps, InvalidLadder> {
+    scales
         .for_exercise(exercise)
         .ok_or_else(|| InvalidLadder::NoScale {
             implement: exercise.implement().as_str(),
@@ -114,7 +113,8 @@ impl Linear {
         primary: Primary,
         fills: SlotFills,
         calendar: Calendar,
-        parameters: &GenerationParameters,
+        progression: &LinearProgression,
+        scales: &Scales,
     ) -> Result<Self, InconsistentMesocycle> {
         Self::check(
             primary.pattern,
@@ -132,8 +132,8 @@ impl Linear {
         //    **The ladder itself is not built.** It opens from the maximum in
         //    force when a session is asked for, which is not knowable now — so
         //    what is checked is the part that depends on neither.
-        steps_for(primary.exercise, parameters)?;
-        Ladder::rises(parameters.ladder_climb_per_week, calendar.duration_weeks())?;
+        steps_for(primary.exercise, scales)?;
+        Ladder::rises(progression.ladder_climb_per_week, calendar.duration_weeks())?;
 
         Ok(Self {
             primary,
@@ -244,16 +244,17 @@ impl Linear {
     pub fn ladder(
         &self,
         maximum: Anchor,
-        parameters: &GenerationParameters,
+        progression: &LinearProgression,
+        scales: &Scales,
     ) -> Result<Ladder, InvalidLadder> {
         Ladder::new(
             Opening {
                 maximum,
-                drop: parameters.entry_drop,
+                drop: progression.entry_drop,
             },
-            parameters.ladder_climb_per_week,
+            progression.ladder_climb_per_week,
             self.calendar.duration_weeks(),
-            self.steps(parameters)?,
+            self.steps(scales)?,
         )
     }
 
@@ -263,11 +264,8 @@ impl Linear {
     ///
     /// [`InvalidLadder::NoScale`] where no scale has been authored for the
     /// primary's implement, which makes every load in the block underivable.
-    pub fn steps<'a>(
-        &self,
-        parameters: &'a GenerationParameters,
-    ) -> Result<&'a LoadSteps, InvalidLadder> {
-        steps_for(self.primary.exercise, parameters)
+    pub fn steps<'a>(&self, scales: &'a Scales) -> Result<&'a LoadSteps, InvalidLadder> {
+        steps_for(self.primary.exercise, scales)
     }
 
     /// Whether this slot is the primary one.

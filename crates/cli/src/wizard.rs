@@ -31,7 +31,7 @@ use std::{
 
 use application::{
     DiaryStore as _, ExerciseHistory, GenerationParameterStore, PlanAuthor as _, PlanStore as _,
-    prescribe::Authoring,
+    PlannedWith, ProgrammeStore, ProgressionStore, prescribe::Authoring,
 };
 use configurator::store::Store;
 use domain::{
@@ -42,13 +42,12 @@ use domain::{
     measure::{Kg, RepCount},
     normalised::OperatorZone,
     plan::{Plan, PlanName, Programme},
-    // `prescription::Block` is the *slot* block — plyometric, power, strength.
-    // The periodised one is a different type with the same word on it, so it is
-    // named for what it holds: the plan a duration divides into.
+    // The periodised block, named for what it holds: the plan a duration
+    // divides into.
     prescription::{
-        Anchor, AnchorProvenance, Authored, Block, ByIntensity, Calendar, EntryTest, Fill,
-        GenerationParameters, GymMesocycle, InvalidBlock, LoadSteps, PrimaryPattern, Skip,
-        SlotFills, SlotId, StaticFill, authored::Shape, block::Block as BlockPlan, rep_max,
+        Anchor, AnchorProvenance, Authored, ByIntensity, Calendar, EntryTest, Fill, GymMesocycle,
+        InvalidBlock, LoadSteps, PrimaryPattern, Scales, Section, Skip, SlotFills, SlotId,
+        StaticFill, authored::Shape, block::Block as BlockPlan, rep_max,
     },
     provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
     schedule::{Diary, Discipline, Relative, SessionRole, TrainingWeek},
@@ -211,26 +210,37 @@ fn count(value: u32) -> Result<RepCount, Failure> {
     RepCount::new(value).map_err(usage)
 }
 
+/// What a plan is authored against: the versions in force now (#192), and
+/// today's load scales.
+pub struct Ready {
+    pub planned_with: PlannedWith,
+    pub scales: Scales,
+}
+
 /// Refuse before asking anything if the store cannot hold what the answers make.
 ///
-/// **And hand back what it found.** The questions need the parameters as well as
-/// the store: what one step up the bar is, and so what "beat it" comes to, is
-/// the plate grid in `scales` rather than anything to ask about.
+/// **And hand back what it found.** The questions need it as well as the store:
+/// what one step up the bar is, and so what "beat it" comes to, is the plate
+/// grid in `scales` rather than anything to ask about.
 pub async fn ready(
-    parameters: &(impl GenerationParameterStore + Sync),
-) -> Result<GenerationParameters, Failure> {
-    parameters
-        .current()
+    store: &(impl GenerationParameterStore + ProgrammeStore + ProgressionStore + Sync),
+) -> Result<Ready, Failure> {
+    let planned_with = application::prescribe::planned_with(store, jiff::Timestamp::now())
         .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?
-        .map(|(_, parameters)| parameters)
-        .ok_or_else(|| {
-            usage(
-                "this store has no generation parameters, so nothing authored here could \
-                 prescribe anything. Run `fitness init` first — it stores them. Nothing \
-                 was asked and nothing was written",
-            )
-        })
+        .map_err(|error| {
+            usage(format!(
+                "{error}. Nothing authored here could prescribe anything, so nothing was \
+                 asked and nothing was written"
+            ))
+        })?;
+    let scales = store
+        .scales_on(jiff::Zoned::now().date())
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    Ok(Ready {
+        planned_with,
+        scales,
+    })
 }
 
 /// Ask which exercise fills a slot that carries its own sets and reps.
@@ -284,7 +294,7 @@ async fn ask_single(
 
     // A hold is the authored duration on every session, so there is nothing to
     // alternate: asking would be offering a distinction that does not exist.
-    if matches!(slot.block(), Block::Mobility) {
+    if matches!(slot.section(), Section::Mobility) {
         return Ok(Fill::Same(exercise));
     }
 
@@ -488,7 +498,7 @@ fn ask_weeks(
             // **A ladder has no table to describe and no ceiling to refuse
             // against.** What it does need is somewhere to climb: one week is a
             // single session's load, not a progression. The climb itself lives
-            // in the generation parameters rather than in the programme, so
+            // in linear progression rather than in the mesocycle, so
             // whether it makes a ladder over this duration is `Linear::new`'s
             // to answer at authoring.
             // Unreachable for `Sbs`, as above: the chart's four weeks are not
@@ -499,7 +509,7 @@ fn ask_weeks(
                     println!("  try a later end");
                     continue;
                 }
-                println!("  {weeks} weeks of climbing, at the rate the parameters hold.");
+                println!("  {weeks} weeks of climbing, at the rate linear progression climbs by.");
                 return Ok(weeks);
             }
         }
@@ -814,7 +824,7 @@ async fn ask_programme(
     template: &'static str,
     diary: &Diary,
     history: &(impl ExerciseHistory + Sync),
-    parameters: &GenerationParameters,
+    parameters: &Ready,
 ) -> Result<(PlanName, Authored), Failure> {
     match template {
         "test" => ask_test(diary, history, parameters).await,
@@ -830,7 +840,7 @@ async fn ask_programme(
 async fn ask_test(
     diary: &Diary,
     history: &(impl ExerciseHistory + Sync),
-    parameters: &GenerationParameters,
+    parameters: &Ready,
 ) -> Result<(PlanName, Authored), Failure> {
     println!("A test: one week, measuring.\n");
     let common = ask_common(diary, "test")?;
@@ -1081,7 +1091,8 @@ pub async fn add(database: &Path, zone: &OperatorZone) -> Result<(), Failure> {
         fills,
         &interruptions,
         zone.as_time_zone(),
-        &parameters,
+        &parameters.planned_with.linear,
+        &parameters.scales,
     )
     .map_err(|error| Failure::usage(&error))?;
 
@@ -1092,8 +1103,8 @@ pub async fn add(database: &Path, zone: &OperatorZone) -> Result<(), Failure> {
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
     let plan = with_gym(name, existing.as_ref(), mesocycle.clone())?;
 
-    let (id, authored) = Authoring::new(plans, parameter_store)
-        .author(&plan, &parameters)
+    let (id, authored) = Authoring::new(plans)
+        .author(&plan)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
@@ -1251,7 +1262,7 @@ fn ask_entry_test(
 pub async fn gym_side(
     store: &Store,
     zone: &OperatorZone,
-    parameters: &GenerationParameters,
+    parameters: &Ready,
     outline: &GymOutline<'_>,
 ) -> Result<Vec<GymMesocycle>, Failure> {
     let GymOutline {
@@ -1311,7 +1322,8 @@ pub async fn gym_side(
                 fills.clone(),
                 &skips,
                 zone.as_time_zone(),
-                parameters,
+                &parameters.planned_with.linear,
+                &parameters.scales,
             )
             .map_err(|error| Failure::usage(&error))?,
         );

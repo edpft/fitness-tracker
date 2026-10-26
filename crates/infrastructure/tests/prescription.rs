@@ -12,7 +12,7 @@ use application::{
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
 use domain::normalised::StatedZones;
-use domain::prescription::{Block, PrescribedItem, SlotId, WeekKind};
+use domain::prescription::{PrescribedItem, Section, SlotId, WeekKind};
 use domain::schedule::{Relative, SessionRole};
 use infrastructure::{
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
@@ -71,12 +71,9 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
     store::canonicalise(&pool).await?;
 
     let plans = SqlitePlanStore::new(pool.clone(), corpus::zone()?);
-    let parameters = SqliteGenerationParameterStore::new(pool.clone());
-    Authoring::new(plans, parameters)
-        .author(
-            &programme::as_plan(programme::programme()?)?,
-            &programme::parameters()?,
-        )
+    programme::design(&pool).await?;
+    Authoring::new(plans)
+        .author(&programme::as_plan(programme::programme()?)?)
         .await?;
 
     Ok((
@@ -133,10 +130,10 @@ fn a_workout_is_issued_in_fatigue_order() {
     assert!(matches!(issued.workout.week(), WeekKind::Climbing(_)));
 
     // Blocks never go backwards through the session.
-    let mut blocks: Vec<Block> = Vec::new();
+    let mut blocks: Vec<Section> = Vec::new();
     for item in issued.workout.shape().items().iter() {
         for slot in item.slots() {
-            let block = slot.block();
+            let block = slot.section();
             if blocks.last() != Some(&block) {
                 blocks.push(block);
             }
@@ -435,21 +432,16 @@ fn the_heavy_session_is_heavier_than_the_light_one() {
 async fn a_second_plan(directory: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let pool = connect(&directory.join("test.db")).await?;
     let spring = Date::constant(2027, 1, 4);
-    Authoring::new(
-        SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-        SqliteGenerationParameterStore::new(pool),
-    )
-    .author(
-        &programme::named_plan(
+    programme::design(&pool).await?;
+    Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
+        .author(&programme::named_plan(
             "2027-spring",
             vec![
                 programme::entry_test_from(spring)?,
                 programme::as_programme(programme::programme_from(Date::constant(2027, 1, 11))?),
             ],
-        )?,
-        &programme::parameters()?,
-    )
-    .await?;
+        )?)
+        .await?;
     Ok(())
 }
 
@@ -472,4 +464,66 @@ fn a_standing_names_the_mesocycle_by_its_place_in_its_plan() {
 
     let standing = run!(prescriber.standing(Date::constant(2027, 1, 13)));
     assert_eq!(standing.ordinal.to_string(), "2");
+}
+
+/// **A version authored after a plan reaches only the plans made after it**
+/// (#192). The operator, 2026-10-26: *"Editing the generic programme would only
+/// apply to the next instance of a programme is planned."*
+///
+/// The light session's share of the heavy one is the value changed, because it
+/// moves a load the operator would see: the fixture plan's light top set stays
+/// where it was, and a plan made afterwards takes the new share.
+#[test]
+fn a_new_version_reaches_only_the_plans_made_after_it() {
+    use application::ProgressionStore as _;
+
+    let (prescriber, directory) = prescriber!();
+    let light = Date::constant(2026, 8, 10);
+    let before = run!(prescriber.prescribe(light));
+
+    let Ok(changed) = domain::prescription::Percentage::try_from("70%".to_owned()) else {
+        panic!("70% is a percentage")
+    };
+    let (store, linear) = run!(async {
+        let pool = connect(&directory.path().join("test.db")).await?;
+        let store = SqliteGenerationParameterStore::new(pool);
+        let (_, linear) = store
+            .linear_at(jiff::Timestamp::now())
+            .await?
+            .ok_or("the fixture designed linear progression")?;
+        Ok::<_, Box<dyn std::error::Error>>((store, linear))
+    });
+    assert_ne!(linear.light_of_heavy, changed, "the change is a change");
+    run!(store.author_linear(
+        jiff::Timestamp::now(),
+        &domain::prescription::LinearProgression {
+            light_of_heavy: changed,
+            ..linear.clone()
+        },
+    ));
+
+    let after = run!(prescriber.prescribe(light));
+    assert_eq!(
+        after.workout.shape(),
+        before.workout.shape(),
+        "the plan made before the change prescribes what it did"
+    );
+    assert!(matches!(after.issuance, Issuance::Unchanged));
+    assert_eq!(
+        run!(prescriber.standing(light))
+            .planned_with
+            .linear
+            .light_of_heavy,
+        linear.light_of_heavy,
+    );
+
+    run!(a_second_plan(directory.path()));
+    assert_eq!(
+        run!(prescriber.standing(Date::constant(2027, 1, 13)))
+            .planned_with
+            .linear
+            .light_of_heavy,
+        changed,
+        "a plan made after the change takes it"
+    );
 }

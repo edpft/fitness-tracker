@@ -75,8 +75,6 @@ fn session() -> Result<Deliverable, Box<dyn std::error::Error>> {
         SessionRole::new(Relative::Lower, Relative::Higher),
         WeekKind::Climbing(WeekIndex::new(4)?),
         DerivedFrom::Anchor(support::programme::anchor()?),
-        support::programme::parameters()?,
-        "2026-08-01T00:00:00Z".parse()?,
         MesocycleId::new(1),
         "2026-08-23T18:00:00Z".parse()?,
     );
@@ -887,8 +885,6 @@ fn ramped_primary() -> Result<Deliverable, Box<dyn std::error::Error>> {
         session.workout.session_role(),
         session.workout.week(),
         session.workout.derived_from(),
-        session.workout.parameters().clone(),
-        session.workout.parameters_authored_at(),
         session.workout.programme(),
         session.workout.issued_at(),
     );
@@ -995,8 +991,6 @@ fn rep_max_primary() -> Result<Deliverable, Box<dyn std::error::Error>> {
         session.workout.session_role(),
         session.workout.week(),
         session.workout.derived_from(),
-        session.workout.parameters().clone(),
-        session.workout.parameters_authored_at(),
         session.workout.programme(),
         session.workout.issued_at(),
     );

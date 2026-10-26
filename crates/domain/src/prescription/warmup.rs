@@ -38,7 +38,20 @@
 use crate::measure::RepCount;
 use crate::sequence::NonEmpty;
 
-use super::programming::WarmupStep;
+use super::parameters::Percentage;
+
+/// One step of the ramp before a top set.
+///
+/// **Each primary progression states its own ramp** (operator, 2026-10-24,
+/// #192). The ramp could apply to any progression and was not extracted: linear
+/// and SBS each define theirs, and that the two agree today is a coincidence of
+/// two stated values rather than one value used twice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WarmupStep {
+    /// Of the session's own top set, never of the anchor.
+    pub of_top_set: Percentage,
+    pub reps: RepCount,
+}
 
 /// The ramp to run when working up to `top` repetitions.
 ///

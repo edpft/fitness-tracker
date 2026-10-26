@@ -650,9 +650,10 @@ fn parameters_command() -> ClapCommand {
     ClapCommand::new("parameters")
         .about("Report the numbers every prescription is generated against")
         .subcommand_required(true)
-        .subcommand(
-            ClapCommand::new("show").about("Print every parameter in force, and when it was set"),
-        )
+        .subcommand(ClapCommand::new("show").about(
+            "Print the latest version of the programme and of each progression, \
+                 and the load scales",
+        ))
 }
 
 fn schedule_command() -> ClapCommand {

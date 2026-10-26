@@ -219,17 +219,12 @@ fn a_performed_prescription_is_not_derived_again() {
     let issued = run!(async {
         // A fortnight later a start puts the same date on a different rung, so
         // a derivation that ran would not agree with what was performed.
-        Authoring::new(
-            SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-            SqliteGenerationParameterStore::new(pool.clone()),
-        )
-        .author(
-            &support::programme::as_plan(support::programme::programme_from(Date::constant(
-                2026, 7, 20,
-            ))?)?,
-            &support::programme::parameters()?,
-        )
-        .await?;
+        support::programme::design(&pool).await?;
+        Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
+            .author(&support::programme::as_plan(
+                support::programme::programme_from(Date::constant(2026, 7, 20))?,
+            )?)
+            .await?;
 
         let prescriber = Prescribing::new(PrescriptionPorts {
             history: SqliteExerciseHistory::new(pool.clone()),
@@ -298,12 +293,12 @@ fn a_superseded_session_that_was_trained_is_the_one_in_force() {
                    mesocycle, issued_for, zone, session_intensity, session_volume,
                    week_kind, week_index,
                    anchor_grams, anchor_provenance, anchor_from,
-                   parameters_authored_at, issued_at
+                   issued_at
                )
                SELECT mesocycle, issued_for, zone, session_intensity, session_volume,
                       week_kind, week_index,
                       anchor_grams, anchor_provenance, anchor_from,
-                      parameters_authored_at, '2099-01-01T00:00:00Z'
+                      '2099-01-01T00:00:00Z'
                FROM prescribed_workout WHERE id = ?
                RETURNING id AS "id!: i64""#,
             id

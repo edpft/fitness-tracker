@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO programme (\n                authored_at,\n                strength_reps_low, strength_reps_high, strength_sets,\n                hypertrophy_reps_low, hypertrophy_reps_high, hypertrophy_sets,\n                static_hold_seconds,\n                rest_plyometric_low, rest_plyometric_high, rest_plyometric_ss_low, rest_plyometric_ss_high,\n                rest_power_low, rest_power_high, rest_power_ss_low, rest_power_ss_high,\n                rest_strength_low, rest_strength_high, rest_strength_ss_low, rest_strength_ss_high,\n                rest_hypertrophy_low, rest_hypertrophy_high, rest_hypertrophy_ss_low, rest_hypertrophy_ss_high,\n                rest_mobility_low, rest_mobility_high, rest_mobility_ss_low, rest_mobility_ss_high\n            )\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?,\n                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 28
+    },
+    "nullable": []
+  },
+  "hash": "38bbe83f238255dc3806300a3981f07f09379f1518437bc9aa9afde704bbbf4c"
+}

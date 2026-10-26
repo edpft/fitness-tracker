@@ -22,9 +22,9 @@ use domain::{
     measure::{Distance, Duration, Kg, Metres, RepCount, Spans},
     plan::PlanName,
     prescription::{
-        Anchor, AnchorProvenance, DerivedFrom, GenerationParameters, MesocycleId, Prescribed,
-        PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
-        SlotId, SupersetMember, Target, WeekIndex, WeekKind, WorkoutShape,
+        Anchor, AnchorProvenance, DerivedFrom, MesocycleId, Prescribed, PrescribedExercise,
+        PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout, SlotId,
+        SupersetMember, Target, WeekIndex, WeekKind, WorkoutShape,
     },
     schedule::{Relative, SessionRole},
     sequence::{AtLeastTwo, NonEmpty},
@@ -446,10 +446,6 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             anchor_failed,
             target_grams,
         } = origin_of(workout.derived_from())?;
-        // The version the parameters came from — the join back to the authored
-        // set. The values themselves are on the row too, which is what § 14
-        // rests on; this is what tells two versions apart.
-        let parameters_at = workout.parameters_authored_at().to_string();
         let issued_at = workout.issued_at().to_string();
 
         let id = sqlx::query!(
@@ -458,9 +454,9 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
                 mesocycle, issued_for, zone, session_intensity, session_volume,
                 week_kind, week_index,
                 anchor_grams, anchor_provenance, anchor_from, anchor_failed_grams,
-                target_grams, parameters_authored_at, issued_at
+                target_grams, issued_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id AS "id!: i64"
             "#,
             mesocycle,
@@ -475,7 +471,6 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             anchor_from,
             anchor_failed,
             target_grams,
-            parameters_at,
             issued_at
         )
         .fetch_one(&mut *tx)
@@ -542,7 +537,6 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
                    anchor_from AS "anchor_from: String",
                    anchor_failed_grams AS "anchor_failed_grams: i64",
                    target_grams AS "target_grams: i64",
-                   parameters_authored_at AS "parameters_authored_at!: String",
                    issued_at AS "issued_at!: String"
             FROM prescribed_workout
             WHERE issued_for = ?
@@ -603,22 +597,12 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             other => return Err(corrupt(&format!("{other:?} is not a week kind"))),
         };
 
-        // The parameters that produced this prescription are read from the
-        // version it names. They are what § 14 depends on being recoverable.
-        let parameters_at: jiff::Timestamp = row
-            .parameters_authored_at
-            .parse()
-            .map_err(|_| corrupt(&"a parameter version that is not an instant"))?;
-        let parameters = read_parameters(&self.pool, &row.parameters_authored_at).await?;
-
         let workout = PrescribedWorkout::new(
             shape,
             date,
             role_of(&row.session_intensity, &row.session_volume)?,
             week,
             derived_from,
-            parameters,
-            parameters_at,
             MesocycleId::new(row.mesocycle),
             row.issued_at
                 .parse()
@@ -658,23 +642,6 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
         let counted = u32::try_from(counted).map_err(|_| corrupt(&"more sessions than a u32"))?;
         Ok(SessionOrdinal::new(counted).ok())
     }
-}
-
-/// The parameters a prescription was generated against.
-async fn read_parameters(
-    pool: &SqlitePool,
-    authored_at: &str,
-) -> Result<GenerationParameters, StoreError> {
-    // Deferring to the parameter store rather than re-reading the tables keeps
-    // one assembly of a `GenerationParameters` in the codebase. It reads the
-    // current version, which is the one an issued prescription names as long as
-    // nothing has been authored since — and where something has, the version on
-    // the row is what distinguishes them.
-    let store = super::parameters::SqliteGenerationParameterStore::new(pool.clone());
-    let (_, parameters) = application::GenerationParameterStore::current(&store)
-        .await?
-        .ok_or_else(|| corrupt(&format!("no parameters authored at {authored_at}")))?;
-    Ok(parameters)
 }
 
 /// The issued shape, rebuilt from its four tables.

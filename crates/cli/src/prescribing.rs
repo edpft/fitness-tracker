@@ -7,8 +7,8 @@
 use std::path::Path;
 
 use application::{
-    GenerationParameterStore as _, MesocycleStore, PrescriptionDeliverer as _,
-    WorkoutPrescriber as _, prescribe::NextSession,
+    GenerationParameterStore as _, MesocycleStore, PrescriptionDeliverer as _, ProgrammeStore as _,
+    ProgressionStore as _, WorkoutPrescriber as _, prescribe::NextSession,
 };
 use configurator::{
     prescribing::{self, PreviewFailure},
@@ -19,34 +19,43 @@ use jiff::civil::Date;
 
 use crate::{Failure, catalogue, config, exit, output};
 
-/// Report the parameters every prescription is generated against (§ 14).
+/// Report the versions of the programme and each primary progression a plan
+/// made now would take (#192), and today's load scales.
 ///
-/// **Only the current set.** Superseded rows stay in the store and nothing
-/// reads one — what a prescription was generated against is recorded on the
-/// prescription itself, which is what makes that safe.
+/// **Only the latest of each.** Superseded versions stay in the store, and a
+/// plan made before one was superseded goes on reading it.
 pub async fn parameters(database: &Path) -> Result<(), Failure> {
     let store = Store::open(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    let versions = store.parameters();
+    let now = jiff::Timestamp::now();
+    let failed = |error: application::StoreError| Failure::message(error.to_string(), exit::STORE);
 
-    let current = store
-        .parameters()
-        .current()
+    let programme = versions.programme_at(now).await.map_err(failed)?;
+    let linear = versions.linear_at(now).await.map_err(failed)?;
+    let sbs = versions.sbs_at(now).await.map_err(failed)?;
+    let scales = versions
+        .scales_on(jiff::Zoned::now().date())
         .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+        .map_err(failed)?;
 
-    match current {
-        Some((authored_at, parameters)) => {
-            let programming = domain::prescription::programming()
-                .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-            output::parameters_in_force(authored_at, &parameters, &programming);
+    match (programme, linear, sbs) {
+        (Some(programme), Some(linear), Some(sbs)) => {
+            output::parameters_in_force(
+                (programme.0, &programme.1),
+                (linear.0, &linear.1),
+                (sbs.0, &sbs.1),
+                &scales,
+            );
             Ok(())
         }
-        // Not an empty report: a store with no parameters can hold a programme
-        // and prescribe nothing from it, and saying so is more use than printing
-        // a set of headings with nothing under them.
-        None => Err(Failure::usage(
-            &"this store has no generation parameters. Run `fitness init` — it stores them",
+        // Not an empty report: a store with none of these can hold a plan and
+        // prescribe nothing from it, and saying so is more use than printing a
+        // set of headings with nothing under them.
+        _ => Err(Failure::usage(
+            &"this store has no programme or progression stored. Run `fitness init` — it \
+              stores the first of each",
         )),
     }
 }

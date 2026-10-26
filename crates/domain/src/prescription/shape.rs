@@ -18,7 +18,7 @@
 //! **Blocks do not survive into what is issued.** They are construction-time
 //! scaffolding. One thing does survive: every item is slot-tagged, or "same
 //! slot, different cycle" stops being answerable — and that comparability was
-//! the argument for slots existing at all. Block is derivable from slot.
+//! the argument for slots existing at all. Section is derivable from slot.
 
 use std::fmt;
 
@@ -105,26 +105,26 @@ impl SlotId {
         }
     }
 
-    /// Which block this slot belongs to. Derived, never stored beside the slot —
+    /// Which section this slot belongs to. Derived, never stored beside the slot —
     /// a second source of truth is a second thing that can disagree.
-    pub const fn block(self) -> Block {
+    pub const fn section(self) -> Section {
         match self {
-            Self::Plyometric => Block::Plyometric,
-            Self::Power => Block::Power,
+            Self::Plyometric => Section::Plyometric,
+            Self::Power => Section::Power,
             Self::KneeDominant | Self::UpperPush | Self::UpperPull | Self::HipDominant => {
-                Block::Strength
+                Section::Strength
             }
             Self::Biceps
             | Self::Triceps
             | Self::WristFlexion
             | Self::WristExtension
-            | Self::Core => Block::Hypertrophy,
+            | Self::Core => Section::Hypertrophy,
             Self::HandstandHold
             | Self::DeadHang
             | Self::HipFlexorStretch
             | Self::HipExternalRotatorStretch
             | Self::HamstringStretch
-            | Self::GroinStretch => Block::Mobility,
+            | Self::GroinStretch => Section::Mobility,
         }
     }
 }
@@ -159,7 +159,7 @@ impl fmt::Display for SlotId {
 /// that pre-fatigues what follows. Ordering is a property of the quality, so
 /// nothing carries an index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Block {
+pub enum Section {
     Plyometric,
     Power,
     Strength,
@@ -167,7 +167,7 @@ pub enum Block {
     Mobility,
 }
 
-impl Block {
+impl Section {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Plyometric => "plyometric",
@@ -179,7 +179,7 @@ impl Block {
     }
 }
 
-impl fmt::Display for Block {
+impl fmt::Display for Section {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }

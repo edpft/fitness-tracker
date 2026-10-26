@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT slot AS \"slot!: String\", reps_low AS \"reps_low!: i64\",\n               reps_high AS \"reps_high: i64\", sets AS \"sets!: i64\"\n        FROM programme_slot_scheme\n        WHERE authored_at = ?\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "slot!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "programme_slot_scheme",
+            "name": "slot"
+          }
+        }
+      },
+      {
+        "name": "reps_low!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme_slot_scheme",
+            "name": "reps_low"
+          }
+        }
+      },
+      {
+        "name": "reps_high: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme_slot_scheme",
+            "name": "reps_high"
+          }
+        }
+      },
+      {
+        "name": "sets!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme_slot_scheme",
+            "name": "sets"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "027f819dbd90ac66f079b64247ef7c834f075792fa838156e59a9e8f22fa9e15"
+}

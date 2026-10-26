@@ -301,7 +301,7 @@ fn gym_session(issued: &Prescription) -> Markup {
         let Some(slot) = item.slots().next() else {
             continue;
         };
-        let block = slot.block().to_string();
+        let block = slot.section().to_string();
         if blocks.last().is_none_or(|(last, _)| *last != block) {
             blocks.push((block, Vec::new()));
         }

@@ -42,6 +42,8 @@
 //! leaves a block with no endpoint to be the plan for — does not reach here: an
 //! SBS cycle's terminus is a scheduled test on a known week, not a number.
 
+use std::fmt;
+
 use crate::{
     measure::{Kg, RepCount},
     prescription::{parameters::Percentage, target::Target},
@@ -130,63 +132,112 @@ pub enum SbsSession {
     Second,
 }
 
+impl SbsSession {
+    /// The stable key. Persisted, so it outlives a rename.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::First => "first",
+            Self::Second => "second",
+        }
+    }
+}
+
+impl fmt::Display for SbsSession {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidSbs {
     #[error("the chart runs four weeks, so week {week} is not one of them")]
     NoSuchWeek { week: u32 },
-    #[error("a value in the shipped chart will not build — this is a defect in this build")]
-    Unbuildable,
+    #[error(
+        "the chart closes on a test in week 4's second session and holds no other, \
+         and week {week}'s {session} session breaks that"
+    )]
+    TestOutOfPlace { week: u32, session: SbsSession },
+    #[error(
+        "SBS's table names no training maximum for a {reps}-repetition maximum, so \
+         week {week} could not move the maximum"
+    )]
+    NoShare { week: u32, reps: RepCount },
 }
 
 /// How many weeks one cycle of the chart runs.
 pub const WEEKS: u32 = 4;
 
-fn count(reps: u32) -> Result<RepCount, InvalidSbs> {
-    RepCount::new(reps).map_err(|_| InvalidSbs::Unbuildable)
+/// One week of the chart: its two days.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SbsWeek {
+    pub first: SbsDay,
+    pub second: SbsDay,
 }
 
-fn share(basis_points: i32) -> Result<Percentage, InvalidSbs> {
-    Percentage::from_basis_points(basis_points).map_err(|_| InvalidSbs::Unbuildable)
+/// The chart: what each day of the four weeks prescribes.
+///
+/// **Its values are stated when the programme is designed, and its shape is
+/// not** (§ 14.1, amended 2026-10-26, #192). Four weeks of two days, closing on
+/// a test in week 4's second session and holding no other — the test is what
+/// anchors the next cycle, and [`GymMesocycle::tests_in`] reads the week it
+/// falls in from the shape. Every repetition maximum is one SBS's table turns
+/// into a training maximum, because a day that cannot move the maximum is not
+/// one this chart can run.
+///
+/// [`GymMesocycle::tests_in`]: crate::prescription::GymMesocycle::tests_in
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SbsChart {
+    weeks: [SbsWeek; 4],
 }
 
-/// What the chart prescribes in a given week and session.
-///
-/// Verified against `Squat 2x Int` in the operator's copy of the workbook, and
-/// recorded in decision 0024.
-///
-/// # Errors
-///
-/// [`InvalidSbs::NoSuchWeek`] outside weeks one to four.
-pub fn day(week: u32, session: SbsSession) -> Result<SbsDay, InvalidSbs> {
-    let percentage = |sets: u32, reps: u32, points: i32| -> Result<SbsDay, InvalidSbs> {
-        Ok(SbsDay::Percentage {
-            sets: count(sets)?,
-            reps: count(reps)?,
-            share: share(points)?,
-        })
-    };
-    let rep_max = |reps: u32, sets: u32, low: u32, high: u32| -> Result<SbsDay, InvalidSbs> {
-        let minimum = count(low)?;
-        let back_off_reps =
-            Target::between(minimum, count(high)?).ok_or(InvalidSbs::Unbuildable)?;
-        Ok(SbsDay::RepMax {
-            reps: count(reps)?,
-            back_off_sets: count(sets)?,
-            back_off_reps,
-        })
-    };
+impl SbsChart {
+    /// # Errors
+    ///
+    /// [`InvalidSbs::TestOutOfPlace`] for a test anywhere but week 4's second
+    /// session, or none there, and [`InvalidSbs::NoShare`] for a repetition
+    /// maximum SBS's table does not name.
+    pub fn new(weeks: [SbsWeek; 4]) -> Result<Self, InvalidSbs> {
+        let chart = Self { weeks };
+        for (week, session, day) in chart.days() {
+            let closes = week == WEEKS && session == SbsSession::Second;
+            if matches!(day, SbsDay::Test { .. }) != closes {
+                return Err(InvalidSbs::TestOutOfPlace { week, session });
+            }
+            if let Some(reps) = day.sets_the_maximum()
+                && training_max_share(reps).is_none()
+            {
+                return Err(InvalidSbs::NoShare { week, reps });
+            }
+        }
+        Ok(chart)
+    }
 
-    match (week, session) {
-        (1, SbsSession::First) => percentage(5, 5, 8_000),
-        (1, SbsSession::Second) => rep_max(8, 3, 5, 6),
-        (2, SbsSession::First) => percentage(4, 3, 8_500),
-        (2, SbsSession::Second) => rep_max(5, 3, 3, 4),
-        (3, SbsSession::First) => percentage(3, 1, 9_000),
-        (3, SbsSession::Second) => rep_max(3, 3, 1, 2),
-        // The operator's transposition of the beginner sheet's taper.
-        (4, SbsSession::First) => percentage(3, 3, 7_500),
-        (4, SbsSession::Second) => Ok(SbsDay::Test { reps: count(1)? }),
-        (week, _) => Err(InvalidSbs::NoSuchWeek { week }),
+    /// What the chart prescribes in a given week and session.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidSbs::NoSuchWeek`] outside weeks one to four.
+    pub fn day(&self, week: u32, session: SbsSession) -> Result<SbsDay, InvalidSbs> {
+        let index = usize::try_from(week.checked_sub(1).ok_or(InvalidSbs::NoSuchWeek { week })?)
+            .map_err(|_| InvalidSbs::NoSuchWeek { week })?;
+        let at = self
+            .weeks
+            .get(index)
+            .ok_or(InvalidSbs::NoSuchWeek { week })?;
+        Ok(match session {
+            SbsSession::First => at.first,
+            SbsSession::Second => at.second,
+        })
+    }
+
+    /// Every day, in order: week, session, and what it prescribes.
+    pub fn days(&self) -> impl Iterator<Item = (u32, SbsSession, SbsDay)> + '_ {
+        (1_u32..).zip(self.weeks.iter()).flat_map(|(week, days)| {
+            [
+                (week, SbsSession::First, days.first),
+                (week, SbsSession::Second, days.second),
+            ]
+        })
     }
 }
 
@@ -320,8 +371,11 @@ pub fn working_load(maximum: Kg, share: Percentage, increment: Kg) -> Option<Kg>
 /// Also `None` for a week the chart does not name, and for one whose second
 /// session measures nothing.
 #[must_use]
-pub fn achieved(week: u32, sets: &[CompletedSet]) -> Option<Kg> {
-    let wanted = day(week, SbsSession::Second).ok()?.sets_the_maximum()?;
+pub fn achieved(chart: &SbsChart, week: u32, sets: &[CompletedSet]) -> Option<Kg> {
+    let wanted = chart
+        .day(week, SbsSession::Second)
+        .ok()?
+        .sets_the_maximum()?;
     sets.iter()
         .filter(|set| set.reps.as_u32() >= wanted.as_u32())
         .map(|set| set.load)
@@ -354,16 +408,21 @@ pub fn achieved(week: u32, sets: &[CompletedSet]) -> Option<Kg> {
 /// what each asks. A ladder asks whether the top set was completed; this asks
 /// which set was the maximum and what it weighed.
 #[must_use]
-pub fn maximum_after(opening: Kg, performed: &[(u32, Vec<CompletedSet>)], increment: Kg) -> Kg {
+pub fn maximum_after(
+    chart: &SbsChart,
+    opening: Kg,
+    performed: &[(u32, Vec<CompletedSet>)],
+    increment: Kg,
+) -> Kg {
     let mut maximum = opening;
     for (week, sets) in performed {
-        let Ok(day) = day(*week, SbsSession::Second) else {
+        let Ok(day) = chart.day(*week, SbsSession::Second) else {
             continue;
         };
         let Some(reps) = day.sets_the_maximum() else {
             continue;
         };
-        let Some(achieved) = achieved(*week, sets) else {
+        let Some(achieved) = achieved(chart, *week, sets) else {
             continue;
         };
         if let Some(next) = advance(achieved, reps, increment) {

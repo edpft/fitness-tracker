@@ -365,19 +365,6 @@ pub(crate) async fn insert(
     Ok(FactId::new(fact))
 }
 
-/// Whether any kind is stated.
-pub(crate) async fn knows_kinds(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-) -> Result<bool, StoreError> {
-    let count = sqlx::query_scalar!(
-        r#"SELECT count(*) AS "count!: i64" FROM equipment_fact WHERE category = 'kind'"#
-    )
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(|error| store_error(&error))?;
-    Ok(count > 0)
-}
-
 #[derive(Debug, Clone)]
 pub struct SqliteEquipmentStore {
     pool: SqlitePool,

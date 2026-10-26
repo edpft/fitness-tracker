@@ -19,7 +19,7 @@ use domain::{
     prescription::{
         Authored, AuthoringError, BlockPeriodisation, BlockWeek, ByIntensity, EntryTest, Fill,
         GymMesocycle, InconsistentMesocycle, Primary, PrimaryPattern, Progression, Skip, SlotFills,
-        StaticFill, Test, Tested, WeekIndex, authored::Shape as AuthoredShape, seed::seed,
+        StaticFill, Test, Tested, WeekIndex, authored::Shape as AuthoredShape, seed,
     },
     schedule::{Relative, SessionRole, TrainingWeek},
 };
@@ -247,7 +247,7 @@ fn a_test_that_never_runs_its_session_is_refused() {
     let Ok(filled) = fills(Fill::Same(Exercise::Reps(RepsExercise::FrontSquatBarbell))) else {
         panic!("the fixture builds")
     };
-    let Ok(parameters) = seed() else {
+    let (Ok(linear), Ok(scales)) = (seed::linear(), seed::scales()) else {
         panic!("the seed builds")
     };
 
@@ -266,7 +266,8 @@ fn a_test_that_never_runs_its_session_is_refused() {
         filled,
         &[] as &[Skip],
         TimeZone::UTC,
-        &parameters,
+        &linear,
+        &scales,
     );
 
     assert!(matches!(

@@ -7,7 +7,10 @@
 
 mod support;
 
-use application::{GenerationParameterStore as _, MesocycleStore as _, PlanStore as _};
+use application::{
+    GenerationParameterStore as _, MesocycleStore as _, PlanStore as _, ProgrammeStore as _,
+    ProgressionStore as _,
+};
 use domain::plan::MesocycleOrdinal;
 use domain::schedule::{Relative, SessionRole};
 use infrastructure::{
@@ -56,82 +59,133 @@ macro_rules! run {
 /// Nothing authored is the ordinary first-run state, and it is reported rather
 /// than guessed at.
 #[test]
-fn an_unauthored_store_has_no_parameters() {
+fn an_unauthored_store_has_no_versions() {
     let (store, _pool, _directory) = opened!();
-    assert_eq!(run!(store.current()), None);
+    let now = jiff::Timestamp::now();
+    assert_eq!(run!(store.programme_at(now)), None);
+    assert_eq!(run!(store.linear_at(now)), None);
+    assert_eq!(run!(store.sbs_at(now)), None);
 }
 
-/// Every value survives the round trip exactly.
+/// Every value survives the round trip exactly (#192).
 ///
-/// The point of holding percentages as basis points and loads as grams: a stored
-/// prescription that cannot be reproduced is not a record of anything. A float
-/// would pass a `==` on the same machine and fail across a rebuild.
+/// The point of holding percentages as basis points and loads as grams: a
+/// version that cannot be read back as it was written would derive a different
+/// session from the one it was planned to.
 #[test]
-fn parameters_round_trip_exactly() {
+fn every_version_round_trips_exactly() {
     let (store, _pool, _directory) = opened!();
     let Ok(authored) = programme::parameters() else {
-        panic!("the fixture parameters are valid")
+        panic!("the fixture versions are valid")
     };
+    let authored = authored.planned_with;
     let now = jiff::Timestamp::now();
 
-    run!(store.author(now, &authored));
+    run!(store.author_programme(now, &authored.programme));
+    run!(store.author_linear(now, &authored.linear));
+    run!(store.author_sbs(now, &authored.sbs));
 
-    let Some((read_at, read_back)) = run!(store.current()) else {
-        panic!("what was authored is in force")
-    };
-    assert_eq!(read_at, now, "the authoring date round trips");
     assert_eq!(
-        read_back, authored,
-        "every parameter round trips, value for value"
+        run!(store.programme_at(now)),
+        Some((now, authored.programme)),
+        "the programme round trips, value for value"
+    );
+    assert_eq!(
+        run!(store.linear_at(now)),
+        Some((now, authored.linear)),
+        "linear progression round trips, value for value"
+    );
+    assert_eq!(
+        run!(store.sbs_at(now)),
+        Some((now, authored.sbs)),
+        "SBS round trips, chart and ramp"
     );
 }
 
-/// Authoring supersedes by date and keeps what came before (§ 12).
+/// **A plan takes the version in force when it was made** (#192), and a later
+/// version is kept beside the earlier one rather than replacing it (§ 12).
 ///
-/// Two things are asserted, and the second is the one worth having: `current`
-/// reads the later version, *and* the earlier row is still in the file. An
-/// issued prescription names the version it used, so losing a superseded row
-/// would make that reference dangle.
+/// Asked as at three instants: before either version, between them, and after
+/// both. The middle one is the operator's ruling — a version authored since
+/// reaches only the plans made after it.
 #[test]
-fn authoring_supersedes_and_retains() {
+fn the_version_in_force_at_an_instant_is_the_latest_before_it() {
     let (store, pool, _directory) = opened!();
-    let Ok(first) = programme::parameters() else {
-        panic!("the fixture parameters are valid")
+    let Ok(fixture) = programme::parameters() else {
+        panic!("the fixture versions are valid")
     };
-
-    // A second version differing in one value, so "which is in force" has an
-    // observable answer.
-    let Ok(changed) = domain::prescription::Percentage::try_from("80%".to_owned()) else {
-        panic!("80% is a percentage")
+    let first = fixture.planned_with.linear;
+    let Ok(changed) = domain::prescription::Percentage::try_from("82.5%".to_owned()) else {
+        panic!("82.5% is a percentage")
     };
-    let second = domain::prescription::GenerationParameters {
+    let second = domain::prescription::LinearProgression {
         light_of_heavy: changed,
         ..first.clone()
     };
 
-    let earlier = jiff::Timestamp::now();
-    let later = earlier
-        .checked_add(jiff::Span::new().hours(1))
-        .unwrap_or(earlier);
-
-    run!(store.author(earlier, &first));
-    run!(store.author(later, &second));
-
-    let Some((in_force_at, in_force)) = run!(store.current()) else {
-        panic!("something is in force")
+    let Ok(earlier) = "2026-10-26T09:00:00Z".parse::<jiff::Timestamp>() else {
+        panic!("an instant")
     };
-    assert_eq!(in_force_at, later, "the later version is in force");
-    assert_eq!(in_force.light_of_heavy, changed);
+    let Ok(later) = "2026-10-26T10:00:00Z".parse::<jiff::Timestamp>() else {
+        panic!("an instant")
+    };
+    let Ok(between) = "2026-10-26T09:30:00Z".parse::<jiff::Timestamp>() else {
+        panic!("an instant")
+    };
+    let Ok(before) = "2026-10-26T08:00:00Z".parse::<jiff::Timestamp>() else {
+        panic!("an instant")
+    };
 
-    // And the earlier row survives. Read directly, because no port exposes a
-    // superseded version — nothing should consult one, which is exactly why the
-    // assertion has to reach past the port.
+    run!(store.author_linear(earlier, &first));
+    run!(store.author_linear(later, &second));
+
+    assert_eq!(run!(store.linear_at(before)), None, "nothing yet");
+    assert_eq!(
+        run!(store.linear_at(between)).map(|(at, linear)| (at, linear.light_of_heavy)),
+        Some((earlier, first.light_of_heavy)),
+        "a plan made between them keeps the first"
+    );
+    assert_eq!(
+        run!(store.linear_at(later)).map(|(at, linear)| (at, linear.light_of_heavy)),
+        Some((later, changed)),
+        "a plan made at the second takes it"
+    );
+
     let count = run!(async {
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM generation_parameters")
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linear_progression")
             .fetch_one(&pool)
             .await
     });
     assert_eq!(count, 2, "the superseded version is kept, not overwritten");
+}
+
+/// **Instants, not text.** A timestamp prints only the fractional digits it
+/// needs, so `…:00Z` sorts after `…:00.5Z` as a string; a version chosen by
+/// comparing the stored text would be the wrong one at this boundary.
+#[test]
+fn versions_are_compared_as_instants_not_as_text() {
+    let (store, _pool, _directory) = opened!();
+    let Ok(fixture) = programme::parameters() else {
+        panic!("the fixture versions are valid")
+    };
+    let Ok(whole) = "2026-10-26T09:00:00Z".parse::<jiff::Timestamp>() else {
+        panic!("an instant")
+    };
+    let Ok(half) = "2026-10-26T09:00:00.5Z".parse::<jiff::Timestamp>() else {
+        panic!("an instant")
+    };
+    let Ok(quarter) = "2026-10-26T09:00:00.25Z".parse::<jiff::Timestamp>() else {
+        panic!("an instant")
+    };
+
+    run!(store.author_programme(whole, &fixture.planned_with.programme));
+    run!(store.author_programme(half, &fixture.planned_with.programme));
+
+    assert_eq!(
+        run!(store.programme_at(quarter)).map(|(at, _)| at),
+        Some(whole),
+        "a quarter-second after the first, the first is in force"
+    );
 }
 
 // --- The programme ---------------------------------------------------------
@@ -562,8 +616,7 @@ fn windows_report_one_entry_per_plan() {
     );
 }
 
-/// What equipment facts are opened onto, with the parameters authored so that
-/// kinds exist.
+/// What equipment facts are opened onto, with the fixture's kinds stated.
 async fn equipment_store() -> Result<
     (
         infrastructure::SqliteEquipmentStore,
@@ -574,13 +627,10 @@ async fn equipment_store() -> Result<
 > {
     let directory = tempfile::tempdir()?;
     let pool = connect(&directory.path().join("test.db")).await?;
-    let parameters = SqliteGenerationParameterStore::new(pool.clone());
-    parameters
-        .author(jiff::Timestamp::now(), &programme::parameters()?)
-        .await?;
+    programme::design(&pool).await?;
     Ok((
-        infrastructure::SqliteEquipmentStore::new(pool),
-        parameters,
+        infrastructure::SqliteEquipmentStore::new(pool.clone()),
+        SqliteGenerationParameterStore::new(pool),
         directory,
     ))
 }
@@ -589,36 +639,10 @@ macro_rules! equipped {
     () => {
         match corpus::block_on(equipment_store()) {
             Ok(Ok(opened)) => opened,
-            Ok(Err(error)) => panic!("a store opens with parameters: {error}"),
+            Ok(Err(error)) => panic!("a store opens with its kinds: {error}"),
             Err(error) => panic!("a runtime is available: {error}"),
         }
     };
-}
-
-/// A version authored into a store that knows no kinds states its scales as
-/// them, undated; a second leaves them alone (issue #450).
-#[test]
-fn the_first_version_states_the_kinds_and_a_later_one_does_not() {
-    use application::EquipmentStore as _;
-    use domain::gym::exercise::Implement;
-
-    let (equipment, parameters, _directory) = equipped!();
-    let facts = run!(equipment.facts());
-    let Some(barbell) = facts.kinds.get(&Implement::Barbell) else {
-        panic!("the fixture's barbell is a kind")
-    };
-    assert_eq!(barbell.iter().count(), 1);
-    assert!(barbell.iter().all(|fact| fact.from.is_none()));
-
-    let Ok(again) = programme::parameters() else {
-        panic!("the fixture parameters are valid")
-    };
-    run!(parameters.author(jiff::Timestamp::now(), &again));
-    let facts = run!(equipment.facts());
-    let Some(barbell) = facts.kinds.get(&Implement::Barbell) else {
-        panic!("still a kind")
-    };
-    assert_eq!(barbell.iter().count(), 1, "a second version states nothing");
 }
 
 /// Declare, change and correct a specific; the corrected value is no longer

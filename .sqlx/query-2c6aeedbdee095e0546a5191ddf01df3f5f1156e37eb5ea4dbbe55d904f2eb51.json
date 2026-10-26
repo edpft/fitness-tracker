@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO linear_warmup_step (authored_at, position, of_top_set_bp, reps)\n                VALUES (?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "2c6aeedbdee095e0546a5191ddf01df3f5f1156e37eb5ea4dbbe55d904f2eb51"
+}

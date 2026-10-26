@@ -1,9 +1,9 @@
-//! The values consulted when authoring a prescription (§ 14).
+//! Percentages, and the load scales that are the generation parameters (§ 14).
 //!
-//! Only the current value is required, and that is not laziness: what a
-//! parameter produced is recorded concretely on the prescription that used it,
-//! so a superseded percentage answers no question. History is kept anyway
-//! because it costs nothing, and no derivation reads it.
+//! **How a program prescribes is not here** (§ 14.1): the programme and each
+//! primary progression are their own dated versions — see
+//! [`Programme`](super::Programme), [`LinearProgression`](super::LinearProgression)
+//! and [`SbsProgression`](super::SbsProgression).
 //!
 //! **Percentages are integers.** Basis points, for the same reason [`Kg`] holds
 //! grams: the value is persisted and a stored prescription that cannot be
@@ -15,7 +15,7 @@
 use std::{collections::BTreeMap, fmt};
 
 use crate::gym::exercise::{Exercise, Implement};
-use crate::measure::{Duration, Kg};
+use crate::measure::Kg;
 
 use super::steps::LoadSteps;
 
@@ -219,63 +219,6 @@ impl Scales {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
-}
-
-/// Everything consulted when generating that is a fact about the world, in
-/// force as one version.
-///
-/// **A parameter is true whether or not a programme is being authored.** What is
-/// on the rack is a parameter; what the warm-up ramp runs is not, and the ramp,
-/// the back-offs, the top sets, the accessory schemes and the reset protocols
-/// moved to [`Programming`](super::Programming) because of it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GenerationParameters {
-    /// The light session's top set, as a proportion of that week's heavy one.
-    /// Deriving it from the heavy load rather than from the anchor is what makes
-    /// the two roles move together by construction.
-    pub light_of_heavy: Percentage,
-    /// What the plan adds each climbing week. There is no authored endpoint:
-    /// the climb runs until the calendar stops it, and what regulates it is the
-    /// reset protocol rather than a stated top. Same kind as
-    /// [`ResetProtocol::reclimb_per_week`], because a reset is this climb run at
-    /// a different rate off a lower start.
-    ///
-    /// **There is no opening percentage beside it.** Where the ladder opens is
-    /// derived from the entry test the anchor records, not authored — see
-    /// `docs/decisions/0009-a-linear-block-opens-from-its-entry-test.md`.
-    ///
-    /// [`ResetProtocol::reclimb_per_week`]: super::ResetProtocol::reclimb_per_week
-    pub ladder_climb_per_week: Kg,
-    /// Negative. What a block's opening drops off the load its entry test
-    /// failed, where the opening is derived rather than declared.
-    ///
-    /// **Authored, not borrowed from a reset.** It lands on the same −10% the
-    /// first reset drops by, and it is stated separately anyway: the two agree
-    /// today by decision rather than by derivation, and a composed default that
-    /// nothing pins is exactly the class of fault that produced `/v1/v1`.
-    pub entry_drop: Percentage,
-    /// How long to rest, block by block.
-    ///
-    /// § 14 like everything else here: only the current value is required,
-    /// because what it produced is written onto the sets of the prescription
-    /// that used it.
-    pub rest: super::rest::RestScheme,
-    /// How long a static hold is held for.
-    ///
-    /// The mobility work does not progress — it is held, and the same length
-    /// every time — so its prescription comes from here rather than from
-    /// history. One duration for every static slot.
-    pub static_hold: Duration,
-    /// What each implement can hold. Consulted wherever a derived load has to
-    /// land on something the gym owns.
-    ///
-    /// **Equipment facts, not part of the version** (issue #450). A store
-    /// fills this with the kinds' increments true today, and a prescription
-    /// with the ones true on its date; authoring a version writes them only to
-    /// a store that knows no kinds yet. Carried here rather than beside the
-    /// parameters because a mesocycle is rebuilt against this struct, and
-    /// separating them reaches every place that does.
-    pub scales: Scales,
 }
 
 crate::newtype::from_str_via_string!(Percentage, InvalidPercentage);

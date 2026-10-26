@@ -1,300 +1,317 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT authored_at AS \"authored_at!: String\",\n                   light_of_heavy_bp AS \"light_of_heavy_bp!: i64\",\n                   ladder_climb_grams AS \"ladder_climb_grams!: i64\",\n                   entry_drop_bp AS \"entry_drop_bp!: i64\",\n                   rest_plyometric_low AS \"rest_plyometric_low!: i64\",\n                   rest_plyometric_high AS \"rest_plyometric_high: i64\",\n                   rest_plyometric_ss_low AS \"rest_plyometric_ss_low: i64\",\n                   rest_plyometric_ss_high AS \"rest_plyometric_ss_high: i64\",\n                   rest_power_low AS \"rest_power_low!: i64\",\n                   rest_power_high AS \"rest_power_high: i64\",\n                   rest_power_ss_low AS \"rest_power_ss_low: i64\",\n                   rest_power_ss_high AS \"rest_power_ss_high: i64\",\n                   rest_strength_low AS \"rest_strength_low!: i64\",\n                   rest_strength_high AS \"rest_strength_high: i64\",\n                   rest_strength_ss_low AS \"rest_strength_ss_low: i64\",\n                   rest_strength_ss_high AS \"rest_strength_ss_high: i64\",\n                   rest_hypertrophy_low AS \"rest_hypertrophy_low!: i64\",\n                   rest_hypertrophy_high AS \"rest_hypertrophy_high: i64\",\n                   rest_hypertrophy_ss_low AS \"rest_hypertrophy_ss_low: i64\",\n                   rest_hypertrophy_ss_high AS \"rest_hypertrophy_ss_high: i64\",\n                   rest_mobility_low AS \"rest_mobility_low!: i64\",\n                   rest_mobility_high AS \"rest_mobility_high: i64\",\n                   rest_mobility_ss_low AS \"rest_mobility_ss_low: i64\",\n                   rest_mobility_ss_high AS \"rest_mobility_ss_high: i64\",\n                   static_hold_seconds AS \"static_hold_seconds!: i64\"\n            FROM generation_parameters\n            ORDER BY authored_at DESC\n            LIMIT 1\n            ",
+  "query": "\n            SELECT strength_reps_low AS \"strength_reps_low!: i64\",\n                   strength_reps_high AS \"strength_reps_high: i64\",\n                   strength_sets AS \"strength_sets!: i64\",\n                   hypertrophy_reps_low AS \"hypertrophy_reps_low!: i64\",\n                   hypertrophy_reps_high AS \"hypertrophy_reps_high: i64\",\n                   hypertrophy_sets AS \"hypertrophy_sets!: i64\",\n                   static_hold_seconds AS \"static_hold_seconds!: i64\",\n                   rest_plyometric_low AS \"rest_plyometric_low!: i64\",\n                   rest_plyometric_high AS \"rest_plyometric_high: i64\",\n                   rest_plyometric_ss_low AS \"rest_plyometric_ss_low: i64\",\n                   rest_plyometric_ss_high AS \"rest_plyometric_ss_high: i64\",\n                   rest_power_low AS \"rest_power_low!: i64\",\n                   rest_power_high AS \"rest_power_high: i64\",\n                   rest_power_ss_low AS \"rest_power_ss_low: i64\",\n                   rest_power_ss_high AS \"rest_power_ss_high: i64\",\n                   rest_strength_low AS \"rest_strength_low!: i64\",\n                   rest_strength_high AS \"rest_strength_high: i64\",\n                   rest_strength_ss_low AS \"rest_strength_ss_low: i64\",\n                   rest_strength_ss_high AS \"rest_strength_ss_high: i64\",\n                   rest_hypertrophy_low AS \"rest_hypertrophy_low!: i64\",\n                   rest_hypertrophy_high AS \"rest_hypertrophy_high: i64\",\n                   rest_hypertrophy_ss_low AS \"rest_hypertrophy_ss_low: i64\",\n                   rest_hypertrophy_ss_high AS \"rest_hypertrophy_ss_high: i64\",\n                   rest_mobility_low AS \"rest_mobility_low!: i64\",\n                   rest_mobility_high AS \"rest_mobility_high: i64\",\n                   rest_mobility_ss_low AS \"rest_mobility_ss_low: i64\",\n                   rest_mobility_ss_high AS \"rest_mobility_ss_high: i64\"\n            FROM programme\n            WHERE authored_at = ?\n            ",
   "describe": {
     "columns": [
       {
-        "name": "authored_at!: String",
+        "name": "strength_reps_low!: i64",
         "ordinal": 0,
-        "type_info": "Text",
+        "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
-            "name": "authored_at"
+            "table": "programme",
+            "name": "strength_reps_low"
           }
         }
       },
       {
-        "name": "light_of_heavy_bp!: i64",
+        "name": "strength_reps_high: i64",
         "ordinal": 1,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
-            "name": "light_of_heavy_bp"
+            "table": "programme",
+            "name": "strength_reps_high"
           }
         }
       },
       {
-        "name": "ladder_climb_grams!: i64",
+        "name": "strength_sets!: i64",
         "ordinal": 2,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
-            "name": "ladder_climb_grams"
+            "table": "programme",
+            "name": "strength_sets"
           }
         }
       },
       {
-        "name": "entry_drop_bp!: i64",
+        "name": "hypertrophy_reps_low!: i64",
         "ordinal": 3,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
-            "name": "entry_drop_bp"
+            "table": "programme",
+            "name": "hypertrophy_reps_low"
+          }
+        }
+      },
+      {
+        "name": "hypertrophy_reps_high: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "hypertrophy_reps_high"
+          }
+        }
+      },
+      {
+        "name": "hypertrophy_sets!: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "hypertrophy_sets"
+          }
+        }
+      },
+      {
+        "name": "static_hold_seconds!: i64",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "programme",
+            "name": "static_hold_seconds"
           }
         }
       },
       {
         "name": "rest_plyometric_low!: i64",
-        "ordinal": 4,
+        "ordinal": 7,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_plyometric_low"
           }
         }
       },
       {
         "name": "rest_plyometric_high: i64",
-        "ordinal": 5,
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_plyometric_high"
           }
         }
       },
       {
         "name": "rest_plyometric_ss_low: i64",
-        "ordinal": 6,
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_plyometric_ss_low"
           }
         }
       },
       {
         "name": "rest_plyometric_ss_high: i64",
-        "ordinal": 7,
+        "ordinal": 10,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_plyometric_ss_high"
           }
         }
       },
       {
         "name": "rest_power_low!: i64",
-        "ordinal": 8,
+        "ordinal": 11,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_power_low"
           }
         }
       },
       {
         "name": "rest_power_high: i64",
-        "ordinal": 9,
+        "ordinal": 12,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_power_high"
           }
         }
       },
       {
         "name": "rest_power_ss_low: i64",
-        "ordinal": 10,
+        "ordinal": 13,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_power_ss_low"
           }
         }
       },
       {
         "name": "rest_power_ss_high: i64",
-        "ordinal": 11,
+        "ordinal": 14,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_power_ss_high"
           }
         }
       },
       {
         "name": "rest_strength_low!: i64",
-        "ordinal": 12,
+        "ordinal": 15,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_strength_low"
           }
         }
       },
       {
         "name": "rest_strength_high: i64",
-        "ordinal": 13,
+        "ordinal": 16,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_strength_high"
           }
         }
       },
       {
         "name": "rest_strength_ss_low: i64",
-        "ordinal": 14,
+        "ordinal": 17,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_strength_ss_low"
           }
         }
       },
       {
         "name": "rest_strength_ss_high: i64",
-        "ordinal": 15,
+        "ordinal": 18,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_strength_ss_high"
           }
         }
       },
       {
         "name": "rest_hypertrophy_low!: i64",
-        "ordinal": 16,
+        "ordinal": 19,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_hypertrophy_low"
           }
         }
       },
       {
         "name": "rest_hypertrophy_high: i64",
-        "ordinal": 17,
+        "ordinal": 20,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_hypertrophy_high"
           }
         }
       },
       {
         "name": "rest_hypertrophy_ss_low: i64",
-        "ordinal": 18,
+        "ordinal": 21,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_hypertrophy_ss_low"
           }
         }
       },
       {
         "name": "rest_hypertrophy_ss_high: i64",
-        "ordinal": 19,
+        "ordinal": 22,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_hypertrophy_ss_high"
           }
         }
       },
       {
         "name": "rest_mobility_low!: i64",
-        "ordinal": 20,
+        "ordinal": 23,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_mobility_low"
           }
         }
       },
       {
         "name": "rest_mobility_high: i64",
-        "ordinal": 21,
+        "ordinal": 24,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_mobility_high"
           }
         }
       },
       {
         "name": "rest_mobility_ss_low: i64",
-        "ordinal": 22,
+        "ordinal": 25,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_mobility_ss_low"
           }
         }
       },
       {
         "name": "rest_mobility_ss_high: i64",
-        "ordinal": 23,
+        "ordinal": 26,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "generation_parameters",
+            "table": "programme",
             "name": "rest_mobility_ss_high"
-          }
-        }
-      },
-      {
-        "name": "static_hold_seconds!: i64",
-        "ordinal": 24,
-        "type_info": "Integer",
-        "origin": {
-          "Table": {
-            "table": "generation_parameters",
-            "name": "static_hold_seconds"
           }
         }
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 1
     },
     "nullable": [
       false,
-      false,
-      false,
-      false,
-      false,
-      true,
-      true,
       true,
       false,
+      false,
       true,
-      true,
-      true,
+      false,
+      false,
       false,
       true,
       true,
@@ -307,8 +324,15 @@
       true,
       true,
       true,
-      false
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true
     ]
   },
-  "hash": "5441588fb2616093fffe66f131a11960fc37155be3e81dba17278559f502df83"
+  "hash": "81455fe73c72400e386420406040d499f8b29e5119d5824bd6ac5f4a0915202d"
 }

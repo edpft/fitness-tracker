@@ -1,0 +1,194 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT light_of_heavy_bp AS \"light_of_heavy_bp!: i64\",\n                   ladder_climb_grams AS \"ladder_climb_grams!: i64\",\n                   entry_drop_bp AS \"entry_drop_bp!: i64\",\n                   higher_top_set_reps AS \"higher_top_set_reps!: i64\",\n                   lower_top_set_reps AS \"lower_top_set_reps!: i64\",\n                   higher_back_off_sets AS \"higher_back_off_sets!: i64\",\n                   higher_back_off_reps AS \"higher_back_off_reps!: i64\",\n                   higher_back_off_bp AS \"higher_back_off_bp!: i64\",\n                   lower_back_off_sets AS \"lower_back_off_sets!: i64\",\n                   lower_back_off_reps AS \"lower_back_off_reps!: i64\",\n                   lower_back_off_bp AS \"lower_back_off_bp!: i64\",\n                   first_reset_drop_bp AS \"first_reset_drop_bp!: i64\",\n                   first_reset_reclimb_grams AS \"first_reset_reclimb_grams!: i64\",\n                   second_reset_drop_bp AS \"second_reset_drop_bp!: i64\",\n                   second_reset_reclimb_grams AS \"second_reset_reclimb_grams!: i64\"\n            FROM linear_progression\n            WHERE authored_at = ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "light_of_heavy_bp!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_progression",
+            "name": "light_of_heavy_bp"
+          }
+        }
+      },
+      {
+        "name": "ladder_climb_grams!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_progression",
+            "name": "ladder_climb_grams"
+          }
+        }
+      },
+      {
+        "name": "entry_drop_bp!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_progression",
+            "name": "entry_drop_bp"
+          }
+        }
+      },
+      {
+        "name": "higher_top_set_reps!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_progression",
+            "name": "higher_top_set_reps"
+          }
+        }
+      },
+      {
+        "name": "lower_top_set_reps!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_progression",
+            "name": "lower_top_set_reps"
+          }
+        }
+      },
+      {
+        "name": "higher_back_off_sets!: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_progression",
+            "name": "higher_back_off_sets"
+          }
+        }
+      },
+      {
+        "name": "higher_back_off_reps!: i64",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_progression",
+            "name": "higher_back_off_reps"
+          }
+        }
+      },
+      {
+        "name": "higher_back_off_bp!: i64",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_progression",
+            "name": "higher_back_off_bp"
+          }
+        }
+      },
+      {
+        "name": "lower_back_off_sets!: i64",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_progression",
+            "name": "lower_back_off_sets"
+          }
+        }
+      },
+      {
+        "name": "lower_back_off_reps!: i64",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_progression",
+            "name": "lower_back_off_reps"
+          }
+        }
+      },
+      {
+        "name": "lower_back_off_bp!: i64",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_progression",
+            "name": "lower_back_off_bp"
+          }
+        }
+      },
+      {
+        "name": "first_reset_drop_bp!: i64",
+        "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_progression",
+            "name": "first_reset_drop_bp"
+          }
+        }
+      },
+      {
+        "name": "first_reset_reclimb_grams!: i64",
+        "ordinal": 12,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_progression",
+            "name": "first_reset_reclimb_grams"
+          }
+        }
+      },
+      {
+        "name": "second_reset_drop_bp!: i64",
+        "ordinal": 13,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_progression",
+            "name": "second_reset_drop_bp"
+          }
+        }
+      },
+      {
+        "name": "second_reset_reclimb_grams!: i64",
+        "ordinal": 14,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_progression",
+            "name": "second_reset_reclimb_grams"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ac2b164ecd6c999244952d4c43d1478215b816a1d2a85557797e0f955002d3d4"
+}
