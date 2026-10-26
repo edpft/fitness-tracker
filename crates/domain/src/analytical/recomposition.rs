@@ -233,6 +233,9 @@ fn cell(masses: &Masses, from: Date, to: Date) -> Option<Cell> {
     let earliest = from
         .checked_add(jiff::Span::new().days(WINDOW_DAYS - 1))
         .ok()?;
+    if earliest > to {
+        return None;
+    }
     let both = |on: &Date| fat_free.contains_key(on);
     let first = fat.range(earliest..=to).map(|(on, _)| *on).find(both)?;
     let last = fat
