@@ -6,9 +6,12 @@
 //! A change holds from its date. A session prescribed before it keeps what it
 //! was prescribed, because a prescription is never rewritten.
 //!
-//! **A change names the exercise and what assists it**, since a prescription
-//! names a specific exercise: a band-assisted dip and a machine-assisted dip
-//! are one exercise performed and two prescribed (the operator, 2026-10-15).
+//! **A change names the exercise, what assists it and what loads it**, since a
+//! prescription names a specific exercise: a band-assisted dip and a
+//! machine-assisted dip are one exercise performed and two prescribed (the
+//! operator, 2026-10-15). Either side of zero may be stated or not, so a dip
+//! is assisted below and loaded above, a dead bug only loaded, and a pogo
+//! neither (the operator, 2026-10-26).
 //!
 //! **A change is for one session's intensity, or both.** A slot can alternate
 //! — back extension on the heavier session, lying leg curl on the lighter —
@@ -17,7 +20,7 @@
 use jiff::{Timestamp, civil::Date};
 
 use crate::{
-    gym::{Exercise, equipment::Specific},
+    gym::{Exercise, equipment::Specific, exercise::Implement},
     schedule::{Relative, SessionRole},
 };
 
@@ -34,6 +37,9 @@ pub struct FillChange {
     pub exercise: Exercise,
     /// The range of bands that assists it, where one does.
     pub assisted_by: Option<Specific>,
+    /// The kind held to load it above bodyweight, where one is: its steps are
+    /// that kind's scale.
+    pub loaded_by: Option<Implement>,
 }
 
 /// Every change to one mesocycle's fills.
@@ -105,6 +111,14 @@ impl FillChanges {
     pub fn assisted_by(&self, slot: SlotId, role: SessionRole, date: Date) -> Option<&Specific> {
         self.on(slot, role.intensity(), date)
             .and_then(|change| change.assisted_by.as_ref())
+    }
+
+    /// What loads a slot above bodyweight in a session on a date, if a change
+    /// says.
+    #[must_use]
+    pub fn loaded_by(&self, slot: SlotId, role: SessionRole, date: Date) -> Option<Implement> {
+        self.on(slot, role.intensity(), date)
+            .and_then(|change| change.loaded_by)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &FillChange> {

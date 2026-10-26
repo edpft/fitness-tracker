@@ -3,7 +3,7 @@
 
 use application::{FillChangeError, MesocycleInForce, fills::Refilling};
 use domain::{
-    gym::{Exercise, equipment::Specific},
+    gym::{Exercise, equipment::Specific, exercise::Implement},
     normalised::OperatorZone,
     prescription::SlotId,
     schedule::Relative,
@@ -53,6 +53,7 @@ pub async fn change(
     from: Date,
     exercise: Exercise,
     assisted_by: Option<Specific>,
+    loaded_by: Option<Implement>,
 ) -> Result<(), FillChangeError> {
     refilling(store, zone)
         .change(
@@ -61,6 +62,7 @@ pub async fn change(
             from,
             exercise,
             assisted_by,
+            loaded_by,
             jiff::Timestamp::now(),
         )
         .await

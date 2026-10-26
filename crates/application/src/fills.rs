@@ -5,7 +5,11 @@
 //! already be known equipment.
 
 use domain::{
-    gym::{Exercise, equipment::Specific},
+    gym::{
+        Exercise,
+        equipment::Specific,
+        exercise::Implement,
+    },
     prescription::{FillChange, SlotId, linear::SlotContent},
     schedule::{Relative, SessionRole},
 };
@@ -45,13 +49,13 @@ where
     }
 
     /// Fill a slot with an exercise from a date, assisted by a specific or
-    /// not.
+    /// not, and loaded above bodyweight by a kind held or not.
     ///
     /// # Errors
     ///
     /// [`FillChangeError`] if no mesocycle is in force then, the slot is
-    /// static or the primary, or the range of bands is not known on that
-    /// date.
+    /// static or the primary, the range of bands is not known on that date,
+    /// or what loads it is named for an exercise that is not bodyweight.
     pub async fn change(
         &self,
         slot: SlotId,
@@ -59,6 +63,7 @@ where
         from: Date,
         exercise: Exercise,
         assisted_by: Option<Specific>,
+        loaded_by: Option<Implement>,
         at: Timestamp,
     ) -> Result<(), FillChangeError> {
         let Some(found) = self.mesocycles.on(from).await? else {
@@ -92,6 +97,12 @@ where
                 });
             }
         }
+        // An exercise on its own implement is loaded by it already.
+        if loaded_by.is_some() && exercise.implement() != Implement::Bodyweight {
+            return Err(FillChangeError::NotBodyweight {
+                exercise: exercise.name(),
+            });
+        }
         let change = FillChange {
             slot,
             intensity,
@@ -99,6 +110,7 @@ where
             recorded_at: at,
             exercise,
             assisted_by,
+            loaded_by,
         };
         Ok(self.changes.record_change(found.id, &change).await?)
     }

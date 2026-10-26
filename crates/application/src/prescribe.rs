@@ -16,7 +16,7 @@ use domain::{
     gym::{
         Load, SetKind, SignedKg,
         equipment::{BandLadder, BandSetting},
-        exercise::{DurationExercise, Exercise, RepsExercise},
+        exercise::{DurationExercise, Exercise, Implement, RepsExercise},
     },
     measure::{Kg, RepCount},
     plan::{Occupies, Plan, PlanId, PlanName, Span},
@@ -231,6 +231,7 @@ where
             parameters: &parameters,
             programming: &programming,
             ladders: &NO_LADDERS,
+            loaded: &NO_LOADS,
         };
         let progress = self.progress_of(&plan, &programme, &consulted, on).await?;
         let target = self.inheritance(&programme, &consulted, on).await?.target;
@@ -404,11 +405,16 @@ where
                 ladders.insert(*slot, BandLadder::of(specific, &range));
             }
         }
+        let loaded: BTreeMap<SlotId, Implement> = SlotId::ALL
+            .iter()
+            .filter_map(|slot| Some((*slot, changes.loaded_by(*slot, role, date)?)))
+            .collect();
         let programming = programming()?;
         let consulted = Consulted {
             parameters: &parameters,
             programming: &programming,
             ladders: &ladders,
+            loaded: &loaded,
         };
 
         // Every exercise the programme can prescribe that progresses, in one
@@ -1194,10 +1200,16 @@ struct Consulted<'a> {
     /// The bands that assist each slot a change says is band-assisted, as
     /// they were on the session's date (#454).
     ladders: &'a BTreeMap<SlotId, BandLadder>,
+    /// What is held to load each slot a change says is loaded above
+    /// bodyweight (#579).
+    loaded: &'a BTreeMap<SlotId, Implement>,
 }
 
 /// No slot is band-assisted.
 static NO_LADDERS: BTreeMap<SlotId, BandLadder> = BTreeMap::new();
+
+/// No slot is loaded by something held.
+static NO_LOADS: BTreeMap<SlotId, Implement> = BTreeMap::new();
 
 /// What the record says, gathered before any slot is derived.
 ///
@@ -2015,7 +2027,17 @@ fn one_exercise(
     let (load, assisted) = match banded {
         Some(banded) => banded,
         None => (
-            progressed_load(consulted, exercise, scheme, last).map_err(underivable)?,
+            progressed_load(
+                consulted,
+                consulted
+                    .loaded
+                    .get(&slot)
+                    .copied()
+                    .unwrap_or_else(|| exercise.implement()),
+                scheme,
+                last,
+            )
+            .map_err(underivable)?,
             None,
         ),
     };
@@ -2107,9 +2129,12 @@ fn heaviest_of<'a>(sets: &[&'a PerformedSetSummary]) -> Option<&'a PerformedSetS
 /// hold. So an implement with no authored scale costs a slot nothing until the
 /// week it would have stepped up — which is the week somebody has to state the
 /// scale anyway.
+///
+/// **The scale is the implement's that loads it**: the exercise's own, or
+/// what a change says is held to load a bodyweight exercise (#579).
 fn progressed_load(
     consulted: &Consulted<'_>,
-    exercise: Exercise,
+    implement: Implement,
     scheme: &domain::prescription::AccessoryScheme,
     last: &Performance,
 ) -> Result<Load, UnderivableReason> {
@@ -2128,7 +2153,7 @@ fn progressed_load(
     let steps = consulted
         .parameters
         .scales
-        .for_exercise(exercise)
+        .for_implement(implement)
         .ok_or(UnderivableReason::NoLoadScale)?;
     match heaviest {
         // The step is read at the load being left, so a dumbbell leaving 10kg
@@ -2507,6 +2532,7 @@ mod progression_tests {
             parameters: &parameters,
             programming: &shape,
             ladders: &super::NO_LADDERS,
+            loaded: &super::NO_LOADS,
         };
         let last = performance(vec![
             set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
@@ -2516,7 +2542,7 @@ mod progression_tests {
 
         let progressed = progressed_load(
             &consulted,
-            Exercise::Reps(domain::gym::exercise::RepsExercise::PreacherCurlBarbell),
+            Exercise::Reps(domain::gym::exercise::RepsExercise::PreacherCurlBarbell).implement(),
             &consulted.programming.strength,
             &last,
         )
@@ -2539,6 +2565,7 @@ mod progression_tests {
             parameters: &parameters,
             programming: &shape,
             ladders: &super::NO_LADDERS,
+            loaded: &super::NO_LOADS,
         };
         let last = performance(vec![
             set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
@@ -2548,7 +2575,7 @@ mod progression_tests {
 
         let progressed = progressed_load(
             &consulted,
-            Exercise::Reps(domain::gym::exercise::RepsExercise::PreacherCurlBarbell),
+            Exercise::Reps(domain::gym::exercise::RepsExercise::PreacherCurlBarbell).implement(),
             &consulted.programming.strength,
             &last,
         )
@@ -2571,6 +2598,7 @@ mod progression_tests {
             parameters: &parameters,
             programming: &shape,
             ladders: &super::NO_LADDERS,
+            loaded: &super::NO_LOADS,
         };
         let last = performance(vec![
             set(Load::relative(SignedKg::from_grams(-15_000)), 6).expect("a set"),
@@ -2580,7 +2608,7 @@ mod progression_tests {
 
         let progressed = progressed_load(
             &consulted,
-            Exercise::Reps(domain::gym::exercise::RepsExercise::ChestDip),
+            Exercise::Reps(domain::gym::exercise::RepsExercise::ChestDip).implement(),
             &consulted.programming.strength,
             &last,
         )
@@ -2606,6 +2634,7 @@ mod progression_tests {
             parameters: &parameters,
             programming: &shape,
             ladders: &super::NO_LADDERS,
+            loaded: &super::NO_LOADS,
         };
         let last = performance(vec![
             set(Load::relative(SignedKg::from_grams(-7_000)), 4).expect("a set"),
@@ -2615,7 +2644,7 @@ mod progression_tests {
 
         let progressed = progressed_load(
             &consulted,
-            Exercise::Reps(domain::gym::exercise::RepsExercise::ChestDip),
+            Exercise::Reps(domain::gym::exercise::RepsExercise::ChestDip).implement(),
             &consulted.programming.strength,
             &last,
         )
@@ -2637,6 +2666,7 @@ mod progression_tests {
             parameters: &parameters,
             programming: &shape,
             ladders: &super::NO_LADDERS,
+            loaded: &super::NO_LOADS,
         };
         let last = performance(vec![
             set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
@@ -2645,13 +2675,63 @@ mod progression_tests {
 
         let progressed = progressed_load(
             &consulted,
-            Exercise::Reps(domain::gym::exercise::RepsExercise::PreacherCurlBarbell),
+            Exercise::Reps(domain::gym::exercise::RepsExercise::PreacherCurlBarbell).implement(),
             &consulted.programming.strength,
             &last,
         )
         .expect("the slot derives");
 
         assert_eq!(progressed, Load::absolute(Kg::from_grams(40_000)));
+    }
+
+    /// **The operator's last dead bugs, 2026-09-07**: `0 x 8`, `0 x 6`, `0 x
+    /// 6`, the top of the core slot's range. A dead bug is bodyweight, so the
+    /// step up is on whatever a change says is held to load it (#579).
+    #[test]
+    fn a_bodyweight_exercise_steps_up_on_what_loads_it() {
+        use domain::{
+            gym::exercise::{Implement, RepsExercise},
+            prescription::{PrescribedExercise, SlotId},
+        };
+
+        use super::{LastPerformance, UnderivableReason, one_exercise};
+
+        let parameters = seed().expect("the seed builds");
+        let shape = programming().expect("the shipped programming builds");
+        let history = std::collections::BTreeMap::from([(
+            RepsExercise::DeadBug,
+            LastPerformance::Performed(performance(vec![
+                set(Load::absolute(Kg::from_grams(0)), 8).expect("a set"),
+                set(Load::absolute(Kg::from_grams(0)), 6).expect("a set"),
+                set(Load::absolute(Kg::from_grams(0)), 6).expect("a set"),
+            ])),
+        )]);
+        let dead_bug = Exercise::Reps(RepsExercise::DeadBug);
+
+        let unstated = Consulted {
+            parameters: &parameters,
+            programming: &shape,
+            ladders: &super::NO_LADDERS,
+            loaded: &super::NO_LOADS,
+        };
+        let refused = one_exercise(&unstated, &history, dead_bug, SlotId::Core)
+            .expect_err("nothing says what loads it");
+        assert_eq!(refused.reason, UnderivableReason::NoLoadScale);
+
+        let dumbbell = std::collections::BTreeMap::from([(SlotId::Core, Implement::Dumbbell)]);
+        let stated = Consulted {
+            loaded: &dumbbell,
+            ..unstated
+        };
+        let derived = one_exercise(&stated, &history, dead_bug, SlotId::Core)
+            .expect("a dumbbell loads it");
+        let PrescribedExercise::ForReps { sets, .. } = derived else {
+            panic!("a dead bug is counted in repetitions");
+        };
+        assert!(
+            sets.iter().all(|set| set.prescription.load() == Load::absolute(Kg::from_grams(1_000))),
+            "the dumbbell scale's first step above nothing is 1kg: {sets:?}"
+        );
     }
 }
 
@@ -2808,6 +2888,7 @@ mod ramp_tests {
             parameters: &parameters,
             programming: &shape,
             ladders: &super::NO_LADDERS,
+            loaded: &super::NO_LOADS,
         };
         let steps = LoadSteps::uniform(Kg::from_grams(2_500))?;
         let sets = primary_sets(
@@ -2867,6 +2948,7 @@ mod ramp_tests {
             parameters: &parameters,
             programming: &shape,
             ladders: &super::NO_LADDERS,
+            loaded: &super::NO_LOADS,
         };
         let steps = LoadSteps::uniform(Kg::from_grams(2_500)).expect("a barbell is one band");
         let shape: Vec<(bool, Option<u64>, Option<Rir>)> = primary_sets(
