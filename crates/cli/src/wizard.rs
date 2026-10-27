@@ -31,7 +31,7 @@ use std::{
 
 use application::{
     DiaryStore as _, ExerciseHistory, GenerationParameterStore, PlanAuthor as _, PlanStore as _,
-    PlannedWith, ProgrammeStore, ProgressionStore, prescribe::Authoring,
+    PlannedWith, ProgressionStore, WorkoutStore, prescribe::Authoring,
 };
 use configurator::store::Store;
 use domain::{
@@ -223,7 +223,7 @@ pub struct Ready {
 /// what one step up the bar is, and so what "beat it" comes to, is the plate
 /// grid in `scales` rather than anything to ask about.
 pub async fn ready(
-    store: &(impl GenerationParameterStore + ProgrammeStore + ProgressionStore + Sync),
+    store: &(impl GenerationParameterStore + WorkoutStore + ProgressionStore + Sync),
 ) -> Result<Ready, Failure> {
     let planned_with = application::prescribe::planned_with(store, jiff::Timestamp::now())
         .await

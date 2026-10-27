@@ -13,11 +13,11 @@ mod equipment;
 mod fills;
 mod one_rep_max;
 mod page;
-mod programme;
 mod range;
 mod report;
 mod run;
 mod weight;
+mod workouts;
 
 use std::{collections::HashMap, convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc};
 
@@ -129,7 +129,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/estimated-1rm", get(estimated_one_rep_max))
         .route("/equipment", get(equipment_page).post(equipment_post))
         .route("/fills", get(fills_page).post(fills_post))
-        .route("/programme", get(programme_page).post(programme_post))
+        .route("/workouts", get(workouts_page).post(workouts_post))
         .route("/run/events", get(events))
         .route("/run/step", get(step))
         .route("/htmx.min.js", get(htmx))
@@ -419,47 +419,47 @@ async fn fills_post(
 }
 
 /// The versions in force, read afresh, with what the last post came to.
-async fn programme_shown(
+async fn workouts_shown(
     runs: &Runs,
     said: Option<&str>,
-    typed: Option<&programme::Fields>,
+    typed: Option<&workouts::Fields>,
 ) -> Markup {
     let store = match configurator::store::Store::open(&runs.setting().database).await {
         Ok(store) => store,
-        Err(error) => return programme::unreadable(&error.to_string()),
+        Err(error) => return workouts::unreadable(&error.to_string()),
     };
     let in_force = configurator::design::in_force(&store).await;
     store.close().await;
     match in_force {
-        Ok(in_force) => programme::page(&in_force, &runs.setting().zone, said, typed),
-        Err(error) => programme::unreadable(&error.to_string()),
+        Ok(in_force) => workouts::page(&in_force, &runs.setting().zone, said, typed),
+        Err(error) => workouts::unreadable(&error.to_string()),
     }
 }
 
-async fn programme_page(State(runs): State<Arc<Runs>>) -> Markup {
-    programme_shown(&runs, None, None).await
+async fn workouts_page(State(runs): State<Arc<Runs>>) -> Markup {
+    workouts_shown(&runs, None, None).await
 }
 
 /// Author a version, then show the page again, as the equipment page does,
 /// keeping what was typed when it is refused.
-async fn programme_post(
+async fn workouts_post(
     State(runs): State<Arc<Runs>>,
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
-    let typed = programme::Fields::new(form);
-    let refused = match programme::asked(&typed) {
+    let typed = workouts::Fields::new(form);
+    let refused = match workouts::asked(&typed) {
         Err(refused) => Some(refused),
         Ok(asked) => match configurator::store::Store::open(&runs.setting().database).await {
             Err(error) => Some(error.to_string()),
             Ok(store) => {
                 let done = match asked {
-                    programme::Asked::Programme(programme) => {
-                        configurator::design::programme(&store, &programme).await
+                    workouts::Asked::Workout(intensity, workout) => {
+                        configurator::design::workout(&store, intensity, &workout).await
                     }
-                    programme::Asked::Linear(linear) => {
+                    workouts::Asked::Linear(linear) => {
                         configurator::design::linear(&store, &linear).await
                     }
-                    programme::Asked::Sbs(sbs) => configurator::design::sbs(&store, &sbs).await,
+                    workouts::Asked::Sbs(sbs) => configurator::design::sbs(&store, &sbs).await,
                 };
                 store.close().await;
                 done.err().map(|error| error.to_string())
@@ -467,8 +467,8 @@ async fn programme_post(
         },
     };
     match refused {
-        None => Redirect::to("/programme").into_response(),
-        Some(refused) => programme_shown(&runs, Some(&refused), Some(&typed))
+        None => Redirect::to("/workouts").into_response(),
+        Some(refused) => workouts_shown(&runs, Some(&refused), Some(&typed))
             .await
             .into_response(),
     }

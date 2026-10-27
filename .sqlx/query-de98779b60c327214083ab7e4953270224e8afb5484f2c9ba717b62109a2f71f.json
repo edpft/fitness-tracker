@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO sbs_rest (\n                authored_at, across_low, across_high, rep_max_low, rep_max_high,\n                back_off_low, back_off_high, attempt_low, attempt_high\n            )\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "de98779b60c327214083ab7e4953270224e8afb5484f2c9ba717b62109a2f71f"
+}

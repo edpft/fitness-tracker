@@ -1,20 +1,23 @@
-//! Designing the programme and each primary progression (#192).
+//! Designing each workout and each primary progression (#192).
 //!
 //! **On their own, and never as a side effect of planning** (§ 14.1). Each is
 //! a dated version: authoring one puts it in force from now, and a plan already
 //! made goes on reading the versions in force when it was planned, so a change
 //! reaches only the plans made after it.
 
-use domain::prescription::{LinearProgression, Programme, SbsProgression};
+use domain::{
+    prescription::{ByIntensity, LinearProgression, SbsProgression, Workout},
+    schedule::Relative,
+};
 use jiff::Timestamp;
 
-use crate::{DesignError, ProgrammeStore, ProgressionStore};
+use crate::{DesignError, ProgressionStore, WorkoutStore};
 
 /// The latest version of each, with when it was authored. `None` for one never
 /// authored, which a store `init` has not seeded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InForce {
-    pub programme: Option<(Timestamp, Programme)>,
+    pub workouts: ByIntensity<Option<(Timestamp, Workout)>>,
     pub linear: Option<(Timestamp, LinearProgression)>,
     pub sbs: Option<(Timestamp, SbsProgression)>,
 }
@@ -24,7 +27,7 @@ pub struct Designing<S> {
     store: S,
 }
 
-impl<S: ProgrammeStore + ProgressionStore + Sync> Designing<S> {
+impl<S: WorkoutStore + ProgressionStore + Sync> Designing<S> {
     pub const fn new(store: S) -> Self {
         Self { store }
     }
@@ -36,30 +39,38 @@ impl<S: ProgrammeStore + ProgressionStore + Sync> Designing<S> {
     /// [`DesignError::Store`] if the store cannot be read.
     pub async fn in_force(&self, at: Timestamp) -> Result<InForce, DesignError> {
         Ok(InForce {
-            programme: self.store.programme_at(at).await?,
+            workouts: ByIntensity {
+                higher: self.store.workout_at(Relative::Higher, at).await?,
+                lower: self.store.workout_at(Relative::Lower, at).await?,
+            },
             linear: self.store.linear_at(at).await?,
             sbs: self.store.sbs_at(at).await?,
         })
     }
 
-    /// Author a version of the programme, in force from `at`.
+    /// Author a version of the workout for sessions of `intensity`, in force
+    /// from `at`. The other workout is untouched.
     ///
     /// # Errors
     ///
     /// [`DesignError::Unchanged`] for the version already in force: a second
     /// copy of it would date a change that was never made.
-    pub async fn programme(&self, programme: &Programme, at: Timestamp) -> Result<(), DesignError> {
-        if self
-            .store
-            .programme_at(at)
-            .await?
-            .map(|(_, was)| was)
-            .as_ref()
-            == Some(programme)
-        {
-            return Err(DesignError::Unchanged { what: "programme" });
+    pub async fn workout(
+        &self,
+        intensity: Relative,
+        workout: &Workout,
+        at: Timestamp,
+    ) -> Result<(), DesignError> {
+        let was = self.store.workout_at(intensity, at).await?;
+        if was.map(|(_, was)| was).as_ref() == Some(workout) {
+            return Err(DesignError::Unchanged {
+                what: match intensity {
+                    Relative::Higher => "higher-intensity workout",
+                    Relative::Lower => "lower-intensity workout",
+                },
+            });
         }
-        Ok(self.store.author_programme(at, programme).await?)
+        Ok(self.store.author_workout(intensity, at, workout).await?)
     }
 
     /// Author a version of linear progression, in force from `at`.
@@ -67,7 +78,7 @@ impl<S: ProgrammeStore + ProgressionStore + Sync> Designing<S> {
     /// # Errors
     ///
     /// [`DesignError::NotADrop`] for an entry drop or a reset that does not
-    /// lower the load, and [`DesignError::Unchanged`] as for the programme.
+    /// lower the load, and [`DesignError::Unchanged`] as for a workout.
     pub async fn linear(
         &self,
         linear: &LinearProgression,
@@ -93,11 +104,11 @@ impl<S: ProgrammeStore + ProgressionStore + Sync> Designing<S> {
         Ok(self.store.author_linear(at, linear).await?)
     }
 
-    /// Author a version of SBS, in force from `at`.
+    /// Author a version of SBS — its ramp and its rest — in force from `at`.
     ///
     /// # Errors
     ///
-    /// [`DesignError::Unchanged`] as for the programme.
+    /// [`DesignError::Unchanged`] as for a workout.
     pub async fn sbs(&self, sbs: &SbsProgression, at: Timestamp) -> Result<(), DesignError> {
         if self.store.sbs_at(at).await?.map(|(_, was)| was).as_ref() == Some(sbs) {
             return Err(DesignError::Unchanged { what: "SBS" });
@@ -110,16 +121,23 @@ impl<S: ProgrammeStore + ProgressionStore + Sync> Designing<S> {
 mod tests {
     use std::sync::Mutex;
 
-    use domain::prescription::{LinearProgression, Percentage, Programme, SbsProgression, seed};
+    use domain::{
+        measure::RepCount,
+        prescription::{
+            AccessoryScheme, LinearProgression, Percentage, SbsProgression, Section, Target,
+            Workout, seed,
+        },
+        schedule::Relative,
+    };
     use jiff::{Timestamp, ToSpan as _};
 
     use super::Designing;
-    use crate::{DesignError, ProgrammeStore, ProgressionStore, StoreError};
+    use crate::{DesignError, ProgressionStore, StoreError, WorkoutStore};
 
     /// Every version authored, in the order it was.
     #[derive(Default)]
     struct Versions {
-        programme: Mutex<Vec<(Timestamp, Programme)>>,
+        workouts: Mutex<Vec<(Relative, Timestamp, Workout)>>,
         linear: Mutex<Vec<(Timestamp, LinearProgression)>>,
         sbs: Mutex<Vec<(Timestamp, SbsProgression)>>,
     }
@@ -137,34 +155,37 @@ mod tests {
             .cloned()
     }
 
-    fn push<T: Clone>(
-        versions: &Mutex<Vec<(Timestamp, T)>>,
-        at: Timestamp,
-        value: &T,
-    ) -> Result<(), StoreError> {
+    fn push<T>(versions: &Mutex<Vec<T>>, value: T) -> Result<(), StoreError> {
         versions
             .lock()
             .map_err(|_| StoreError::Unavailable {
                 detail: "poisoned".to_owned(),
             })?
-            .push((at, value.clone()));
+            .push(value);
         Ok(())
     }
 
-    impl ProgrammeStore for Versions {
-        async fn programme_at(
+    impl WorkoutStore for Versions {
+        async fn workout_at(
             &self,
+            intensity: Relative,
             when: Timestamp,
-        ) -> Result<Option<(Timestamp, Programme)>, StoreError> {
-            Ok(at(&self.programme, when))
+        ) -> Result<Option<(Timestamp, Workout)>, StoreError> {
+            Ok(self.workouts.lock().ok().and_then(|all| {
+                all.iter()
+                    .filter(|(of, at, _)| *of == intensity && *at <= when)
+                    .max_by_key(|(_, at, _)| *at)
+                    .map(|(_, at, workout)| (*at, workout.clone()))
+            }))
         }
 
-        async fn author_programme(
+        async fn author_workout(
             &self,
+            intensity: Relative,
             when: Timestamp,
-            programme: &Programme,
+            workout: &Workout,
         ) -> Result<(), StoreError> {
-            push(&self.programme, when, programme)
+            push(&self.workouts, (intensity, when, workout.clone()))
         }
     }
 
@@ -181,7 +202,7 @@ mod tests {
             when: Timestamp,
             linear: &LinearProgression,
         ) -> Result<(), StoreError> {
-            push(&self.linear, when, linear)
+            push(&self.linear, (when, linear.clone()))
         }
 
         async fn sbs_at(
@@ -196,7 +217,7 @@ mod tests {
             when: Timestamp,
             sbs: &SbsProgression,
         ) -> Result<(), StoreError> {
-            push(&self.sbs, when, sbs)
+            push(&self.sbs, (when, sbs.clone()))
         }
     }
 
@@ -204,25 +225,45 @@ mod tests {
         tokio::runtime::Builder::new_current_thread().build()
     }
 
-    /// **A version is in force from when it is authored, and not before**: a
-    /// plan made earlier still reads the one it was made under.
+    /// **Each workout is edited on its own** (operator, 2026-10-27): changing
+    /// Monday's leaves Friday's as it was, and neither changes before it is
+    /// authored.
     #[test]
-    fn a_new_version_is_in_force_from_when_it_is_authored() {
+    fn a_workout_changes_on_its_own_and_from_when_it_is_authored() {
         runtime().expect("a runtime").block_on(async {
             let designing = Designing::new(Versions::default());
-            let first = seed::programme().expect("the seed builds");
+            let first = seed::workout().expect("the seed builds");
             let then = Timestamp::UNIX_EPOCH;
             let now = then + 1.hour();
-            designing.programme(&first, then).await.expect("authored");
+            for intensity in [Relative::Higher, Relative::Lower] {
+                designing
+                    .workout(intensity, &first, then)
+                    .await
+                    .expect("authored");
+            }
 
-            let mut second = first.clone();
-            second.static_hold = domain::measure::Duration::from_seconds(45);
-            designing.programme(&second, now).await.expect("authored");
+            let mut monday = first.clone();
+            monday.reps.sections.insert(
+                Section::Hypertrophy,
+                AccessoryScheme {
+                    reps: Target::between(
+                        RepCount::new(6).expect("six"),
+                        RepCount::new(8).expect("eight"),
+                    )
+                    .expect("a range"),
+                    sets: RepCount::new(3).expect("three"),
+                },
+            );
+            designing
+                .workout(Relative::Lower, &monday, now)
+                .await
+                .expect("authored");
 
             let before = designing.in_force(then).await.expect("read");
             let after = designing.in_force(now).await.expect("read");
-            assert_eq!(before.programme, Some((then, first)));
-            assert_eq!(after.programme, Some((now, second)));
+            assert_eq!(before.workouts.lower, Some((then, first.clone())));
+            assert_eq!(after.workouts.lower, Some((now, monday)));
+            assert_eq!(after.workouts.higher, Some((then, first)));
         });
     }
 

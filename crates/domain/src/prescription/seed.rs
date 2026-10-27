@@ -1,4 +1,4 @@
-//! What this build ships as the first version of the programme, of each primary
+//! What this build ships as the first version of each workout, of each primary
 //! progression (§ 14.1), and of the load scales (§ 14).
 //!
 //! **A seed, never a fallback** (decision 0015). `init` writes these into the
@@ -7,8 +7,8 @@
 //! force at a time is recoverable, and a default that changes later does not
 //! rewrite anything already authored.
 //!
-//! **It lives in `domain` because it is configuration of a gym exercise
-//! programme**, and that is the subject matter here. It sat in `cli` until
+//! **It lives in `domain` because it is configuration of gym training**, and
+//! that is the subject matter here. It sat in `cli` until
 //! 2026-08-30, justified by a comment claiming it was "preference, not domain
 //! fact" — that a back-off is a share of the top set is true of anyone, that
 //! the share is 85% is true of this operator. No decision ever said that, and
@@ -31,9 +31,9 @@ use crate::{
     gym::exercise::Implement,
     measure::{Duration, Kg, RepCount},
     prescription::{
-        AccessoryScheme, BackOff, ByIntensity, LinearProgression, LoadSteps, Percentage, Programme,
-        ResetProtocol, RestScheme, SbsChart, SbsDay, SbsProgression, SbsWeek, Scales, SectionRest,
-        SlotId, Step, Target, TopSetReps, WarmupStep,
+        AccessoryScheme, BackOff, ByIntensity, Levels, LinearProgression, LinearRest, LoadSteps,
+        Percentage, ResetProtocol, Rest, RestScheme, SbsProgression, SbsRest, Scales, Section,
+        SlotId, Step, Target, TopSetReps, WarmupStep, Workout,
     },
     sequence::NonEmpty,
 };
@@ -67,8 +67,8 @@ fn mass(what: &str, kilos: &str) -> Result<Kg, InvalidSeed> {
 }
 
 /// A rest of one duration.
-const fn exactly(seconds: u64) -> SectionRest {
-    SectionRest {
+const fn exactly(seconds: u64) -> Rest {
+    Rest {
         between_sets: Target::Exactly(Duration::from_seconds(seconds)),
         after_superset: None,
     }
@@ -79,15 +79,18 @@ const fn exactly(seconds: u64) -> SectionRest {
 /// **The domain holds a span rather than two bounds**, so an inverted range is
 /// not expressible past this point — which is why the seed states `120, 180`
 /// and gets `None` rather than a backwards rest if anyone swaps them.
-fn banded(what: &str, between: (u64, u64), after: (u64, u64)) -> Result<SectionRest, InvalidSeed> {
-    let span = |low: u64, high: u64| {
-        Target::between(Duration::from_seconds(low), Duration::from_seconds(high))
-            .ok_or_else(|| wrong(what, "a rest range runs low-high and must span"))
-    };
-    Ok(SectionRest {
+fn banded(what: &str, between: (u64, u64), after: (u64, u64)) -> Result<Rest, InvalidSeed> {
+    let span = |low: u64, high: u64| span(what, low, high);
+    Ok(Rest {
         between_sets: span(between.0, between.1)?,
         after_superset: Some(span(after.0, after.1)?),
     })
+}
+
+/// A rest range, in seconds.
+fn span(what: &str, low: u64, high: u64) -> Result<Target<Duration>, InvalidSeed> {
+    Target::between(Duration::from_seconds(low), Duration::from_seconds(high))
+        .ok_or_else(|| wrong(what, "a rest range runs low-high and must span"))
 }
 
 fn count(what: &str, reps: u32) -> Result<RepCount, InvalidSeed> {
@@ -167,27 +170,38 @@ pub fn scales() -> Result<Scales, InvalidSeed> {
     Ok(Scales::new(scales))
 }
 
-/// The first version of the programme.
+/// The first version of each workout. Both gym sessions of the microcycle start
+/// from it, and each is then edited on its own (operator, 2026-10-27).
 ///
 /// # Errors
 ///
 /// [`InvalidSeed`] if a value written here does not build.
-pub fn programme() -> Result<Programme, InvalidSeed> {
-    Ok(Programme {
-        // INFERRED. The two sections' ranges were eyeballed from pull-ups at six
-        // and curls around four to six, and are unconfirmed.
-        strength: scheme("strength scheme", (4, 6), 3)?,
-        hypertrophy: scheme("hypertrophy scheme", (4, 6), 3)?,
+pub fn workout() -> Result<Workout, InvalidSeed> {
+    // INFERRED. The two sections' ranges were eyeballed from pull-ups at six and
+    // curls around four to six, and are unconfirmed. Stated for each section, and
+    // for the workout as the same, so that a section changed later is a section
+    // changed rather than a default moved under it.
+    let strength = scheme("strength scheme", (4, 6), 3)?;
+    let hypertrophy = scheme("hypertrophy scheme", (4, 6), 3)?;
+    Ok(Workout {
+        reps: Levels {
+            workout: strength,
+            sections: BTreeMap::from([
+                (Section::Strength, strength),
+                (Section::Hypertrophy, hypertrophy),
+            ]),
+            supersets: BTreeMap::new(),
+            // The wrist pair runs eight to twelve. The operator, 2026-10-22,
+            // asked whether the whole hypertrophy section should: "Only the wrist
+            // pair".
+            exercises: BTreeMap::from([
+                (SlotId::WristFlexion, scheme("wrist pair", (8, 12), 3)?),
+                (SlotId::WristExtension, scheme("wrist pair", (8, 12), 3)?),
+            ]),
+        },
 
-        // The wrist pair runs eight to twelve. The operator, 2026-10-22, asked
-        // whether the whole hypertrophy section should: "Only the wrist pair".
-        slots: BTreeMap::from([
-            (SlotId::WristFlexion, scheme("wrist pair", (8, 12), 3)?),
-            (SlotId::WristExtension, scheme("wrist pair", (8, 12), 3)?),
-        ]),
-
-        // How long to rest between sets, section by section. All of it stated by the
-        // operator on 2026-08-23.
+        // How long to rest, section by section. All of it stated by the operator
+        // on 2026-08-23.
         //
         // **Zero between the members of a superset is not stated here**, because
         // it is what a superset is rather than a value to choose: a set another
@@ -195,25 +209,35 @@ pub fn programme() -> Result<Programme, InvalidSeed> {
         // what the group rests for once it ends.
         //
         // `after_superset` absent means the section rests the same however its
-        // work is grouped — which is not the same as resting for zero, and is
-        // why plyometric and power leave it out rather than set it to zero.
+        // work is grouped — which is not the same as resting for zero, and is why
+        // plyometric and power leave it out rather than set it to zero.
         //
         // The warm-up ramp is not here either. It instructs no rest at all —
         // changing the plates is the rest — except for the step into the working
-        // set, which takes the bottom of its section's range. That is a rule
-        // rather than a number, so it lives in `crate::prescription::rest` and
-        // nothing authors it.
+        // set, which takes the bottom of its range. That is a rule rather than a
+        // number, so it lives in `crate::prescription::rest` and nothing authors
+        // it.
         rest: RestScheme {
-            plyometric: exactly(30),
-            power: exactly(90),
-            strength: banded("strength rest", (120, 180), (90, 150))?,
-            // The same as strength, written out rather than pointing at it. The
-            // operator is not sure the two should agree, and two numbers to
-            // change is the shape that makes disagreeing a one-line edit
-            // instead of a restructuring.
-            hypertrophy: banded("hypertrophy rest", (120, 180), (90, 150))?,
-            // Mobility work runs straight through.
-            mobility: exactly(0),
+            workout: banded("strength rest", (120, 180), (90, 150))?,
+            sections: BTreeMap::from([
+                (Section::Plyometric, exactly(30)),
+                (Section::Power, exactly(90)),
+                (
+                    Section::Strength,
+                    banded("strength rest", (120, 180), (90, 150))?,
+                ),
+                // The same as strength, written out rather than pointing at it.
+                // The operator is not sure the two should agree, and two numbers
+                // to change is the shape that makes disagreeing a one-line edit.
+                (
+                    Section::Hypertrophy,
+                    banded("hypertrophy rest", (120, 180), (90, 150))?,
+                ),
+                // Mobility work runs straight through.
+                (Section::Mobility, exactly(0)),
+            ]),
+            supersets: BTreeMap::new(),
+            exercises: BTreeMap::new(),
         },
 
         // How long a static hold is held for. The mobility work does not
@@ -305,59 +329,35 @@ pub fn linear() -> Result<LinearProgression, InvalidSeed> {
             drop: percentage("second reset", "-5%")?,
             reclimb_per_week: mass("second reset", "2.5")?,
         },
+
+        // What the primary rested before the progression owned its rest
+        // (operator, 2026-10-27): the strength section's range, for every kind of
+        // set. Kept so that nothing prescribed changes until he states his own.
+        rest: LinearRest {
+            top_set: span("top set rest", 120, 180)?,
+            back_off: span("back-off rest", 120, 180)?,
+            attempt: span("attempt rest", 120, 180)?,
+        },
     })
 }
 
-/// The first version of SBS: Stronger By Science's two-day intermediate squat
-/// chart, as the operator runs it.
-///
-/// Verified against `Squat 2x Int` in the operator's copy of the workbook, and
-/// recorded in decision 0024.
+/// The first version of SBS: what its published chart leaves out, which is the
+/// warm-up ramp and the rest. The chart itself is SBS's —
+/// [`SbsChart::published`](crate::prescription::SbsChart::published).
 ///
 /// # Errors
 ///
 /// [`InvalidSeed`] if a value written here does not build.
 pub fn sbs() -> Result<SbsProgression, InvalidSeed> {
-    let percentage_day = |sets: u32, reps: u32, share: &str| -> Result<SbsDay, InvalidSeed> {
-        Ok(SbsDay::Percentage {
-            sets: count("SBS chart", sets)?,
-            reps: count("SBS chart", reps)?,
-            share: percentage("SBS chart", share)?,
-        })
-    };
-    let rep_max = |reps: u32, sets: u32, low: u32, high: u32| -> Result<SbsDay, InvalidSeed> {
-        Ok(SbsDay::RepMax {
-            reps: count("SBS chart", reps)?,
-            back_off_sets: count("SBS chart", sets)?,
-            back_off_reps: Target::between(count("SBS chart", low)?, count("SBS chart", high)?)
-                .ok_or_else(|| wrong("SBS chart", "a rep range runs low-high and must span"))?,
-        })
-    };
-    let chart = SbsChart::new([
-        SbsWeek {
-            first: percentage_day(5, 5, "80%")?,
-            second: rep_max(8, 3, 5, 6)?,
-        },
-        SbsWeek {
-            first: percentage_day(4, 3, "85%")?,
-            second: rep_max(5, 3, 3, 4)?,
-        },
-        SbsWeek {
-            first: percentage_day(3, 1, "90%")?,
-            second: rep_max(3, 3, 1, 2)?,
-        },
-        // The operator's transposition of the beginner sheet's taper.
-        SbsWeek {
-            first: percentage_day(3, 3, "75%")?,
-            second: SbsDay::Test {
-                reps: count("SBS chart", 1)?,
-            },
-        },
-    ])
-    .map_err(|error| wrong("SBS chart", error))?;
     Ok(SbsProgression {
         warmup: ramp("SBS warm-up ramp")?,
-        chart,
+        // As linear's: what the primary rested before the progression owned it.
+        rest: SbsRest {
+            across: span("SBS rest", 120, 180)?,
+            rep_max: span("SBS rest", 120, 180)?,
+            back_off: span("SBS rest", 120, 180)?,
+            attempt: span("SBS rest", 120, 180)?,
+        },
     })
 }
 
@@ -370,16 +370,16 @@ pub fn sbs() -> Result<SbsProgression, InvalidSeed> {
 /// the numbers are pinned where they are written.
 #[cfg(test)]
 mod pinned {
-    use super::{linear, programme, sbs, scales};
-    use crate::prescription::{SbsDay, SbsSession, SlotId};
+    use super::{linear, sbs, scales, workout};
+    use crate::prescription::{SbsChart, SbsDay, SbsSession, SlotId};
 
     #[test]
-    fn the_programme_is_the_operators() {
-        let seeded = programme().expect("the shipped programme builds");
+    fn the_workout_is_the_operators() {
+        let seeded = workout().expect("the shipped workout builds");
 
         assert_eq!(seeded.static_hold.as_seconds(), 60);
         let range = |slot| {
-            let scheme = seeded.scheme_for(slot);
+            let scheme = seeded.reps.for_slot(slot, None);
             (scheme.sets.as_u32(), scheme.reps.to_string())
         };
         assert_eq!(range(SlotId::WristFlexion), (3, "8-12".to_owned()));
@@ -430,16 +430,16 @@ mod pinned {
     #[test]
     fn sbs_is_the_published_chart_and_the_operators_ramp() {
         let seeded = sbs().expect("the shipped SBS builds");
+        let chart = SbsChart::published().expect("the published chart builds");
 
         assert_eq!(seeded.warmup, linear().expect("linear builds").warmup);
-        let Ok(SbsDay::Percentage { sets, reps, share }) = seeded.chart.day(4, SbsSession::First)
-        else {
+        let Ok(SbsDay::Percentage { sets, reps, share }) = chart.day(4, SbsSession::First) else {
             panic!("week 4 opens on a percentage day");
         };
         assert_eq!((sets.as_u32(), reps.as_u32()), (3, 3));
         assert_eq!(share.to_string(), "75%");
         assert!(matches!(
-            seeded.chart.day(4, SbsSession::Second),
+            chart.day(4, SbsSession::Second),
             Ok(SbsDay::Test { .. })
         ));
     }

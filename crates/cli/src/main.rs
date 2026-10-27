@@ -176,7 +176,7 @@ fn command() -> ClapCommand {
         .subcommand(deliver_command())
         .subcommand(compare_command())
         .subcommand(mesocycle_command())
-        .subcommand(programme_command())
+        .subcommand(workouts_command())
         .subcommand(schedule_command())
         .subcommand(canonicalise_command())
         .subcommand(
@@ -646,13 +646,13 @@ fn mesocycle_command() -> ClapCommand {
 /// no way to change one from here yet; a `change` that only some of them
 /// accepted would be worse than an honest gap. What this closes is decision
 /// 0015's own guard — a shipped default is never invisible.
-fn programme_command() -> ClapCommand {
-    ClapCommand::new("programme")
-        .about("Report the numbers every prescription is generated against")
+fn workouts_command() -> ClapCommand {
+    ClapCommand::new("workouts")
+        .about("Report the workouts and progressions every prescription is generated against")
         .subcommand_required(true)
         .subcommand(ClapCommand::new("show").about(
-            "Print the latest version of the programme and of each progression, \
-                 and the load scales",
+            "Print the latest version of each workout and of each progression, \
+                 SBS's chart, and the load scales",
         ))
 }
 
@@ -1045,9 +1045,9 @@ async fn authored_command(
             };
             Some(plan_command_run(sub, database, &zone, credentials).await)
         }
-        "programme" => Some(match sub.subcommand() {
-            Some(("show", _)) => prescribing::programme(database).await,
-            _ => Err(Failure::message("no programme command given", exit::USAGE)),
+        "workouts" => Some(match sub.subcommand() {
+            Some(("show", _)) => prescribing::workouts(database).await,
+            _ => Err(Failure::message("no workouts command given", exit::USAGE)),
         }),
         name if catalogue::discipline(name).is_some() => {
             Some(discipline_command_run(name, sub, credentials, stated_timezone, database).await)

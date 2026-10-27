@@ -43,7 +43,7 @@ pub const PAGES: [(&str, &str); 10] = [
     ("/resting-heart-rate", "Resting heart rate"),
     ("/hrv", "Overnight HRV"),
     ("/estimated-1rm", "Estimated 1RM"),
-    ("/programme", "Programme"),
+    ("/workouts", "Workouts"),
     ("/fills", "Fills"),
     ("/equipment", "Equipment"),
 ];

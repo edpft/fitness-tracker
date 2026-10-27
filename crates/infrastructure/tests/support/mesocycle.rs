@@ -85,7 +85,10 @@ pub fn parameters() -> Result<Parameters, MesocycleFixtureError> {
     use domain::prescription::seed;
     Ok(Parameters {
         planned_with: PlannedWith {
-            programme: seed::programme().map_err(invalid)?,
+            workouts: domain::prescription::ByIntensity {
+                higher: seed::workout().map_err(invalid)?,
+                lower: seed::workout().map_err(invalid)?,
+            },
             linear: seed::linear().map_err(invalid)?,
             sbs: seed::sbs().map_err(invalid)?,
         },
@@ -135,16 +138,20 @@ pub fn parameters() -> Result<Parameters, MesocycleFixtureError> {
 ///
 /// [`MesocycleFixtureError`] if a fixture value is invalid or the store refuses.
 pub async fn design(pool: &sqlx::SqlitePool) -> Result<(), MesocycleFixtureError> {
-    use application::{EquipmentStore as _, ProgrammeStore as _, ProgressionStore as _};
+    use application::{EquipmentStore as _, ProgressionStore as _, WorkoutStore as _};
+    use domain::schedule::Relative;
     use infrastructure::store::{SqliteEquipmentStore, SqliteGenerationParameterStore};
 
     let fixture = parameters()?;
     let versions = SqliteGenerationParameterStore::new(pool.clone());
     let at = jiff::Timestamp::UNIX_EPOCH;
     // Once: a test that builds on another's store designs it again.
-    if versions.programme_at(at).await?.is_none() {
+    if versions.workout_at(Relative::Higher, at).await?.is_none() {
         versions
-            .author_programme(at, &fixture.planned_with.programme)
+            .author_workout(Relative::Higher, at, &fixture.planned_with.workouts.higher)
+            .await?;
+        versions
+            .author_workout(Relative::Lower, at, &fixture.planned_with.workouts.lower)
             .await?;
         versions
             .author_linear(at, &fixture.planned_with.linear)

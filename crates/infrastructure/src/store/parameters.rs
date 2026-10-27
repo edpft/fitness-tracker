@@ -1,7 +1,7 @@
-//! The § 14 generation parameters, the programme and each primary progression
+//! The § 14 generation parameters, each workout and each primary progression
 //! (#192).
 //!
-//! **Superseded by date, never overwritten** (§ 12). The programme and each
+//! **Superseded by date, never overwritten** (§ 12). Each workout and each
 //! progression are dated versions, and a plan takes the latest of each authored
 //! on or before it was made — a lookup rather than a reference stored on the
 //! plan, and rather than a mutable flag. The load scales and bands are
@@ -9,14 +9,15 @@
 
 use std::collections::BTreeMap;
 
-use application::{GenerationParameterStore, ProgrammeStore, ProgressionStore, StoreError};
+use application::{GenerationParameterStore, ProgressionStore, StoreError, WorkoutStore};
 use domain::{
     measure::{Duration, Kg, RepCount},
     prescription::{
-        AccessoryScheme, BackOff, ByIntensity, LinearProgression, Percentage, Programme,
-        ResetProtocol, RestScheme, SbsChart, SbsDay, SbsProgression, SbsSession, SbsWeek, Scales,
-        SectionRest, SlotId, Target, TopSetReps, WarmupStep,
+        AccessoryScheme, BackOff, ByIntensity, Levels, LinearProgression, LinearRest, Percentage,
+        ResetProtocol, Rest, RestScheme, SbsProgression, SbsRest, Scales, Section, SlotId,
+        Superset, Target, TopSetReps, WarmupStep, Workout,
     },
+    schedule::Relative,
     sequence::NonEmpty,
 };
 use jiff::Timestamp;
@@ -53,7 +54,7 @@ fn grams_from_storage(grams: i64) -> Result<Kg, StoreError> {
 /// The inverse of [`section_rest`]. An exact rest writes no `high`, and a block
 /// that states no superset rest writes no superset pair at all — null there
 /// means "the same however it is grouped", which is a different fact from zero.
-fn rest_columns(rest: SectionRest) -> Result<RestColumns, StoreError> {
+fn rest_columns(rest: Rest) -> Result<RestColumns, StoreError> {
     let (low, high) = rest_bounds(rest.between_sets)?;
     let (superset_low, superset_high) = match rest.after_superset {
         Some(grouped) => {
@@ -105,8 +106,8 @@ fn section_rest(
     high: Option<i64>,
     superset_low: Option<i64>,
     superset_high: Option<i64>,
-) -> Result<SectionRest, StoreError> {
-    Ok(SectionRest {
+) -> Result<Rest, StoreError> {
+    Ok(Rest {
         between_sets: rest_target(low, high)?,
         after_superset: match superset_low {
             Some(low) => Some(rest_target(low, superset_high)?),
@@ -197,35 +198,7 @@ fn ramp(steps: Vec<(i64, i64)>) -> Result<NonEmpty<WarmupStep>, StoreError> {
     NonEmpty::new(ramp).map_err(|_| corrupt(&"a stored warm-up ramp with no step"))
 }
 
-/// The slots a programme version gives a scheme of their own.
-async fn slot_schemes(
-    pool: &SqlitePool,
-    stamp: &str,
-) -> Result<BTreeMap<SlotId, AccessoryScheme>, StoreError> {
-    let slot_rows = sqlx::query!(
-        r#"
-        SELECT slot AS "slot!: String", reps_low AS "reps_low!: i64",
-               reps_high AS "reps_high: i64", sets AS "sets!: i64"
-        FROM programme_slot_scheme
-        WHERE authored_at = ?
-        "#,
-        stamp
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|error| store_error(&error))?;
-    let mut slots = BTreeMap::new();
-    for slot in slot_rows {
-        slots.insert(
-            SlotId::try_from(slot.slot).map_err(|error| corrupt(&error))?,
-            scheme(slot.reps_low, slot.reps_high, slot.sets)?,
-        );
-    }
-
-    Ok(slots)
-}
-
-/// The load scales and band ranges (§ 14), the programme (#192), and each
+/// The load scales and band ranges (§ 14), each workout (#192), and each
 /// primary progression (#192), as one store.
 #[derive(Debug, Clone)]
 pub struct SqliteGenerationParameterStore {
@@ -257,105 +230,321 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
     }
 }
 
-impl ProgrammeStore for SqliteGenerationParameterStore {
-    async fn programme_at(
+/// Which level a stored row of a workout is stated at, and for what.
+enum Named {
+    Section(Section),
+    Superset(Superset),
+    Exercise(SlotId),
+}
+
+fn named(level: &str, name: String) -> Result<Named, StoreError> {
+    match level {
+        "section" => Section::try_from(name)
+            .map(Named::Section)
+            .map_err(|error| corrupt(&error)),
+        "superset" => Superset::try_from(name)
+            .map(Named::Superset)
+            .map_err(|error| corrupt(&error)),
+        "exercise" => SlotId::try_from(name)
+            .map(Named::Exercise)
+            .map_err(|error| corrupt(&error)),
+        other => Err(corrupt(&format!("{other:?} is not a level of a workout"))),
+    }
+}
+
+/// A workout's reps stated narrower than the workout, over its default.
+async fn read_reps(
+    pool: &SqlitePool,
+    of: &str,
+    stamp: &str,
+    default: AccessoryScheme,
+) -> Result<Levels<AccessoryScheme>, StoreError> {
+    let mut reps = Levels::only(default);
+    let rep_rows = sqlx::query!(
+        r#"
+        SELECT level AS "level!: String", name AS "name!: String",
+               reps_low AS "reps_low!: i64", reps_high AS "reps_high: i64",
+               sets AS "sets!: i64"
+        FROM workout_reps
+        WHERE intensity = ? AND authored_at = ?
+        "#,
+        of,
+        stamp
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+    for found in rep_rows {
+        let stated = scheme(found.reps_low, found.reps_high, found.sets)?;
+        match named(&found.level, found.name)? {
+            Named::Section(section) => reps.sections.insert(section, stated),
+            Named::Superset(superset) => reps.supersets.insert(superset, stated),
+            Named::Exercise(slot) => reps.exercises.insert(slot, stated),
+        };
+    }
+    Ok(reps)
+}
+
+/// A workout's rest stated narrower than the workout, over its default.
+async fn read_rest(
+    pool: &SqlitePool,
+    of: &str,
+    stamp: &str,
+    workout: Rest,
+) -> Result<RestScheme, StoreError> {
+    let mut rest = RestScheme {
+        workout,
+        sections: BTreeMap::new(),
+        supersets: BTreeMap::new(),
+        exercises: BTreeMap::new(),
+    };
+    let rest_rows = sqlx::query!(
+        r#"
+        SELECT level AS "level!: String", name AS "name!: String",
+               rest_low AS "rest_low!: i64", rest_high AS "rest_high: i64",
+               rest_ss_low AS "rest_ss_low: i64", rest_ss_high AS "rest_ss_high: i64"
+        FROM workout_rest
+        WHERE intensity = ? AND authored_at = ?
+        "#,
+        of,
+        stamp
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+    for found in rest_rows {
+        match named(&found.level, found.name)? {
+            Named::Section(section) => {
+                rest.sections.insert(
+                    section,
+                    section_rest(
+                        found.rest_low,
+                        found.rest_high,
+                        found.rest_ss_low,
+                        found.rest_ss_high,
+                    )?,
+                );
+            }
+            Named::Superset(superset) => {
+                rest.supersets
+                    .insert(superset, rest_target(found.rest_low, found.rest_high)?);
+            }
+            Named::Exercise(slot) => {
+                rest.exercises
+                    .insert(slot, rest_target(found.rest_low, found.rest_high)?);
+            }
+        }
+    }
+    Ok(rest)
+}
+
+async fn write_reps(
+    conn: &mut sqlx::SqliteConnection,
+    of: &str,
+    stamp: &str,
+    reps: &Levels<AccessoryScheme>,
+) -> Result<(), StoreError> {
+    let stated = reps
+        .sections
+        .iter()
+        .map(|(section, scheme)| ("section", section.to_string(), scheme))
+        .chain(
+            reps.supersets
+                .iter()
+                .map(|(superset, scheme)| ("superset", superset.to_string(), scheme)),
+        )
+        .chain(
+            reps.exercises
+                .iter()
+                .map(|(slot, scheme)| ("exercise", slot.to_string(), scheme)),
+        );
+    for (level, name, scheme) in stated {
+        let (low, high) = reps_bounds(scheme.reps);
+        let sets = count_for_storage(scheme.sets);
+        sqlx::query!(
+            r"
+            INSERT INTO workout_reps (
+                intensity, authored_at, level, name, reps_low, reps_high, sets
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ",
+            of,
+            stamp,
+            level,
+            name,
+            low,
+            high,
+            sets
+        )
+        .execute(&mut *conn)
+        .await
+        .map_err(|error| store_error(&error))?;
+    }
+    Ok(())
+}
+
+/// One rest for a superset or an exercise, which states no after-superset rest.
+fn single_rest(rest: Target<Duration>) -> Result<RestColumns, StoreError> {
+    let (low, high) = rest_bounds(rest)?;
+    Ok(RestColumns {
+        low,
+        high,
+        superset_low: None,
+        superset_high: None,
+    })
+}
+
+async fn write_rest(
+    conn: &mut sqlx::SqliteConnection,
+    of: &str,
+    stamp: &str,
+    rest: &RestScheme,
+) -> Result<(), StoreError> {
+    let mut stated = Vec::new();
+    for (section, rest) in &rest.sections {
+        stated.push(("section", section.to_string(), rest_columns(*rest)?));
+    }
+    for (superset, rest) in &rest.supersets {
+        stated.push(("superset", superset.to_string(), single_rest(*rest)?));
+    }
+    for (slot, rest) in &rest.exercises {
+        stated.push(("exercise", slot.to_string(), single_rest(*rest)?));
+    }
+    for (level, name, rest) in stated {
+        sqlx::query!(
+            r"
+            INSERT INTO workout_rest (
+                intensity, authored_at, level, name,
+                rest_low, rest_high, rest_ss_low, rest_ss_high
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ",
+            of,
+            stamp,
+            level,
+            name,
+            rest.low,
+            rest.high,
+            rest.superset_low,
+            rest.superset_high
+        )
+        .execute(&mut *conn)
+        .await
+        .map_err(|error| store_error(&error))?;
+    }
+    Ok(())
+}
+
+async fn read_linear_rest(pool: &SqlitePool, stamp: &str) -> Result<LinearRest, StoreError> {
+    let rest = sqlx::query!(
+        r#"
+        SELECT top_set_low AS "top_set_low!: i64", top_set_high AS "top_set_high: i64",
+               back_off_low AS "back_off_low!: i64", back_off_high AS "back_off_high: i64",
+               attempt_low AS "attempt_low!: i64", attempt_high AS "attempt_high: i64"
+        FROM linear_rest
+        WHERE authored_at = ?
+        "#,
+        stamp
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+    Ok(LinearRest {
+        top_set: rest_target(rest.top_set_low, rest.top_set_high)?,
+        back_off: rest_target(rest.back_off_low, rest.back_off_high)?,
+        attempt: rest_target(rest.attempt_low, rest.attempt_high)?,
+    })
+}
+
+async fn write_linear_rest(
+    conn: &mut sqlx::SqliteConnection,
+    stamp: &str,
+    rest: &LinearRest,
+) -> Result<(), StoreError> {
+    let (top_set_low, top_set_high) = rest_bounds(rest.top_set)?;
+    let (back_off_low, back_off_high) = rest_bounds(rest.back_off)?;
+    let (attempt_low, attempt_high) = rest_bounds(rest.attempt)?;
+    sqlx::query!(
+        r"
+        INSERT INTO linear_rest (
+            authored_at, top_set_low, top_set_high, back_off_low, back_off_high,
+            attempt_low, attempt_high
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ",
+        stamp,
+        top_set_low,
+        top_set_high,
+        back_off_low,
+        back_off_high,
+        attempt_low,
+        attempt_high
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(|error| store_error(&error))?;
+    Ok(())
+}
+
+impl WorkoutStore for SqliteGenerationParameterStore {
+    async fn workout_at(
         &self,
+        intensity: Relative,
         at: Timestamp,
-    ) -> Result<Option<(Timestamp, Programme)>, StoreError> {
-        let stamps =
-            sqlx::query_scalar!(r#"SELECT authored_at AS "authored_at!: String" FROM programme"#)
-                .fetch_all(&self.pool)
-                .await
-                .map_err(|error| store_error(&error))?;
+    ) -> Result<Option<(Timestamp, Workout)>, StoreError> {
+        let of = intensity.as_str();
+        let stamps = sqlx::query_scalar!(
+            r#"SELECT authored_at AS "authored_at!: String" FROM workout WHERE intensity = ?"#,
+            of
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
         let Some(stamp) = latest_at(stamps, at)? else {
             return Ok(None);
         };
         let row = sqlx::query!(
             r#"
-            SELECT strength_reps_low AS "strength_reps_low!: i64",
-                   strength_reps_high AS "strength_reps_high: i64",
-                   strength_sets AS "strength_sets!: i64",
-                   hypertrophy_reps_low AS "hypertrophy_reps_low!: i64",
-                   hypertrophy_reps_high AS "hypertrophy_reps_high: i64",
-                   hypertrophy_sets AS "hypertrophy_sets!: i64",
-                   static_hold_seconds AS "static_hold_seconds!: i64",
-                   rest_plyometric_low AS "rest_plyometric_low!: i64",
-                   rest_plyometric_high AS "rest_plyometric_high: i64",
-                   rest_plyometric_ss_low AS "rest_plyometric_ss_low: i64",
-                   rest_plyometric_ss_high AS "rest_plyometric_ss_high: i64",
-                   rest_power_low AS "rest_power_low!: i64",
-                   rest_power_high AS "rest_power_high: i64",
-                   rest_power_ss_low AS "rest_power_ss_low: i64",
-                   rest_power_ss_high AS "rest_power_ss_high: i64",
-                   rest_strength_low AS "rest_strength_low!: i64",
-                   rest_strength_high AS "rest_strength_high: i64",
-                   rest_strength_ss_low AS "rest_strength_ss_low: i64",
-                   rest_strength_ss_high AS "rest_strength_ss_high: i64",
-                   rest_hypertrophy_low AS "rest_hypertrophy_low!: i64",
-                   rest_hypertrophy_high AS "rest_hypertrophy_high: i64",
-                   rest_hypertrophy_ss_low AS "rest_hypertrophy_ss_low: i64",
-                   rest_hypertrophy_ss_high AS "rest_hypertrophy_ss_high: i64",
-                   rest_mobility_low AS "rest_mobility_low!: i64",
-                   rest_mobility_high AS "rest_mobility_high: i64",
-                   rest_mobility_ss_low AS "rest_mobility_ss_low: i64",
-                   rest_mobility_ss_high AS "rest_mobility_ss_high: i64"
-            FROM programme
-            WHERE authored_at = ?
+            SELECT reps_low AS "reps_low!: i64", reps_high AS "reps_high: i64",
+                   sets AS "sets!: i64",
+                   rest_low AS "rest_low!: i64", rest_high AS "rest_high: i64",
+                   rest_ss_low AS "rest_ss_low: i64", rest_ss_high AS "rest_ss_high: i64",
+                   static_hold_seconds AS "static_hold_seconds!: i64"
+            FROM workout
+            WHERE intensity = ? AND authored_at = ?
             "#,
+            of,
             stamp
         )
         .fetch_one(&self.pool)
         .await
         .map_err(|error| store_error(&error))?;
 
-        let slots = slot_schemes(&self.pool, &stamp).await?;
+        let reps = read_reps(
+            &self.pool,
+            of,
+            &stamp,
+            scheme(row.reps_low, row.reps_high, row.sets)?,
+        )
+        .await?;
+        let rest = read_rest(
+            &self.pool,
+            of,
+            &stamp,
+            section_rest(
+                row.rest_low,
+                row.rest_high,
+                row.rest_ss_low,
+                row.rest_ss_high,
+            )?,
+        )
+        .await?;
 
         Ok(Some((
             stamp_from_storage(&stamp)?,
-            Programme {
-                strength: scheme(
-                    row.strength_reps_low,
-                    row.strength_reps_high,
-                    row.strength_sets,
-                )?,
-                hypertrophy: scheme(
-                    row.hypertrophy_reps_low,
-                    row.hypertrophy_reps_high,
-                    row.hypertrophy_sets,
-                )?,
-                slots,
-                rest: RestScheme {
-                    plyometric: section_rest(
-                        row.rest_plyometric_low,
-                        row.rest_plyometric_high,
-                        row.rest_plyometric_ss_low,
-                        row.rest_plyometric_ss_high,
-                    )?,
-                    power: section_rest(
-                        row.rest_power_low,
-                        row.rest_power_high,
-                        row.rest_power_ss_low,
-                        row.rest_power_ss_high,
-                    )?,
-                    strength: section_rest(
-                        row.rest_strength_low,
-                        row.rest_strength_high,
-                        row.rest_strength_ss_low,
-                        row.rest_strength_ss_high,
-                    )?,
-                    hypertrophy: section_rest(
-                        row.rest_hypertrophy_low,
-                        row.rest_hypertrophy_high,
-                        row.rest_hypertrophy_ss_low,
-                        row.rest_hypertrophy_ss_high,
-                    )?,
-                    mobility: section_rest(
-                        row.rest_mobility_low,
-                        row.rest_mobility_high,
-                        row.rest_mobility_ss_low,
-                        row.rest_mobility_ss_high,
-                    )?,
-                },
+            Workout {
+                reps,
+                rest,
                 static_hold: Duration::from_seconds(
                     u64::try_from(row.static_hold_seconds)
                         .map_err(|_| corrupt(&"a negative static hold"))?,
@@ -364,10 +553,11 @@ impl ProgrammeStore for SqliteGenerationParameterStore {
         )))
     }
 
-    async fn author_programme(
+    async fn author_workout(
         &self,
+        intensity: Relative,
         at: Timestamp,
-        programme: &Programme,
+        workout: &Workout,
     ) -> Result<(), StoreError> {
         let mut tx = self
             .pool
@@ -375,87 +565,38 @@ impl ProgrammeStore for SqliteGenerationParameterStore {
             .await
             .map_err(|error| store_error(&error))?;
 
+        let of = intensity.as_str();
         let stamp = at.to_string();
-        let (strength_low, strength_high) = reps_bounds(programme.strength.reps);
-        let strength_sets = count_for_storage(programme.strength.sets);
-        let (hypertrophy_low, hypertrophy_high) = reps_bounds(programme.hypertrophy.reps);
-        let hypertrophy_sets = count_for_storage(programme.hypertrophy.sets);
-        let static_hold = i64::try_from(programme.static_hold.as_seconds())
+        let (reps_low, reps_high) = reps_bounds(workout.reps.workout.reps);
+        let sets = count_for_storage(workout.reps.workout.sets);
+        let rest = rest_columns(workout.rest.workout)?;
+        let static_hold = i64::try_from(workout.static_hold.as_seconds())
             .map_err(|_| corrupt(&"a static hold longer than the store can hold"))?;
-        let rest_plyometric = rest_columns(programme.rest.plyometric)?;
-        let rest_power = rest_columns(programme.rest.power)?;
-        let rest_strength = rest_columns(programme.rest.strength)?;
-        let rest_hypertrophy = rest_columns(programme.rest.hypertrophy)?;
-        let rest_mobility = rest_columns(programme.rest.mobility)?;
-
         sqlx::query!(
             r"
-            INSERT INTO programme (
-                authored_at,
-                strength_reps_low, strength_reps_high, strength_sets,
-                hypertrophy_reps_low, hypertrophy_reps_high, hypertrophy_sets,
-                static_hold_seconds,
-                rest_plyometric_low, rest_plyometric_high, rest_plyometric_ss_low, rest_plyometric_ss_high,
-                rest_power_low, rest_power_high, rest_power_ss_low, rest_power_ss_high,
-                rest_strength_low, rest_strength_high, rest_strength_ss_low, rest_strength_ss_high,
-                rest_hypertrophy_low, rest_hypertrophy_high, rest_hypertrophy_ss_low, rest_hypertrophy_ss_high,
-                rest_mobility_low, rest_mobility_high, rest_mobility_ss_low, rest_mobility_ss_high
+            INSERT INTO workout (
+                intensity, authored_at, reps_low, reps_high, sets,
+                rest_low, rest_high, rest_ss_low, rest_ss_high, static_hold_seconds
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ",
+            of,
             stamp,
-            strength_low,
-            strength_high,
-            strength_sets,
-            hypertrophy_low,
-            hypertrophy_high,
-            hypertrophy_sets,
-            static_hold,
-            rest_plyometric.low,
-            rest_plyometric.high,
-            rest_plyometric.superset_low,
-            rest_plyometric.superset_high,
-            rest_power.low,
-            rest_power.high,
-            rest_power.superset_low,
-            rest_power.superset_high,
-            rest_strength.low,
-            rest_strength.high,
-            rest_strength.superset_low,
-            rest_strength.superset_high,
-            rest_hypertrophy.low,
-            rest_hypertrophy.high,
-            rest_hypertrophy.superset_low,
-            rest_hypertrophy.superset_high,
-            rest_mobility.low,
-            rest_mobility.high,
-            rest_mobility.superset_low,
-            rest_mobility.superset_high
+            reps_low,
+            reps_high,
+            sets,
+            rest.low,
+            rest.high,
+            rest.superset_low,
+            rest.superset_high,
+            static_hold
         )
         .execute(&mut *tx)
         .await
         .map_err(|error| store_error(&error))?;
 
-        for (slot, scheme) in &programme.slots {
-            let slot = slot.as_str();
-            let (low, high) = reps_bounds(scheme.reps);
-            let sets = count_for_storage(scheme.sets);
-            sqlx::query!(
-                r"
-                INSERT INTO programme_slot_scheme (authored_at, slot, reps_low, reps_high, sets)
-                VALUES (?, ?, ?, ?, ?)
-                ",
-                stamp,
-                slot,
-                low,
-                high,
-                sets
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-        }
+        write_reps(&mut tx, of, &stamp, &workout.reps).await?;
+        write_rest(&mut tx, of, &stamp, &workout.rest).await?;
 
         tx.commit().await.map_err(|error| store_error(&error))
     }
@@ -512,6 +653,7 @@ impl ProgressionStore for SqliteGenerationParameterStore {
         .fetch_all(&self.pool)
         .await
         .map_err(|error| store_error(&error))?;
+        let rest = read_linear_rest(&self.pool, &stamp).await?;
 
         Ok(Some((
             stamp_from_storage(&stamp)?,
@@ -549,6 +691,7 @@ impl ProgressionStore for SqliteGenerationParameterStore {
                     drop: bp_from_storage(row.second_reset_drop_bp)?,
                     reclimb_per_week: grams_from_storage(row.second_reset_reclimb_grams)?,
                 },
+                rest,
             },
         )))
     }
@@ -638,6 +781,8 @@ impl ProgressionStore for SqliteGenerationParameterStore {
             .map_err(|error| store_error(&error))?;
         }
 
+        write_linear_rest(&mut tx, &stamp, &linear.rest).await?;
+
         tx.commit().await.map_err(|error| store_error(&error))
     }
 
@@ -666,71 +811,20 @@ impl ProgressionStore for SqliteGenerationParameterStore {
         .fetch_all(&self.pool)
         .await
         .map_err(|error| store_error(&error))?;
-        let days = sqlx::query!(
+        let rest = sqlx::query!(
             r#"
-            SELECT week AS "week!: i64", session AS "session!: String", kind AS "kind!: String",
-                   reps AS "reps!: i64", sets AS "sets: i64", share_bp AS "share_bp: i64",
-                   back_off_sets AS "back_off_sets: i64",
-                   back_off_reps_low AS "back_off_reps_low: i64",
-                   back_off_reps_high AS "back_off_reps_high: i64"
-            FROM sbs_chart_day
+            SELECT across_low AS "across_low!: i64", across_high AS "across_high: i64",
+                   rep_max_low AS "rep_max_low!: i64", rep_max_high AS "rep_max_high: i64",
+                   back_off_low AS "back_off_low!: i64", back_off_high AS "back_off_high: i64",
+                   attempt_low AS "attempt_low!: i64", attempt_high AS "attempt_high: i64"
+            FROM sbs_rest
             WHERE authored_at = ?
             "#,
             stamp
         )
-        .fetch_all(&self.pool)
+        .fetch_one(&self.pool)
         .await
         .map_err(|error| store_error(&error))?;
-
-        let mut found: BTreeMap<(i64, SbsSession), SbsDay> = BTreeMap::new();
-        for day in days {
-            let session = match day.session.as_str() {
-                "first" => SbsSession::First,
-                "second" => SbsSession::Second,
-                other => return Err(corrupt(&format!("{other:?} is not a session of the chart"))),
-            };
-            let reps = count_from_storage(day.reps)?;
-            let read = match (
-                day.kind.as_str(),
-                day.sets,
-                day.share_bp,
-                day.back_off_sets,
-                day.back_off_reps_low,
-            ) {
-                ("percentage", Some(sets), Some(share), None, None) => SbsDay::Percentage {
-                    sets: count_from_storage(sets)?,
-                    reps,
-                    share: bp_from_storage(share)?,
-                },
-                ("rep_max", None, None, Some(sets), Some(low)) => SbsDay::RepMax {
-                    reps,
-                    back_off_sets: count_from_storage(sets)?,
-                    back_off_reps: reps_target(low, day.back_off_reps_high)?,
-                },
-                ("test", None, None, None, None) => SbsDay::Test { reps },
-                _ => {
-                    return Err(corrupt(
-                        &"a stored chart day whose columns do not fit its kind",
-                    ));
-                }
-            };
-            found.insert((day.week, session), read);
-        }
-        let mut week = |at: i64| -> Result<SbsWeek, StoreError> {
-            let mut day = |session| {
-                found.remove(&(at, session)).ok_or_else(|| {
-                    corrupt(&format!(
-                        "the stored chart has no week {at} {session} session"
-                    ))
-                })
-            };
-            Ok(SbsWeek {
-                first: day(SbsSession::First)?,
-                second: day(SbsSession::Second)?,
-            })
-        };
-        let chart = SbsChart::new([week(1)?, week(2)?, week(3)?, week(4)?])
-            .map_err(|error| corrupt(&error))?;
 
         Ok(Some((
             stamp_from_storage(&stamp)?,
@@ -741,7 +835,12 @@ impl ProgressionStore for SqliteGenerationParameterStore {
                         .map(|step| (step.of_top_set_bp, step.reps))
                         .collect(),
                 )?,
-                chart,
+                rest: SbsRest {
+                    across: rest_target(rest.across_low, rest.across_high)?,
+                    rep_max: rest_target(rest.rep_max_low, rest.rep_max_high)?,
+                    back_off: rest_target(rest.back_off_low, rest.back_off_high)?,
+                    attempt: rest_target(rest.attempt_low, rest.attempt_high)?,
+                },
             },
         )))
     }
@@ -780,68 +879,31 @@ impl ProgressionStore for SqliteGenerationParameterStore {
             .map_err(|error| store_error(&error))?;
         }
 
-        for (week, session, day) in sbs.chart.days() {
-            let week = i64::from(week);
-            let session = session.as_str();
-            let (kind, reps, sets, share, back_off_sets, back_off_low, back_off_high) = match day {
-                SbsDay::Percentage { sets, reps, share } => (
-                    "percentage",
-                    count_for_storage(reps),
-                    Some(count_for_storage(sets)),
-                    Some(bp_for_storage(share)),
-                    None,
-                    None,
-                    None,
-                ),
-                SbsDay::RepMax {
-                    reps,
-                    back_off_sets,
-                    back_off_reps,
-                } => {
-                    let (low, high) = reps_bounds(back_off_reps);
-                    (
-                        "rep_max",
-                        count_for_storage(reps),
-                        None,
-                        None,
-                        Some(count_for_storage(back_off_sets)),
-                        Some(low),
-                        high,
-                    )
-                }
-                SbsDay::Test { reps } => (
-                    "test",
-                    count_for_storage(reps),
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
-            };
-            sqlx::query!(
-                r"
-                INSERT INTO sbs_chart_day (
-                    authored_at, week, session, kind, reps, sets, share_bp,
-                    back_off_sets, back_off_reps_low, back_off_reps_high
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ",
-                stamp,
-                week,
-                session,
-                kind,
-                reps,
-                sets,
-                share,
-                back_off_sets,
-                back_off_low,
-                back_off_high
+        let (across_low, across_high) = rest_bounds(sbs.rest.across)?;
+        let (rep_max_low, rep_max_high) = rest_bounds(sbs.rest.rep_max)?;
+        let (back_off_low, back_off_high) = rest_bounds(sbs.rest.back_off)?;
+        let (attempt_low, attempt_high) = rest_bounds(sbs.rest.attempt)?;
+        sqlx::query!(
+            r"
+            INSERT INTO sbs_rest (
+                authored_at, across_low, across_high, rep_max_low, rep_max_high,
+                back_off_low, back_off_high, attempt_low, attempt_high
             )
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-        }
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ",
+            stamp,
+            across_low,
+            across_high,
+            rep_max_low,
+            rep_max_high,
+            back_off_low,
+            back_off_high,
+            attempt_low,
+            attempt_high
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| store_error(&error))?;
 
         tx.commit().await.map_err(|error| store_error(&error))
     }

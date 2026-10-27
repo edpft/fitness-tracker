@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT top_set_low AS \"top_set_low!: i64\", top_set_high AS \"top_set_high: i64\",\n               back_off_low AS \"back_off_low!: i64\", back_off_high AS \"back_off_high: i64\",\n               attempt_low AS \"attempt_low!: i64\", attempt_high AS \"attempt_high: i64\"\n        FROM linear_rest\n        WHERE authored_at = ?\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "top_set_low!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_rest",
+            "name": "top_set_low"
+          }
+        }
+      },
+      {
+        "name": "top_set_high: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_rest",
+            "name": "top_set_high"
+          }
+        }
+      },
+      {
+        "name": "back_off_low!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_rest",
+            "name": "back_off_low"
+          }
+        }
+      },
+      {
+        "name": "back_off_high: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_rest",
+            "name": "back_off_high"
+          }
+        }
+      },
+      {
+        "name": "attempt_low!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_rest",
+            "name": "attempt_low"
+          }
+        }
+      },
+      {
+        "name": "attempt_high: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "linear_rest",
+            "name": "attempt_high"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "2be7936f8f19c341b727aea43358345ef846624f1d92e6afedbcd28d65ea76fa"
+}

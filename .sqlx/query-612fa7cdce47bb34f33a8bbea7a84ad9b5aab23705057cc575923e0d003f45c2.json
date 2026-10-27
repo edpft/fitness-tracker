@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO linear_rest (\n            authored_at, top_set_low, top_set_high, back_off_low, back_off_high,\n            attempt_low, attempt_high\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "612fa7cdce47bb34f33a8bbea7a84ad9b5aab23705057cc575923e0d003f45c2"
+}

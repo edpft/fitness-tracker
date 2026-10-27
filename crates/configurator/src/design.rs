@@ -1,17 +1,20 @@
-//! Designing the programme and each primary progression, over this build's
-//! store (#192).
+//! Designing each workout and each primary progression, over this build's store
+//! (#192).
 
 use application::{
     DesignError,
     design::{Designing, InForce},
 };
-use domain::prescription::{LinearProgression, Programme, SbsProgression};
+use domain::{
+    prescription::{LinearProgression, SbsProgression, Workout},
+    schedule::Relative,
+};
 
 use crate::store::Store;
 
 fn designing(
     store: &Store,
-) -> Designing<impl application::ProgrammeStore + application::ProgressionStore + Sync + use<>> {
+) -> Designing<impl application::WorkoutStore + application::ProgressionStore + Sync + use<>> {
     Designing::new(store.parameters())
 }
 
@@ -26,10 +29,14 @@ pub async fn in_force(store: &Store) -> Result<InForce, DesignError> {
 
 /// # Errors
 ///
-/// See [`Designing::programme`].
-pub async fn programme(store: &Store, programme: &Programme) -> Result<(), DesignError> {
+/// See [`Designing::workout`].
+pub async fn workout(
+    store: &Store,
+    intensity: Relative,
+    workout: &Workout,
+) -> Result<(), DesignError> {
     designing(store)
-        .programme(programme, jiff::Timestamp::now())
+        .workout(intensity, workout, jiff::Timestamp::now())
         .await
 }
 

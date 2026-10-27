@@ -148,8 +148,12 @@ impl fmt::Display for SbsSession {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidSbs {
+    /// A value in [`SbsChart::published`] that does not build: a defect in this
+    /// build, not anything the operator did.
+    #[error("SBS's published chart will not build ({detail}) — this is a defect in this build")]
+    Unbuildable { detail: String },
     #[error("the chart runs four weeks, so week {week} is not one of them")]
     NoSuchWeek { week: u32 },
     #[error(
@@ -210,6 +214,61 @@ impl SbsChart {
             }
         }
         Ok(chart)
+    }
+
+    /// Stronger By Science's two-day intermediate squat chart, as the operator
+    /// runs it.
+    ///
+    /// **SBS's, and so not authored** (§ 14.1, amended 2026-10-27): *"it owns
+    /// its percentage and rep schema"*. Verified against `Squat 2x Int` in the
+    /// operator's copy of the workbook, and recorded in decision 0024. Week 4's
+    /// first session is his: SBS's two-workout intermediate template runs a back
+    /// squat day and a front squat day, he runs the front squat on both, and its
+    /// taper is the beginner sheet's moved to sit five points below week 1.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidSbs::Unbuildable`] if a value written here does not build, which
+    /// a test pins against.
+    pub fn published() -> Result<Self, InvalidSbs> {
+        let unbuildable = |detail: &dyn fmt::Display| InvalidSbs::Unbuildable {
+            detail: detail.to_string(),
+        };
+        let count = |reps: u32| RepCount::new(reps).map_err(|error| unbuildable(&error));
+        let percentage_day = |sets: u32, reps: u32, points: i32| -> Result<SbsDay, InvalidSbs> {
+            Ok(SbsDay::Percentage {
+                sets: count(sets)?,
+                reps: count(reps)?,
+                share: Percentage::from_basis_points(points)
+                    .map_err(|error| unbuildable(&error))?,
+            })
+        };
+        let rep_max = |reps: u32, sets: u32, low: u32, high: u32| -> Result<SbsDay, InvalidSbs> {
+            Ok(SbsDay::RepMax {
+                reps: count(reps)?,
+                back_off_sets: count(sets)?,
+                back_off_reps: Target::between(count(low)?, count(high)?)
+                    .ok_or_else(|| unbuildable(&"a rep range runs low-high and must span"))?,
+            })
+        };
+        Self::new([
+            SbsWeek {
+                first: percentage_day(5, 5, 8000)?,
+                second: rep_max(8, 3, 5, 6)?,
+            },
+            SbsWeek {
+                first: percentage_day(4, 3, 8500)?,
+                second: rep_max(5, 3, 3, 4)?,
+            },
+            SbsWeek {
+                first: percentage_day(3, 1, 9000)?,
+                second: rep_max(3, 3, 1, 2)?,
+            },
+            SbsWeek {
+                first: percentage_day(3, 3, 7500)?,
+                second: SbsDay::Test { reps: count(1)? },
+            },
+        ])
     }
 
     /// What the chart prescribes in a given week and session.

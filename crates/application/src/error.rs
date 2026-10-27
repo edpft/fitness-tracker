@@ -290,6 +290,10 @@ pub enum PrescriptionError {
     /// Distinct from a slot or two being underivable, which is a value on the
     /// result: a prescription with ten good slots and one gap is worth issuing,
     /// and one with no slots at all is not a prescription.
+    /// SBS's published chart does not build: a defect in this build.
+    #[error(transparent)]
+    Sbs(#[from] domain::prescription::InvalidSbs),
+
     #[error("no slot could be derived, so there is no workout to issue")]
     NothingDerivable,
     /// A test whose target is inherited, with nothing before it to inherit from.
