@@ -325,7 +325,7 @@ impl Progression {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum InconsistentMesocycle {
     #[error(
-        "this programme gates on the {gating} session but never runs one, \
+        "this mesocycle gates on the {gating} session but never runs one, \
          so its ladder would never advance"
     )]
     GatingRoleNeverRuns { gating: SessionRole },
@@ -344,7 +344,7 @@ pub enum InconsistentMesocycle {
     TestIsNotOneWeek { weeks: u32 },
     #[error(
         "a test at {reps} repetitions is too many for the repetition-maximum \
-         table to convert into the maximum a programme after it would anchor on"
+         table to convert into the maximum a mesocycle after it would anchor on"
     )]
     TestRepsTooMany { reps: u32 },
     #[error(
@@ -356,7 +356,7 @@ pub enum InconsistentMesocycle {
         measure: &'static str,
     },
     #[error(
-        "this programme names {pattern} as primary but fills that slot with \
+        "this mesocycle names {pattern} as primary but fills that slot with \
          {fill} rather than the primary exercise {primary}"
     )]
     PrimaryDoesNotFillItsSlot {
@@ -369,7 +369,7 @@ pub enum InconsistentMesocycle {
     #[error("the block is not a plan: {0}")]
     Block(#[from] crate::prescription::block::InvalidBlock),
     #[error(
-        "this programme starts on {start} but its entry test is dated {tested},          which is not before it"
+        "this mesocycle starts on {start} but its entry test is dated {tested},          which is not before it"
     )]
     EntryTestIsNotBeforeTheBlock {
         start: jiff::civil::Date,

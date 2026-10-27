@@ -32,7 +32,7 @@ use domain::{
     cycling::{CyclingMicrocycle, Ftp, PlannedRide, Ride, clock},
     measure::PositiveDuration,
     normalised::OperatorZone,
-    plan::{Plan, Programme},
+    plan::{Mesocycles, Plan},
     schedule::{Relative, SessionRole},
 };
 use jiff::civil::{Date, Weekday};
@@ -103,7 +103,7 @@ pub fn riding_failure(from: Date, error: &RidingError) -> Failure {
     match error {
         RidingError::Prescription(application::PrescriptionError::NoPlan { .. }) => {
             Failure::message(
-                format!("no cycling programme covers {from}. Author one first: fitness plan"),
+                format!("no cycling mesocycle covers {from}. Author one first: fitness plan"),
                 exit::USAGE,
             )
         }
@@ -405,15 +405,15 @@ pub async fn hold(
     let cycling = with_holding(&plan, held, start)?;
     let gym = plan
         .gym()
-        .map(|programme| programme.mesocycles().cloned().collect::<Vec<_>>());
+        .map(|side| side.mesocycles().cloned().collect::<Vec<_>>());
 
     let rewritten = Plan::new(
         name.clone(),
         jiff::Timestamp::now(),
-        gym.map(Programme::new)
+        gym.map(Mesocycles::new)
             .transpose()
             .map_err(|error| Failure::usage(&error))?,
-        Some(Programme::new(cycling).map_err(|error| Failure::usage(&error))?),
+        Some(Mesocycles::new(cycling).map_err(|error| Failure::usage(&error))?),
     )
     .map_err(|error| Failure::usage(&error))?;
 
@@ -440,7 +440,7 @@ fn with_holding(
 ) -> Result<Vec<domain::cycling::CyclingMesocycle>, Failure> {
     let mut mesocycles = Vec::new();
     let mut later = Vec::new();
-    for mesocycle in plan.cycling().into_iter().flat_map(Programme::mesocycles) {
+    for mesocycle in plan.cycling().into_iter().flat_map(Mesocycles::mesocycles) {
         if mesocycle.start() < start {
             mesocycles.push(mesocycle.clone());
         } else {

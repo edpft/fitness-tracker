@@ -39,7 +39,7 @@ use infrastructure::{
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
-use support::{corpus, programme, store};
+use support::{corpus, mesocycle, store};
 
 type Prescriber = Prescribing<
     SqliteExerciseHistory,
@@ -58,16 +58,16 @@ type Prescriber = Prescribing<
 async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::Error>> {
     let (directory, pool) = corpus_store().await?;
 
-    let test = test_programme()?;
-    programme::design(&pool).await?;
+    let test = test_mesocycle()?;
+    mesocycle::design(&pool).await?;
     Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
-        .author(&programme::named_plan("entry-test", vec![test])?)
+        .author(&mesocycle::named_plan("entry-test", vec![test])?)
         .await?;
 
     Ok((
         Prescribing::new(PrescriptionPorts {
             history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+            mesocycles: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
             parameters: SqliteGenerationParameterStore::new(pool.clone()),
             prescriptions: SqlitePrescribedWorkoutStore::new(
                 pool.clone(),
@@ -85,9 +85,9 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
 /// fixture block differs, and everything before that does not.
 async fn corpus_store() -> Result<(tempfile::TempDir, SqlitePool), Box<dyn std::error::Error>> {
     let (directory, pool) = landed_store().await?;
-    programme::design(&pool).await?;
+    mesocycle::design(&pool).await?;
     Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
-        .author(&programme::as_plan(programme::programme()?)?)
+        .author(&mesocycle::as_plan(mesocycle::linear()?)?)
         .await?;
 
     Ok((directory, pool))
@@ -102,7 +102,7 @@ async fn landed_store() -> Result<(tempfile::TempDir, SqlitePool), Box<dyn std::
     let pool: SqlitePool = connect(&directory.path().join("test.db")).await?;
     // A block's calendar is rebuilt from the operator's week on every read
     // (issue #63), so a store with no week in it cannot hold a plan.
-    programme::record_the_week(&pool).await?;
+    mesocycle::record_the_week(&pool).await?;
 
     let landing = HevyWorkoutLandingStore::new(pool.clone())?;
     let runs = SqliteExtractionRunLog::new(pool.clone());
@@ -145,8 +145,8 @@ async fn landed_store() -> Result<(tempfile::TempDir, SqlitePool), Box<dyn std::
 /// The questions ask every slot unconditionally, so there was never anything
 /// left to inherit — and the fixture fills here are the same ones the programme
 /// before it was authored with.
-fn test_programme() -> Result<domain::prescription::GymMesocycle, Box<dyn std::error::Error>> {
-    let answers = programme::authored(
+fn test_mesocycle() -> Result<domain::prescription::GymMesocycle, Box<dyn std::error::Error>> {
+    let answers = mesocycle::authored(
         Date::constant(2026, 8, 31),
         Shape::Test {
             reps: domain::measure::RepCount::new(1)?,
@@ -158,7 +158,7 @@ fn test_programme() -> Result<domain::prescription::GymMesocycle, Box<dyn std::e
             asserted: None,
         },
     )?;
-    Ok(programme::authoring(answers, &[])??)
+    Ok(mesocycle::authoring(answers, &[])??)
 }
 
 macro_rules! prescriber {
@@ -310,7 +310,7 @@ fn a_test_week_issues_every_slot() {
 /// whether or not there is an entry test; the week in front is added by the
 /// presence of the entry test and by nothing else.
 fn autumn_block() -> Result<domain::prescription::GymMesocycle, Box<dyn std::error::Error>> {
-    let answers = programme::authored(
+    let answers = mesocycle::authored(
         Date::constant(2026, 8, 31),
         Shape::Block {
             gating: SessionRole::new(Relative::Higher, Relative::Lower),
@@ -329,22 +329,22 @@ fn autumn_block() -> Result<domain::prescription::GymMesocycle, Box<dyn std::err
             )?),
         },
     )?;
-    Ok(programme::authoring(answers, &[])??)
+    Ok(mesocycle::authoring(answers, &[])??)
 }
 
 /// A store with the fixture block, and an autumn block that tests its own entry.
 async fn with_block() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::Error>> {
     let (directory, pool) = corpus_store().await?;
     let block = autumn_block()?;
-    programme::design(&pool).await?;
+    mesocycle::design(&pool).await?;
     Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
-        .author(&programme::named_plan("autumn", vec![block])?)
+        .author(&mesocycle::named_plan("autumn", vec![block])?)
         .await?;
 
     Ok((
         Prescribing::new(PrescriptionPorts {
             history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+            mesocycles: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
             parameters: SqliteGenerationParameterStore::new(pool.clone()),
             prescriptions: SqlitePrescribedWorkoutStore::new(
                 pool.clone(),
@@ -476,7 +476,7 @@ fn provided_test() -> Result<domain::prescription::GymMesocycle, Box<dyn std::er
         "Stronger By Science".to_owned().try_into()?,
         "Squat 2x Int".to_owned().try_into()?,
     );
-    let answers = programme::authored(
+    let answers = mesocycle::authored(
         Date::constant(2026, 8, 31),
         Shape::Test {
             reps: domain::measure::RepCount::new(1)?,
@@ -491,7 +491,7 @@ fn provided_test() -> Result<domain::prescription::GymMesocycle, Box<dyn std::er
             )?),
         },
     )?;
-    Ok(programme::authoring(answers, &[])??)
+    Ok(mesocycle::authoring(answers, &[])??)
 }
 
 /// A store whose only programme is a published test week — the shape of a plan
@@ -504,8 +504,8 @@ async fn with_provided_test(
     } else {
         landed_store().await?
     };
-    let plan = programme::named_plan("published-entry-test", vec![provided_test()?])?;
-    programme::design(&pool).await?;
+    let plan = mesocycle::named_plan("published-entry-test", vec![provided_test()?])?;
+    mesocycle::design(&pool).await?;
     Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
         .author(&plan)
         .await?;
@@ -513,7 +513,7 @@ async fn with_provided_test(
     Ok((
         Prescribing::new(PrescriptionPorts {
             history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+            mesocycles: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
             parameters: SqliteGenerationParameterStore::new(pool.clone()),
             prescriptions: SqlitePrescribedWorkoutStore::new(
                 pool.clone(),
@@ -646,7 +646,7 @@ async fn held_after_the_test()
     use application::DiaryStore as _;
 
     let (directory, pool) = landed_store().await?;
-    let answers = programme::authored(
+    let answers = mesocycle::authored(
         Date::constant(2026, 6, 29),
         Shape::Test {
             reps: domain::measure::RepCount::new(1)?,
@@ -654,10 +654,10 @@ async fn held_after_the_test()
             asserted: None,
         },
     )?;
-    let test = programme::authoring(answers, &[])??;
-    programme::design(&pool).await?;
+    let test = mesocycle::authoring(answers, &[])??;
+    mesocycle::design(&pool).await?;
     Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
-        .author(&programme::named_plan("held", vec![test])?)
+        .author(&mesocycle::named_plan("held", vec![test])?)
         .await?;
 
     let diary = infrastructure::SqliteDiaryStore::new(pool.clone())
@@ -675,7 +675,7 @@ async fn held_after_the_test()
     Ok((
         Prescribing::new(PrescriptionPorts {
             history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: application::reschedule::Rescheduled::new(
+            mesocycles: application::reschedule::Rescheduled::new(
                 SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
                 SqlitePlanStore::new(pool.clone(), corpus::zone()?),
                 reschedule,
@@ -729,7 +729,7 @@ fn a_holding_week_opens_the_linear_template_from_the_test_just_done() {
     assert_eq!(anchor.provenance(), AnchorProvenance::Tested);
     let failed = anchor.failed().expect("the test of 3 July failed a load");
 
-    let parameters = programme::parameters().expect("the fixture parameters are valid");
+    let parameters = mesocycle::parameters().expect("the fixture parameters are valid");
     let steps = parameters
         .scales
         .for_exercise(domain::gym::Exercise::Reps(

@@ -15,7 +15,7 @@ use domain::{
         PlannedRide, PowerZone, Ride, RideVenue, SessionPosition,
     },
     measure::PositiveDuration,
-    plan::{Plan, PlanName, Programme},
+    plan::{Mesocycles, Plan, PlanName},
     provider::{ExternalProgramme, ProgrammeName, Provider, PublishedAt},
     schedule::{Diary, PartOfDay, Relative, SessionRole, TrainingWeek},
     sequence::NonEmpty,
@@ -50,7 +50,7 @@ fn plan(called: &str, mesocycles: Vec<CyclingMesocycle>) -> Fallible<Plan> {
         PlanName::try_from(called.to_owned())?,
         jiff::Timestamp::now(),
         None,
-        Some(Programme::new(mesocycles)?),
+        Some(Mesocycles::new(mesocycles)?),
     )?)
 }
 
@@ -186,7 +186,7 @@ fn microcycle(published: u32, test: bool) -> Fallible<CyclingMicrocycle> {
     Ok(CyclingMicrocycle::new(rides.into_iter().collect())?)
 }
 
-fn programme(start: Date, published: &[u32], test: bool) -> Fallible<CyclingMesocycle> {
+fn mesocycle(start: Date, published: &[u32], test: bool) -> Fallible<CyclingMesocycle> {
     let weeks = published
         .iter()
         .map(|number| microcycle(*number, test))
@@ -231,7 +231,7 @@ fn quiet_diary() -> Diary {
 #[test]
 fn an_authored_mesocycle_round_trips_exactly() {
     let (opened, _directory) = opened!();
-    let Ok(authored) = programme(date(2026, 9, 21), &[1, 2, 4, 5], false) else {
+    let Ok(authored) = mesocycle(date(2026, 9, 21), &[1, 2, 4, 5], false) else {
         panic!("the fixture mesocycle is valid")
     };
     let Ok(plan) = plan("autumn", vec![authored.clone()]) else {
@@ -256,7 +256,7 @@ fn an_authored_mesocycle_round_trips_exactly() {
 #[test]
 fn an_effort_round_trips_with_no_cool_down() {
     let (opened, _directory) = opened!();
-    let Ok(authored) = programme(date(2026, 9, 14), &[5], true) else {
+    let Ok(authored) = mesocycle(date(2026, 9, 14), &[5], true) else {
         panic!("the fixture mesocycle is valid")
     };
     let Ok(plan) = plan("autumn", vec![authored]) else {
@@ -296,8 +296,8 @@ fn an_effort_round_trips_with_no_cool_down() {
 fn re_authoring_a_name_supersedes_rather_than_competing() {
     let (opened, _directory) = opened!();
     let (Ok(first), Ok(corrected)) = (
-        programme(date(2026, 9, 21), &[1, 2, 4, 5], false),
-        programme(date(2026, 9, 21), &[1, 2, 3, 4], false),
+        mesocycle(date(2026, 9, 21), &[1, 2, 4, 5], false),
+        mesocycle(date(2026, 9, 21), &[1, 2, 3, 4], false),
     ) else {
         panic!("both fixtures are valid")
     };
@@ -327,7 +327,7 @@ fn re_authoring_a_name_supersedes_rather_than_competing() {
 /// Two *plans* covering one day would make which of them answers depend on the
 /// order rows came back in.
 ///
-/// **Two mesocycles of one plan are a different rule**, and `Programme::new`
+/// **Two mesocycles of one plan are a different rule**, and `Mesocycles::new`
 /// refuses those before a store is involved at all. What this asserts is the
 /// rule that survived #86: the gym and the bike inside one plan compete for
 /// every day on purpose, and two plans may not.
@@ -335,8 +335,8 @@ fn re_authoring_a_name_supersedes_rather_than_competing() {
 fn a_second_plan_covering_the_same_days_is_refused() {
     let (opened, _directory) = opened!();
     let (Ok(first), Ok(overlapping)) = (
-        programme(date(2026, 9, 21), &[1, 2, 4, 5], false),
-        programme(date(2026, 10, 12), &[1, 2, 4, 5], false),
+        mesocycle(date(2026, 9, 21), &[1, 2, 4, 5], false),
+        mesocycle(date(2026, 10, 12), &[1, 2, 4, 5], false),
     ) else {
         panic!("both fixtures are valid")
     };
@@ -369,8 +369,8 @@ fn a_second_plan_covering_the_same_days_is_refused() {
 fn the_next_ride_crosses_a_mesocycle_boundary() {
     let (opened, _directory) = opened!();
     let (Ok(first), Ok(second)) = (
-        programme(date(2026, 9, 21), &[1, 2, 4, 5], false),
-        programme(date(2026, 10, 19), &[1, 2, 4, 5], false),
+        mesocycle(date(2026, 9, 21), &[1, 2, 4, 5], false),
+        mesocycle(date(2026, 10, 19), &[1, 2, 4, 5], false),
     ) else {
         panic!("both fixtures are valid")
     };

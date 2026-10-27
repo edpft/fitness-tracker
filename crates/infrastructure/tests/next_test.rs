@@ -7,7 +7,7 @@ mod support;
 
 use domain::analytical::one_rep_max::{NextTest, next_test};
 use jiff::civil::date;
-use support::programme::{entry_test_from, plan};
+use support::mesocycle::{entry_test_from, plan};
 
 #[test]
 fn a_test_week_tests_on_its_last_programmed_day() {

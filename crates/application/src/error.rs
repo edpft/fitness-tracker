@@ -298,7 +298,7 @@ pub enum PrescriptionError {
     /// Distinct from [`Self::NoPlan`]: a mesocycle covers the day and simply has
     /// nothing more to run, which is a block that has finished rather than a gap
     /// in the plan. The operator's answer is a new plan, not a correction.
-    #[error("the programme has no session left on or after {from}")]
+    #[error("the mesocycle in force has no session left on or after {from}")]
     NoSessionScheduled { from: Date },
 
     /// No operator time zone is declared. The same gap as

@@ -1,15 +1,15 @@
 //! What a plan holds, what it occupies, and what may not compete with it.
 
 use domain::plan::{
-    EmptyPlan, InvalidPlanName, InvalidProgramme, Occupies, Plan, PlanName, PlanWindow, Programme,
-    Span,
+    EmptyPlan, InvalidMesocycles, InvalidPlanName, Mesocycles, Occupies, Plan, PlanName,
+    PlanWindow, Span,
 };
 use jiff::civil::Date;
 
 /// Something that occupies days and is nothing else.
 ///
 /// **A stand-in rather than a real mesocycle**, because what is under test is
-/// the container: `Programme` is generic over its mesocycle precisely so that
+/// the container: `Mesocycles` is generic over its mesocycle precisely so that
 /// ordering, overlap and answering for a date are written once, and a fixture
 /// carrying a lift or a zone plan would test the fixture too.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,8 +129,8 @@ fn autumn_gym() -> Vec<Occupant> {
 }
 
 #[test]
-fn a_programme_spans_its_first_mesocycle_to_its_last() {
-    let Ok(gym) = Programme::new(autumn_gym()) else {
+fn mesocycles_span_the_first_to_the_last() {
+    let Ok(gym) = Mesocycles::new(autumn_gym()) else {
         panic!("the autumn is a valid programme")
     };
     assert_eq!(gym.count(), 4);
@@ -139,8 +139,8 @@ fn a_programme_spans_its_first_mesocycle_to_its_last() {
 }
 
 #[test]
-fn a_programme_answers_for_a_date_with_where_it_sits() {
-    let Ok(gym) = Programme::new(autumn_gym()) else {
+fn mesocycles_answer_for_a_date_with_where_it_sits() {
+    let Ok(gym) = Mesocycles::new(autumn_gym()) else {
         panic!("the autumn is a valid programme")
     };
     let Some((at, _)) = gym.on(Date::constant(2026, 10, 20)) else {
@@ -161,7 +161,7 @@ fn a_programme_answers_for_a_date_with_where_it_sits() {
 /// fortnight away, a deload nobody programmed — and not a fault.
 #[test]
 fn a_gap_belongs_to_no_mesocycle() {
-    let Ok(interrupted) = Programme::new(vec![at(2026, 9, 14, 1), at(2026, 9, 28, 4)]) else {
+    let Ok(interrupted) = Mesocycles::new(vec![at(2026, 9, 14, 1), at(2026, 9, 28, 4)]) else {
         panic!("a gap is legal")
     };
     assert!(interrupted.on(Date::constant(2026, 9, 22)).is_none());
@@ -171,18 +171,18 @@ fn a_gap_belongs_to_no_mesocycle() {
 /// Two mesocycles competing for one day would make the answer to "what am I
 /// doing today" depend on the order rows came back in.
 #[test]
-fn two_mesocycles_of_one_programme_may_not_compete() {
+fn two_mesocycles_of_one_discipline_may_not_compete() {
     assert_eq!(
-        Programme::new(vec![at(2026, 9, 14, 4), at(2026, 10, 5, 4)]),
-        Err(InvalidProgramme::OutOfOrder {
+        Mesocycles::new(vec![at(2026, 9, 14, 4), at(2026, 10, 5, 4)]),
+        Err(InvalidMesocycles::OutOfOrder {
             at: 2,
             before: 1,
             start: Date::constant(2026, 10, 5),
         })
     );
     assert_eq!(
-        Programme::new(Vec::<Occupant>::new()),
-        Err(InvalidProgramme::NoMesocycles)
+        Mesocycles::new(Vec::<Occupant>::new()),
+        Err(InvalidMesocycles::NoMesocycles)
     );
 }
 
@@ -190,7 +190,7 @@ fn two_mesocycles_of_one_programme_may_not_compete() {
 /// question for the store — except for the mesocycle that opens a plan.
 #[test]
 fn the_preceding_mesocycle_is_the_last_one_to_have_finished() {
-    let Ok(gym) = Programme::new(autumn_gym()) else {
+    let Ok(gym) = Mesocycles::new(autumn_gym()) else {
         panic!("the autumn is a valid programme")
     };
     assert_eq!(

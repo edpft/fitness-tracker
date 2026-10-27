@@ -17,7 +17,7 @@ use infrastructure::{
     SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqlitePlanStore, connect,
 };
 use sqlx::SqlitePool;
-use support::{corpus, programme};
+use support::{corpus, mesocycle};
 
 async fn store() -> Result<
     (
@@ -75,7 +75,7 @@ fn an_unauthored_store_has_no_versions() {
 #[test]
 fn every_version_round_trips_exactly() {
     let (store, _pool, _directory) = opened!();
-    let Ok(authored) = programme::parameters() else {
+    let Ok(authored) = mesocycle::parameters() else {
         panic!("the fixture versions are valid")
     };
     let authored = authored.planned_with;
@@ -111,7 +111,7 @@ fn every_version_round_trips_exactly() {
 #[test]
 fn the_version_in_force_at_an_instant_is_the_latest_before_it() {
     let (store, pool, _directory) = opened!();
-    let Ok(fixture) = programme::parameters() else {
+    let Ok(fixture) = mesocycle::parameters() else {
         panic!("the fixture versions are valid")
     };
     let first = fixture.planned_with.linear;
@@ -165,7 +165,7 @@ fn the_version_in_force_at_an_instant_is_the_latest_before_it() {
 #[test]
 fn versions_are_compared_as_instants_not_as_text() {
     let (store, _pool, _directory) = opened!();
-    let Ok(fixture) = programme::parameters() else {
+    let Ok(fixture) = mesocycle::parameters() else {
         panic!("the fixture versions are valid")
     };
     let Ok(whole) = "2026-10-26T09:00:00Z".parse::<jiff::Timestamp>() else {
@@ -190,7 +190,7 @@ fn versions_are_compared_as_instants_not_as_text() {
 
 // --- The programme ---------------------------------------------------------
 
-async fn programme_store() -> Result<
+async fn mesocycle_store() -> Result<
     (
         SqlitePlanStore,
         SqliteGymMesocycleStore,
@@ -203,7 +203,7 @@ async fn programme_store() -> Result<
     let pool = connect(&directory.path().join("test.db")).await?;
     // A block's calendar is rebuilt from the operator's week on every read
     // (issue #63), so a store with no week in it cannot hold a plan.
-    programme::record_the_week(&pool).await?;
+    mesocycle::record_the_week(&pool).await?;
     Ok((
         SqlitePlanStore::new(pool.clone(), corpus::zone()?),
         SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
@@ -218,9 +218,9 @@ async fn programme_store() -> Result<
 /// written, so every round trip here goes through one.
 macro_rules! plan_of {
     ($called:expr, $($mesocycle:expr),+ $(,)?) => {
-        match programme::named_plan(
+        match mesocycle::named_plan(
             $called,
-            vec![$(programme::as_programme($mesocycle)),+],
+            vec![$(mesocycle::as_mesocycle($mesocycle)),+],
         ) {
             Ok(plan) => plan,
             Err(error) => panic!("the fixture plan is consistent: {error}"),
@@ -228,9 +228,9 @@ macro_rules! plan_of {
     };
 }
 
-macro_rules! programmes {
+macro_rules! mesocycles {
     () => {
-        match corpus::block_on(programme_store()) {
+        match corpus::block_on(mesocycle_store()) {
             Ok(Ok(opened)) => opened,
             Ok(Err(error)) => panic!("a store opens: {error}"),
             Err(error) => panic!("a runtime is available: {error}"),
@@ -249,7 +249,7 @@ const fn inside_the_block() -> jiff::civil::Date {
 
 #[test]
 fn an_unauthored_store_has_no_mesocycle() {
-    let (_plans, store, _pool, _directory) = programmes!();
+    let (_plans, store, _pool, _directory) = mesocycles!();
     assert!(run!(store.on(inside_the_block())).is_none());
 }
 
@@ -260,9 +260,9 @@ fn an_unauthored_store_has_no_mesocycle() {
 /// slots, flattened into one table and grouped back out. Comparing the whole
 /// `SlotFills` covers every one of them at once.
 #[test]
-fn a_programme_round_trips_with_every_fill_shape() {
-    let (plans, store, _pool, _directory) = programmes!();
-    let Ok(authored) = programme::programme() else {
+fn a_mesocycle_round_trips_with_every_fill_shape() {
+    let (plans, store, _pool, _directory) = mesocycles!();
+    let Ok(authored) = mesocycle::linear() else {
         panic!("the fixture programme is consistent")
     };
 
@@ -309,7 +309,7 @@ fn a_programme_round_trips_with_every_fill_shape() {
 /// only on the rows.
 #[test]
 fn the_interrupted_weeks_round_trip() {
-    let (plans, store, _pool, _directory) = programmes!();
+    let (plans, store, _pool, _directory) = mesocycles!();
     let (Ok(away), Ok(after)) = (
         jiff::civil::Date::new(2026, 7, 20),
         jiff::civil::Date::new(2026, 7, 27),
@@ -320,7 +320,7 @@ fn the_interrupted_weeks_round_trip() {
         panic!("seven is not zero")
     };
     let week = domain::prescription::Skip::new(away, seven);
-    let Ok(authored) = programme::programme_skipping(&[week]) else {
+    let Ok(authored) = mesocycle::linear_skipping(&[week]) else {
         panic!("a week inside the block can be skipped")
     };
 
@@ -352,8 +352,8 @@ fn the_interrupted_weeks_round_trip() {
 /// The weekday mapping round trips, including which role each day carries.
 #[test]
 fn the_weekday_mapping_round_trips() {
-    let (plans, store, _pool, _directory) = programmes!();
-    let Ok(authored) = programme::programme() else {
+    let (plans, store, _pool, _directory) = mesocycles!();
+    let Ok(authored) = mesocycle::linear() else {
         panic!("the fixture programme is consistent")
     };
     run!(plans.author(&plan_of!("fixture", authored.clone())));
@@ -381,8 +381,8 @@ fn the_weekday_mapping_round_trips() {
 /// again is what re-authoring actually does.
 #[test]
 fn authoring_a_plan_supersedes_and_retains() {
-    let (plans, _store, pool, _directory) = programmes!();
-    let (Ok(first), Ok(again)) = (programme::programme(), programme::programme()) else {
+    let (plans, _store, pool, _directory) = mesocycles!();
+    let (Ok(first), Ok(again)) = (mesocycle::linear(), mesocycle::linear()) else {
         panic!("the fixture programme is consistent")
     };
 
@@ -404,7 +404,7 @@ fn authoring_a_plan_supersedes_and_retains() {
 /// which is why these assert on the constructor rather than on `author`.
 #[test]
 fn the_three_inconsistencies_are_refused() {
-    let Ok(gating) = programme::gating_on_a_role_it_never_runs() else {
+    let Ok(gating) = mesocycle::gating_on_a_role_it_never_runs() else {
         panic!("the fixture literals are valid")
     };
     assert!(
@@ -412,7 +412,7 @@ fn the_three_inconsistencies_are_refused() {
         "a programme gating on a role it never runs would never advance"
     );
 
-    let Ok(measure) = programme::primary_not_counted_in_reps() else {
+    let Ok(measure) = mesocycle::primary_not_counted_in_reps() else {
         panic!("the fixture literals are valid")
     };
     assert!(
@@ -420,7 +420,7 @@ fn the_three_inconsistencies_are_refused() {
         "a top set is a number of repetitions, so the primary must be counted in them"
     );
 
-    let Ok(slot) = programme::primary_does_not_fill_its_slot() else {
+    let Ok(slot) = mesocycle::primary_does_not_fill_its_slot() else {
         panic!("the fixture literals are valid")
     };
     assert!(
@@ -454,15 +454,15 @@ fn a_block_authored_with_days_away_skips_them() {
         domain::prescription::Skip::new(friday, three),
     ];
 
-    let programme = match fixture_block().and_then(|answers| programme::authoring(answers, &skips))
+    let mesocycle = match fixture_block().and_then(|answers| mesocycle::authoring(answers, &skips))
     {
-        Ok(Ok(programme)) => programme,
+        Ok(Ok(mesocycle)) => mesocycle,
         Ok(Err(error)) => panic!("the block is consistent: {error}"),
         Err(error) => panic!("the fixture builds: {error}"),
     };
 
     assert_eq!(
-        programme
+        mesocycle
             .calendar()
             .interruptions()
             .iter()
@@ -471,16 +471,16 @@ fn a_block_authored_with_days_away_skips_them() {
         "both skips are the block's"
     );
     assert_eq!(
-        programme.calendar().duration_weeks(),
+        mesocycle.calendar().duration_weeks(),
         8,
         "the duration counts training weeks, so a holiday does not shorten it"
     );
     // The week of the 20th loses both its sessions, so nothing survives in it
     // and the block reaches one calendar week further.
-    assert_eq!(programme.calendar().calendar_weeks(), 9);
-    assert!(programme.calendar().place(monday).is_err());
-    assert!(programme.calendar().place(friday).is_err());
-    match programme.calendar().place(after) {
+    assert_eq!(mesocycle.calendar().calendar_weeks(), 9);
+    assert!(mesocycle.calendar().place(monday).is_err());
+    assert!(mesocycle.calendar().place(friday).is_err());
+    match mesocycle.calendar().place(after) {
         Ok((domain::prescription::WeekKind::Climbing(week), _)) => {
             assert_eq!(week.as_u32(), 3, "the week after the holiday is week three");
         }
@@ -492,8 +492,8 @@ fn a_block_authored_with_days_away_skips_them() {
 ///
 /// A free function returning `Result`, because the test exemptions do not reach
 /// one.
-fn fixture_block() -> Result<domain::prescription::Authored, programme::ProgrammeFixtureError> {
-    programme::authored(
+fn fixture_block() -> Result<domain::prescription::Authored, mesocycle::MesocycleFixtureError> {
+    mesocycle::authored(
         jiff::civil::Date::constant(2026, 7, 6),
         domain::prescription::authored::Shape::Linear {
             gating: SessionRole::new(Relative::Higher, Relative::Lower),
@@ -515,7 +515,7 @@ fn a_week_outside_the_block_does_not_author() {
         jiff::civil::Date::constant(2026, 6, 29),
     )];
 
-    match fixture_block().and_then(|answers| programme::authoring(answers, &before)) {
+    match fixture_block().and_then(|answers| mesocycle::authoring(answers, &before)) {
         Ok(Err(domain::prescription::AuthoringError::Calendar(error))) => {
             assert!(
                 matches!(
@@ -538,12 +538,12 @@ fn a_week_outside_the_block_does_not_author() {
 /// first one's dates as well as its own.
 #[test]
 fn two_plans_succeed_one_another_and_the_date_chooses() {
-    let (plans, store, _pool, _directory) = programmes!();
+    let (plans, store, _pool, _directory) = mesocycles!();
     let (Ok(summer), Ok(autumn)) = (
-        programme::programme_from(jiff::civil::Date::constant(2026, 7, 6)),
+        mesocycle::linear_from(jiff::civil::Date::constant(2026, 7, 6)),
         // Eight weeks from 6 July ends on 31 August, so the autumn plan opens
         // the Monday after and the two are adjacent rather than overlapping.
-        programme::programme_from(jiff::civil::Date::constant(2026, 8, 31)),
+        mesocycle::linear_from(jiff::civil::Date::constant(2026, 8, 31)),
     ) else {
         panic!("the fixtures are consistent")
     };
@@ -571,8 +571,8 @@ fn two_plans_succeed_one_another_and_the_date_chooses() {
 /// A day no mesocycle covers is nothing, not the nearest one.
 #[test]
 fn a_day_between_mesocycles_belongs_to_neither() {
-    let (plans, store, _pool, _directory) = programmes!();
-    let Ok(summer) = programme::programme_from(jiff::civil::Date::constant(2026, 7, 6)) else {
+    let (plans, store, _pool, _directory) = mesocycles!();
+    let Ok(summer) = mesocycle::linear_from(jiff::civil::Date::constant(2026, 7, 6)) else {
         panic!("the fixture is consistent")
     };
     run!(plans.author(&plan_of!("summer", summer)));
@@ -591,11 +591,11 @@ fn a_day_between_mesocycles_belongs_to_neither() {
 /// Every plan's window comes back, and versions of one collapse to one.
 #[test]
 fn windows_report_one_entry_per_plan() {
-    let (plans, _store, _pool, _directory) = programmes!();
+    let (plans, _store, _pool, _directory) = mesocycles!();
     let (Ok(summer), Ok(again), Ok(autumn)) = (
-        programme::programme_from(jiff::civil::Date::constant(2026, 7, 6)),
-        programme::programme_from(jiff::civil::Date::constant(2026, 7, 6)),
-        programme::programme_from(jiff::civil::Date::constant(2026, 8, 31)),
+        mesocycle::linear_from(jiff::civil::Date::constant(2026, 7, 6)),
+        mesocycle::linear_from(jiff::civil::Date::constant(2026, 7, 6)),
+        mesocycle::linear_from(jiff::civil::Date::constant(2026, 8, 31)),
     ) else {
         panic!("the fixtures are consistent")
     };
@@ -627,7 +627,7 @@ async fn equipment_store() -> Result<
 > {
     let directory = tempfile::tempdir()?;
     let pool = connect(&directory.path().join("test.db")).await?;
-    programme::design(&pool).await?;
+    mesocycle::design(&pool).await?;
     Ok((
         infrastructure::SqliteEquipmentStore::new(pool.clone()),
         SqliteGenerationParameterStore::new(pool),

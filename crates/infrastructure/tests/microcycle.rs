@@ -35,7 +35,7 @@ use domain::{
     },
     measure::PositiveDuration,
     normalised::{OperatorZone, StartedAt},
-    plan::{Plan, PlanName, Programme},
+    plan::{Mesocycles, Plan, PlanName},
     planner::{MicrocycleState, Rerun, SessionState},
     prescription::{WeekIndex, WeekKind},
     provider::ProgrammeName,
@@ -52,7 +52,7 @@ use infrastructure::{
 };
 use jiff::civil::{Date, DateTime};
 use sqlx::SqlitePool;
-use support::{corpus, programme};
+use support::{corpus, mesocycle};
 
 type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -215,7 +215,7 @@ fn endurance() -> Fallible<PlannedRide> {
 async fn autumn_on_the_bike() -> Fallible<(SqlitePool, tempfile::TempDir)> {
     let directory = tempfile::tempdir()?;
     let pool = connect(&directory.path().join("test.db")).await?;
-    programme::record_the_week(&pool).await?;
+    mesocycle::record_the_week(&pool).await?;
 
     let rides = [
         (SessionPosition::new(1)?, endurance()?),
@@ -230,13 +230,13 @@ async fn autumn_on_the_bike() -> Fallible<(SqlitePool, tempfile::TempDir)> {
         NonEmpty::of(week, Vec::new()),
     )?;
 
-    programme::design(&pool).await?;
+    mesocycle::design(&pool).await?;
     Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
         .author(&Plan::new(
             PlanName::try_from("2026-autumn-bike".to_owned())?,
             jiff::Timestamp::now(),
             None,
-            Some(Programme::new(vec![mesocycle])?),
+            Some(Mesocycles::new(vec![mesocycle])?),
         )?)
         .await?;
 
@@ -252,7 +252,7 @@ async fn autumn_on_the_bike() -> Fallible<(SqlitePool, tempfile::TempDir)> {
 async fn autumn_together() -> Fallible<(SqlitePool, tempfile::TempDir)> {
     let directory = tempfile::tempdir()?;
     let pool = connect(&directory.path().join("test.db")).await?;
-    programme::record_the_week(&pool).await?;
+    mesocycle::record_the_week(&pool).await?;
 
     let rides = [
         (SessionPosition::new(1)?, endurance()?),
@@ -267,15 +267,15 @@ async fn autumn_together() -> Fallible<(SqlitePool, tempfile::TempDir)> {
     )?;
     let build = test_week.starting_on(Date::constant(2026, 9, 21));
 
-    programme::design(&pool).await?;
+    mesocycle::design(&pool).await?;
     Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
         .author(&Plan::new(
             PlanName::try_from("2026-autumn".to_owned())?,
             jiff::Timestamp::now(),
-            Some(Programme::new(vec![programme::as_programme(
-                programme::programme_from(Date::constant(2026, 9, 14))?,
+            Some(Mesocycles::new(vec![mesocycle::as_mesocycle(
+                mesocycle::linear_from(Date::constant(2026, 9, 14))?,
             )])?),
-            Some(Programme::new(vec![test_week, build])?),
+            Some(Mesocycles::new(vec![test_week, build])?),
         )?)
         .await?;
 
@@ -291,7 +291,7 @@ async fn autumn_together() -> Fallible<(SqlitePool, tempfile::TempDir)> {
 async fn autumn_tested() -> Fallible<(SqlitePool, tempfile::TempDir)> {
     let directory = tempfile::tempdir()?;
     let pool = connect(&directory.path().join("test.db")).await?;
-    programme::record_the_week(&pool).await?;
+    mesocycle::record_the_week(&pool).await?;
 
     let rides = [
         (SessionPosition::new(1)?, endurance()?),
@@ -306,16 +306,16 @@ async fn autumn_tested() -> Fallible<(SqlitePool, tempfile::TempDir)> {
     )?;
     let build = test_week.starting_on(Date::constant(2026, 9, 21));
 
-    programme::design(&pool).await?;
+    mesocycle::design(&pool).await?;
     Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
         .author(&Plan::new(
             PlanName::try_from("2026-autumn".to_owned())?,
             jiff::Timestamp::now(),
-            Some(Programme::new(vec![
-                programme::entry_test_from(Date::constant(2026, 9, 14))?,
-                programme::as_programme(programme::programme_from(Date::constant(2026, 9, 21))?),
+            Some(Mesocycles::new(vec![
+                mesocycle::entry_test_from(Date::constant(2026, 9, 14))?,
+                mesocycle::as_mesocycle(mesocycle::linear_from(Date::constant(2026, 9, 21))?),
             ])?),
-            Some(Programme::new(vec![test_week, build])?),
+            Some(Mesocycles::new(vec![test_week, build])?),
         )?)
         .await?;
 
@@ -353,11 +353,11 @@ fn peloton() -> Fallible<DestinationName> {
 async fn autumn() -> Fallible<(SqlitePool, tempfile::TempDir)> {
     let directory = tempfile::tempdir()?;
     let pool = connect(&directory.path().join("test.db")).await?;
-    programme::record_the_week(&pool).await?;
+    mesocycle::record_the_week(&pool).await?;
 
-    programme::design(&pool).await?;
+    mesocycle::design(&pool).await?;
     Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
-        .author(&programme::as_plan(programme::programme_from(
+        .author(&mesocycle::as_plan(mesocycle::linear_from(
             Date::constant(2026, 9, 14),
         )?)?)
         .await?;
@@ -389,7 +389,7 @@ async fn gym_delivered_for_the_friday(pool: &SqlitePool) -> Fallible<()> {
     let prescriptions =
         SqlitePrescribedWorkoutStore::new(pool.clone(), corpus::zone()?.id().to_owned());
     let id = prescriptions
-        .issue(&programme::a_workout_for(friday)?)
+        .issue(&mesocycle::a_workout_for(friday)?)
         .await?;
 
     let destination = hevy()?;

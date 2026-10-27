@@ -23,7 +23,7 @@ use crate::{next::NextFailure, rescheduling, store::Store};
 /// # Errors
 ///
 /// [`NextFailure`] if the store cannot be read.
-pub async fn programmes(
+pub async fn mesocycles(
     store: &Store,
     zone: &OperatorZone,
 ) -> Result<impl MesocycleStore + Send + Sync + use<>, NextFailure> {
@@ -58,7 +58,7 @@ pub async fn prescriber(
 > {
     Ok(Prescribing::new(PrescriptionPorts {
         history: store.exercise_history(),
-        programmes: rescheduling::gym(store, zone).await?,
+        mesocycles: rescheduling::gym(store, zone).await?,
         parameters: store.parameters(),
         prescriptions: store.prescriptions(zone),
         lifecycle: store.gym_deliveries(),
@@ -85,7 +85,7 @@ pub async fn delivering<T: PrescriptionDestination + Sync>(
 > {
     Ok(Delivering::new(DeliveryPorts {
         prescriptions: store.prescriptions(zone),
-        programmes: rescheduling::gym(store, zone).await?,
+        mesocycles: rescheduling::gym(store, zone).await?,
         deliveries: store.gym_deliveries(),
         destination,
     }))
@@ -122,7 +122,7 @@ pub async fn preview(
 
     let delivering = Delivering::new(DeliveryPorts {
         prescriptions: store.prescriptions(zone),
-        programmes: rescheduling::gym(store, zone).await?,
+        mesocycles: rescheduling::gym(store, zone).await?,
         deliveries: ForgetfulDeliveries,
         destination: &destination,
     });

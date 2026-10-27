@@ -430,8 +430,8 @@ struct Columns {
     entry_test_light: Option<i64>,
 }
 
-fn columns_of(programme: &GymMesocycle) -> Result<Columns, StoreError> {
-    let entry_test = match programme {
+fn columns_of(mesocycle: &GymMesocycle) -> Result<Columns, StoreError> {
+    let entry_test = match mesocycle {
         GymMesocycle::Progression(Progression::BlockPeriodisation(block)) => block.entry_test(),
         // An SBS cycle has no entry test: its test is the last session of the
         // last week, not a week in front (decision 0024).
@@ -452,14 +452,14 @@ fn columns_of(programme: &GymMesocycle) -> Result<Columns, StoreError> {
     // the seed, which nothing can derive because nothing came before it. A
     // standalone test and a block that measures its own entry are the same case
     // in two shapes.
-    let asserted = match programme {
+    let asserted = match mesocycle {
         GymMesocycle::Test(test) => test.asserted(),
         GymMesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             block.entry_test().and_then(EntryTest::asserted)
         }
         GymMesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. }) => None,
     };
-    let test_reps = match programme {
+    let test_reps = match mesocycle {
         GymMesocycle::Test(test) => Some(i64::from(test.reps().as_u32())),
         GymMesocycle::Progression(_) => None,
     };
@@ -480,10 +480,10 @@ fn columns_of(programme: &GymMesocycle) -> Result<Columns, StoreError> {
                     .map_err(|_| corrupt(&"a failed load larger than the store can hold"))
             })
             .transpose()?,
-        gating_intensity: programme
+        gating_intensity: mesocycle
             .gating_role()
             .map(|role| role.intensity().as_str()),
-        gating_volume: programme.gating_role().map(|role| role.volume().as_str()),
+        gating_volume: mesocycle.gating_role().map(|role| role.volume().as_str()),
         test_reps,
         entry_test_reps: entry_test.map(|test| i64::from(test.reps().as_u32())),
         entry_test_light,
@@ -536,7 +536,7 @@ fn rehydrate_periodisation(
     entry_test: Option<EntryTest>,
 ) -> Result<GymMesocycle, StoreError> {
     let gating =
-        gating.ok_or_else(|| corrupt(&"a programme that climbs with nothing gating it"))?;
+        gating.ok_or_else(|| corrupt(&"a mesocycle that climbs with nothing gating it"))?;
     let primary = Primary::new(common.pattern, common.exercise, gating);
     if template == "sbs" {
         // A `CHECK` refuses an `sbs` row without a provider, so a `None` here is

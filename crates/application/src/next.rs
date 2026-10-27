@@ -647,14 +647,14 @@ where
         from: Date,
         reschedule: &Reschedule,
     ) -> Result<GymPrescribed, PrescriptionError> {
-        let programmes = || {
+        let mesocycles = || {
             Rescheduled::new(
                 self.mesocycles.clone(),
                 self.plans.clone(),
                 reschedule.clone(),
             )
         };
-        let date = match crate::prescribe::next_session(&programmes(), from).await? {
+        let date = match crate::prescribe::next_session(&mesocycles(), from).await? {
             NextSession::On(date) => date,
             NextSession::NothingPlanned { last } => {
                 return Ok(GymPrescribed::NothingPlanned { from, last });
@@ -662,7 +662,7 @@ where
         };
         let issued = Prescribing::new(PrescriptionPorts {
             history: self.history.clone(),
-            programmes: programmes(),
+            mesocycles: mesocycles(),
             parameters: self.parameters.clone(),
             prescriptions: self.prescriptions.clone(),
             lifecycle: self.lifecycle.clone(),
@@ -674,7 +674,7 @@ where
             Err(why) => Err(Undelivered::NoAccess(why.clone())),
             Ok(destination) => Delivering::new(DeliveryPorts {
                 prescriptions: self.prescriptions.clone(),
-                programmes: programmes(),
+                mesocycles: mesocycles(),
                 deliveries: self.deliveries.clone(),
                 destination,
             })

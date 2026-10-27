@@ -24,7 +24,7 @@ use infrastructure::{
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
-use support::{corpus, programme, store};
+use support::{corpus, mesocycle, store};
 
 type Prescriber = Prescribing<
     SqliteExerciseHistory,
@@ -48,10 +48,10 @@ const GATING: Date = Date::constant(2026, 7, 10);
 const HEAVY_ROUTINE: &str = "11437699-cb70-4e0e-a77b-caa9fd5cdb24";
 
 async fn ready() -> Fallible<(Prescriber, Comparer, tempfile::TempDir, SqlitePool)> {
-    let (directory, pool) = store::with_programme(programme::programme_from(BLOCK_START)?).await?;
+    let (directory, pool) = store::with_mesocycle(mesocycle::linear_from(BLOCK_START)?).await?;
     let prescriber = Prescribing::new(PrescriptionPorts {
         history: SqliteExerciseHistory::new(pool.clone()),
-        programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+        mesocycles: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), "Europe/London".to_owned()),
         lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),

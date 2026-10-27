@@ -577,7 +577,7 @@ fn init_creates_the_store_and_states_the_zone() {
     let report = stdout(&output);
     assert!(report.contains("HEVY_API_KEY"), "{report}");
     assert!(report.contains("fitness credentials hevy"), "{report}");
-    assert!(report.contains("programme add"), "{report}");
+    assert!(report.contains("mesocycle add"), "{report}");
 }
 
 /// What `init` writes is what the next invocation reads. The two halves of the

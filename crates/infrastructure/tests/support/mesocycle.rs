@@ -1,4 +1,4 @@
-//! An authored programme, as a fixture.
+//! An authored mesocycle, as a fixture.
 //!
 //! Free functions returning `Result`, so a test unwraps at the call site: the
 //! `clippy.toml` exemptions cover `#[test]` bodies and not helpers defined
@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 use domain::{
     gym::exercise::{DistanceExercise, DurationExercise, Exercise, Implement, RepsExercise},
     measure::{Kg, RepCount},
-    plan::{Plan, PlanName, Programme},
+    plan::{Mesocycles, Plan, PlanName},
     prescription::{
         Anchor, AnchorProvenance, Authored, AuthoringError, ByIntensity, Calendar, GymMesocycle,
         Linear, LoadSteps, PrescribedWorkout, Progression, Scales, Skip, Step,
@@ -37,22 +37,22 @@ use domain::{
 use jiff::{civil::Date, tz::TimeZone};
 
 #[derive(Debug, thiserror::Error)]
-pub enum ProgrammeFixtureError {
+pub enum MesocycleFixtureError {
     #[error("the programme fixture holds an invalid value: {0}")]
     Invalid(String),
     #[error(transparent)]
     Store(#[from] StoreError),
 }
 
-fn invalid(detail: impl std::fmt::Display) -> ProgrammeFixtureError {
-    ProgrammeFixtureError::Invalid(detail.to_string())
+fn invalid(detail: impl std::fmt::Display) -> MesocycleFixtureError {
+    MesocycleFixtureError::Invalid(detail.to_string())
 }
 
-fn kg(value: &str) -> Result<Kg, ProgrammeFixtureError> {
+fn kg(value: &str) -> Result<Kg, MesocycleFixtureError> {
     Kg::try_from(value.to_owned()).map_err(invalid)
 }
 
-fn reps(count: u32) -> Result<RepCount, ProgrammeFixtureError> {
+fn reps(count: u32) -> Result<RepCount, MesocycleFixtureError> {
     RepCount::new(count).map_err(invalid)
 }
 
@@ -60,8 +60,8 @@ fn reps(count: u32) -> Result<RepCount, ProgrammeFixtureError> {
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the identifier is not one the database knows.
-pub fn zone() -> Result<TimeZone, ProgrammeFixtureError> {
+/// [`MesocycleFixtureError`] if the identifier is not one the database knows.
+pub fn zone() -> Result<TimeZone, MesocycleFixtureError> {
     TimeZone::get("Europe/London").map_err(invalid)
 }
 
@@ -79,9 +79,9 @@ pub struct Parameters {
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if any literal here is not a valid value, which
+/// [`MesocycleFixtureError`] if any literal here is not a valid value, which
 /// would be a typo in this file.
-pub fn parameters() -> Result<Parameters, ProgrammeFixtureError> {
+pub fn parameters() -> Result<Parameters, MesocycleFixtureError> {
     use domain::prescription::seed;
     Ok(Parameters {
         planned_with: PlannedWith {
@@ -133,8 +133,8 @@ pub fn parameters() -> Result<Parameters, ProgrammeFixtureError> {
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if a fixture value is invalid or the store refuses.
-pub async fn design(pool: &sqlx::SqlitePool) -> Result<(), ProgrammeFixtureError> {
+/// [`MesocycleFixtureError`] if a fixture value is invalid or the store refuses.
+pub async fn design(pool: &sqlx::SqlitePool) -> Result<(), MesocycleFixtureError> {
     use application::{EquipmentStore as _, ProgrammeStore as _, ProgressionStore as _};
     use infrastructure::store::{SqliteEquipmentStore, SqliteGenerationParameterStore};
 
@@ -175,8 +175,8 @@ pub async fn design(pool: &sqlx::SqlitePool) -> Result<(), ProgrammeFixtureError
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if a literal here is invalid.
-pub fn fills() -> Result<SlotFills, ProgrammeFixtureError> {
+/// [`MesocycleFixtureError`] if a literal here is invalid.
+pub fn fills() -> Result<SlotFills, MesocycleFixtureError> {
     // Static prescriptions, authored rather than derived. Unwrapped here because
     // these literals are non-zero by inspection and a fallible fixture builder
     // would push the panic to every call site.
@@ -222,8 +222,8 @@ pub fn fills() -> Result<SlotFills, ProgrammeFixtureError> {
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the date or load is invalid.
-pub fn anchor() -> Result<Anchor, ProgrammeFixtureError> {
+/// [`MesocycleFixtureError`] if the date or load is invalid.
+pub fn anchor() -> Result<Anchor, MesocycleFixtureError> {
     let from = Date::new(2026, 7, 3).map_err(invalid)?;
     // The 3 July test: a completed single at 90, then a failed 95. The failed
     // load is what the block opens at.
@@ -243,8 +243,8 @@ pub fn anchor() -> Result<Anchor, ProgrammeFixtureError> {
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the store is unavailable.
-pub async fn record_the_week(pool: &sqlx::SqlitePool) -> Result<(), ProgrammeFixtureError> {
+/// [`MesocycleFixtureError`] if the store is unavailable.
+pub async fn record_the_week(pool: &sqlx::SqlitePool) -> Result<(), MesocycleFixtureError> {
     use application::DiaryAuthor as _;
     use domain::schedule::{Allocation, Discipline, PartOfDay, TrainingPattern, TrainingSlot};
 
@@ -295,8 +295,8 @@ pub async fn record_the_week(pool: &sqlx::SqlitePool) -> Result<(), ProgrammeFix
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the list is empty.
-pub fn weekdays() -> Result<TrainingWeek, ProgrammeFixtureError> {
+/// [`MesocycleFixtureError`] if the list is empty.
+pub fn weekdays() -> Result<TrainingWeek, MesocycleFixtureError> {
     TrainingWeek::new(vec![
         (
             jiff::civil::Weekday::Monday,
@@ -314,8 +314,8 @@ pub fn weekdays() -> Result<TrainingWeek, ProgrammeFixtureError> {
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the date or the weekday list is invalid.
-pub fn calendar() -> Result<Calendar, ProgrammeFixtureError> {
+/// [`MesocycleFixtureError`] if the date or the weekday list is invalid.
+pub fn calendar() -> Result<Calendar, MesocycleFixtureError> {
     calendar_running(weekdays()?, &[])
 }
 
@@ -323,12 +323,12 @@ pub fn calendar() -> Result<Calendar, ProgrammeFixtureError> {
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the date is invalid, or if a named week falls
+/// [`MesocycleFixtureError`] if the date is invalid, or if a named week falls
 /// outside the block.
 pub fn calendar_running(
     weekdays: TrainingWeek,
     skipping: &[Skip],
-) -> Result<Calendar, ProgrammeFixtureError> {
+) -> Result<Calendar, MesocycleFixtureError> {
     let start = Date::new(2026, 7, 6).map_err(invalid)?;
     Calendar::new(start, 8, skipping, weekdays, zone()?).map_err(invalid)
 }
@@ -342,11 +342,11 @@ pub fn calendar_running(
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the date or the weekday list is invalid.
+/// [`MesocycleFixtureError`] if the date or the weekday list is invalid.
 pub fn calendar_from(
     start: Date,
     weekdays: TrainingWeek,
-) -> Result<Calendar, ProgrammeFixtureError> {
+) -> Result<Calendar, MesocycleFixtureError> {
     Calendar::new(start, 8, &[], weekdays, zone()?).map_err(invalid)
 }
 
@@ -357,7 +357,7 @@ pub fn calendar_from(
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the programme is inconsistent, which would be a
+/// [`MesocycleFixtureError`] if the programme is inconsistent, which would be a
 /// mistake in this file rather than in the code under test.
 /// What the fixtures call themselves.
 ///
@@ -368,8 +368,8 @@ pub const FIXTURE_NAME: &str = "fixture";
 
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the text is not a usable plan name.
-pub fn name(text: &str) -> Result<PlanName, ProgrammeFixtureError> {
+/// [`MesocycleFixtureError`] if the text is not a usable plan name.
+pub fn name(text: &str) -> Result<PlanName, MesocycleFixtureError> {
     PlanName::try_from(text.to_owned()).map_err(invalid)
 }
 
@@ -381,9 +381,9 @@ pub fn name(text: &str) -> Result<PlanName, ProgrammeFixtureError> {
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the name is unusable or the mesocycles do not
+/// [`MesocycleFixtureError`] if the name is unusable or the mesocycles do not
 /// make a programme.
-pub fn plan(mesocycles: Vec<GymMesocycle>) -> Result<Plan, ProgrammeFixtureError> {
+pub fn plan(mesocycles: Vec<GymMesocycle>) -> Result<Plan, MesocycleFixtureError> {
     named_plan(FIXTURE_NAME, mesocycles)
 }
 
@@ -395,11 +395,11 @@ pub fn plan(mesocycles: Vec<GymMesocycle>) -> Result<Plan, ProgrammeFixtureError
 pub fn named_plan(
     called: &str,
     mesocycles: Vec<GymMesocycle>,
-) -> Result<Plan, ProgrammeFixtureError> {
+) -> Result<Plan, MesocycleFixtureError> {
     Plan::new(
         name(called)?,
         jiff::Timestamp::now(),
-        Some(Programme::new(mesocycles).map_err(invalid)?),
+        Some(Mesocycles::new(mesocycles).map_err(invalid)?),
         None,
     )
     .map_err(invalid)
@@ -410,8 +410,8 @@ pub fn named_plan(
 /// # Errors
 ///
 /// As [`plan`].
-pub fn as_plan(linear: Linear) -> Result<Plan, ProgrammeFixtureError> {
-    plan(vec![entry_test()?, as_programme(linear)])
+pub fn as_plan(linear: Linear) -> Result<Plan, MesocycleFixtureError> {
+    plan(vec![entry_test()?, as_mesocycle(linear)])
 }
 
 /// The 3 July entry test, as the week in front of the block.
@@ -425,8 +425,8 @@ pub fn as_plan(linear: Linear) -> Result<Plan, ProgrammeFixtureError> {
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the week or the test is invalid.
-pub fn entry_test() -> Result<GymMesocycle, ProgrammeFixtureError> {
+/// [`MesocycleFixtureError`] if the week or the test is invalid.
+pub fn entry_test() -> Result<GymMesocycle, MesocycleFixtureError> {
     let start = Date::new(2026, 6, 29).map_err(invalid)?;
     let week = domain::prescription::Test::week(
         start,
@@ -455,8 +455,8 @@ pub fn entry_test() -> Result<GymMesocycle, ProgrammeFixtureError> {
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the week or the test is invalid.
-pub fn entry_test_from(start: Date) -> Result<GymMesocycle, ProgrammeFixtureError> {
+/// [`MesocycleFixtureError`] if the week or the test is invalid.
+pub fn entry_test_from(start: Date) -> Result<GymMesocycle, MesocycleFixtureError> {
     let week = domain::prescription::Test::week(start, &[] as &[Skip], weekdays()?, zone()?)
         .map_err(invalid)?;
     Ok(GymMesocycle::Test(
@@ -487,8 +487,8 @@ pub fn entry_test_from(start: Date) -> Result<GymMesocycle, ProgrammeFixtureErro
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the name or the weekday list is invalid.
-pub fn authored(start: Date, shape: Shape) -> Result<Authored, ProgrammeFixtureError> {
+/// [`MesocycleFixtureError`] if the name or the weekday list is invalid.
+pub fn authored(start: Date, shape: Shape) -> Result<Authored, MesocycleFixtureError> {
     Ok(Authored {
         start,
         pattern: PrimaryPattern::KneeDominant,
@@ -502,14 +502,14 @@ pub fn authored(start: Date, shape: Shape) -> Result<Authored, ProgrammeFixtureE
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if a fixture value is invalid. What the assembly
+/// [`MesocycleFixtureError`] if a fixture value is invalid. What the assembly
 /// itself refuses is returned as an [`AuthoringError`] for the caller to assert
 /// on.
 pub fn authoring(
     answers: Authored,
     interruptions: &[Skip],
-) -> Result<Result<GymMesocycle, AuthoringError>, ProgrammeFixtureError> {
-    Ok(domain::prescription::authored::programme(
+) -> Result<Result<GymMesocycle, AuthoringError>, MesocycleFixtureError> {
+    Ok(domain::prescription::authored::mesocycle(
         answers,
         fills()?,
         interruptions,
@@ -524,21 +524,21 @@ pub fn authoring(
 /// The fixtures below build a `Linear` because that is what they are about;
 /// every port takes a `GymMesocycle`, so this is the one line between them.
 #[must_use]
-pub const fn as_programme(linear: Linear) -> GymMesocycle {
+pub const fn as_mesocycle(linear: Linear) -> GymMesocycle {
     GymMesocycle::Progression(Progression::Linear(linear))
 }
 
-pub fn programme() -> Result<Linear, ProgrammeFixtureError> {
-    programme_skipping(&[])
+pub fn linear() -> Result<Linear, MesocycleFixtureError> {
+    linear_skipping(&[])
 }
 
 /// The same programme, with sessions it does not run.
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the programme is inconsistent, or if a skip
+/// [`MesocycleFixtureError`] if the programme is inconsistent, or if a skip
 /// falls outside the block.
-pub fn programme_skipping(skips: &[Skip]) -> Result<Linear, ProgrammeFixtureError> {
+pub fn linear_skipping(skips: &[Skip]) -> Result<Linear, MesocycleFixtureError> {
     let parameters = parameters()?;
     Linear::new(
         Primary::new(
@@ -558,9 +558,9 @@ pub fn programme_skipping(skips: &[Skip]) -> Result<Linear, ProgrammeFixtureErro
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the programme is inconsistent, which would be a
+/// [`MesocycleFixtureError`] if the programme is inconsistent, which would be a
 /// mistake in this file rather than in the code under test.
-pub fn programme_from(start: Date) -> Result<Linear, ProgrammeFixtureError> {
+pub fn linear_from(start: Date) -> Result<Linear, MesocycleFixtureError> {
     let parameters = parameters()?;
     Linear::new(
         Primary::new(
@@ -589,10 +589,10 @@ pub fn programme_from(start: Date) -> Result<Linear, ProgrammeFixtureError> {
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] only if a literal here is invalid; the programme
+/// [`MesocycleFixtureError`] only if a literal here is invalid; the programme
 /// itself is expected to be refused, which the caller asserts.
 pub fn gating_on_a_role_it_never_runs()
--> Result<Result<GymMesocycle, AuthoringError>, ProgrammeFixtureError> {
+-> Result<Result<GymMesocycle, AuthoringError>, MesocycleFixtureError> {
     // Monday only, and Monday is the easier session — so a gate on the harder
     // one never fires.
     let monday_only = TrainingWeek::new(vec![(
@@ -620,9 +620,9 @@ pub fn gating_on_a_role_it_never_runs()
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] only if a literal here is invalid.
+/// [`MesocycleFixtureError`] only if a literal here is invalid.
 pub fn primary_not_counted_in_reps()
--> Result<Result<Linear, domain::prescription::InconsistentMesocycle>, ProgrammeFixtureError> {
+-> Result<Result<Linear, domain::prescription::InconsistentMesocycle>, MesocycleFixtureError> {
     let parameters = parameters()?;
     Ok(Linear::new(
         Primary::new(
@@ -641,9 +641,9 @@ pub fn primary_not_counted_in_reps()
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] only if a literal here is invalid.
+/// [`MesocycleFixtureError`] only if a literal here is invalid.
 pub fn primary_does_not_fill_its_slot()
--> Result<Result<Linear, domain::prescription::InconsistentMesocycle>, ProgrammeFixtureError> {
+-> Result<Result<Linear, domain::prescription::InconsistentMesocycle>, MesocycleFixtureError> {
     let parameters = parameters()?;
     Ok(Linear::new(
         // Names the knee-dominant slot as primary, but the primary exercise is a
@@ -670,8 +670,8 @@ pub fn primary_does_not_fill_its_slot()
 ///
 /// # Errors
 ///
-/// [`ProgrammeFixtureError`] if the date or the shape is invalid.
-pub fn a_workout_for(date: Date) -> Result<PrescribedWorkout, ProgrammeFixtureError> {
+/// [`MesocycleFixtureError`] if the date or the shape is invalid.
+pub fn a_workout_for(date: Date) -> Result<PrescribedWorkout, MesocycleFixtureError> {
     use domain::{
         gym::{Load, exercise::RepsExercise},
         measure::RepCount,

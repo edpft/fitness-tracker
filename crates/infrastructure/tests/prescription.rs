@@ -22,7 +22,7 @@ use infrastructure::{
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
-use support::{corpus, programme, store};
+use support::{corpus, mesocycle, store};
 
 type Prescriber = Prescribing<
     SqliteExerciseHistory,
@@ -38,7 +38,7 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
     let pool: SqlitePool = connect(&directory.path().join("test.db")).await?;
     // A block's calendar is rebuilt from the operator's week on every read
     // (issue #63), so a store with no week in it cannot hold a plan.
-    programme::record_the_week(&pool).await?;
+    mesocycle::record_the_week(&pool).await?;
 
     let landing = HevyWorkoutLandingStore::new(pool.clone())?;
     let runs = SqliteExtractionRunLog::new(pool.clone());
@@ -71,15 +71,15 @@ async fn ready() -> Result<(Prescriber, tempfile::TempDir), Box<dyn std::error::
     store::canonicalise(&pool).await?;
 
     let plans = SqlitePlanStore::new(pool.clone(), corpus::zone()?);
-    programme::design(&pool).await?;
+    mesocycle::design(&pool).await?;
     Authoring::new(plans)
-        .author(&programme::as_plan(programme::programme()?)?)
+        .author(&mesocycle::as_plan(mesocycle::linear()?)?)
         .await?;
 
     Ok((
         Prescribing::new(PrescriptionPorts {
             history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+            mesocycles: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
             parameters: SqliteGenerationParameterStore::new(pool.clone()),
             prescriptions: SqlitePrescribedWorkoutStore::new(
                 pool.clone(),
@@ -432,13 +432,13 @@ fn the_heavy_session_is_heavier_than_the_light_one() {
 async fn a_second_plan(directory: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let pool = connect(&directory.join("test.db")).await?;
     let spring = Date::constant(2027, 1, 4);
-    programme::design(&pool).await?;
+    mesocycle::design(&pool).await?;
     Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
-        .author(&programme::named_plan(
+        .author(&mesocycle::named_plan(
             "2027-spring",
             vec![
-                programme::entry_test_from(spring)?,
-                programme::as_programme(programme::programme_from(Date::constant(2027, 1, 11))?),
+                mesocycle::entry_test_from(spring)?,
+                mesocycle::as_mesocycle(mesocycle::linear_from(Date::constant(2027, 1, 11))?),
             ],
         )?)
         .await?;

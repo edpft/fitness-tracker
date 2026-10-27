@@ -285,7 +285,7 @@ fn restating_an_absence_can_make_it_illness() {
 /// what it needs from the schedule is that the 14th is gone. A programme takes
 /// the slots it has been allocated and asks which of its days it loses.
 #[test]
-fn the_fourteenth_of_september_is_the_day_the_programme_loses() {
+fn the_fourteenth_of_september_is_the_day_the_mesocycle_loses() {
     let (store, _directory) = opened!();
 
     run!(store.record_pattern(&TrainingPattern::new(

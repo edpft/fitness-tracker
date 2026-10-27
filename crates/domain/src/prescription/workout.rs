@@ -22,7 +22,7 @@ use crate::{measure::Kg, schedule::SessionRole};
 
 use super::{anchor::Anchor, schedule::WeekKind, shape::WorkoutShape};
 
-/// Which authored programme issued a prescription.
+/// Which mesocycle issued a prescription.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MesocycleId(i64);
 
@@ -97,7 +97,7 @@ pub struct PrescribedWorkout {
     session_role: SessionRole,
     week: WeekKind,
     derived_from: DerivedFrom,
-    programme: MesocycleId,
+    mesocycle: MesocycleId,
     issued_at: Timestamp,
 }
 
@@ -108,7 +108,7 @@ impl PrescribedWorkout {
         session_role: SessionRole,
         week: WeekKind,
         derived_from: DerivedFrom,
-        programme: MesocycleId,
+        mesocycle: MesocycleId,
         issued_at: Timestamp,
     ) -> Self {
         Self {
@@ -117,7 +117,7 @@ impl PrescribedWorkout {
             session_role,
             week,
             derived_from,
-            programme,
+            mesocycle,
             issued_at,
         }
     }
@@ -148,8 +148,8 @@ impl PrescribedWorkout {
         self.derived_from.anchor()
     }
 
-    pub const fn programme(&self) -> MesocycleId {
-        self.programme
+    pub const fn mesocycle(&self) -> MesocycleId {
+        self.mesocycle
     }
 
     pub const fn issued_at(&self) -> Timestamp {

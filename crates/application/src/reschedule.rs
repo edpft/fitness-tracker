@@ -21,7 +21,7 @@
 
 use domain::{
     cycling::{CyclingMesocycle, CyclingMesocycleId},
-    plan::{Occupies, Plan, PlanId, PlanName, PlanWindow, Programme},
+    plan::{Mesocycles, Occupies, Plan, PlanId, PlanName, PlanWindow},
     planner::{self, Missed, Rerun, RerunOrdinal},
     prescription::{GymMesocycle, MesocycleId},
     schedule::{Diary, Discipline, SessionRole},
@@ -125,8 +125,8 @@ enum Pick {
 }
 
 impl Pick {
-    fn find<M: Occupies>(self, programme: &Programme<M>) -> Option<usize> {
-        let spans: Vec<_> = programme.mesocycles().map(Occupies::span).collect();
+    fn find<M: Occupies>(self, mesocycles: &Mesocycles<M>) -> Option<usize> {
+        let spans: Vec<_> = mesocycles.mesocycles().map(Occupies::span).collect();
         match self {
             Self::On(date) => spans.iter().position(|span| span.covers(date)),
             Self::Preceding(date) => spans.iter().rposition(|span| span.end() <= date),
@@ -137,8 +137,8 @@ impl Pick {
 
 /// The authored start and the rescheduled mesocycle at one position.
 fn located<M: Occupies + Clone>(
-    authored: &Programme<M>,
-    now: &Programme<M>,
+    authored: &Mesocycles<M>,
+    now: &Mesocycles<M>,
     pick: Pick,
 ) -> Option<(Date, M)> {
     let at = pick.find(now)?;

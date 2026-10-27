@@ -168,7 +168,7 @@ where
 
         let previous = plan
             .cycling()
-            .and_then(|programme| programme.mesocycles().last())
+            .and_then(|side| side.mesocycles().last())
             .filter(|last| last.start() >= macrocycle.start())
             .and_then(|last| self.cycling_of(last));
         Ok(macrocycle
@@ -237,7 +237,7 @@ where
     ) -> Result<Vec<GymMesocycle>, CommitError> {
         let before = plan
             .gym()
-            .and_then(|programme| programme.mesocycles().last())
+            .and_then(|side| side.mesocycles().last())
             .ok_or_else(|| CommitError::NothingToCarryOn {
                 detail: "the plan holds no gym mesocycle to carry on from".to_owned(),
             })?;
@@ -312,7 +312,7 @@ where
                     .collect()
             });
             built.push(
-                domain::prescription::authored::programme(
+                domain::prescription::authored::mesocycle(
                     answers,
                     before.fills().clone(),
                     &skips,

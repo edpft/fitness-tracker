@@ -24,7 +24,7 @@ use crate::{Failure, catalogue, config, exit, output};
 ///
 /// **Only the latest of each.** Superseded versions stay in the store, and a
 /// plan made before one was superseded goes on reading it.
-pub async fn parameters(database: &Path) -> Result<(), Failure> {
+pub async fn programme(database: &Path) -> Result<(), Failure> {
     let store = Store::open(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
@@ -94,7 +94,7 @@ pub async fn standing(
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    output::programme_standing(&standing);
+    output::mesocycle_standing(&standing);
     Ok(())
 }
 
@@ -108,10 +108,10 @@ pub async fn prescribe(
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let programmes = prescribing::programmes(&store, zone).await?;
+    let mesocycles = prescribing::mesocycles(&store, zone).await?;
     let prescriber = prescribing::prescriber(&store, zone).await?;
 
-    let Some(date) = resolve(&programmes, zone, date).await? else {
+    let Some(date) = resolve(&mesocycles, zone, date).await? else {
         return Ok(());
     };
     let issued = prescriber
@@ -138,7 +138,7 @@ pub async fn prescribe(
 /// answers for the date it was given, so a day the block skips is refused when
 /// the prescription is derived. Only the porcelain searches — see [`next`].
 async fn resolve(
-    programmes: &(impl MesocycleStore + Sync),
+    mesocycles: &(impl MesocycleStore + Sync),
     zone: &OperatorZone,
     given: Option<&str>,
 ) -> Result<Option<Date>, Failure> {
@@ -147,7 +147,7 @@ async fn resolve(
             .map(Some)
             .map_err(|error| Failure::usage(&error));
     }
-    search(programmes, today(zone)).await
+    search(mesocycles, today(zone)).await
 }
 
 /// The first session at or after a date, for `gym next`.
@@ -169,20 +169,20 @@ pub async fn next(
     let store = Store::open(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    let programmes = prescribing::programmes(&store, zone).await?;
+    let mesocycles = prescribing::mesocycles(&store, zone).await?;
 
     let from = match from {
         Some(text) => config::named_date(text).map_err(|error| Failure::usage(&error))?,
         None => today(zone),
     };
-    search(&programmes, from).await
+    search(&mesocycles, from).await
 }
 
 async fn search(
-    programmes: &(impl MesocycleStore + Sync),
+    mesocycles: &(impl MesocycleStore + Sync),
     from: Date,
 ) -> Result<Option<Date>, Failure> {
-    let found = application::prescribe::next_session(programmes, from)
+    let found = application::prescribe::next_session(mesocycles, from)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
     match found {
@@ -217,8 +217,8 @@ pub async fn deliver(
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let programmes = prescribing::programmes(&store, zone).await?;
-    let Some(date) = resolve(&programmes, zone, date).await? else {
+    let mesocycles = prescribing::mesocycles(&store, zone).await?;
+    let Some(date) = resolve(&mesocycles, zone, date).await? else {
         return Ok(());
     };
 
@@ -262,10 +262,10 @@ pub async fn compare(
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    let programmes = prescribing::programmes(&store, zone).await?;
+    let mesocycles = prescribing::mesocycles(&store, zone).await?;
     let comparing = prescribing::comparing(&store, zone);
 
-    let Some(date) = resolve(&programmes, zone, date).await? else {
+    let Some(date) = resolve(&mesocycles, zone, date).await? else {
         return Ok(());
     };
     let comparison = comparing

@@ -89,8 +89,8 @@ impl Filled<'_> {
 /// missing is more use than leaving it out.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Unfilled {
-    #[error("this plan programmes no {discipline}")]
-    NoProgramme { discipline: Discipline },
+    #[error("this plan trains no {discipline}")]
+    NotTrained { discipline: Discipline },
     #[error("no {discipline} mesocycle of this plan covers {date}")]
     NoMesocycle { discipline: Discipline, date: Date },
     #[error(transparent)]
@@ -530,10 +530,10 @@ pub fn state_of(
 fn fill(plan: &Plan, slot: ScheduledSlot) -> Result<Filled<'_>, Unfilled> {
     match slot.discipline {
         Discipline::Gym => {
-            let programme = plan.gym().ok_or(Unfilled::NoProgramme {
+            let side = plan.gym().ok_or(Unfilled::NotTrained {
                 discipline: Discipline::Gym,
             })?;
-            let (_, mesocycle) = programme.on(slot.date).ok_or(Unfilled::NoMesocycle {
+            let (_, mesocycle) = side.on(slot.date).ok_or(Unfilled::NoMesocycle {
                 discipline: Discipline::Gym,
                 date: slot.date,
             })?;
@@ -545,10 +545,10 @@ fn fill(plan: &Plan, slot: ScheduledSlot) -> Result<Filled<'_>, Unfilled> {
             Ok(Filled::Gym { mesocycle, week })
         }
         Discipline::Cycling => {
-            let programme = plan.cycling().ok_or(Unfilled::NoProgramme {
+            let side = plan.cycling().ok_or(Unfilled::NotTrained {
                 discipline: Discipline::Cycling,
             })?;
-            let (_, mesocycle) = programme.on(slot.date).ok_or(Unfilled::NoMesocycle {
+            let (_, mesocycle) = side.on(slot.date).ok_or(Unfilled::NoMesocycle {
                 discipline: Discipline::Cycling,
                 date: slot.date,
             })?;
@@ -943,7 +943,7 @@ pub enum Unreschedulable {
     #[error(transparent)]
     Calendar(#[from] crate::prescription::InvalidCalendar),
     #[error(transparent)]
-    Programme(#[from] crate::plan::InvalidProgramme),
+    Mesocycles(#[from] crate::plan::InvalidMesocycles),
     #[error(transparent)]
     Plan(#[from] crate::plan::EmptyPlan),
 }
@@ -988,29 +988,29 @@ pub fn rescheduled(plan: &Plan, reruns: &[Rerun], diary: &Diary) -> Result<Plan,
 
     let gym = plan
         .gym()
-        .map(|programme| -> Result<_, Unreschedulable> {
+        .map(|side| -> Result<_, Unreschedulable> {
             let mut moved = Vec::new();
             let mut cursor: Option<Date> = None;
-            for mesocycle in programme.mesocycles() {
+            for mesocycle in side.mesocycles() {
                 let next = gym_rescheduled(mesocycle, cursor, &gym_weeks, diary)?;
                 cursor = Some(crate::plan::Occupies::span(&next).end());
                 moved.push(next);
             }
-            Ok(crate::plan::Programme::new(moved)?)
+            Ok(crate::plan::Mesocycles::new(moved)?)
         })
         .transpose()?;
 
     let cycling = plan
         .cycling()
-        .map(|programme| -> Result<_, Unreschedulable> {
+        .map(|side| -> Result<_, Unreschedulable> {
             let mut moved = Vec::new();
             let mut cursor: Option<Date> = None;
-            for mesocycle in programme.mesocycles() {
+            for mesocycle in side.mesocycles() {
                 let next = cycling_rescheduled(mesocycle, cursor, &cycling_weeks);
                 cursor = Some(crate::plan::Occupies::span(&next).end());
                 moved.push(next);
             }
-            Ok(crate::plan::Programme::new(moved)?)
+            Ok(crate::plan::Mesocycles::new(moved)?)
         })
         .transpose()?;
 

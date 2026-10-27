@@ -1252,7 +1252,7 @@ pub struct UnderivableSlot {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum UnderivableReason {
-    #[error("never performed, and the programme sets no starting load")]
+    #[error("never performed, and the mesocycle sets no starting load")]
     NeverPerformed,
     /// Performed only where a watch's classifier named it.
     ///
@@ -1273,7 +1273,7 @@ pub enum UnderivableReason {
     #[error("the item it is supersetted with could not be derived")]
     GroupWithheld,
     /// The programme's span and duration do not make a ladder.
-    #[error("the programme's span and duration do not make a ladder")]
+    #[error("the mesocycle's span and duration do not make a ladder")]
     NoLadder,
     /// A provided cycle opening from the one before it, resolved to nothing.
     ///
@@ -1292,13 +1292,13 @@ pub enum UnderivableReason {
     /// from — or one whose predecessor trained a different lift, whose maximum
     /// says nothing about this one (decision 0013).
     #[error(
-        "this test takes its target from the programme before it, and there is          none to take it from"
+        "this test takes its target from the mesocycle before it, and there is          none to take it from"
     )]
     NoTarget,
     /// The light session of a test week runs the predecessor's session, and
     /// there is no predecessor whose progression could say at what load.
     #[error(
-        "the other session of a test week is the previous programme's, and          there is no previous programme"
+        "the other session of a test week is the previous mesocycle's, and          there is no previous mesocycle"
     )]
     NoPredecessor,
     /// A block's entry-test week states no load for its other session, which is
@@ -1856,7 +1856,7 @@ pub trait MesocycleStore {
     /// definition does not return.
     ///
     /// **Usually the previous element of a list rather than a query.** Inside a
-    /// plan `Programme::preceding` answers it without a store at all; this is for
+    /// plan `Mesocycles::preceding` answers it without a store at all; this is for
     /// the mesocycle at the very start of a plan, whose predecessor belongs to
     /// the plan before.
     ///
@@ -2502,7 +2502,7 @@ pub struct LadderStanding {
     /// the number the operator reads. The store's row id counts across every
     /// plan, so the first mesocycle of a second plan would print as the third.
     pub ordinal: MesocycleOrdinal,
-    pub programme: GymMesocycle,
+    pub mesocycle: GymMesocycle,
     /// The versions the plan was planned with.
     pub planned_with: PlannedWith,
     /// The load scales true on the date asked about.

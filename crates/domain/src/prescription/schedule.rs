@@ -153,7 +153,7 @@ impl fmt::Display for WeekKind {
 /// Why a date could not be placed in the block.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NotScheduled {
-    #[error("{date} is a {weekday}; this programme runs {programmed}")]
+    #[error("{date} is a {weekday}; this mesocycle runs {programmed}")]
     NotAProgrammedDay {
         date: Date,
         weekday: String,

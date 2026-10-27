@@ -67,7 +67,7 @@ async fn ready() -> Fallible<(
     let reader = SqliteCanonicalGymSessionStore::new(pool.clone());
     let prescriber = Prescribing::new(PrescriptionPorts {
         history: SqliteExerciseHistory::new(pool.clone()),
-        programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+        mesocycles: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), "Europe/London".to_owned()),
         lifecycle: SqlitePrescriptionDeliveryStore::new(pool),

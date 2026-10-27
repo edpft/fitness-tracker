@@ -475,14 +475,14 @@ fn short(id: &str) -> String {
 }
 
 /// What was authored.
-pub fn programme_authored(
+pub fn mesocycle_authored(
     id: domain::plan::PlanId,
     authored: application::Authored,
     plan: &domain::plan::Plan,
-    programme: &GymMesocycle,
+    mesocycle: &GymMesocycle,
     parameters: &crate::wizard::Ready,
 ) {
-    let calendar = programme.calendar();
+    let calendar = mesocycle.calendar();
     // Which of the two it was, first and in plain words. A name the store has
     // not seen starts a plan; one it has corrects that plan — and a typo in the
     // name is a new plan, so the operator has to be able to see that happen
@@ -500,13 +500,13 @@ pub fn programme_authored(
     }
     println!(
         "  plan {id}, {} gym mesocycle(s)",
-        plan.gym().map_or(0, domain::plan::Programme::count),
+        plan.gym().map_or(0, domain::plan::Mesocycles::count),
     );
     println!(
         "  this one ({}) — {}, {} primary, {} {} from {}",
-        programme.template(),
-        programme.primary_exercise(),
-        programme.primary(),
+        mesocycle.template(),
+        mesocycle.primary_exercise(),
+        mesocycle.primary(),
         calendar.duration_weeks(),
         if calendar.duration_weeks() == 1 {
             "week"
@@ -515,7 +515,7 @@ pub fn programme_authored(
         },
         calendar.start(),
     );
-    if let Some(gating) = programme.gating_role() {
+    if let Some(gating) = mesocycle.gating_role() {
         println!("  gating on the {gating} session");
     }
     let skipped: Vec<String> = calendar
@@ -539,7 +539,7 @@ pub fn programme_authored(
             calendar.calendar_weeks(),
         );
     }
-    authored_plan(programme, &parameters.planned_with);
+    authored_plan(mesocycle, &parameters.planned_with);
     authored_parameters(&parameters.planned_with, &parameters.scales);
 }
 
@@ -548,9 +548,9 @@ pub fn programme_authored(
 /// Split out because it is three unrelated reports sharing a `match`, and
 /// because what the versions say is a separate question from what the
 /// programme does with them.
-fn authored_plan(programme: &GymMesocycle, with: &application::PlannedWith) {
-    let calendar = programme.calendar();
-    match programme {
+fn authored_plan(mesocycle: &GymMesocycle, with: &application::PlannedWith) {
+    let calendar = mesocycle.calendar();
+    match mesocycle {
         GymMesocycle::Test(test) => {
             println!(
                 "  a test at {} — no anchor, because producing one is what it does",
@@ -791,17 +791,17 @@ pub fn parameters_in_force(
 ///
 /// The `of anchor` column is read back out of the load rather than driving it,
 /// which is what lets the climb be seen passing 100% of the max it started from.
-pub fn programme_standing(standing: &application::LadderStanding) {
-    let programme = &standing.programme;
-    let calendar = programme.calendar();
+pub fn mesocycle_standing(standing: &application::LadderStanding) {
+    let mesocycle = &standing.mesocycle;
+    let calendar = mesocycle.calendar();
 
     println!(
         "plan \"{}\" — mesocycle {} ({}) — {}, {} primary, {} {} from {}",
         standing.plan,
         standing.ordinal,
-        programme.template(),
-        programme.primary_exercise(),
-        programme.primary(),
+        mesocycle.template(),
+        mesocycle.primary_exercise(),
+        mesocycle.primary(),
         calendar.duration_weeks(),
         if calendar.duration_weeks() == 1 {
             "week"
@@ -810,7 +810,7 @@ pub fn programme_standing(standing: &application::LadderStanding) {
         },
         calendar.start(),
     );
-    if let Some(gating) = programme.gating_role() {
+    if let Some(gating) = mesocycle.gating_role() {
         println!("gating on the {gating} session");
     }
     match standing.history_through {
@@ -820,7 +820,7 @@ pub fn programme_standing(standing: &application::LadderStanding) {
         None => println!("history through — nothing performed yet"),
     }
 
-    match programme {
+    match mesocycle {
         GymMesocycle::Test(test) => test_standing(test, standing),
         GymMesocycle::Progression(Progression::Linear(linear)) => {
             linear_standing(linear, standing);
@@ -879,7 +879,7 @@ fn test_standing(test: &domain::prescription::Test, standing: &application::Ladd
              step apart"
         ),
         None => println!(
-            "no target: this test takes one from the programme before it, and \
+            "no target: this test takes one from the mesocycle before it, and \
              there is none in the same lift"
         ),
     }
@@ -903,7 +903,7 @@ fn test_standing(test: &domain::prescription::Test, standing: &application::Ladd
             provided.programme(),
             provided,
         ),
-        None => println!("  the {role} session is the test; the other is the previous programme's"),
+        None => println!("  the {role} session is the test; the other is the previous mesocycle's"),
     }
 }
 
@@ -1789,7 +1789,7 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
     }
 
     println!();
-    println!("next: add a programme — fitness programme add");
+    println!("next: add a mesocycle — fitness mesocycle add");
 }
 
 // --- The operator's week ----------------------------------------------------

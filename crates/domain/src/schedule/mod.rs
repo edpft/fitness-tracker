@@ -339,7 +339,7 @@ pub struct TrainingWeek {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("a programme that runs on no day of the week issues nothing")]
+#[error("a training week with no day in it issues nothing")]
 pub struct NoTrainingDays;
 
 impl TrainingWeek {

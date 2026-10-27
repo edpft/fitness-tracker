@@ -1,4 +1,4 @@
-//! The programme page: what fills each slot of the mesocycle in force, and a
+//! The fills page: what fills each slot of the mesocycle in force, and a
 //! form to change a fill from a date (#454).
 //!
 //! **A change names the exercise, what assists it and what loads it.** Only a
@@ -18,7 +18,7 @@ use domain::{
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
-const TITLE: &str = "Programme";
+const TITLE: &str = "Fills";
 
 const STYLE: &str = "
 form.fill { display: grid; gap: 0.4rem; margin: 0.25rem 0 1.25rem; }
@@ -66,7 +66,7 @@ pub fn page(
             }
             body {
                 main {
-                    (crate::page::menu("/programme"))
+                    (crate::page::menu("/fills"))
                     h1 { (TITLE) }
                     @if let Some(said) = said { p.said { (said) } }
                     @match found {
@@ -158,7 +158,7 @@ fn form(
     let assisted = latest.and_then(|change| change.assisted_by.as_ref());
     let loaded = latest.and_then(|change| change.loaded_by);
     html! {
-        form.fill method="post" action="/programme" {
+        form.fill method="post" action="/fills" {
             input type="hidden" name="slot" value=(slot.as_str());
             @if let Some(intensity) = intensity {
                 input type="hidden" name="intensity" value=(intensity.as_str());
@@ -254,7 +254,7 @@ pub fn unreadable(error: &str) -> Markup {
             }
             body {
                 main {
-                    (crate::page::menu("/programme"))
+                    (crate::page::menu("/fills"))
                     p.failed { "the store could not be read: " (error) }
                 }
             }

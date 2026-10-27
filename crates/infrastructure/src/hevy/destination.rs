@@ -43,7 +43,7 @@
 //!
 //! ## The folder
 //!
-//! One per programme, resolved by title on the way past: found if it exists,
+//! One per plan, resolved by title on the way past: found if it exists,
 //! created if it does not. That is the only concession to the app's own shape in
 //! this module, and it is a rendering decision — where a reader looks for the
 //! session — rather than anything the domain knows about.
@@ -51,7 +51,7 @@
 //! **And it is outside the fingerprint.** [`fingerprint`] answers what a routine
 //! *says*, so that a stale rendering can be told from a current one (#343); the
 //! folder is where it is filed, and resolving one to find out would create it on
-//! every run that had nothing to send. A programme renamed therefore moves the
+//! every run that had nothing to send. A plan renamed therefore moves the
 //! folder on the next real delivery rather than prompting one.
 
 use std::{sync::OnceLock, time::Duration};
@@ -148,7 +148,7 @@ impl HevyRoutines {
         format!("{ROUTINES_ENDPOINT}/{reference}")
     }
 
-    /// The folder for a programme: the one with that title, or a new one.
+    /// The folder for a plan: the one with that title, or a new one.
     async fn folder_for(&self, title: &str) -> Result<Option<i64>, DeliveryError> {
         if let Some(existing) = self.find_folder(title).await? {
             return Ok(Some(existing));

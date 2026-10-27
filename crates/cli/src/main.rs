@@ -158,7 +158,7 @@ fn command() -> ClapCommand {
         )
         .subcommand(
             ClapCommand::new("status")
-                .about("Report the most recent successful extraction, and the programme in force")
+                .about("Report the most recent successful extraction, and the mesocycle in force")
                 .arg(stream_argument())
                 // Optional here, unlike everywhere else it appears. § 34 forbids a
                 // default and § 38 wants staleness observable even when things are
@@ -175,8 +175,8 @@ fn command() -> ClapCommand {
         .subcommand(prescribe_command())
         .subcommand(deliver_command())
         .subcommand(compare_command())
+        .subcommand(mesocycle_command())
         .subcommand(programme_command())
-        .subcommand(parameters_command())
         .subcommand(schedule_command())
         .subcommand(canonicalise_command())
         .subcommand(
@@ -413,10 +413,10 @@ fn corrections_command() -> ClapCommand {
 /// 0025 settled that Peloton should be both, and it is not yet. Adding a
 /// catalogue entry pointing at streams that do not exist would make the shape
 /// look finished while `next` could only ever prescribe.
-/// `plan` — generate a hybrid programme from the providers and the constraints.
+/// `plan` — generate a plan from the providers and the constraints.
 fn plan_command() -> ClapCommand {
     ClapCommand::new("plan")
-        .about("Generate a hybrid programme from a gym provider and a cycling provider")
+        .about("Generate a plan from a gym provider and a cycling provider")
         .arg(
             Arg::new("microcycles")
                 .long("microcycles")
@@ -518,7 +518,7 @@ fn prescribe_command() -> ClapCommand {
         ))
 }
 
-/// Add the programme, or report the one in force.
+/// Add a gym mesocycle, or report the one in force.
 /// Prepare a machine.
 ///
 /// **First in the list because it is first in the order.** An operator who has
@@ -615,26 +615,26 @@ fn deliver_command() -> ClapCommand {
         .arg(timezone_argument())
 }
 
-fn programme_command() -> ClapCommand {
-    ClapCommand::new("programme")
-        .about("Add a programme, or report the one in force")
+fn mesocycle_command() -> ClapCommand {
+    ClapCommand::new("mesocycle")
+        .about("Add a gym mesocycle, or report the one in force")
         // Global across `add` and `show`, so `--timezone` may be typed on
         // either side of the subcommand. Both need it and neither has a default.
         .arg(timezone_argument().global(true))
         .subcommand_required(true)
-        .subcommand(ClapCommand::new("add").about(
-            "Ask what the block is and store it. It supersedes the previous \
-             programme of that name",
-        ))
+        .subcommand(
+            ClapCommand::new("add")
+                .about("Ask what the block is and store it in the plan of the name given"),
+        )
         .subcommand(
             ClapCommand::new("show")
                 .about(
-                    "Report the programme in force on a date, its plan week by \
-                     week, and which rung the record puts you on",
+                    "Report the mesocycle in force on a date, week by week, and \
+                     which rung the record puts you on",
                 )
                 .arg(Arg::new("date").long("date").value_name("date").help(
                     "The day to report on, as YYYY-MM-DD. Defaults to today — \
-                     programmes succeed one another, so which one answers \
+                     mesocycles succeed one another, so which one answers \
                      depends on the date",
                 )),
         )
@@ -646,8 +646,8 @@ fn programme_command() -> ClapCommand {
 /// no way to change one from here yet; a `change` that only some of them
 /// accepted would be worse than an honest gap. What this closes is decision
 /// 0015's own guard — a shipped default is never invisible.
-fn parameters_command() -> ClapCommand {
-    ClapCommand::new("parameters")
+fn programme_command() -> ClapCommand {
+    ClapCommand::new("programme")
         .about("Report the numbers every prescription is generated against")
         .subcommand_required(true)
         .subcommand(ClapCommand::new("show").about(
@@ -1045,9 +1045,9 @@ async fn authored_command(
             };
             Some(plan_command_run(sub, database, &zone, credentials).await)
         }
-        "parameters" => Some(match sub.subcommand() {
-            Some(("show", _)) => prescribing::parameters(database).await,
-            _ => Err(Failure::message("no parameters command given", exit::USAGE)),
+        "programme" => Some(match sub.subcommand() {
+            Some(("show", _)) => prescribing::programme(database).await,
+            _ => Err(Failure::message("no programme command given", exit::USAGE)),
         }),
         name if catalogue::discipline(name).is_some() => {
             Some(discipline_command_run(name, sub, credentials, stated_timezone, database).await)
@@ -1060,12 +1060,12 @@ async fn authored_command(
             Some(("show", _)) => scheduling::show(database).await,
             _ => Err(Failure::message("no schedule command given", exit::USAGE)),
         }),
-        "programme" => {
+        "mesocycle" => {
             let zone = match zone(sub) {
                 Ok(zone) => zone,
                 Err(error) => return Some(Err(error.into())),
             };
-            Some(programme_command_run(sub, database, &zone).await)
+            Some(mesocycle_command_run(sub, database, &zone).await)
         }
         _ => None,
     }
@@ -1371,10 +1371,10 @@ pub(crate) fn to_peloton(
     }
 }
 
-/// `programme add` and `programme show`, once the zone is in hand.
+/// `mesocycle add` and `mesocycle show`, once the zone is in hand.
 ///
 /// Its own function only because the arm outgrew the match it lived in.
-async fn programme_command_run(
+async fn mesocycle_command_run(
     sub: &ArgMatches,
     database: &Path,
     zone: &domain::normalised::OperatorZone,
@@ -1389,7 +1389,7 @@ async fn programme_command_run(
             )
             .await
         }
-        _ => Err(Failure::message("no programme command given", exit::USAGE)),
+        _ => Err(Failure::message("no mesocycle command given", exit::USAGE)),
     }
 }
 

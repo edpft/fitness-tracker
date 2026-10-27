@@ -251,7 +251,7 @@ fn a_test_that_never_runs_its_session_is_refused() {
         panic!("the seed builds")
     };
 
-    let refused = domain::prescription::authored::programme(
+    let refused = domain::prescription::authored::mesocycle(
         Authored {
             start,
             pattern: PrimaryPattern::KneeDominant,
@@ -369,17 +369,17 @@ fn a_test_gates_nothing_and_a_block_gates_a_role() {
     ) else {
         panic!("a front squat single on the heavy day is a test")
     };
-    let programme = GymMesocycle::Test(test);
-    assert_eq!(programme.template(), "test");
-    assert_eq!(programme.gating_role(), None, "and gates nothing");
+    let mesocycle = GymMesocycle::Test(test);
+    assert_eq!(mesocycle.template(), "test");
+    assert_eq!(mesocycle.gating_role(), None, "and gates nothing");
 
     let Ok(Ok(block)) = block(None) else {
         panic!("a tested anchor makes a block")
     };
-    let programme = GymMesocycle::Progression(Progression::BlockPeriodisation(block));
-    assert_eq!(programme.template(), "block");
+    let mesocycle = GymMesocycle::Progression(Progression::BlockPeriodisation(block));
+    assert_eq!(mesocycle.template(), "block");
     assert_eq!(
-        programme.gating_role(),
+        mesocycle.gating_role(),
         Some(SessionRole::new(Relative::Higher, Relative::Lower))
     );
 }

@@ -327,7 +327,7 @@ pub fn next_test(plans: &[Plan], after: Date) -> Option<NextTest> {
     let mut mesocycles: Vec<&GymMesocycle> = plans
         .iter()
         .filter_map(Plan::gym)
-        .flat_map(crate::plan::Programme::mesocycles)
+        .flat_map(crate::plan::Mesocycles::mesocycles)
         .collect();
     mesocycles.sort_by_key(|mesocycle| mesocycle.span().start());
     let mut sessions = 0_u32;
