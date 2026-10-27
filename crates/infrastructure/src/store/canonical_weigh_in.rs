@@ -187,16 +187,43 @@ impl CanonicalWeighInStore for SqliteCanonicalWeighInStore {
 }
 
 /// Body weight, read back for relative strength: one weigh-in per weighing.
+///
+/// **And its fat-free mass** (#253), as body composition works it out: what an
+/// account stated, or else the mass that account weighed less its fat, stated
+/// as a mass or a percentage (the operator, 2026-10-27). A stated figure comes
+/// first, then the account the mass came from.
 impl WeighInHistory for SqliteCanonicalWeighInStore {
     async fn weigh_ins(&self) -> Result<Vec<Weighed>, StoreError> {
         let rows = sqlx::query!(
             r#"
-            SELECT measured_at_utc AS "measured_at_utc: String",
-                   zone AS "zone: String",
-                   on_day AS "on_day: String",
-                   mass_grams AS "mass_grams!: i64"
-            FROM canonical_weigh_in
-            ORDER BY COALESCE(measured_at_utc, on_day), id
+            SELECT c.measured_at_utc AS "measured_at_utc: String",
+                   c.zone AS "zone: String",
+                   c.on_day AS "on_day: String",
+                   c.mass_grams AS "mass_grams!: i64",
+                   (SELECT CASE
+                             WHEN stated.mass_grams IS NOT NULL THEN stated.mass_grams
+                             WHEN fat.mass_grams IS NOT NULL
+                                 THEN w.mass_grams - fat.mass_grams
+                             ELSE w.mass_grams * (1000 - fat.percentage_tenths) / 1000
+                           END
+                    FROM canonical_weigh_in_account a
+                    JOIN weigh_in w ON w.id = a.weigh_in
+                    LEFT JOIN body_composition stated
+                      ON stated.weigh_in = a.weigh_in AND stated.component = 'fat-free'
+                    LEFT JOIN body_composition fat
+                      ON fat.weigh_in = a.weigh_in AND fat.component = 'fat'
+                    WHERE a.canonical = c.id
+                      AND (stated.mass_grams IS NOT NULL
+                           OR (fat.mass_grams IS NOT NULL AND fat.mass_grams < w.mass_grams)
+                           OR (fat.percentage_tenths IS NOT NULL
+                               AND fat.percentage_tenths < 1000))
+                    ORDER BY stated.mass_grams IS NULL,
+                             a.weigh_in <> (SELECT m.mass_weigh_in FROM canonical_weigh_in m
+                                            WHERE m.id = a.canonical),
+                             a.weigh_in
+                    LIMIT 1) AS "fat_free_grams: i64"
+            FROM canonical_weigh_in c
+            ORDER BY COALESCE(c.measured_at_utc, c.on_day), c.id
             "#
         )
         .fetch_all(&self.pool)
@@ -212,6 +239,7 @@ impl WeighInHistory for SqliteCanonicalWeighInStore {
                         row.on_day.as_deref(),
                     )?,
                     mass: mass(row.mass_grams)?,
+                    fat_free: row.fat_free_grams.map(mass).transpose()?,
                 })
             })
             .collect()

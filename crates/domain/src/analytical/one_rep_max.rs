@@ -1,8 +1,14 @@
 //! Estimated one-rep maximum as a trend, from one test to the next (#420).
 //!
 //! **Absolute strength**: each session's estimate as [`session_estimate`]
-//! reads it, with no body weight in it (the operator, 2026-10-13). Relative
-//! strength is #253.
+//! reads it, with no body weight in it (the operator, 2026-10-13).
+//!
+//! **And relative strength, drawn the same way** (#253, the operator,
+//! 2026-10-27): the same estimate over the body weight or the fat-free mass
+//! of the session's own weigh-in, as [`weigh_in_for`] finds it. A session
+//! with no weigh-in that day has no ratio, and is a gap rather than a point;
+//! the stretches are still the ones the tests mark, whether or not a test was
+//! weighed.
 //!
 //! **The question is how well the submaximal sets predict the test they lead
 //! up to** (the operator, 2026-10-14). So a stretch runs from one test to the
@@ -32,7 +38,9 @@
 
 use jiff::civil::Date;
 
-use super::{Estimate, OneRepMaxEstimator, session_estimate};
+use super::{
+    Estimate, OneRepMaxEstimator, RelativeStrength, Weighed, session_estimate, weigh_in_for,
+};
 use crate::{
     canonical::Attributed,
     gym::{
@@ -77,8 +85,82 @@ pub enum Reading {
     Tested { failed: Kg },
 }
 
-/// The least-squares line through a stretch's estimates, in grams against
-/// sessions since its test.
+/// A figure a stretch is drawn through: a session's estimate, or that
+/// estimate over a body mass.
+pub trait Figure: Copy {
+    fn on(&self) -> Date;
+    fn reading(&self) -> Reading;
+    /// What the line is fitted to: grams for a mass, basis points for a ratio.
+    fn value(&self) -> Option<f64>;
+}
+
+impl Figure for Point {
+    fn on(&self) -> Date {
+        self.on
+    }
+
+    fn reading(&self) -> Reading {
+        self.reading
+    }
+
+    fn value(&self) -> Option<f64> {
+        grams(self.estimate.one_rep_max.as_grams())
+    }
+}
+
+/// What a relative figure is read against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Against {
+    BodyWeight,
+    FatFreeMass,
+}
+
+impl Against {
+    /// Both, in the order they are shown.
+    pub const ALL: [Self; 2] = [Self::BodyWeight, Self::FatFreeMass];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::BodyWeight => "body weight",
+            Self::FatFreeMass => "fat-free mass",
+        }
+    }
+
+    /// The mass a weigh-in gives for it, where it gives one.
+    pub const fn of(self, weigh_in: &Weighed) -> Option<Kg> {
+        match self {
+            Self::BodyWeight => Some(weigh_in.mass),
+            Self::FatFreeMass => weigh_in.fat_free,
+        }
+    }
+}
+
+/// One session's estimate over the body mass it is read against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Relative {
+    pub point: Point,
+    pub body: Kg,
+    pub ratio: RelativeStrength,
+}
+
+impl Figure for Relative {
+    fn on(&self) -> Date {
+        self.point.on
+    }
+
+    fn reading(&self) -> Reading {
+        self.point.reading
+    }
+
+    fn value(&self) -> Option<f64> {
+        u32::try_from(self.ratio.as_basis_points())
+            .ok()
+            .map(f64::from)
+    }
+}
+
+/// The least-squares line through a stretch's estimates, in the figure's own
+/// unit against sessions since its test.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Line {
     first: i32,
@@ -93,7 +175,7 @@ pub struct Line {
 }
 
 impl Line {
-    /// The line through `points`, each a session and a mass in grams; `None`
+    /// The line through `points`, each a session and a value; `None`
     /// with fewer than three, or with all of them in one session.
     pub fn through(points: &[(i32, f64)]) -> Option<Self> {
         let count = u32::try_from(points.len())
@@ -143,18 +225,18 @@ impl Line {
         self.last
     }
 
-    /// The line's mass at a session, in grams.
+    /// The line's value at a session.
     pub fn at(&self, day: i32) -> f64 {
         self.slope.mul_add(f64::from(day), self.intercept)
     }
 
-    /// How far either side of [`Self::at`] the band runs at a session, in grams.
+    /// How far either side of [`Self::at`] the band runs at a session.
     pub fn band(&self, day: i32) -> f64 {
         self.spread(day, 0.0)
     }
 
     /// How far either side of [`Self::at`] a single test at a session could
-    /// fall, in grams: the band widened by the scatter of one reading.
+    /// fall: the band widened by the scatter of one reading.
     pub fn predicts(&self, day: i32) -> f64 {
         self.spread(day, 1.0)
     }
@@ -166,7 +248,7 @@ impl Line {
                 .sqrt()
     }
 
-    /// The slope, in grams a session.
+    /// The slope, a session.
     pub const fn per_session(&self) -> f64 {
         self.slope
     }
@@ -200,31 +282,73 @@ pub fn points<E: OneRepMaxEstimator>(
 ) -> Vec<Point> {
     let mut points: Vec<Point> = sessions
         .iter()
-        .filter_map(|session| {
-            let on = session.occurred().day();
-            let estimated = session_estimate(estimator, session, lift).map(|estimate| Point {
-                on,
-                estimate,
-                reading: Reading::Estimated,
-            });
-            let tested = tested(estimator, session, lift).map(|(estimate, failed)| Point {
-                on,
-                estimate,
-                reading: Reading::Tested { failed },
-            });
-            match (estimated, tested) {
-                (Some(estimated), Some(tested))
-                    if estimated.estimate.one_rep_max > tested.estimate.one_rep_max =>
-                {
-                    Some(estimated)
-                }
-                (_, Some(tested)) => Some(tested),
-                (estimated, None) => estimated,
-            }
-        })
+        .filter_map(|session| point(estimator, session, lift))
         .collect();
     points.sort_by_key(|point| point.on);
     points
+}
+
+/// Every session's estimate of `lift` over the body mass `against` reads off
+/// its own weigh-in, oldest first. A session with no weigh-in that day, or
+/// one that states no such mass, has none.
+pub fn relative<E: OneRepMaxEstimator>(
+    estimator: &E,
+    sessions: &[CanonicalGymSession],
+    lift: RepsExercise,
+    weigh_ins: &[Weighed],
+    against: Against,
+) -> Vec<Relative> {
+    let mut relative: Vec<Relative> = sessions
+        .iter()
+        .filter_map(|session| {
+            let point = point(estimator, session, lift)?;
+            let body = against.of(weigh_in_for(session, weigh_ins)?)?;
+            let ratio = RelativeStrength::of(point.estimate.one_rep_max, body)?;
+            Some(Relative { point, body, ratio })
+        })
+        .collect();
+    relative.sort_by_key(|relative| relative.point.on);
+    relative
+}
+
+/// One session's point: [`points`]' rule.
+fn point<E: OneRepMaxEstimator>(
+    estimator: &E,
+    session: &CanonicalGymSession,
+    lift: RepsExercise,
+) -> Option<Point> {
+    let on = session.occurred().day();
+    let estimated = session_estimate(estimator, session, lift).map(|estimate| Point {
+        on,
+        estimate,
+        reading: Reading::Estimated,
+    });
+    let tested = tested(estimator, session, lift).map(|(estimate, failed)| Point {
+        on,
+        estimate,
+        reading: Reading::Tested { failed },
+    });
+    match (estimated, tested) {
+        (Some(estimated), Some(tested))
+            if estimated.estimate.one_rep_max > tested.estimate.one_rep_max =>
+        {
+            Some(estimated)
+        }
+        (_, Some(tested)) => Some(tested),
+        (estimated, None) => estimated,
+    }
+}
+
+/// The days of every test among `points`, oldest first.
+pub fn tests<P: Figure>(points: &[P]) -> Vec<Date> {
+    let mut days: Vec<Date> = points
+        .iter()
+        .filter(|point| matches!(point.reading(), Reading::Tested { .. }))
+        .map(Figure::on)
+        .collect();
+    days.sort_unstable();
+    days.dedup();
+    days
 }
 
 /// A maximal attempt at `lift` in `session`, and the load that failed above it.
@@ -362,15 +486,19 @@ fn last_of_its_week(mesocycle: &GymMesocycle, on: Date) -> bool {
 
 /// A stretch from one test to the next.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Stretch {
-    /// The test it starts from.
-    pub test: Point,
+pub struct Stretch<P = Point> {
+    /// The day of the test it starts from.
+    pub from: Date,
+    /// That test, where it gives a figure: a ratio needs a weigh-in that day.
+    pub test: Option<P>,
     /// Each estimate after it, and which session after the test it came in:
     /// 1 is the first.
-    pub estimates: Vec<(u32, Point)>,
+    pub estimates: Vec<(u32, P)>,
     pub line: Option<Line>,
-    /// The test that ended it, and its session, once performed.
-    pub closed_by: Option<(u32, Point)>,
+    /// The day of the test that ended it, once performed.
+    pub to: Option<Date>,
+    /// That test, and its session, where it gives a figure.
+    pub closed_by: Option<(u32, P)>,
     /// Where the line puts the test that ends the stretch: the one performed,
     /// or the next planned while it is still to come.
     pub projection: Option<Projection>,
@@ -381,23 +509,29 @@ pub struct Stretch {
 pub struct Projection {
     pub on: Date,
     pub session: u32,
-    /// Grams.
-    pub mass: f64,
-    /// The range a single test could fall in, in grams, lowest first.
+    /// In the figure's own unit, as [`Figure::value`].
+    pub value: f64,
+    /// The range a single test could fall in, lowest first.
     pub low: f64,
     pub high: f64,
 }
 
 /// Every stretch, oldest first.
 ///
-/// From the points and the days `lift` was performed; `next` is the next
-/// planned test, counted from the last of those days. A stretch is projected
-/// to the test that ended it, and the one still open to `next`.
-pub fn stretches(points: &[Point], days: &[Date], next: Option<NextTest>) -> Vec<Stretch> {
-    let tests: Vec<&Point> = points
-        .iter()
-        .filter(|point| matches!(point.reading, Reading::Tested { .. }))
-        .collect();
+/// One from each of `tests`, through the next, over the figures and the days
+/// `lift` was performed; `next` is the next planned test, counted from the
+/// last of those days. A stretch is projected to the test that ended it, and
+/// the one still open to `next`.
+///
+/// **The tests mark the stretches, not the figures**, so a test with no
+/// figure of its own (a ratio's, with no weigh-in that day) still ends one
+/// stretch and starts the next.
+pub fn stretches<P: Figure>(
+    figures: &[P],
+    tests: &[Date],
+    days: &[Date],
+    next: Option<NextTest>,
+) -> Vec<Stretch<P>> {
     let ordinal = |from: Date, to: Date| {
         u32::try_from(
             days.iter()
@@ -406,34 +540,38 @@ pub fn stretches(points: &[Point], days: &[Date], next: Option<NextTest>) -> Vec
         )
         .unwrap_or(u32::MAX)
     };
+    let test_on = |on: Date| {
+        figures
+            .iter()
+            .find(|figure| figure.on() == on && matches!(figure.reading(), Reading::Tested { .. }))
+            .copied()
+    };
     tests
         .iter()
         .enumerate()
-        .map(|(index, test)| {
+        .map(|(index, from)| {
+            let from = *from;
             let closing = tests.get(index + 1).copied();
-            let estimates: Vec<(u32, Point)> = points
+            let estimates: Vec<(u32, P)> = figures
                 .iter()
-                .filter(|point| point.reading == Reading::Estimated)
-                .filter(|point| point.on > test.on)
-                .filter(|point| closing.is_none_or(|closing| point.on < closing.on))
-                .map(|point| (ordinal(test.on, point.on), *point))
+                .filter(|figure| figure.reading() == Reading::Estimated)
+                .filter(|figure| figure.on() > from)
+                .filter(|figure| closing.is_none_or(|closing| figure.on() < closing))
+                .map(|figure| (ordinal(from, figure.on()), *figure))
                 .collect();
             let line = Line::through(
                 &estimates
                     .iter()
-                    .filter_map(|(session, point)| {
-                        Some((
-                            i32::try_from(*session).ok()?,
-                            grams(point.estimate.one_rep_max.as_grams())?,
-                        ))
+                    .filter_map(|(session, figure)| {
+                        Some((i32::try_from(*session).ok()?, figure.value()?))
                     })
                     .collect::<Vec<_>>(),
             );
-            let performed = days.last().map_or(0, |last| ordinal(test.on, *last));
+            let performed = days.last().map_or(0, |last| ordinal(from, *last));
             // The test that closed the stretch, or the next one planned for
             // the stretch still open.
             let target = match (closing, next) {
-                (Some(closing), _) => Some((ordinal(test.on, closing.on), closing.on)),
+                (Some(closing), _) => Some((ordinal(from, closing), closing)),
                 (None, Some(next)) => Some((performed.saturating_add(next.sessions), next.on)),
                 (None, None) => None,
             };
@@ -442,16 +580,19 @@ pub fn stretches(points: &[Point], days: &[Date], next: Option<NextTest>) -> Vec
                 Some(Projection {
                     on,
                     session,
-                    mass: line.at(at),
+                    value: line.at(at),
                     low: line.at(at) - line.predicts(at),
                     high: line.at(at) + line.predicts(at),
                 })
             });
             Stretch {
-                test: **test,
+                from,
+                test: test_on(from),
                 estimates,
                 line,
-                closed_by: closing.map(|closing| (ordinal(test.on, closing.on), *closing)),
+                to: closing,
+                closed_by: closing
+                    .and_then(|closing| Some((ordinal(from, closing), test_on(closing)?))),
                 projection,
             }
         })

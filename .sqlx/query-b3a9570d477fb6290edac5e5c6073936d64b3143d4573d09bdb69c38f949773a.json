@@ -1,0 +1,69 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT c.measured_at_utc AS \"measured_at_utc: String\",\n                   c.zone AS \"zone: String\",\n                   c.on_day AS \"on_day: String\",\n                   c.mass_grams AS \"mass_grams!: i64\",\n                   (SELECT CASE\n                             WHEN stated.mass_grams IS NOT NULL THEN stated.mass_grams\n                             WHEN fat.mass_grams IS NOT NULL\n                                 THEN w.mass_grams - fat.mass_grams\n                             ELSE w.mass_grams * (1000 - fat.percentage_tenths) / 1000\n                           END\n                    FROM canonical_weigh_in_account a\n                    JOIN weigh_in w ON w.id = a.weigh_in\n                    LEFT JOIN body_composition stated\n                      ON stated.weigh_in = a.weigh_in AND stated.component = 'fat-free'\n                    LEFT JOIN body_composition fat\n                      ON fat.weigh_in = a.weigh_in AND fat.component = 'fat'\n                    WHERE a.canonical = c.id\n                      AND (stated.mass_grams IS NOT NULL\n                           OR (fat.mass_grams IS NOT NULL AND fat.mass_grams < w.mass_grams)\n                           OR (fat.percentage_tenths IS NOT NULL\n                               AND fat.percentage_tenths < 1000))\n                    ORDER BY stated.mass_grams IS NULL,\n                             a.weigh_in <> (SELECT m.mass_weigh_in FROM canonical_weigh_in m\n                                            WHERE m.id = a.canonical),\n                             a.weigh_in\n                    LIMIT 1) AS \"fat_free_grams: i64\"\n            FROM canonical_weigh_in c\n            ORDER BY COALESCE(c.measured_at_utc, c.on_day), c.id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "measured_at_utc: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_weigh_in",
+            "name": "measured_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_weigh_in",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "on_day: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_weigh_in",
+            "name": "on_day"
+          }
+        }
+      },
+      {
+        "name": "mass_grams!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_weigh_in",
+            "name": "mass_grams"
+          }
+        }
+      },
+      {
+        "name": "fat_free_grams: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "b3a9570d477fb6290edac5e5c6073936d64b3143d4573d09bdb69c38f949773a"
+}
