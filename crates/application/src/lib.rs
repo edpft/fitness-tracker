@@ -20,6 +20,7 @@ pub mod compare;
 pub mod composition;
 pub mod cycling;
 pub mod deliver;
+pub mod design;
 pub mod devices;
 pub mod equipment;
 pub mod error;
@@ -41,7 +42,7 @@ pub mod status;
 pub mod strength;
 
 pub use error::{
-    ComparisonError, DeliveryError, EquipmentError, ExtractionError, FillChangeError,
+    ComparisonError, DeliveryError, DesignError, EquipmentError, ExtractionError, FillChangeError,
     NormalisationError, PrescriptionError, RunLockError, SourceError, StatusError, StoreError,
 };
 pub use ports::{

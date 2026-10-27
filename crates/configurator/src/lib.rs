@@ -14,6 +14,7 @@ pub mod composition;
 pub mod config;
 pub mod corrections;
 pub mod cycling;
+pub mod design;
 pub mod devices;
 pub mod equipment;
 pub mod fills;

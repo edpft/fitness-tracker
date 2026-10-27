@@ -13,6 +13,7 @@ mod equipment;
 mod fills;
 mod one_rep_max;
 mod page;
+mod programme;
 mod range;
 mod report;
 mod run;
@@ -128,6 +129,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/estimated-1rm", get(estimated_one_rep_max))
         .route("/equipment", get(equipment_page).post(equipment_post))
         .route("/fills", get(fills_page).post(fills_post))
+        .route("/programme", get(programme_page).post(programme_post))
         .route("/run/events", get(events))
         .route("/run/step", get(step))
         .route("/htmx.min.js", get(htmx))
@@ -413,6 +415,62 @@ async fn fills_post(
     match refused {
         None => Redirect::to("/fills").into_response(),
         Some(refused) => fills_shown(&runs, Some(&refused)).await.into_response(),
+    }
+}
+
+/// The versions in force, read afresh, with what the last post came to.
+async fn programme_shown(
+    runs: &Runs,
+    said: Option<&str>,
+    typed: Option<&programme::Fields>,
+) -> Markup {
+    let store = match configurator::store::Store::open(&runs.setting().database).await {
+        Ok(store) => store,
+        Err(error) => return programme::unreadable(&error.to_string()),
+    };
+    let in_force = configurator::design::in_force(&store).await;
+    store.close().await;
+    match in_force {
+        Ok(in_force) => programme::page(&in_force, &runs.setting().zone, said, typed),
+        Err(error) => programme::unreadable(&error.to_string()),
+    }
+}
+
+async fn programme_page(State(runs): State<Arc<Runs>>) -> Markup {
+    programme_shown(&runs, None, None).await
+}
+
+/// Author a version, then show the page again, as the equipment page does,
+/// keeping what was typed when it is refused.
+async fn programme_post(
+    State(runs): State<Arc<Runs>>,
+    Form(form): Form<Vec<(String, String)>>,
+) -> Response {
+    let typed = programme::Fields::new(form);
+    let refused = match programme::asked(&typed) {
+        Err(refused) => Some(refused),
+        Ok(asked) => match configurator::store::Store::open(&runs.setting().database).await {
+            Err(error) => Some(error.to_string()),
+            Ok(store) => {
+                let done = match asked {
+                    programme::Asked::Programme(programme) => {
+                        configurator::design::programme(&store, &programme).await
+                    }
+                    programme::Asked::Linear(linear) => {
+                        configurator::design::linear(&store, &linear).await
+                    }
+                    programme::Asked::Sbs(sbs) => configurator::design::sbs(&store, &sbs).await,
+                };
+                store.close().await;
+                done.err().map(|error| error.to_string())
+            }
+        },
+    };
+    match refused {
+        None => Redirect::to("/programme").into_response(),
+        Some(refused) => programme_shown(&runs, Some(&refused), Some(&typed))
+            .await
+            .into_response(),
     }
 }
 
