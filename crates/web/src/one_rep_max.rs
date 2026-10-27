@@ -17,7 +17,7 @@
 
 use application::one_rep_max::{Lift, View};
 use domain::analytical::one_rep_max::{
-    CONFIDENCE, Figure, Line, Point, Projection, Reading, Relative, Stretch,
+    Against, CONFIDENCE, Figure, Line, Point, Projection, Reading, Relative, Stretch,
 };
 use maud::{DOCTYPE, Markup, html};
 
@@ -183,22 +183,49 @@ impl Shown for Relative {
     }
 }
 
+/// One lift, in kilograms or over a body mass: the kilograms shown and the
+/// others a choice away, as `/body-composition` offers fat's units.
 fn lift_section(lift: &Lift) -> Markup {
+    let group = format!(
+        "axis-{}",
+        lift.lift.name().to_lowercase().replace([' ', '(', ')'], "")
+    );
     html! {
         h2 { (lift.lift.name()) }
         @if lift.absolute.is_empty() {
             p { "No test has been recorded." }
         } @else {
-            (chart_section(lift.lift.name(), "in kilograms", "no estimate", &lift.absolute))
-            @for (against, stretches) in &lift.relative {
-                (chart_section(
-                    lift.lift.name(),
-                    &format!("over {}", against.name()),
-                    &format!("no {} that day", against.name()),
-                    stretches,
-                ))
+            div.axes {
+                input type="radio" name=(group) id=(format!("{group}-kg")) class="kg" checked;
+                label for=(format!("{group}-kg")) { "kg" }
+                @for (against, _) in &lift.relative {
+                    @let id = format!("{group}-{}", key(*against));
+                    input type="radio" name=(group) id=(id) class=(key(*against));
+                    label for=(id) { "over " (against.name()) }
+                }
+                div.axis.kg {
+                    (chart_section(lift.lift.name(), "in kilograms", "no estimate", &lift.absolute))
+                }
+                @for (against, stretches) in &lift.relative {
+                    div class=(format!("axis {}", key(*against))) {
+                        (chart_section(
+                            lift.lift.name(),
+                            &format!("over {}", against.name()),
+                            &format!("no {} that day", against.name()),
+                            stretches,
+                        ))
+                    }
+                }
             }
         }
+    }
+}
+
+/// What a body mass is called in the page's markup.
+const fn key(against: Against) -> &'static str {
+    match against {
+        Against::BodyWeight => "body-weight",
+        Against::FatFreeMass => "fat-free-mass",
     }
 }
 
@@ -211,7 +238,6 @@ fn chart_section<P: Shown>(
     stretches: &[Stretch<P>],
 ) -> Markup {
     html! {
-        h3 { "Estimated 1RM " (over) }
         @for (index, stretch) in stretches.iter().enumerate() {
             div.(class(index, stretches.len())) {
                 p.reading { (opening(stretch, missing)) }
@@ -562,6 +588,10 @@ svg.chart { width: 100%; min-width: 600px; height: auto; display: block; }
 p.reading { font-size: 1.1rem; font-variant-numeric: tabular-nums; margin: 0.25rem 0; }
 div.earlier p.reading { color: var(--muted); }
 p.legend { color: var(--muted); font-size: 0.9rem; }
+div.axes label { margin: 0 0.75rem 0 0.25rem; }
+div.axes input.kg:checked ~ div.axis:not(.kg),
+div.axes input.body-weight:checked ~ div.axis:not(.body-weight),
+div.axes input.fat-free-mass:checked ~ div.axis:not(.fat-free-mass) { display: none; }
 table.figures { font-variant-numeric: tabular-nums; font-size: 0.9rem; }
 table.figures th { text-align: left; padding-right: 0.75rem; }
 table.figures td { padding-right: 0.75rem; }
@@ -704,8 +734,14 @@ mod tests {
             &crate::run::View::default(),
         )
         .into_string();
-        assert!(page.contains("Estimated 1RM over body weight"), "{page}");
-        assert!(page.contains("Estimated 1RM over fat-free mass"), "{page}");
+        assert_eq!(page.matches("<h2>").count(), 1, "one lift, one heading");
+        assert_eq!(
+            page.matches(r#"type="radio""#).count(),
+            3,
+            "kg and two ratios"
+        );
+        assert!(page.contains(">over body weight</label>"), "{page}");
+        assert!(page.contains(">over fat-free mass</label>"), "{page}");
         assert!(
             page.contains(
                 "test on 2026-09-25 · 1.10× · tested: 92.5kg × 1, 95kg failed · over 84.0kg · 4 estimates since"
