@@ -8,8 +8,8 @@
 mod support;
 
 use application::{
-    GenerationParameterStore as _, MesocycleStore as _, PlanStore as _, ProgrammeStore as _,
-    ProgressionStore as _,
+    GenerationParameterStore as _, MesocycleStore as _, PlanStore as _, ProgressionStore as _,
+    WorkoutStore as _,
 };
 use domain::plan::MesocycleOrdinal;
 use domain::schedule::{Relative, SessionRole};
@@ -62,7 +62,8 @@ macro_rules! run {
 fn an_unauthored_store_has_no_versions() {
     let (store, _pool, _directory) = opened!();
     let now = jiff::Timestamp::now();
-    assert_eq!(run!(store.programme_at(now)), None);
+    assert_eq!(run!(store.workout_at(Relative::Higher, now)), None);
+    assert_eq!(run!(store.workout_at(Relative::Lower, now)), None);
     assert_eq!(run!(store.linear_at(now)), None);
     assert_eq!(run!(store.sbs_at(now)), None);
 }
@@ -81,14 +82,40 @@ fn every_version_round_trips_exactly() {
     let authored = authored.planned_with;
     let now = jiff::Timestamp::now();
 
-    run!(store.author_programme(now, &authored.programme));
+    // **Every level stated**, so that each table and each kind of row is read
+    // back: a superset's reps and rest, and an exercise's rest.
+    let mut workout = authored.workouts.higher.clone();
+    let pair = domain::prescription::Superset::of(
+        domain::prescription::SlotId::Biceps,
+        domain::prescription::SlotId::Triceps,
+        &[],
+    );
+    let Some(scheme) = workout.reps.sections.values().next().copied() else {
+        panic!("the fixture states a section's reps")
+    };
+    workout.reps.supersets.insert(pair.clone(), scheme);
+    let one_minute =
+        domain::prescription::Target::Exactly(domain::measure::Duration::from_seconds(60));
+    workout.rest.supersets.insert(pair, one_minute);
+    workout
+        .rest
+        .exercises
+        .insert(domain::prescription::SlotId::Core, one_minute);
+
+    run!(store.author_workout(Relative::Higher, now, &workout));
+    run!(store.author_workout(Relative::Lower, now, &authored.workouts.lower));
     run!(store.author_linear(now, &authored.linear));
     run!(store.author_sbs(now, &authored.sbs));
 
     assert_eq!(
-        run!(store.programme_at(now)),
-        Some((now, authored.programme)),
-        "the programme round trips, value for value"
+        run!(store.workout_at(Relative::Higher, now)),
+        Some((now, workout)),
+        "a workout round trips, value for value, at every level"
+    );
+    assert_eq!(
+        run!(store.workout_at(Relative::Lower, now)),
+        Some((now, authored.workouts.lower)),
+        "and the other is its own"
     );
     assert_eq!(
         run!(store.linear_at(now)),
@@ -98,7 +125,7 @@ fn every_version_round_trips_exactly() {
     assert_eq!(
         run!(store.sbs_at(now)),
         Some((now, authored.sbs)),
-        "SBS round trips, chart and ramp"
+        "SBS round trips, ramp and rest"
     );
 }
 
@@ -178,17 +205,18 @@ fn versions_are_compared_as_instants_not_as_text() {
         panic!("an instant")
     };
 
-    run!(store.author_programme(whole, &fixture.planned_with.programme));
-    run!(store.author_programme(half, &fixture.planned_with.programme));
+    let workout = &fixture.planned_with.workouts.higher;
+    run!(store.author_workout(Relative::Higher, whole, workout));
+    run!(store.author_workout(Relative::Higher, half, workout));
 
     assert_eq!(
-        run!(store.programme_at(quarter)).map(|(at, _)| at),
+        run!(store.workout_at(Relative::Higher, quarter)).map(|(at, _)| at),
         Some(whole),
         "a quarter-second after the first, the first is in force"
     );
 }
 
-// --- The programme ---------------------------------------------------------
+// --- The plan and its mesocycles ---------------------------------------------
 
 async fn mesocycle_store() -> Result<
     (

@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT level AS \"level!: String\", name AS \"name!: String\",\n               reps_low AS \"reps_low!: i64\", reps_high AS \"reps_high: i64\",\n               sets AS \"sets!: i64\"\n        FROM workout_reps\n        WHERE intensity = ? AND authored_at = ?\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "level!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workout_reps",
+            "name": "level"
+          }
+        }
+      },
+      {
+        "name": "name!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workout_reps",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "reps_low!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout_reps",
+            "name": "reps_low"
+          }
+        }
+      },
+      {
+        "name": "reps_high: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout_reps",
+            "name": "reps_high"
+          }
+        }
+      },
+      {
+        "name": "sets!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout_reps",
+            "name": "sets"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "631ee5ec80a28b06023bef58c3b20347824431f505a12355bf9f64f4fc1c8ed6"
+}

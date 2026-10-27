@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT authored_at AS \"authored_at!: String\" FROM programme",
+  "query": "SELECT authored_at AS \"authored_at!: String\" FROM workout WHERE intensity = ?",
   "describe": {
     "columns": [
       {
@@ -9,18 +9,18 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "programme",
+            "table": "workout",
             "name": "authored_at"
           }
         }
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 1
     },
     "nullable": [
       false
     ]
   },
-  "hash": "7be817c25fcdaef0e3e6d5e89fa126052f3983f40552c209798f5f8e36998a3a"
+  "hash": "7cc0359a90309ceee5ed314624d23ce5e0d2b4da4503322a84015d6e885c5351"
 }

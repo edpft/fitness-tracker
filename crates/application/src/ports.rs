@@ -43,11 +43,11 @@ use domain::normalised::{
 use domain::plan::{MesocycleOrdinal, Plan, PlanId, PlanName, PlanWindow};
 use domain::planner::RerunOrdinal;
 use domain::prescription::{
-    Anchor, GymMesocycle, LinearProgression, MesocycleId, PrescribedWorkout, PrescriptionState,
-    Programme, Progress, SbsProgression, Scales, SlotId, WeekIndex,
+    Anchor, ByIntensity, GymMesocycle, LinearProgression, MesocycleId, PrescribedWorkout,
+    PrescriptionState, Progress, SbsProgression, Scales, SlotId, WeekIndex, Workout,
 };
 use domain::provider::ExternalProgramme;
-use domain::schedule::{Alteration, Diary, Holidays, SessionRole, Skip, TrainingPattern};
+use domain::schedule::{Alteration, Diary, Holidays, Relative, SessionRole, Skip, TrainingPattern};
 use domain::sequence::NonEmpty;
 
 use crate::error::{
@@ -1638,54 +1638,59 @@ pub trait CanonicalWeighInStore {
     fn count(&self) -> impl Future<Output = Result<WeighInCount, StoreError>> + Send;
 }
 
-/// The versions of the programme and of each primary progression a plan is
-/// planned with (#192), and the load scales of the date a session is for.
+/// The versions of each workout and of each primary progression a plan is
+/// planned with (#192).
 ///
 /// **What a derivation reads, in one place.** A plan takes the latest version of
 /// each authored on or before it was planned, so a later version reaches only
-/// the plans made after it (§ 14.1). The scales are equipment facts and are the
-/// ones true on the session's own date (#450).
+/// the plans made after it (§ 14.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannedWith {
-    pub programme: Programme,
+    /// One for each gym session of the microcycle, by its intensity.
+    pub workouts: ByIntensity<Workout>,
     pub linear: LinearProgression,
     pub sbs: SbsProgression,
 }
 
-/// The versions of the programme, each in force from when it was authored
+/// The versions of each workout, each in force from when it was authored
 /// (#192).
 ///
 /// **Superseded by date, never overwritten** (§ 12). Which version a plan uses
 /// is the latest authored on or before the plan, a `WHERE` clause rather than a
-/// reference stored on the plan.
-pub trait ProgrammeStore {
-    /// The latest version authored at or before `at`, with when it was.
+/// reference stored on the plan. **Each workout has its own**, keyed by the
+/// intensity of the session it fills, because each is edited on its own
+/// (operator, 2026-10-27).
+pub trait WorkoutStore {
+    /// The latest version of the workout for sessions of `intensity` authored
+    /// at or before `at`, with when it was.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
-    fn programme_at(
+    fn workout_at(
         &self,
+        intensity: Relative,
         at: Timestamp,
-    ) -> impl Future<Output = Result<Option<(Timestamp, Programme)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<(Timestamp, Workout)>, StoreError>> + Send;
 
     /// Author a version, in force from `at`.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
-    fn author_programme(
+    fn author_workout(
         &self,
+        intensity: Relative,
         at: Timestamp,
-        programme: &Programme,
+        workout: &Workout,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// The versions of each primary progression, each in force from when it was
 /// authored (#192).
 ///
-/// Separate from the programme because the operator designs them separately:
-/// the primary runs one of them, and the programme says nothing about how.
+/// Separate from the workouts because the operator designs them separately: the
+/// primary runs one of them, and a workout says nothing about how.
 pub trait ProgressionStore {
     /// The latest version of linear progression authored at or before `at`.
     ///

@@ -11,8 +11,8 @@
 use std::fmt;
 
 use crate::{
-    measure::{Kg, RepCount},
-    prescription::{ByIntensity, Percentage, warmup::WarmupStep},
+    measure::{Duration, Kg, RepCount},
+    prescription::{ByIntensity, Percentage, Target, warmup::WarmupStep},
     sequence::NonEmpty,
 };
 
@@ -66,6 +66,22 @@ pub struct BackOff {
     pub of_top_set: Percentage,
 }
 
+/// How long the primary rests after each kind of set linear progression issues.
+///
+/// **The progression's, not the workout's** (operator, 2026-10-27): it is what
+/// creates a top set, a back-off and an attempt, so it is what says how long
+/// each rests. A block and a test SBS does not provide take these, as they take
+/// linear's ramp.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LinearRest {
+    /// After the top set — and after each set across, where a block runs them.
+    pub top_set: Target<Duration>,
+    /// After each back-off.
+    pub back_off: Target<Duration>,
+    /// Between a test's attempts.
+    pub attempt: Target<Duration>,
+}
+
 /// One version of linear progression.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinearProgression {
@@ -100,4 +116,5 @@ pub struct LinearProgression {
     pub entry_drop: Percentage,
     pub first_reset: ResetProtocol,
     pub second_reset: ResetProtocol,
+    pub rest: LinearRest,
 }

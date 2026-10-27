@@ -20,6 +20,7 @@ pub mod compare;
 pub mod composition;
 pub mod cycling;
 pub mod deliver;
+pub mod design;
 pub mod devices;
 pub mod equipment;
 pub mod error;
@@ -41,7 +42,7 @@ pub mod status;
 pub mod strength;
 
 pub use error::{
-    ComparisonError, DeliveryError, EquipmentError, ExtractionError, FillChangeError,
+    ComparisonError, DeliveryError, DesignError, EquipmentError, ExtractionError, FillChangeError,
     NormalisationError, PrescriptionError, RunLockError, SourceError, StatusError, StoreError,
 };
 pub use ports::{
@@ -59,13 +60,13 @@ pub use ports::{
     Occupant, OvernightHrvHistory, Part, Performance, PerformedCyclingSessions,
     PerformedGymSessions, PerformedSessionLog, PerformedSetSummary, Placed, PlanAuthor, PlanStore,
     PlannedWith, PrescribedWorkoutId, PrescribedWorkoutStore, Prescription, PrescriptionDeliverer,
-    PrescriptionDeliveryStore, PrescriptionDestination, PrescriptionLifecycle, ProgrammeStore,
-    ProgressionStore, PublishedCell, PublishedCycling, PublishedProgrammes, PublishedRead,
-    RawExtent, Reached, ReadUpTo, Reading, RecordedDevices, Rederivation, RefusalReport,
-    RefusalReporter, RefusalStore, RenderingDigest, ReplyStatus, RestingHeartRateHistory,
-    ResumptionPointResetter, ResumptionPointStore, RiddenSession, RiddenSessionLog, RiddenVenues,
-    RideDestination, RidesPlaced, RunLock, RunSummary, SessionOrdinal, SourceAccount, SourceEvent,
-    StreamStatus, Taken, Terms, Translation, Translator, UnderivableReason, UnderivableSlot,
-    Unexpressed, WearRecord, WeighInHistory, WorkoutEventSource, WorkoutExtractor,
-    WorkoutNormaliser, WorkoutPrescriber,
+    PrescriptionDeliveryStore, PrescriptionDestination, PrescriptionLifecycle, ProgressionStore,
+    PublishedCell, PublishedCycling, PublishedProgrammes, PublishedRead, RawExtent, Reached,
+    ReadUpTo, Reading, RecordedDevices, Rederivation, RefusalReport, RefusalReporter, RefusalStore,
+    RenderingDigest, ReplyStatus, RestingHeartRateHistory, ResumptionPointResetter,
+    ResumptionPointStore, RiddenSession, RiddenSessionLog, RiddenVenues, RideDestination,
+    RidesPlaced, RunLock, RunSummary, SessionOrdinal, SourceAccount, SourceEvent, StreamStatus,
+    Taken, Terms, Translation, Translator, UnderivableReason, UnderivableSlot, Unexpressed,
+    WearRecord, WeighInHistory, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser,
+    WorkoutPrescriber, WorkoutStore,
 };

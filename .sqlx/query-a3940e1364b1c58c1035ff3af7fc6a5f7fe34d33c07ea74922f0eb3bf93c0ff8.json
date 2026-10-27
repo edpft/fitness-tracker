@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT reps_low AS \"reps_low!: i64\", reps_high AS \"reps_high: i64\",\n                   sets AS \"sets!: i64\",\n                   rest_low AS \"rest_low!: i64\", rest_high AS \"rest_high: i64\",\n                   rest_ss_low AS \"rest_ss_low: i64\", rest_ss_high AS \"rest_ss_high: i64\",\n                   static_hold_seconds AS \"static_hold_seconds!: i64\"\n            FROM workout\n            WHERE intensity = ? AND authored_at = ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "reps_low!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout",
+            "name": "reps_low"
+          }
+        }
+      },
+      {
+        "name": "reps_high: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout",
+            "name": "reps_high"
+          }
+        }
+      },
+      {
+        "name": "sets!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout",
+            "name": "sets"
+          }
+        }
+      },
+      {
+        "name": "rest_low!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout",
+            "name": "rest_low"
+          }
+        }
+      },
+      {
+        "name": "rest_high: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout",
+            "name": "rest_high"
+          }
+        }
+      },
+      {
+        "name": "rest_ss_low: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout",
+            "name": "rest_ss_low"
+          }
+        }
+      },
+      {
+        "name": "rest_ss_high: i64",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout",
+            "name": "rest_ss_high"
+          }
+        }
+      },
+      {
+        "name": "static_hold_seconds!: i64",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout",
+            "name": "static_hold_seconds"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "a3940e1364b1c58c1035ff3af7fc6a5f7fe34d33c07ea74922f0eb3bf93c0ff8"
+}

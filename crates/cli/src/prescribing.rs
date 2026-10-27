@@ -7,24 +7,24 @@
 use std::path::Path;
 
 use application::{
-    GenerationParameterStore as _, MesocycleStore, PrescriptionDeliverer as _, ProgrammeStore as _,
-    ProgressionStore as _, WorkoutPrescriber as _, prescribe::NextSession,
+    GenerationParameterStore as _, MesocycleStore, PrescriptionDeliverer as _,
+    ProgressionStore as _, WorkoutPrescriber as _, WorkoutStore as _, prescribe::NextSession,
 };
 use configurator::{
     prescribing::{self, PreviewFailure},
     store::Store,
 };
-use domain::normalised::OperatorZone;
+use domain::{normalised::OperatorZone, schedule::Relative};
 use jiff::civil::Date;
 
 use crate::{Failure, catalogue, config, exit, output};
 
-/// Report the versions of the programme and each primary progression a plan
-/// made now would take (#192), and today's load scales.
+/// Report the versions of each workout and each primary progression a plan made
+/// now would take (#192), SBS's chart, and today's load scales.
 ///
 /// **Only the latest of each.** Superseded versions stay in the store, and a
 /// plan made before one was superseded goes on reading it.
-pub async fn programme(database: &Path) -> Result<(), Failure> {
+pub async fn workouts(database: &Path) -> Result<(), Failure> {
     let store = Store::open(database)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
@@ -32,20 +32,33 @@ pub async fn programme(database: &Path) -> Result<(), Failure> {
     let now = jiff::Timestamp::now();
     let failed = |error: application::StoreError| Failure::message(error.to_string(), exit::STORE);
 
-    let programme = versions.programme_at(now).await.map_err(failed)?;
+    let higher = versions
+        .workout_at(Relative::Higher, now)
+        .await
+        .map_err(failed)?;
+    let lower = versions
+        .workout_at(Relative::Lower, now)
+        .await
+        .map_err(failed)?;
     let linear = versions.linear_at(now).await.map_err(failed)?;
     let sbs = versions.sbs_at(now).await.map_err(failed)?;
     let scales = versions
         .scales_on(jiff::Zoned::now().date())
         .await
         .map_err(failed)?;
+    let chart = domain::prescription::SbsChart::published()
+        .map_err(|error| Failure::message(error.to_string(), exit::USAGE))?;
 
-    match (programme, linear, sbs) {
-        (Some(programme), Some(linear), Some(sbs)) => {
-            output::parameters_in_force(
-                (programme.0, &programme.1),
+    match (higher, lower, linear, sbs) {
+        (Some(higher), Some(lower), Some(linear), Some(sbs)) => {
+            output::designs_in_force(
+                [
+                    ("higher-intensity", higher.0, &higher.1),
+                    ("lower-intensity", lower.0, &lower.1),
+                ],
                 (linear.0, &linear.1),
                 (sbs.0, &sbs.1),
+                &chart,
                 &scales,
             );
             Ok(())
@@ -54,7 +67,7 @@ pub async fn programme(database: &Path) -> Result<(), Failure> {
         // prescribe nothing from it, and saying so is more use than printing a
         // set of headings with nothing under them.
         _ => Err(Failure::usage(
-            &"this store has no programme or progression stored. Run `fitness init` — it \
+            &"this store has no workout or progression stored. Run `fitness init` — it \
               stores the first of each",
         )),
     }

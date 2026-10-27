@@ -16,7 +16,6 @@ use domain::{
         CompletedSet, SbsChart, SbsDay, SbsSession, achieved, advance, maximum_after,
         parameters::Percentage,
         sbs::{InvalidSbs, WEEKS, training_max_share, working_load},
-        seed,
         target::Target,
     },
 };
@@ -26,10 +25,10 @@ const fn increment() -> Kg {
     Kg::from_grams(2_500)
 }
 
-/// The chart this build ships, which is the workbook's (#192: the chart is a
-/// stored version now, and this is its first).
+/// SBS's published chart, which is the workbook's (#192: SBS owns it, and it
+/// is not authored).
 fn chart() -> Option<SbsChart> {
-    seed::sbs().ok().map(|sbs| sbs.chart)
+    SbsChart::published().ok()
 }
 
 fn reps(count: u32) -> Option<RepCount> {

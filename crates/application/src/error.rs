@@ -132,6 +132,19 @@ pub enum EquipmentError {
     NotTheSameEquipment { id: i64, was: String, now: String },
 }
 
+/// Authoring a version of the programme or a primary progression (#192).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DesignError {
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    #[error("that is the {what} already in force: nothing was changed")]
+    Unchanged { what: &'static str },
+    /// A drop is negative: one that adds load would climb where a stall
+    /// should cost.
+    #[error("the {what} is {drop}, which raises the load: a drop is negative")]
+    NotADrop { what: &'static str, drop: String },
+}
+
 /// Changing a slot's fill (#454).
 #[derive(Debug, thiserror::Error)]
 pub enum FillChangeError {
@@ -277,6 +290,10 @@ pub enum PrescriptionError {
     /// Distinct from a slot or two being underivable, which is a value on the
     /// result: a prescription with ten good slots and one gap is worth issuing,
     /// and one with no slots at all is not a prescription.
+    /// SBS's published chart does not build: a defect in this build.
+    #[error(transparent)]
+    Sbs(#[from] domain::prescription::InvalidSbs),
+
     #[error("no slot could be derived, so there is no workout to issue")]
     NothingDerivable,
     /// A test whose target is inherited, with nothing before it to inherit from.

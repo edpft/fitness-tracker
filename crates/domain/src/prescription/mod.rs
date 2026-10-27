@@ -24,12 +24,12 @@ pub mod block;
 pub mod candidates;
 pub mod change;
 pub mod delivery;
+pub mod design;
 pub mod ladder;
 pub mod linear;
 pub mod mesocycle;
 pub mod parameters;
 pub mod prilepin;
-pub mod programme;
 pub mod progression;
 pub mod project;
 pub mod repmax;
@@ -61,21 +61,21 @@ pub use delivery::{
     DeliveryReference, DestinationName, DestinationReply, InvalidDelivery, PrescriptionState,
     RenderingDigest, ReplyStatus, SessionOrdinal, WrongRenderingWidth,
 };
+pub use design::{AccessoryScheme, InvalidSuperset, Levels, Rest, RestScheme, Superset, Workout};
 pub use ladder::{InvalidLadder, Ladder, Opening};
 pub use linear::{
-    BackOff, Fill, Linear, LinearProgression, Position, Primary, PrimaryPattern, ResetProtocol,
-    SlotContent, SlotFills, StaticFill, TopSetReps,
+    BackOff, Fill, Linear, LinearProgression, LinearRest, Position, Primary, PrimaryPattern,
+    ResetProtocol, SlotContent, SlotFills, StaticFill, TopSetReps,
 };
 pub use mesocycle::{GymMesocycle, InconsistentMesocycle, Progression, check_primary};
 pub use parameters::{InvalidPercentage, Percentage, Scales};
-pub use programme::{AccessoryScheme, Programme};
 pub use progression::{GatingTopSet, Progress, Reset, progress_after};
 pub use project::{Divergence, ItemPosition, Projection, ProjectionGap, project, satisfies};
 pub use repmax::rep_max;
-pub use rest::{RestScheme, SectionRest, rested};
+pub use rest::{rested, warmup_rested};
 pub use sbs::{
-    CompletedSet, InvalidSbs, Sbs, SbsChart, SbsDay, SbsProgression, SbsSession, SbsWeek, achieved,
-    advance, maximum_after, training_max_share, working_load,
+    CompletedSet, InvalidSbs, Sbs, SbsChart, SbsDay, SbsProgression, SbsRest, SbsSession, SbsWeek,
+    achieved, advance, maximum_after, training_max_share, working_load,
 };
 // `SessionRole` is deliberately not re-exported here. It moved to
 // `domain::schedule` on 2026-09-20 (issue #63), because a training slot carries
@@ -88,7 +88,7 @@ pub use schedule::{
 };
 pub use shape::{
     PrescribedExercise, PrescribedItem, PrescribedSuperset, Section, SlotId, SupersetMember,
-    UnknownSlot, WorkoutShape,
+    UnknownSection, UnknownSlot, WorkoutShape,
 };
 pub use steps::{InvalidLoadSteps, LoadSteps, Step};
 pub use succession::{RECENT_WEEKS, is_recent_enough, weeks_between};

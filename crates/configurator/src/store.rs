@@ -13,8 +13,8 @@ use application::{
     FillChangeStore, FtpHistory, GenerationParameterStore, MesocycleStore,
     NormalisedCyclingSessionReader, NormalisedGymSessionReader, NormalisedWeighInReader,
     PerformedGymSessions, PerformedSessionLog, PlanStore, PrescribedWorkoutStore,
-    PrescriptionDeliveryStore, PrescriptionLifecycle, ProgrammeStore, ProgressionStore,
-    RiddenSessionLog, RiddenVenues, StoreError, WeighInHistory,
+    PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore, RiddenSessionLog,
+    RiddenVenues, StoreError, WeighInHistory, WorkoutStore,
 };
 use domain::normalised::OperatorZone;
 use infrastructure::{
@@ -66,7 +66,7 @@ impl Store {
     #[must_use]
     pub fn parameters(
         &self,
-    ) -> impl GenerationParameterStore + ProgrammeStore + ProgressionStore + Clone + Send + Sync + use<>
+    ) -> impl GenerationParameterStore + WorkoutStore + ProgressionStore + Clone + Send + Sync + use<>
     {
         SqliteGenerationParameterStore::new(self.pool.clone())
     }

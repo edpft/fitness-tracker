@@ -30,7 +30,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use application::{EquipmentStore as _, ProgrammeStore as _, ProgressionStore as _};
+use application::{EquipmentStore as _, ProgressionStore as _, WorkoutStore as _};
 use configurator::{
     Credentials,
     setup::{self, Credential as StoredCredential, from_environment},
@@ -53,7 +53,7 @@ pub struct Prepared {
 
 /// What `init` did about the parameters a prescription is generated against.
 ///
-/// **Seeding them is a step of setting up, not of authoring a programme**
+/// **Seeding them is a step of setting up, not of programming**
 /// (decision 0015). Nothing on the generation path reaches a compiled-in
 /// number, so a store with no parameters can hold a programme and prescribe
 /// nothing from it — which is exactly the dead end this step exists to close.
@@ -168,18 +168,28 @@ pub async fn init(
 /// other, so the version in force at a time stays recoverable and a later change
 /// to what this build ships rewrites nothing already authored.
 async fn seed_parameters(store: &Store) -> Result<ParameterOutcome, Failure> {
-    use domain::prescription::seed;
+    use domain::{prescription::seed, schedule::Relative};
 
     let failed = |error: application::StoreError| Failure::message(error.to_string(), exit::STORE);
     let unbuildable = |error: seed::InvalidSeed| Failure::message(error.to_string(), exit::USAGE);
     let versions = store.parameters();
     let now = jiff::Timestamp::now();
-    let programme = versions.programme_at(now).await.map_err(failed)?.is_none();
-    if programme {
-        versions
-            .author_programme(now, &seed::programme().map_err(unbuildable)?)
+    // **Both workouts start from the same seed** and are edited on their own
+    // afterwards (operator, 2026-10-27).
+    let mut workouts = false;
+    for intensity in [Relative::Higher, Relative::Lower] {
+        if versions
+            .workout_at(intensity, now)
             .await
-            .map_err(failed)?;
+            .map_err(failed)?
+            .is_none()
+        {
+            versions
+                .author_workout(intensity, now, &seed::workout().map_err(unbuildable)?)
+                .await
+                .map_err(failed)?;
+            workouts = true;
+        }
     }
     let linear = versions.linear_at(now).await.map_err(failed)?.is_none();
     if linear {
@@ -215,7 +225,7 @@ async fn seed_parameters(store: &Store) -> Result<ParameterOutcome, Failure> {
         }
     }
 
-    Ok(if programme || linear || sbs || kinds {
+    Ok(if workouts || linear || sbs || kinds {
         ParameterOutcome::Seeded
     } else {
         ParameterOutcome::AlreadyInForce

@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT level AS \"level!: String\", name AS \"name!: String\",\n               rest_low AS \"rest_low!: i64\", rest_high AS \"rest_high: i64\",\n               rest_ss_low AS \"rest_ss_low: i64\", rest_ss_high AS \"rest_ss_high: i64\"\n        FROM workout_rest\n        WHERE intensity = ? AND authored_at = ?\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "level!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workout_rest",
+            "name": "level"
+          }
+        }
+      },
+      {
+        "name": "name!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workout_rest",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "rest_low!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout_rest",
+            "name": "rest_low"
+          }
+        }
+      },
+      {
+        "name": "rest_high: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout_rest",
+            "name": "rest_high"
+          }
+        }
+      },
+      {
+        "name": "rest_ss_low: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout_rest",
+            "name": "rest_ss_low"
+          }
+        }
+      },
+      {
+        "name": "rest_ss_high: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workout_rest",
+            "name": "rest_ss_high"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "90af52a9622c3898f28aa67bdebe17e6ec84dada44a02c98544a05bfff35d4de"
+}

@@ -168,6 +168,15 @@ pub enum Section {
 }
 
 impl Section {
+    /// Every section, in fatigue order.
+    pub const ALL: [Self; 5] = [
+        Self::Plyometric,
+        Self::Power,
+        Self::Strength,
+        Self::Hypertrophy,
+        Self::Mobility,
+    ];
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Plyometric => "plyometric",
@@ -176,6 +185,23 @@ impl Section {
             Self::Hypertrophy => "hypertrophy",
             Self::Mobility => "mobility",
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{value:?} does not name a section")]
+pub struct UnknownSection {
+    value: String,
+}
+
+impl TryFrom<String> for Section {
+    type Error = UnknownSection;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::ALL
+            .into_iter()
+            .find(|section| section.as_str() == value)
+            .ok_or(UnknownSection { value })
     }
 }
 

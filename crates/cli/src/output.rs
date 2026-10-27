@@ -572,10 +572,10 @@ fn authored_plan(mesocycle: &GymMesocycle, with: &application::PlannedWith) {
                 "  opening from whatever the mesocycle before it measures, \
                  and it does not stay fixed"
             );
-            let first_days: Vec<String> = with
-                .sbs
-                .chart
-                .days()
+            let chart = domain::prescription::SbsChart::published();
+            let first_days: Vec<String> = chart
+                .iter()
+                .flat_map(domain::prescription::SbsChart::days)
                 .filter_map(|(_, session, day)| match (session, day) {
                     (
                         domain::prescription::SbsSession::First,
@@ -649,7 +649,15 @@ fn authored_parameters(with: &application::PlannedWith, scales: &domain::prescri
     for (implement, steps) in scales.iter() {
         println!("  {implement} loads in {steps}");
     }
-    println!("  holds {}", with.programme.static_hold);
+    let (higher, lower) = (
+        with.workouts.higher.static_hold,
+        with.workouts.lower.static_hold,
+    );
+    if higher == lower {
+        println!("  holds {higher}");
+    } else {
+        println!("  holds {higher} in the higher-intensity workout, {lower} in the lower");
+    }
 }
 
 /// The time a version was authored, to the second. What the operator wants from
@@ -666,7 +674,7 @@ fn ramp(warmup: &domain::sequence::NonEmpty<domain::prescription::WarmupStep>) {
     }
 }
 
-/// The latest version of the programme and of each primary progression, and
+/// The latest version of each workout and of each primary progression, and
 /// today's load scales.
 ///
 /// **Complete rather than summarised**, which is the whole reason it exists.
@@ -677,43 +685,19 @@ fn ramp(warmup: &domain::sequence::NonEmpty<domain::prescription::WarmupStep>) {
 /// [`authored_parameters`] stays the short form: it runs after authoring, where
 /// the question is what this plan was built against rather than what every
 /// number is.
-pub fn parameters_in_force(
-    programme: (jiff::Timestamp, &domain::prescription::Programme),
+pub fn designs_in_force(
+    workouts: [(&str, jiff::Timestamp, &domain::prescription::Workout); 2],
     linear: (jiff::Timestamp, &domain::prescription::LinearProgression),
     sbs: (jiff::Timestamp, &domain::prescription::SbsProgression),
+    chart: &domain::prescription::SbsChart,
     scales: &domain::prescription::Scales,
 ) {
-    let (programme_at, programme) = programme;
-    println!("the programme, since {}", since(programme_at));
-    println!(
-        "  strength slots {} × {}; hypertrophy slots {} × {}",
-        programme.strength.sets,
-        programme.strength.reps,
-        programme.hypertrophy.sets,
-        programme.hypertrophy.reps,
-    );
-    for (slot, scheme) in &programme.slots {
-        println!("  {slot} {} × {}", scheme.sets, scheme.reps);
-    }
-    println!("  holds {}", programme.static_hold);
-    println!("  rest");
-    for (section, rest) in [
-        ("plyometric", programme.rest.plyometric),
-        ("power", programme.rest.power),
-        ("strength", programme.rest.strength),
-        ("hypertrophy", programme.rest.hypertrophy),
-        ("mobility", programme.rest.mobility),
-    ] {
-        // **Absent and equal are different**, so a section that says nothing
-        // about supersets says nothing here either rather than repeating its
-        // between-sets rest as though it had been stated.
-        match rest.after_superset {
-            Some(after) => println!(
-                "    {section:<12} {} between sets, {after} after a superset",
-                rest.between_sets
-            ),
-            None => println!("    {section:<12} {} between sets", rest.between_sets),
+    for (index, (which, at, workout)) in workouts.into_iter().enumerate() {
+        if index > 0 {
+            println!();
         }
+        println!("the {which} workout, since {}", since(at));
+        workout_in_force(workout);
     }
 
     let (linear_at, linear) = linear;
@@ -749,12 +733,23 @@ pub fn parameters_in_force(
         "  second stall: drop {}, re-climb {}kg a week",
         linear.second_reset.drop, linear.second_reset.reclimb_per_week,
     );
+    println!(
+        "  rest {} after a top set, {} after a back-off, {} between attempts",
+        linear.rest.top_set, linear.rest.back_off, linear.rest.attempt,
+    );
     ramp(&linear.warmup);
 
     let (sbs_at, sbs) = sbs;
     println!();
     println!("SBS, since {}", since(sbs_at));
-    for (week, session, day) in sbs.chart.days() {
+    println!(
+        "  rest {} between sets across, {} after a repetition maximum, {} after a back-off, \
+         {} between attempts",
+        sbs.rest.across, sbs.rest.rep_max, sbs.rest.back_off, sbs.rest.attempt,
+    );
+    ramp(&sbs.warmup);
+    println!("  SBS's chart");
+    for (week, session, day) in chart.days() {
         use domain::prescription::{SbsDay, SbsSession};
         let label = match session {
             SbsSession::First => format!("  week {week}"),
@@ -772,7 +767,6 @@ pub fn parameters_in_force(
             SbsDay::Test { reps } => println!("{label}  a test at {reps}"),
         }
     }
-    ramp(&sbs.warmup);
 
     println!();
     println!("what each implement can hold");
@@ -783,7 +777,55 @@ pub fn parameters_in_force(
     }
 }
 
-/// The programme in force, with its ladder week by week and where it stands.
+/// One workout: its reps and rest at every level it states them, and its hold.
+fn workout_in_force(workout: &domain::prescription::Workout) {
+    let scheme = |scheme: &domain::prescription::AccessoryScheme| {
+        format!("{} × {}", scheme.sets, scheme.reps)
+    };
+    // **Absent and equal are different**, so a level that says nothing about
+    // supersets says nothing here either rather than repeating its between-sets
+    // rest as though it had been stated.
+    let rest = |rest: domain::prescription::Rest| {
+        rest.after_superset.map_or_else(
+            || format!("{} between sets", rest.between_sets),
+            |after| {
+                format!(
+                    "{} between sets, {after} after a superset",
+                    rest.between_sets
+                )
+            },
+        )
+    };
+    println!(
+        "  reps    {} unless stated below",
+        scheme(&workout.reps.workout)
+    );
+    for (section, stated) in &workout.reps.sections {
+        println!("    {:<28} {}", section.to_string(), scheme(stated));
+    }
+    for (superset, stated) in &workout.reps.supersets {
+        println!("    {:<28} {}", superset.to_string(), scheme(stated));
+    }
+    for (slot, stated) in &workout.reps.exercises {
+        println!("    {:<28} {}", slot.to_string(), scheme(stated));
+    }
+    println!(
+        "  rest    {} unless stated below",
+        rest(workout.rest.workout)
+    );
+    for (section, stated) in &workout.rest.sections {
+        println!("    {:<28} {}", section.to_string(), rest(*stated));
+    }
+    for (superset, stated) in &workout.rest.supersets {
+        println!("    {:<28} {stated} after a round", superset.to_string());
+    }
+    for (slot, stated) in &workout.rest.exercises {
+        println!("    {:<28} {stated} between sets", slot.to_string());
+    }
+    println!("  holds   {}", workout.static_hold);
+}
+
+/// The mesocycle in force, with its ladder week by week and where it stands.
 ///
 /// **The table is the point.** A rate and a duration are two numbers; what an
 /// operator needs to see is the load each week asks for, and which of those weeks

@@ -50,6 +50,14 @@ impl<T> ByIntensity<T> {
             Relative::Higher => &self.higher,
         }
     }
+
+    /// The one for sessions of `intensity`.
+    pub const fn of(&self, intensity: Relative) -> &T {
+        match intensity {
+            Relative::Lower => &self.lower,
+            Relative::Higher => &self.higher,
+        }
+    }
 }
 
 /// Which climbing week of a block, one-based.

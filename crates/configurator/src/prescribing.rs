@@ -46,7 +46,7 @@ pub async fn prescriber(
             impl PlanStore + Send + Sync + use<>,
         >,
         impl application::GenerationParameterStore
-        + application::ProgrammeStore
+        + application::WorkoutStore
         + application::ProgressionStore
         + Send
         + Sync

@@ -4,6 +4,8 @@
 //! an instruction to go straight on (a superset), and a length. These pin the
 //! rule that tells them apart.
 
+use std::collections::BTreeMap;
+
 use domain::{
     gym::{
         Load,
@@ -11,23 +13,23 @@ use domain::{
     },
     measure::{Duration, Kg, RepCount},
     prescription::{
-        PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, RestScheme,
-        SectionRest, SlotId, SupersetMember, Target, WorkoutShape, rested,
+        PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, Rest, RestScheme,
+        Section, SlotId, Superset, SupersetMember, Target, WorkoutShape, rested,
     },
     sequence::{AtLeastTwo, NonEmpty},
 };
 
 type Built<T> = Result<T, Box<dyn std::error::Error>>;
 
-const fn flat(seconds: u64) -> SectionRest {
-    SectionRest {
+const fn flat(seconds: u64) -> Rest {
+    Rest {
         between_sets: Target::Exactly(Duration::from_seconds(seconds)),
         after_superset: None,
     }
 }
 
-fn grouped(low: u64, high: u64, ss_low: u64, ss_high: u64) -> Built<SectionRest> {
-    Ok(SectionRest {
+fn grouped(low: u64, high: u64, ss_low: u64, ss_high: u64) -> Built<Rest> {
+    Ok(Rest {
         between_sets: span(low, high)?,
         after_superset: Some(span(ss_low, ss_high)?),
     })
@@ -36,11 +38,16 @@ fn grouped(low: u64, high: u64, ss_low: u64, ss_high: u64) -> Built<SectionRest>
 /// The operator's own, stated on 2026-08-23.
 fn scheme() -> Built<RestScheme> {
     Ok(RestScheme {
-        plyometric: flat(30),
-        power: flat(90),
-        strength: grouped(120, 180, 90, 150)?,
-        hypertrophy: grouped(120, 180, 90, 150)?,
-        mobility: flat(0),
+        workout: grouped(120, 180, 90, 150)?,
+        sections: BTreeMap::from([
+            (Section::Plyometric, flat(30)),
+            (Section::Power, flat(90)),
+            (Section::Strength, grouped(120, 180, 90, 150)?),
+            (Section::Hypertrophy, grouped(120, 180, 90, 150)?),
+            (Section::Mobility, flat(0)),
+        ]),
+        supersets: BTreeMap::new(),
+        exercises: BTreeMap::new(),
     })
 }
 
@@ -80,7 +87,10 @@ fn first(shape: &WorkoutShape) -> Rests {
     }
 }
 
-/// The primary's ramp and its working sets.
+/// A primary nobody in these fixtures fills, so that every slot is rested.
+const PRIMARY: SlotId = SlotId::HipDominant;
+
+/// A ramp and its working sets.
 fn ramp() -> Built<WorkoutShape> {
     let squat = PrescribedExercise::ForReps {
         exercise: RepsExercise::FrontSquatBarbell,
@@ -197,7 +207,7 @@ fn a_warm_up_ramp_rests_only_on_its_way_into_the_working_set() {
     let two_minutes = Target::Exactly(Duration::from_seconds(120));
 
     assert_eq!(
-        first(&rested(&shape, &scheme)),
+        first(&rested(&shape, &scheme, PRIMARY)),
         vec![None, Some(two_minutes), Some(range), Some(range)],
         "no rest between warm-ups, the low end into the single, then the range"
     );
@@ -213,7 +223,7 @@ fn a_superset_rests_only_where_it_ends() {
     let ending = span(90, 150).expect("ninety to a hundred and fifty spans");
 
     let (first_member, second_member) =
-        pair(&rested(&shape, &scheme)).expect("the item is a superset");
+        pair(&rested(&shape, &scheme, PRIMARY)).expect("the item is a superset");
 
     assert_eq!(
         first_member,
@@ -235,7 +245,7 @@ fn a_block_with_no_superset_rest_rests_the_same_either_way() {
     let scheme = scheme().expect("the rest scheme builds");
 
     let (first_member, second_member) =
-        pair(&rested(&shape, &scheme)).expect("the item is a superset");
+        pair(&rested(&shape, &scheme, PRIMARY)).expect("the item is a superset");
 
     let zero = vec![Some(Target::Exactly(Duration::ZERO))];
     assert_eq!(first_member, zero);
@@ -252,5 +262,51 @@ fn a_block_stating_one_number_rests_that_long() {
     let scheme = scheme().expect("the rest scheme builds");
 
     let thirty = Some(Target::Exactly(Duration::from_seconds(30)));
-    assert_eq!(first(&rested(&shape, &scheme)), vec![thirty, thirty]);
+    assert_eq!(
+        first(&rested(&shape, &scheme, PRIMARY)),
+        vec![thirty, thirty]
+    );
+}
+
+/// **The narrowest level stated stands.** An exercise's own rest beats its
+/// section's, and a superset's beats the section's after-superset rest.
+#[test]
+fn an_exercise_and_a_superset_rest_as_they_are_stated() {
+    let mut scheme = scheme().expect("the rest scheme builds");
+    let four_minutes = Target::Exactly(Duration::from_seconds(240));
+    let one_minute = Target::Exactly(Duration::from_seconds(60));
+    scheme.exercises.insert(SlotId::KneeDominant, four_minutes);
+    scheme.supersets.insert(
+        Superset::of(SlotId::Biceps, SlotId::Triceps, &[]),
+        one_minute,
+    );
+
+    let ramp = ramp().expect("the ramp fixture builds");
+    assert_eq!(
+        first(&rested(&ramp, &scheme, PRIMARY)),
+        vec![
+            None,
+            Some(Target::Exactly(Duration::from_seconds(240))),
+            Some(four_minutes),
+            Some(four_minutes)
+        ],
+        "the exercise's own rest, and the bottom of it into the working set"
+    );
+
+    let arms = arms().expect("the arms fixture builds");
+    let (_, second_member) = pair(&rested(&arms, &scheme, PRIMARY)).expect("a superset");
+    assert_eq!(second_member, vec![Some(one_minute)]);
+}
+
+/// **The primary's rest is its progression's**, so the workout leaves its sets
+/// as they arrived.
+#[test]
+fn the_primary_is_not_rested_by_the_workout() {
+    let shape = ramp().expect("the ramp fixture builds");
+    let scheme = scheme().expect("the rest scheme builds");
+
+    assert_eq!(
+        first(&rested(&shape, &scheme, SlotId::KneeDominant)),
+        vec![None, None, None, None]
+    );
 }

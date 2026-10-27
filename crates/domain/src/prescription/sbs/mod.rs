@@ -18,4 +18,4 @@ pub use chart::{
     maximum_after, training_max_share, working_load,
 };
 pub use mesocycle::{GATING, Sbs};
-pub use progression::SbsProgression;
+pub use progression::{SbsProgression, SbsRest};
