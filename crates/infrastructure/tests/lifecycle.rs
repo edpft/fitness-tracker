@@ -78,7 +78,7 @@ async fn issued() -> Fallible<(tempfile::TempDir, SqlitePool, i64)> {
     // join works against what the tool actually writes.
     let prescriber = Prescribing::new(PrescriptionPorts {
         history: SqliteExerciseHistory::new(pool.clone()),
-        programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+        mesocycles: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), "Europe/London".to_owned()),
         lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),
@@ -219,16 +219,16 @@ fn a_performed_prescription_is_not_derived_again() {
     let issued = run!(async {
         // A fortnight later a start puts the same date on a different rung, so
         // a derivation that ran would not agree with what was performed.
-        support::programme::design(&pool).await?;
+        support::mesocycle::design(&pool).await?;
         Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
-            .author(&support::programme::as_plan(
-                support::programme::programme_from(Date::constant(2026, 7, 20))?,
+            .author(&support::mesocycle::as_plan(
+                support::mesocycle::linear_from(Date::constant(2026, 7, 20))?,
             )?)
             .await?;
 
         let prescriber = Prescribing::new(PrescriptionPorts {
             history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+            mesocycles: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
             parameters: SqliteGenerationParameterStore::new(pool.clone()),
             prescriptions: SqlitePrescribedWorkoutStore::new(
                 pool.clone(),

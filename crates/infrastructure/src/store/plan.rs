@@ -21,7 +21,7 @@ use domain::{
     cycling::CyclingMesocycle,
     macrocycle::Chain,
     normalised::OperatorZone,
-    plan::{Plan, PlanId, PlanName, PlanWindow, Programme},
+    plan::{Mesocycles, Plan, PlanId, PlanName, PlanWindow},
     prescription::GymMesocycle,
 };
 use sqlx::SqlitePool;
@@ -97,12 +97,12 @@ impl SqlitePlanStore {
             let gym_side = if gym_side.is_empty() {
                 None
             } else {
-                Some(Programme::new(gym_side).map_err(|error| corrupt(&error))?)
+                Some(Mesocycles::new(gym_side).map_err(|error| corrupt(&error))?)
             };
             let cycling_side = if cycling_side.is_empty() {
                 None
             } else {
-                Some(Programme::new(cycling_side).map_err(|error| corrupt(&error))?)
+                Some(Mesocycles::new(cycling_side).map_err(|error| corrupt(&error))?)
             };
 
             let plan = Plan::new(name, authored_at, gym_side, cycling_side)

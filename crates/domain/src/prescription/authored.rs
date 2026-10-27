@@ -148,7 +148,7 @@ impl Shape {
     /// The calendar weeks this shape occupies, before any interruption.
     ///
     /// **What the schedule is asked about**, so the losses can be read off the
-    /// diary and handed back to [`programme`]. Nominal, which is what stops it
+    /// diary and handed back to [`mesocycle`]. Nominal, which is what stops it
     /// being circular: the interruptions come from the window, so the window
     /// cannot come from the interruptions.
     #[must_use]
@@ -170,7 +170,7 @@ impl Shape {
 impl Authored {
     /// The days this programme runs across, first and last.
     ///
-    /// **What the schedule is asked about**, ahead of [`programme`]: what the
+    /// **What the schedule is asked about**, ahead of [`mesocycle`]: what the
     /// gym loses is a question about a span of dates, and the diary is the only
     /// thing that can answer it.
     ///
@@ -209,7 +209,7 @@ impl Authored {
 ///
 /// [`AuthoringError`] where the weeks do not make a calendar, or where the
 /// programme is inconsistent with itself.
-pub fn programme(
+pub fn mesocycle(
     authored: Authored,
     fills: SlotFills,
     interruptions: &[Skip],

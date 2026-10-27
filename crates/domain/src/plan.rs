@@ -1,4 +1,5 @@
-//! The authored unit: a plan, its programmes, and the days they occupy.
+//! The authored unit: a plan, each discipline's mesocycles, and the days they
+//! occupy.
 //!
 //! **Neither `plan` nor `programme` is a level any more** (#224). The
 //! operator, 2026-09-24, amending his hierarchy of 2026-09-06:
@@ -9,12 +10,15 @@
 //!
 //! where the macrocycle is a school term and the holiday that ends it
 //! ([`crate::macrocycle`]), and the mesocycle is a gym and a cycling mesocycle
-//! together ([`Mesocycle`]). `Plan` and `Programme` stay only as the way
+//! together ([`Mesocycle`]). `Plan` and `Mesocycles` stay only as the way
 //! mesocycles are stored and superseded, and go when #222 realises mesocycles
 //! one at a time instead of authoring a plan of them.
 //!
 //! What follows is how they came to be, under the hierarchy of 2026-09-06:
-//! `macrocycle → plan → programme → mesocycle → microcycle → session`.
+//! `macrocycle → plan → programme → mesocycle → microcycle → session`. Since
+//! 2026-10-26 (#589) "programme" names only the programme design
+//! ([`crate::prescription::Programme`]), and one discipline's mesocycles inside a
+//! plan are [`Mesocycles`].
 //!
 //! The autumn is **one plan**. It holds a cycling programme and a gym
 //! programme, and each of those holds four mesocycles: one entry test and three
@@ -29,12 +33,12 @@
 //!
 //! **The overlap rule mostly stops mattering.** It refused two *differently
 //! named* programmes competing for a day, which is now two differently named
-//! plans. Inside a plan the two programmes compete for every day on purpose:
+//! plans. Inside a plan the two disciplines compete for every day on purpose:
 //! running the gym and the bike together is the point of the tool.
 //!
-//! **`Programme` is generic over its mesocycle rather than written twice.** The
+//! **`Mesocycles` is generic over its mesocycle rather than written twice.** The
 //! two disciplines' mesocycles are different types — one is a lift progressing,
-//! the other is rides at zones — but what a *programme* does with them is
+//! the other is rides at zones — but what a plan does with them is
 //! identical: keep them in order, refuse two that collide, and answer for a
 //! date. Whether the mesocycles themselves converge is a separate question and
 //! not settled here.
@@ -130,7 +134,7 @@ impl fmt::Display for Span {
     }
 }
 
-/// Anything that occupies days: a mesocycle, or a programme of them.
+/// Anything that occupies days: a mesocycle, or one discipline's mesocycles.
 pub trait Occupies {
     fn span(&self) -> Span;
 }
@@ -211,7 +215,7 @@ pub struct InvalidMesocycleOrdinal;
 /// the number he means by "mesocycle 2" — the entry test is the first mesocycle
 /// of the autumn whatever row it landed in. The two are told apart by the type
 /// because they read identically in a store holding one plan, which is how
-/// `programme show` came to print a row id for two weeks (#314).
+/// `programme show` (now `mesocycle show`) came to print a row id for two weeks (#314).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MesocycleOrdinal(u32);
 
@@ -306,12 +310,12 @@ impl fmt::Display for PlanWindow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum InvalidProgramme {
-    #[error("a programme is at least one mesocycle")]
+pub enum InvalidMesocycles {
+    #[error("a discipline's mesocycles are at least one")]
     NoMesocycles,
     #[error(
         "mesocycle {at} starts on {start}, which is not after mesocycle {before} ends — \
-         two mesocycles of one programme may not compete for a day"
+         two mesocycles of one discipline may not compete for a day"
     )]
     OutOfOrder {
         at: usize,
@@ -328,23 +332,23 @@ pub enum InvalidProgramme {
 /// competing for one day, which would make the answer to "what am I doing today"
 /// depend on the order rows came back in.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Programme<M> {
+pub struct Mesocycles<M> {
     mesocycles: NonEmpty<M>,
 }
 
-impl<M: Occupies> Programme<M> {
+impl<M: Occupies> Mesocycles<M> {
     /// # Errors
     ///
-    /// [`InvalidProgramme`] for no mesocycles at all, or for two that overlap or
+    /// [`InvalidMesocycles`] for no mesocycles at all, or for two that overlap or
     /// are out of order.
-    pub fn new(mesocycles: Vec<M>) -> Result<Self, InvalidProgramme> {
+    pub fn new(mesocycles: Vec<M>) -> Result<Self, InvalidMesocycles> {
         for (at, pair) in mesocycles.windows(2).enumerate() {
             let (Some(before), Some(next)) = (pair.first(), pair.get(1)) else {
                 continue;
             };
             let (before, next) = (before.span(), next.span());
             if next.start() < before.end() {
-                return Err(InvalidProgramme::OutOfOrder {
+                return Err(InvalidMesocycles::OutOfOrder {
                     at: at.saturating_add(2),
                     before: at.saturating_add(1),
                     start: next.start(),
@@ -353,7 +357,7 @@ impl<M: Occupies> Programme<M> {
         }
         Ok(Self {
             mesocycles: NonEmpty::new(mesocycles)
-                .map_err(|_: TooShort| InvalidProgramme::NoMesocycles)?,
+                .map_err(|_: TooShort| InvalidMesocycles::NoMesocycles)?,
         })
     }
 
@@ -369,8 +373,7 @@ impl<M: Occupies> Programme<M> {
         self.mesocycles.count()
     }
 
-    /// The mesocycle that answers for a date, and where it sits in this
-    /// programme.
+    /// The mesocycle that answers for a date, and where it sits among these.
     ///
     /// `None` for a day in a gap, before the first, or after the last. A real
     /// state, not a fault.
@@ -381,7 +384,7 @@ impl<M: Occupies> Programme<M> {
             .find(|(_, mesocycle)| mesocycle.span().covers(date))
     }
 
-    /// The mesocycle immediately before a date, if this programme holds one.
+    /// The mesocycle immediately before a date, if there is one.
     ///
     /// **What a test takes its target from** (decision 0013). Inside a plan that
     /// is the previous element of a list rather than a question for the store —
@@ -393,7 +396,7 @@ impl<M: Occupies> Programme<M> {
             .last()
     }
 
-    /// The days this programme occupies, first mesocycle to last.
+    /// The days these occupy, first mesocycle to last.
     #[must_use]
     pub fn span(&self) -> Span {
         self.mesocycles
@@ -404,19 +407,19 @@ impl<M: Occupies> Programme<M> {
     }
 }
 
-impl<M: Occupies> Occupies for Programme<M> {
+impl<M: Occupies> Occupies for Mesocycles<M> {
     fn span(&self) -> Span {
         Self::span(self)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("a plan trains something: it holds a gym programme, a cycling programme, or both")]
+#[error("a plan trains something: it holds gym mesocycles, cycling mesocycles, or both")]
 pub struct EmptyPlan;
 
-/// What is authored: one plan, holding one programme per discipline.
+/// What is authored: one plan, holding each discipline's mesocycles.
 ///
-/// **A field per discipline rather than a list.** A plan with two gym programmes
+/// **A field per discipline rather than a list.** A plan with two gym sides
 /// is not a thing, and a list would let one be built; a `KnownDiscipline` key
 /// would be the same list with a lookup in front of it. What this costs is a line
 /// per discipline when a third arrives, which is the right price for making the
@@ -429,8 +432,8 @@ pub struct EmptyPlan;
 pub struct Plan {
     name: PlanName,
     authored_at: Timestamp,
-    gym: Option<Programme<GymMesocycle>>,
-    cycling: Option<Programme<CyclingMesocycle>>,
+    gym: Option<Mesocycles<GymMesocycle>>,
+    cycling: Option<Mesocycles<CyclingMesocycle>>,
     /// The cycling chain the macrocycle follows (#222). `None` for a plan
     /// written before chains were stated, which nothing can be committed
     /// against until it is stated again.
@@ -440,12 +443,12 @@ pub struct Plan {
 impl Plan {
     /// # Errors
     ///
-    /// [`EmptyPlan`] if it holds no programme at all.
+    /// [`EmptyPlan`] if it holds no mesocycle at all.
     pub fn new(
         name: PlanName,
         authored_at: Timestamp,
-        gym: Option<Programme<GymMesocycle>>,
-        cycling: Option<Programme<CyclingMesocycle>>,
+        gym: Option<Mesocycles<GymMesocycle>>,
+        cycling: Option<Mesocycles<CyclingMesocycle>>,
     ) -> Result<Self, EmptyPlan> {
         if gym.is_none() && cycling.is_none() {
             return Err(EmptyPlan);
@@ -478,11 +481,11 @@ impl Plan {
         self.authored_at
     }
 
-    pub const fn gym(&self) -> Option<&Programme<GymMesocycle>> {
+    pub const fn gym(&self) -> Option<&Mesocycles<GymMesocycle>> {
         self.gym.as_ref()
     }
 
-    pub const fn cycling(&self) -> Option<&Programme<CyclingMesocycle>> {
+    pub const fn cycling(&self) -> Option<&Mesocycles<CyclingMesocycle>> {
         self.cycling.as_ref()
     }
 
@@ -530,18 +533,18 @@ impl Plan {
 
     /// The mesocycle running on a date, both disciplines' halves of it.
     ///
-    /// `None` for a day neither programme covers: a gap, or outside the plan.
+    /// `None` for a day neither discipline covers: a gap, or outside the plan.
     #[must_use]
     pub fn mesocycle_on(&self, date: Date) -> Option<Mesocycle<'_>> {
         let gym = self
             .gym
             .as_ref()
-            .and_then(|programme| programme.on(date))
+            .and_then(|side| side.on(date))
             .map(|(_, mesocycle)| mesocycle);
         let cycling = self
             .cycling
             .as_ref()
-            .and_then(|programme| programme.on(date))
+            .and_then(|side| side.on(date))
             .map(|(_, mesocycle)| mesocycle);
         let span = gym
             .map(Occupies::span)

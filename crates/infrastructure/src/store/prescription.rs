@@ -430,7 +430,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        let mesocycle = workout.programme().as_i64();
+        let mesocycle = workout.mesocycle().as_i64();
         let issued_for = workout.issued_for().to_string();
         let intensity = workout.session_role().intensity().as_str();
         let volume = workout.session_role().volume().as_str();

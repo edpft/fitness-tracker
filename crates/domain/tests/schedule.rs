@@ -218,7 +218,7 @@ fn a_later_schedule_supersedes_an_earlier_one() {
 /// them is not the gym's problem — and a gym block that counted them would skip
 /// weeks it never planned to run.
 #[test]
-fn a_programme_loses_only_its_own_days() {
+fn a_discipline_loses_only_its_own_days() {
     let diary = september().expect("the diary builds");
 
     let lost = diary.unavailable(

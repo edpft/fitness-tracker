@@ -10,9 +10,9 @@ mod chart;
 mod composition;
 mod daily;
 mod equipment;
+mod fills;
 mod one_rep_max;
 mod page;
-mod programme;
 mod range;
 mod report;
 mod run;
@@ -127,7 +127,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/resting-heart-rate", get(resting_heart_rate))
         .route("/estimated-1rm", get(estimated_one_rep_max))
         .route("/equipment", get(equipment_page).post(equipment_post))
-        .route("/programme", get(programme_page).post(programme_post))
+        .route("/fills", get(fills_page).post(fills_post))
         .route("/run/events", get(events))
         .route("/run/step", get(step))
         .route("/htmx.min.js", get(htmx))
@@ -372,11 +372,11 @@ async fn equipment_post(
     }
 }
 
-/// The programme in force today, read afresh, with what the last post came to.
-async fn programme_shown(runs: &Runs, said: Option<&str>) -> Markup {
+/// The fills in force today, read afresh, with what the last post came to.
+async fn fills_shown(runs: &Runs, said: Option<&str>) -> Markup {
     let store = match configurator::store::Store::open(&runs.setting().database).await {
         Ok(store) => store,
-        Err(error) => return programme::unreadable(&error.to_string()),
+        Err(error) => return fills::unreadable(&error.to_string()),
     };
     let zone = &runs.setting().zone;
     let today = configurator::equipment::today(zone);
@@ -384,22 +384,22 @@ async fn programme_shown(runs: &Runs, said: Option<&str>) -> Markup {
     let facts = configurator::equipment::facts(&store).await;
     store.close().await;
     match (found, facts) {
-        (Ok(found), Ok(facts)) => programme::page(found.as_ref(), &facts, today, said),
-        (Err(error), _) => programme::unreadable(&error.to_string()),
-        (_, Err(error)) => programme::unreadable(&error.to_string()),
+        (Ok(found), Ok(facts)) => fills::page(found.as_ref(), &facts, today, said),
+        (Err(error), _) => fills::unreadable(&error.to_string()),
+        (_, Err(error)) => fills::unreadable(&error.to_string()),
     }
 }
 
-async fn programme_page(State(runs): State<Arc<Runs>>) -> Markup {
-    programme_shown(&runs, None).await
+async fn fills_page(State(runs): State<Arc<Runs>>) -> Markup {
+    fills_shown(&runs, None).await
 }
 
 /// Change a fill, then show the page again, as the equipment page does.
-async fn programme_post(
+async fn fills_post(
     State(runs): State<Arc<Runs>>,
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
-    let refused = match programme::asked(&form) {
+    let refused = match fills::asked(&form) {
         Err(refused) => Some(refused),
         Ok(asked) => match configurator::store::Store::open(&runs.setting().database).await {
             Err(error) => Some(error.to_string()),
@@ -411,8 +411,8 @@ async fn programme_post(
         },
     };
     match refused {
-        None => Redirect::to("/programme").into_response(),
-        Some(refused) => programme_shown(&runs, Some(&refused)).await.into_response(),
+        None => Redirect::to("/fills").into_response(),
+        Some(refused) => fills_shown(&runs, Some(&refused)).await.into_response(),
     }
 }
 

@@ -48,7 +48,7 @@ use crate::{
 /// Everything delivery needs from the outside.
 pub struct DeliveryPorts<S, P, D, T> {
     pub prescriptions: S,
-    pub programmes: P,
+    pub mesocycles: P,
     pub deliveries: D,
     pub destination: T,
 }
@@ -77,7 +77,7 @@ impl<S, P, D, T> Delivering<S, P, D, T> {
 /// that is not `Sync`, and the port declares `deliver` `Send`.
 async fn deliverable<S, P>(
     prescriptions: &S,
-    programmes: &P,
+    mesocycles: &P,
     date: Date,
 ) -> Result<(PrescribedWorkoutId, Deliverable), DeliveryError>
 where
@@ -97,8 +97,8 @@ where
     // **A date no mesocycle covers is usually a week the plan stopped
     // running** (#316): lost to illness or moved, which is ordinary. Only a
     // prescription naming a mesocycle the store no longer holds is corrupt.
-    let Some(found) = programmes.on(date).await? else {
-        return Err(if programmes.holds(workout.programme()).await? {
+    let Some(found) = mesocycles.on(date).await? else {
+        return Err(if mesocycles.holds(workout.mesocycle()).await? {
             DeliveryError::WeekNotRun {
                 date,
                 week_of: domain::planner::commencing(date),
@@ -108,7 +108,7 @@ where
         });
     };
     let microcycle = found.mesocycle.calendar().microcycle(workout.week());
-    let rerun = programmes.rerun_on(date).await?;
+    let rerun = mesocycles.rerun_on(date).await?;
 
     // **And the number comes from the record, not from the calendar** (#312). A
     // calendar is rebuilt from a start, a duration and its interruptions, so
@@ -143,7 +143,7 @@ where
     async fn deliver(&self, date: Date) -> Result<Delivery, DeliveryError> {
         let destination = self.ports.destination.name();
         let (id, session) =
-            deliverable(&self.ports.prescriptions, &self.ports.programmes, date).await?;
+            deliverable(&self.ports.prescriptions, &self.ports.mesocycles, date).await?;
         let ordinal = session.ordinal;
 
         // **Asked before sent, and asked about the date rather than about this

@@ -9,7 +9,7 @@
 
 pub mod corpus;
 pub mod layers;
-pub mod programme;
+pub mod mesocycle;
 pub mod store;
 
 /// Derive over the corpus, or fail the test saying which step broke.

@@ -31,7 +31,7 @@
 //! **Identity is the plan's, and there is no overlap rule here at all.** A
 //! mesocycle had a [`ProgrammeName`] of its own until 2026-09-06 and competed
 //! for its days against every other cycling mesocycle, which is how four of
-//! them were held in sequence without a plan to hold them. `Programme` orders
+//! them were held in sequence without a plan to hold them. `Mesocycles` orders
 //! them now and refuses two that collide, and the only overlap rule left is
 //! between *plans* — so the gym and the bike compete for every day of one plan
 //! on purpose, which is the point of the tool.

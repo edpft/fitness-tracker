@@ -14,7 +14,7 @@ use domain::{
     schedule::SessionRole,
 };
 use jiff::civil::date;
-use support::programme::{self, entry_test_from};
+use support::mesocycle::{self, entry_test_from};
 
 #[test]
 fn a_change_in_one_mesocycle_holds_in_the_next() {
@@ -27,17 +27,17 @@ fn a_change_in_one_mesocycle_holds_in_the_next() {
         let pool = infrastructure::connect(&directory.path().join("test.db"))
             .await
             .expect("a store");
-        programme::record_the_week(&pool).await.expect("the week");
+        mesocycle::record_the_week(&pool).await.expect("the week");
         let zone = support::corpus::zone().expect("the zone");
 
         // Two test weeks a fortnight apart, both stating the fixture's fills:
         // the core slot is the bent-over cable chop.
-        let plan = programme::plan(vec![
+        let plan = mesocycle::plan(vec![
             entry_test_from(date(2026, 9, 14)).expect("a test week"),
             entry_test_from(date(2026, 9, 28)).expect("a test week"),
         ])
         .expect("a plan");
-        programme::design(&pool).await.expect("the fixture designs");
+        mesocycle::design(&pool).await.expect("the fixture designs");
         Authoring::new(infrastructure::SqlitePlanStore::new(
             pool.clone(),
             zone.clone(),

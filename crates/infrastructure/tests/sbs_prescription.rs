@@ -42,7 +42,7 @@ use infrastructure::{
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
-use support::{corpus, programme};
+use support::{corpus, mesocycle};
 
 type Failure = Box<dyn std::error::Error>;
 
@@ -83,8 +83,8 @@ fn entry_test() -> Result<GymMesocycle, Failure> {
     let week = Test::week(
         Date::new(2026, 9, 7)?,
         &[] as &[Skip],
-        programme::weekdays()?,
-        programme::zone()?,
+        mesocycle::weekdays()?,
+        mesocycle::zone()?,
     )?;
     let measured = Anchor::new(
         Kg::from_grams(92_500),
@@ -98,7 +98,7 @@ fn entry_test() -> Result<GymMesocycle, Failure> {
             Exercise::Reps(RepsExercise::FrontSquatBarbell),
             RepCount::new(1)?,
         ),
-        programme::fills()?,
+        mesocycle::fills()?,
         week,
         None,
         Some(measured),
@@ -106,8 +106,8 @@ fn entry_test() -> Result<GymMesocycle, Failure> {
 }
 
 fn cycle() -> Result<GymMesocycle, Failure> {
-    let answers = programme::authored(opens(), Shape::Provided { from: provided()? })?;
-    Ok(programme::authoring(answers, &[])??)
+    let answers = mesocycle::authored(opens(), Shape::Provided { from: provided()? })?;
+    Ok(mesocycle::authoring(answers, &[])??)
 }
 
 /// One front squat set, every field of it one normalised session's.
@@ -178,8 +178,8 @@ async fn ready(
     // **Built before the await, not inside it.** A `?` in an argument holds its
     // `Result` across the await, and a boxed error is not `Send` — which
     // `clippy::future_not_send` refuses rather than this reading better.
-    let plan = programme::named_plan("2026-autumn", vec![entry_test()?, cycle()?])?;
-    programme::design(&pool).await?;
+    let plan = mesocycle::named_plan("2026-autumn", vec![entry_test()?, cycle()?])?;
+    mesocycle::design(&pool).await?;
     Authoring::new(SqlitePlanStore::new(pool.clone(), zone.clone()))
         .author(&plan)
         .await?;
@@ -199,7 +199,7 @@ async fn ready(
     Ok((
         Prescribing::new(PrescriptionPorts {
             history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: SqliteGymMesocycleStore::new(pool.clone(), zone),
+            mesocycles: SqliteGymMesocycleStore::new(pool.clone(), zone),
             parameters: SqliteGenerationParameterStore::new(pool.clone()),
             prescriptions: SqlitePrescribedWorkoutStore::new(
                 pool.clone(),

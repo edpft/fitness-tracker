@@ -18,7 +18,7 @@ use domain::{
     provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
 };
 use jiff::civil::Date;
-use support::programme;
+use support::mesocycle;
 
 /// Built by hand: `#[tokio::test]` expands with an `allow` this crate forbids.
 fn runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
@@ -44,32 +44,32 @@ fn provided() -> Result<ProvidedFrom, Box<dyn std::error::Error>> {
 /// more: the anchor belongs to the microcycle and is read off whatever measured
 /// the lift before it, when a session is asked for.
 fn cycle() -> Result<GymMesocycle, Box<dyn std::error::Error>> {
-    let answers = programme::authored(
+    let answers = mesocycle::authored(
         Date::new(2026, 9, 14)?,
         Shape::Provided { from: provided()? },
     )?;
-    Ok(programme::authoring(answers, &[])??)
+    Ok(mesocycle::authoring(answers, &[])??)
 }
 
 #[test]
 fn the_answers_author_an_sbs_cycle() {
-    let programme = cycle().expect("the answers author");
+    let mesocycle = cycle().expect("the answers author");
 
-    assert_eq!(programme.template(), "sbs");
-    let GymMesocycle::Progression(Progression::Provided { from, .. }) = &programme else {
+    assert_eq!(mesocycle.template(), "sbs");
+    let GymMesocycle::Progression(Progression::Provided { from, .. }) = &mesocycle else {
         panic!("a provided cycle knows where it came from")
     };
     assert_eq!(from.programme().name().as_str(), "Squat 2x Int");
     assert_eq!(from.to_string(), "micros 1-2-3-4");
     assert!(
         matches!(
-            programme,
+            mesocycle,
             GymMesocycle::Progression(Progression::Provided { .. })
         ),
         "and it is a periodisation, beside linear and block",
     );
     assert_eq!(
-        programme.calendar().duration_weeks(),
+        mesocycle.calendar().duration_weeks(),
         4,
         "four weeks, taken from the chart rather than from the answers",
     );
@@ -77,10 +77,10 @@ fn the_answers_author_an_sbs_cycle() {
 
 #[test]
 fn the_cycle_leaves_a_maximum_behind_it() {
-    let programme = cycle().expect("the answers author");
+    let mesocycle = cycle().expect("the answers author");
 
     assert!(
-        programme.produces_maximum().is_some(),
+        mesocycle.produces_maximum().is_some(),
         "week 4 day 2 is a single, and it is what opens the next cycle",
     );
 }
@@ -101,11 +101,11 @@ fn a_cycle_states_no_anchor_and_round_trips_through_the_store() {
             // A block's calendar is rebuilt from the operator's week on every
             // read (issue #63), so a store with no week in it cannot hold a
             // plan.
-            programme::record_the_week(&pool).await?;
+            mesocycle::record_the_week(&pool).await?;
             let zone = support::corpus::zone()?;
 
-            let plan = programme::plan(vec![cycle()?])?;
-            programme::design(&pool).await?;
+            let plan = mesocycle::plan(vec![cycle()?])?;
+            mesocycle::design(&pool).await?;
             Authoring::new(infrastructure::SqlitePlanStore::new(
                 pool.clone(),
                 zone.clone(),

@@ -74,14 +74,14 @@ fn session() -> Result<Deliverable, Box<dyn std::error::Error>> {
         "2026-08-24".parse()?,
         SessionRole::new(Relative::Lower, Relative::Higher),
         WeekKind::Climbing(WeekIndex::new(4)?),
-        DerivedFrom::Anchor(support::programme::anchor()?),
+        DerivedFrom::Anchor(support::mesocycle::anchor()?),
         MesocycleId::new(1),
         "2026-08-23T18:00:00Z".parse()?,
     );
 
     Ok(Deliverable {
         workout,
-        plan: support::programme::name("summer-2026-front-squat")?,
+        plan: support::mesocycle::name("summer-2026-front-squat")?,
         mesocycle: MesocycleOrdinal::new(2)?,
         microcycle: Some(WeekIndex::new(4)?),
         rerun: None,
@@ -590,9 +590,9 @@ fn a_replacement_of_a_routine_that_is_gone_is_refused() {
     assert!(!posted, "and nothing was created in its place");
 }
 
-/// A programme with no folder yet gets one, and the session goes into it.
+/// A plan with no folder yet gets one, and the session goes into it.
 #[test]
-fn a_programme_without_a_folder_has_one_made_for_it() {
+fn a_plan_without_a_folder_has_one_made_for_it() {
     let folder_id = support::corpus::block_on(async {
         let server = MockServer::start().await;
 
@@ -885,7 +885,7 @@ fn ramped_primary() -> Result<Deliverable, Box<dyn std::error::Error>> {
         session.workout.session_role(),
         session.workout.week(),
         session.workout.derived_from(),
-        session.workout.programme(),
+        session.workout.mesocycle(),
         session.workout.issued_at(),
     );
     Ok(session)
@@ -991,7 +991,7 @@ fn rep_max_primary() -> Result<Deliverable, Box<dyn std::error::Error>> {
         session.workout.session_role(),
         session.workout.week(),
         session.workout.derived_from(),
-        session.workout.programme(),
+        session.workout.mesocycle(),
         session.workout.issued_at(),
     );
     session.ordinal = SessionOrdinal::new(5)?;

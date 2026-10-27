@@ -106,7 +106,7 @@ fn build() -> Result<ExternalProgramme, Box<dyn std::error::Error>> {
 }
 
 /// Four microcycles beginning Monday 2026-09-21, ridden Wednesday and Sunday.
-fn programme() -> Result<CyclingMesocycle, Box<dyn std::error::Error>> {
+fn mesocycle() -> Result<CyclingMesocycle, Box<dyn std::error::Error>> {
     let microcycles = NonEmpty::new(vec![
         microcycle(1)?,
         microcycle(2)?,
@@ -125,26 +125,26 @@ fn programme() -> Result<CyclingMesocycle, Box<dyn std::error::Error>> {
 /// nothing renumbers the rest to hide it.
 #[test]
 fn a_microcycle_says_which_published_one_it_is() {
-    let programme = programme().expect("the fixture programme is valid");
-    let numbers: Vec<Option<u32>> = programme
+    let mesocycle = mesocycle().expect("the fixture mesocycle is valid");
+    let numbers: Vec<Option<u32>> = mesocycle
         .microcycles()
         .iter()
         .map(CyclingMicrocycle::published_ordinal)
         .collect();
     assert_eq!(numbers, vec![Some(1), Some(2), Some(4), Some(5)]);
     assert_eq!(
-        programme
+        mesocycle
             .microcycle(3)
             .and_then(CyclingMicrocycle::published_ordinal),
         Some(4),
-        "the programme's third microcycle is the published fourth",
+        "the mesocycle's third microcycle is the published fourth",
     );
     assert_eq!(
-        programme
+        mesocycle
             .provided_from()
             .map(|from| format!("{} {from}", from.programme())),
         Some("Build Your Power Zones micros 1-2-4-5".to_owned()),
-        "and the mesocycle as a whole says which weeks of which programme it is",
+        "and the mesocycle as a whole says which weeks of which mesocycle it is",
     );
 }
 
@@ -152,11 +152,11 @@ fn a_microcycle_says_which_published_one_it_is() {
 /// one: this is what `cycling next` stopped needing `--start` for.
 #[test]
 fn a_date_resolves_to_a_microcycle_and_a_ride() {
-    let programme = programme().expect("the fixture programme is valid");
+    let mesocycle = mesocycle().expect("the fixture mesocycle is valid");
 
     // 2026-09-23 is the Wednesday of the first week, 2026-10-11 the Sunday of
     // the third.
-    let (number, position, ride) = programme
+    let (number, position, ride) = mesocycle
         .on(date(2026, 9, 23), &riding_week().expect("a week"))
         .expect("the first Wednesday rides");
     assert_eq!(number, 1);
@@ -166,7 +166,7 @@ fn a_date_resolves_to_a_microcycle_and_a_ride() {
         "45 min Power Zone Endurance Ride"
     );
 
-    let (number, position, ride) = programme
+    let (number, position, ride) = mesocycle
         .on(date(2026, 10, 11), &riding_week().expect("a week"))
         .expect("the third Sunday rides");
     assert_eq!(number, 3, "three weeks after the start is microcycle three");
@@ -189,8 +189,8 @@ fn a_date_resolves_to_a_microcycle_and_a_ride() {
 /// 2026-09-05.
 #[test]
 fn a_week_counts_its_own_sessions_and_keeps_the_published_numbers() {
-    let programme = programme().expect("the fixture programme is valid");
-    let week = programme.microcycle(1).expect("the first microcycle");
+    let mesocycle = mesocycle().expect("the fixture mesocycle is valid");
+    let week = mesocycle.microcycle(1).expect("the first microcycle");
 
     assert_eq!(week.session_count(), 2, "two rides, so two of two");
     let ours: Vec<u8> = week.rides().keys().map(|at| at.as_u8()).collect();
@@ -210,20 +210,20 @@ fn a_week_counts_its_own_sessions_and_keeps_the_published_numbers() {
 /// A day the programme does not ride and a day it does not cover are different
 /// answers to different questions, and both are `None` rather than a guess.
 #[test]
-fn a_day_outside_the_programme_rides_nothing() {
-    let programme = programme().expect("the fixture programme is valid");
+fn a_day_outside_the_mesocycle_rides_nothing() {
+    let mesocycle = mesocycle().expect("the fixture mesocycle is valid");
     assert_eq!(
-        programme.on(date(2026, 9, 25), &riding_week().expect("a week")),
+        mesocycle.on(date(2026, 9, 25), &riding_week().expect("a week")),
         None,
         "Friday is the gym's"
     );
     assert_eq!(
-        programme.microcycle_of(date(2026, 9, 20)),
+        mesocycle.microcycle_of(date(2026, 9, 20)),
         None,
         "the day before it starts",
     );
     assert_eq!(
-        programme.microcycle_of(date(2026, 10, 19)),
+        mesocycle.microcycle_of(date(2026, 10, 19)),
         None,
         "the Monday after the last microcycle ends",
     );
@@ -233,15 +233,15 @@ fn a_day_outside_the_programme_rides_nothing() {
 /// first Wednesday of the programme.
 #[test]
 fn the_next_riding_day_is_found_from_any_date() {
-    let programme = programme().expect("the fixture programme is valid");
+    let mesocycle = mesocycle().expect("the fixture mesocycle is valid");
     assert_eq!(
-        programme.next_riding_day(date(2026, 9, 28), &riding_week().expect("a week")),
+        mesocycle.next_riding_day(date(2026, 9, 28), &riding_week().expect("a week")),
         Some(date(2026, 9, 30)),
     );
     assert_eq!(
-        programme.next_riding_day(date(2026, 9, 1), &riding_week().expect("a week")),
+        mesocycle.next_riding_day(date(2026, 9, 1), &riding_week().expect("a week")),
         Some(date(2026, 9, 23)),
-        "a date before the start finds the programme's own first ride",
+        "a date before the start finds the mesocycle's own first ride",
     );
 }
 
@@ -445,8 +445,8 @@ fn the_shorter_harder_ride_takes_the_wednesday_whatever_its_position() {
 /// purpose.
 #[test]
 fn a_cycling_mesocycle_occupies_the_weeks_it_runs() {
-    let programme = programme().expect("the fixture programme is valid");
-    let span = programme.span();
+    let mesocycle = mesocycle().expect("the fixture mesocycle is valid");
+    let span = mesocycle.span();
     assert_eq!(span.calendar_weeks(), 4);
     assert!(span.covers(date(2026, 10, 18)), "the last day it occupies");
     assert!(!span.covers(date(2026, 10, 19)), "the day after");

@@ -155,7 +155,7 @@ impl Linear {
     /// superseded.
     ///
     /// It could not fail in any case: the two ways `Ladder::new` refuses are a
-    /// duration below two and a climb of nothing, and the `programme` and
+    /// duration below two and a climb of nothing, and the `mesocycle` and
     /// `generation_parameters` tables both carry a `CHECK` excluding them. So this
     /// is about the check meaning the wrong thing rather than about it failing.
     /// Keeping it out also keeps `MesocycleStore` able to answer its own question
@@ -194,7 +194,7 @@ impl Linear {
     /// programme with a week rather than about the programme, and the week
     /// changes under a programme that is already stored — so a type invariant
     /// would make an old mesocycle unreadable the day the operator moved his
-    /// gym nights. [`runs_its_gating_session`](super::super::authored::programme)
+    /// gym nights. [`runs_its_gating_session`](super::super::authored::mesocycle)
     /// asks it at authoring, where a refusal is something he can act on.
     fn check(
         primary: PrimaryPattern,

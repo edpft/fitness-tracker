@@ -18,7 +18,7 @@ use domain::{
     },
     gym::exercise::{DurationExercise, Exercise, RepsExercise},
     measure::{PositiveDuration, RepCount},
-    plan::{Plan, PlanName, Programme},
+    plan::{Mesocycles, Plan, PlanName},
     planner::{self, Filled, Missed, Planned, week},
     prescription::{
         BlockPeriodisation, EntryTest, Fill, GymMesocycle, Primary, PrimaryPattern, Progression,
@@ -217,8 +217,8 @@ fn plan(test: bool) -> Built<Plan> {
     Ok(Plan::new(
         PlanName::try_from("autumn".to_owned())?,
         jiff::Timestamp::UNIX_EPOCH,
-        Some(Programme::new(vec![gym()?])?),
-        Some(Programme::new(vec![cycling(test)?])?),
+        Some(Mesocycles::new(vec![gym()?])?),
+        Some(Mesocycles::new(vec![cycling(test)?])?),
     )?)
 }
 

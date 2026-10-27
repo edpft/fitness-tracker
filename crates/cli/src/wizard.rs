@@ -1,4 +1,4 @@
-//! `fitness programme add`, asked rather than typed.
+//! `fitness mesocycle add`, asked rather than typed.
 //!
 //! **Seventeen slots out of a hundred and thirty-five exercises.** A fresh
 //! periodisation states every slot itself — there is no predecessor to inherit
@@ -41,7 +41,7 @@ use domain::{
     },
     measure::{Kg, RepCount},
     normalised::OperatorZone,
-    plan::{Plan, PlanName, Programme},
+    plan::{Mesocycles, Plan, PlanName},
     // The periodised block, named for what it holds: the plan a duration
     // divides into.
     prescription::{
@@ -399,7 +399,7 @@ fn gym_week(diary: &Diary, start: Date) -> Result<(TrainingWeek, SessionRole), F
     let Some(week) = diary.training_week(start, Discipline::Gym) else {
         return Err(usage(format!(
             "the schedule gives the gym no day of the week as of {start}, so there \
-             is nothing for a programme to run on. Record the week first: \
+             is nothing for a mesocycle to run on. Record the week first: \
              fitness schedule add"
         )));
     };
@@ -692,7 +692,7 @@ const TEMPLATES: [(&str, &str); 4] = [
 ];
 
 fn ask_template() -> Result<&'static str, Failure> {
-    println!("which kind of programme?");
+    println!("which kind of mesocycle?");
     for (at, (name, gloss)) in TEMPLATES.iter().enumerate() {
         println!("  {:>2}. {name:<8} {gloss}", at.saturating_add(1));
     }
@@ -820,7 +820,7 @@ pub fn ask_lift(template: &str, pattern: PrimaryPattern) -> Result<RepsExercise,
     })
 }
 
-async fn ask_programme(
+async fn ask_mesocycle(
     template: &'static str,
     diary: &Diary,
     history: &(impl ExerciseHistory + Sync),
@@ -1071,7 +1071,7 @@ pub async fn add(database: &Path, zone: &OperatorZone) -> Result<(), Failure> {
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
     let template = ask_template()?;
-    let (name, answers) = ask_programme(template, &diary, &history, &parameters).await?;
+    let (name, answers) = ask_mesocycle(template, &diary, &history, &parameters).await?;
 
     println!("\nAnd the slots. A number picks from the list; anything else is read");
     println!("as an exercise, so something you have never done is one word away.");
@@ -1086,7 +1086,7 @@ pub async fn add(database: &Path, zone: &OperatorZone) -> Result<(), Failure> {
     // prescribed.
     let interruptions = interruptions(&diary, &answers);
 
-    let mesocycle = domain::prescription::authored::programme(
+    let mesocycle = domain::prescription::authored::mesocycle(
         answers,
         fills,
         &interruptions,
@@ -1108,7 +1108,7 @@ pub async fn add(database: &Path, zone: &OperatorZone) -> Result<(), Failure> {
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
-    output::programme_authored(id, authored, &plan, &mesocycle, &parameters);
+    output::mesocycle_authored(id, authored, &plan, &mesocycle, &parameters);
     Ok(())
 }
 
@@ -1129,9 +1129,8 @@ fn with_gym(
     let start = mesocycle.calendar().start();
     let mut gym: Vec<GymMesocycle> = existing
         .and_then(Plan::gym)
-        .map(|programme| {
-            programme
-                .mesocycles()
+        .map(|side| {
+            side.mesocycles()
                 .filter(|held| held.calendar().start() != start)
                 .cloned()
                 .collect()
@@ -1143,7 +1142,7 @@ fn with_gym(
     Plan::new(
         name,
         jiff::Timestamp::now(),
-        Some(Programme::new(gym).map_err(|error| Failure::usage(&error))?),
+        Some(Mesocycles::new(gym).map_err(|error| Failure::usage(&error))?),
         existing.and_then(Plan::cycling).cloned(),
     )
     .map_err(|error| Failure::usage(&error))
@@ -1244,7 +1243,7 @@ fn ask_entry_test(
 /// The gym half of a plan: an entry test and the progressions after it.
 ///
 /// **This is `plan` composing the wizard rather than restating it** (issue #73).
-/// Every question here is one `programme add` already asks; what differs is that
+/// Every question here is one `mesocycle add` already asks; what differs is that
 /// they are asked once for the whole plan instead of once per mesocycle, and the
 /// four mesocycles are laid out from the answers rather than typed in over three
 /// months.
@@ -1317,7 +1316,7 @@ pub async fn gym_side(
         };
         let skips = interruptions(&diary, &answers);
         mesocycles.push(
-            domain::prescription::authored::programme(
+            domain::prescription::authored::mesocycle(
                 answers,
                 fills.clone(),
                 &skips,

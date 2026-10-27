@@ -30,7 +30,7 @@ use infrastructure::{
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
-use support::{corpus, programme, store};
+use support::{corpus, mesocycle, store};
 
 /// A destination that keeps count and invents a reference per call.
 ///
@@ -239,7 +239,7 @@ struct Ready {
 
 /// The corpus, landed and derived, with the fixture programme authored.
 async fn ready() -> Result<Ready, Box<dyn std::error::Error>> {
-    ready_with(programme::as_plan(programme::programme()?)?).await
+    ready_with(mesocycle::as_plan(mesocycle::linear()?)?).await
 }
 
 /// The same, holding a plan the caller shaped.
@@ -252,7 +252,7 @@ async fn ready_with(plan: domain::plan::Plan) -> Result<Ready, Box<dyn std::erro
     let pool: SqlitePool = connect(&directory.path().join("test.db")).await?;
     // A block's calendar is rebuilt from the operator's week on every read
     // (issue #63), so a store with no week in it cannot hold a plan.
-    programme::record_the_week(&pool).await?;
+    mesocycle::record_the_week(&pool).await?;
 
     let landing = HevyWorkoutLandingStore::new(pool.clone())?;
     let runs = SqliteExtractionRunLog::new(pool.clone());
@@ -286,7 +286,7 @@ async fn ready_with(plan: domain::plan::Plan) -> Result<Ready, Box<dyn std::erro
     // derivation of what the step above has just written (#350).
     store::canonicalise(&pool).await?;
 
-    programme::design(&pool).await?;
+    mesocycle::design(&pool).await?;
     Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
         .author(&plan)
         .await?;
@@ -294,7 +294,7 @@ async fn ready_with(plan: domain::plan::Plan) -> Result<Ready, Box<dyn std::erro
     Ok(Ready {
         prescriber: Prescribing::new(PrescriptionPorts {
             history: SqliteExerciseHistory::new(pool.clone()),
-            programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+            mesocycles: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
             parameters: SqliteGenerationParameterStore::new(pool.clone()),
             prescriptions: SqlitePrescribedWorkoutStore::new(
                 pool.clone(),
@@ -322,7 +322,7 @@ fn delivering<'a>(
             ready.pool.clone(),
             "Europe/London".to_owned(),
         ),
-        programmes: SqliteGymMesocycleStore::new(ready.pool.clone(), ready.zone.clone()),
+        mesocycles: SqliteGymMesocycleStore::new(ready.pool.clone(), ready.zone.clone()),
         deliveries: SqlitePrescriptionDeliveryStore::new(ready.pool.clone()),
         destination,
     })
@@ -350,8 +350,8 @@ macro_rules! run {
 /// block needs that one's maximum recorded and a test is what records it — which
 /// is also the shape the autumn actually ran (decision 0013).
 fn to_a_test() -> Result<domain::plan::Plan, Box<dyn std::error::Error>> {
-    let closing_test = programme::authoring(
-        programme::authored(
+    let closing_test = mesocycle::authoring(
+        mesocycle::authored(
             Date::constant(2026, 8, 31),
             domain::prescription::authored::Shape::Test {
                 reps: domain::measure::RepCount::new(1)?,
@@ -363,9 +363,9 @@ fn to_a_test() -> Result<domain::plan::Plan, Box<dyn std::error::Error>> {
         &[],
     )??;
 
-    Ok(programme::plan(vec![
-        programme::entry_test()?,
-        programme::as_programme(programme::programme()?),
+    Ok(mesocycle::plan(vec![
+        mesocycle::entry_test()?,
+        mesocycle::as_mesocycle(mesocycle::linear()?),
         closing_test,
     ])?)
 }
@@ -574,9 +574,9 @@ fn a_corrected_session_replaces_the_one_already_delivered() {
     let (first_issued, first_delivery) = first;
 
     let (issued, second) = run!(async {
-        programme::design(&ready.pool).await?;
+        mesocycle::design(&ready.pool).await?;
         Authoring::new(SqlitePlanStore::new(ready.pool.clone(), ready.zone.clone()))
-            .author(&programme::as_plan(programme::programme_from(
+            .author(&mesocycle::as_plan(mesocycle::linear_from(
                 Date::constant(2026, 7, 20),
             )?)?)
             .await?;
@@ -762,9 +762,9 @@ fn a_replacement_moves_the_delivery_record() {
     });
 
     let replacing = run!(async {
-        programme::design(&ready.pool).await?;
+        mesocycle::design(&ready.pool).await?;
         Authoring::new(SqlitePlanStore::new(ready.pool.clone(), ready.zone.clone()))
-            .author(&programme::as_plan(programme::programme_from(
+            .author(&mesocycle::as_plan(mesocycle::linear_from(
                 Date::constant(2026, 7, 20),
             )?)?)
             .await?;
@@ -828,11 +828,11 @@ fn a_date_with_nothing_issued_delivers_nothing() {
 /// illness that cost the block's first week would have it: nothing now covers
 /// 6 to 12 July.
 async fn a_week_lost(ready: &Ready) -> Result<(), Box<dyn std::error::Error>> {
-    programme::design(&ready.pool).await?;
+    mesocycle::design(&ready.pool).await?;
     Authoring::new(SqlitePlanStore::new(ready.pool.clone(), corpus::zone()?))
-        .author(&programme::plan(vec![
-            programme::entry_test()?,
-            programme::as_programme(programme::programme_from(Date::constant(2026, 7, 13))?),
+        .author(&mesocycle::plan(vec![
+            mesocycle::entry_test()?,
+            mesocycle::as_mesocycle(mesocycle::linear_from(Date::constant(2026, 7, 13))?),
         ])?)
         .await?;
     Ok(())
@@ -1035,7 +1035,7 @@ fn a_failed_delivery_keeps_its_reply_and_shows_it() {
                 ready.pool.clone(),
                 "Europe/London".to_owned(),
             ),
-            programmes: SqliteGymMesocycleStore::new(ready.pool.clone(), ready.zone.clone()),
+            mesocycles: SqliteGymMesocycleStore::new(ready.pool.clone(), ready.zone.clone()),
             deliveries: SqlitePrescriptionDeliveryStore::new(ready.pool.clone()),
             destination: &destination,
         })

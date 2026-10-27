@@ -19,7 +19,7 @@ use infrastructure::{
 };
 use sqlx::SqlitePool;
 
-use super::{corpus, programme};
+use super::{corpus, mesocycle};
 
 type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -28,7 +28,7 @@ type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 /// The directory comes back with the pool because dropping it deletes the file
 /// the pool is talking to.
 pub async fn derived_and_authored() -> Fallible<(tempfile::TempDir, SqlitePool)> {
-    with_programme(programme::programme()?).await
+    with_mesocycle(mesocycle::linear()?).await
 }
 
 /// Rebuild the canonical gym layer from whatever the normalised one now holds.
@@ -47,15 +47,15 @@ pub async fn canonicalise(pool: &SqlitePool) -> Fallible<()> {
 }
 
 /// The same, with a programme the caller chose.
-pub async fn with_programme(
-    programme: domain::prescription::Linear,
+pub async fn with_mesocycle(
+    mesocycle: domain::prescription::Linear,
 ) -> Fallible<(tempfile::TempDir, SqlitePool)> {
     let directory = tempfile::tempdir()?;
     let pool: SqlitePool = connect(&directory.path().join("test.db")).await?;
 
     // Before anything else, because a block's calendar is rebuilt from the
     // operator's week on every read (issue #63).
-    programme::record_the_week(&pool).await?;
+    mesocycle::record_the_week(&pool).await?;
 
     let landing = HevyWorkoutLandingStore::new(pool.clone())?;
     let runs = SqliteExtractionRunLog::new(pool.clone());
@@ -84,9 +84,9 @@ pub async fn with_programme(
         .await?;
     canonicalise(&pool).await?;
 
-    programme::design(&pool).await?;
+    mesocycle::design(&pool).await?;
     Authoring::new(SqlitePlanStore::new(pool.clone(), corpus::zone()?))
-        .author(&programme::as_plan(programme)?)
+        .author(&mesocycle::as_plan(mesocycle)?)
         .await?;
 
     Ok((directory, pool))

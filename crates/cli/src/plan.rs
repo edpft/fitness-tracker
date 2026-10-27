@@ -22,7 +22,7 @@
 //! **The plan is written whole even so** (issue #86). What is already authored
 //! under the name given is read, its cycling programme is replaced by these four
 //! and its gym programme carried through untouched, and the lot is re-authored.
-//! So this command and `fitness programme add` write the two halves of one plan
+//! So this command and `fitness mesocycle add` write the two halves of one plan
 //! in either order, without either superseding the other — which is what closes
 //! the half-written intermediate state #73 named, without merging the two
 //! wizards.
@@ -39,7 +39,7 @@ use domain::{
     gym::exercise::RepsExercise,
     macrocycle::PROGRESSIONS,
     normalised::OperatorZone,
-    plan::{Plan, PlanName, Programme},
+    plan::{Mesocycles, Plan, PlanName},
     prescription::{PrimaryPattern, sbs},
     provider::{ExternalProgramme, ProgrammeName, Provider},
     schedule::Discipline,
@@ -149,7 +149,7 @@ pub async fn generate(
     // is when it would be cheapest to say so.
     let peloton = configurator::access::peloton(credentials).ok();
 
-    println!("A hybrid programme: one gym provider, one cycling provider.\n");
+    println!("A plan: one gym provider, one cycling provider.\n");
     let start = wizard::ask_until("Monday the block begins (YYYY-MM-DD): ", |typed| {
         typed
             .parse::<Date>()
@@ -261,7 +261,7 @@ pub async fn cycling_weekdays(
         return Err(Failure::message(
             format!(
                 "the schedule gives cycling no day of the week as of {start}, so \
-                 there is nothing for a programme to run on"
+                 there is nothing for a plan to run on"
             ),
             exit::USAGE,
         ));
@@ -318,7 +318,7 @@ fn build(
 ///
 /// **Both halves or neither** (issue #73). It printed thirteen weeks and wrote
 /// the cycling five of them until 2026-09-07, leaving the gym side to
-/// `fitness programme add` afterwards — which meant the command that exists to
+/// `fitness mesocycle add` afterwards — which meant the command that exists to
 /// author a hybrid plan authored half of one. The gym questions are the wizard's
 /// own, asked through [`wizard::gym_side`] rather than restated here.
 #[expect(clippy::too_many_arguments, reason = "one plan's worth of answers")]
@@ -335,7 +335,7 @@ async fn author(
     println!();
     let write =
         wizard::ask_until(
-            "Author this plan — both programmes? [y/N] ",
+            "Author this plan — gym and cycling? [y/N] ",
             |typed| match typed.to_lowercase().as_str() {
                 "" | "n" | "no" => Ok(false),
                 "y" | "yes" => Ok(true),
@@ -452,7 +452,7 @@ async fn author(
 /// This command generates the four together — a test week and three mesocycles
 /// laid against one another — so there is no sense in which one of them could be
 /// amended alone. What must survive is the gym programme, which
-/// `fitness programme add` wrote and this command knows nothing about.
+/// `fitness mesocycle add` wrote and this command knows nothing about.
 fn with_both(
     name: PlanName,
     existing: Option<&Plan>,
@@ -461,16 +461,16 @@ fn with_both(
 ) -> Result<Plan, Failure> {
     // **Both sides replaced, since this command now authors both.** It carried
     // the gym programme through until 2026-09-07, when it wrote only cycling and
-    // `programme add` wrote the other half; re-running it then would leave a gym
+    // `mesocycle add` wrote the other half; re-running it then would leave a gym
     // programme from an older answer beside a cycling one from this run. What
-    // `programme add` adds afterwards still survives — it reads the plan back
+    // `mesocycle add` adds afterwards still survives — it reads the plan back
     // and appends to whichever half it is adding to.
     let _ = existing;
     Plan::new(
         name,
         jiff::Timestamp::now(),
-        Some(Programme::new(gym).map_err(|error| Failure::usage(&error))?),
-        Some(Programme::new(mesocycles).map_err(|error| Failure::usage(&error))?),
+        Some(Mesocycles::new(gym).map_err(|error| Failure::usage(&error))?),
+        Some(Mesocycles::new(mesocycles).map_err(|error| Failure::usage(&error))?),
     )
     .map_err(|error| Failure::usage(&error))
 }

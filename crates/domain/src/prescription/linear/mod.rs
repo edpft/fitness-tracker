@@ -16,10 +16,10 @@
 //! The template is a builder rather than a value: there is no `Template` type
 //! anywhere, because selecting a variant is selecting among programme types.
 
-pub mod programme;
+pub mod mesocycle;
 pub mod progression;
 pub mod template;
 
-pub use programme::{Linear, Primary};
+pub use mesocycle::{Linear, Primary};
 pub use progression::{BackOff, LinearProgression, ResetProtocol, TopSetReps};
 pub use template::{Fill, Position, PrimaryPattern, STRETCHES, SlotContent, SlotFills, StaticFill};

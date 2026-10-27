@@ -32,7 +32,7 @@ use infrastructure::{
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
-use support::{corpus, programme, store};
+use support::{corpus, mesocycle, store};
 
 type Prescriber = Prescribing<
     SqliteExerciseHistory,
@@ -95,10 +95,10 @@ async fn published() -> Fallible<(Prescriber, tempfile::TempDir, SqlitePool)> {
 /// wired to it.
 async fn assembled() -> Fallible<(Prescriber, tempfile::TempDir, SqlitePool)> {
     let start = BLOCK_START;
-    let (directory, pool) = store::with_programme(programme::programme_from(start)?).await?;
+    let (directory, pool) = store::with_mesocycle(mesocycle::linear_from(start)?).await?;
     let prescriber = Prescribing::new(PrescriptionPorts {
         history: SqliteExerciseHistory::new(pool.clone()),
-        programmes: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
+        mesocycles: SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
         parameters: SqliteGenerationParameterStore::new(pool.clone()),
         prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), "Europe/London".to_owned()),
         lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),
@@ -201,18 +201,18 @@ fn the_block_opens_below_what_its_entry_test_failed() {
         "the calendar still says which week of the block this is"
     );
 
-    let Ok(parameters) = programme::parameters() else {
+    let Ok(parameters) = mesocycle::parameters() else {
         panic!("the fixtures build")
     };
-    let Ok(programme) = programme::programme_from(BLOCK_START) else {
-        panic!("the programme builds")
+    let Ok(mesocycle) = mesocycle::linear_from(BLOCK_START) else {
+        panic!("the mesocycle builds")
     };
-    let Ok(anchor) = programme::anchor() else {
+    let Ok(anchor) = mesocycle::anchor() else {
         panic!("the anchor fixture builds")
     };
     let (Ok(ladder), Ok(steps)) = (
-        programme.ladder(anchor, &parameters.planned_with.linear, &parameters.scales),
-        programme.steps(&parameters.scales),
+        mesocycle.ladder(anchor, &parameters.planned_with.linear, &parameters.scales),
+        mesocycle.steps(&parameters.scales),
     ) else {
         panic!("the ladder builds")
     };

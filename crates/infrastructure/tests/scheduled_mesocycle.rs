@@ -25,7 +25,7 @@ use domain::{
 };
 use infrastructure::{SqliteDiaryStore, SqliteExerciseHistory, connect};
 use jiff::civil::{Weekday, date};
-use support::{corpus, programme as fixture};
+use support::{corpus, mesocycle as fixture};
 
 /// The autumn block from Monday 14 September: nine phase weeks, plus the entry
 /// test week in front of them, so ten calendar weeks ending 22 November.
@@ -245,21 +245,21 @@ fn the_window_covers_the_entry_test_week() {
 /// `calendar` — and this is the join: the day the diary took out is the day the
 /// calendar will not place.
 #[test]
-fn the_day_the_schedule_removed_is_refused_by_the_programme() {
+fn the_day_the_schedule_removed_is_refused_by_the_mesocycle() {
     let outcome = corpus::block_on(async {
         let (store, _directory) = seeded().await?;
         let skips = derived(&autumn()?, &store).await?;
-        let programme = fixture::authoring(autumn()?, &skips)??;
-        Ok::<_, Box<dyn std::error::Error>>(programme)
+        let mesocycle = fixture::authoring(autumn()?, &skips)??;
+        Ok::<_, Box<dyn std::error::Error>>(mesocycle)
     });
 
-    let programme = match outcome {
-        Ok(Ok(programme)) => programme,
+    let mesocycle = match outcome {
+        Ok(Ok(mesocycle)) => mesocycle,
         Ok(Err(error)) => panic!("the block is authored: {error}"),
         Err(error) => panic!("a runtime is available: {error}"),
     };
 
-    let refusal = programme.calendar().place(date(2026, 9, 14));
+    let refusal = mesocycle.calendar().place(date(2026, 9, 14));
     assert!(
         matches!(
             refusal,
@@ -270,7 +270,7 @@ fn the_day_the_schedule_removed_is_refused_by_the_programme() {
 
     // And the Friday of that week is untouched: one day went, not the week.
     assert!(
-        programme.calendar().place(date(2026, 9, 18)).is_ok(),
+        mesocycle.calendar().place(date(2026, 9, 18)).is_ok(),
         "the Friday still runs"
     );
 }
@@ -281,7 +281,7 @@ fn the_day_the_schedule_removed_is_refused_by_the_programme() {
 /// full. Nothing has been issued yet, so there is nothing stale behind it.
 ///
 /// **What this does not do is notice on its own.** Nothing watches the diary;
-/// the operator re-runs `programme add`, and re-running it under the same name
+/// the operator re-runs `mesocycle add`, and re-running it under the same name
 /// is a supersession rather than a second programme (decision 0012).
 #[test]
 fn a_schedule_changed_before_the_start_is_picked_up_by_re_authoring() {

@@ -40,7 +40,7 @@ use crate::{
 /// The next ride, and everything needed to say where it sits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NextRide {
-    pub programme: CyclingMesocycleId,
+    pub mesocycle: CyclingMesocycleId,
     /// The date it is ridden.
     pub date: Date,
     /// Which microcycle of the authored programme, counting from one.
@@ -77,7 +77,7 @@ impl Due {
 /// A day of a holding week, and what kind of ride it asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HoldingDay {
-    pub programme: CyclingMesocycleId,
+    pub mesocycle: CyclingMesocycleId,
     pub date: Date,
     /// Which of this mesocycle's holding weeks, counting from one.
     pub week: usize,
@@ -115,25 +115,25 @@ pub async fn next_ride<S: CyclingMesocycleStore + Sync>(
     // The programme covering the date answers first, and only a programme with
     // no riding day left defers to the one after it — a mesocycle whose last
     // ride is on the Sunday is still the programme in force on the Saturday.
-    if let Some((id, _, programme)) = covering
-        && let Some(found) = ride_in(&programme, id, from, week, diary, missed)
+    if let Some((id, _, mesocycle)) = covering
+        && let Some(found) = ride_in(&mesocycle, id, from, week, diary, missed)
     {
-        return Ok((programme, found));
+        return Ok((mesocycle, found));
     }
 
     // **Two different answers, and the message is the whole difference.** A date
     // no programme covers is a gap in the plan; a date one covers with no ride
     // left in it and nothing after is a block that has finished.
-    let Some((id, _, programme)) = store.following(from).await? else {
+    let Some((id, _, mesocycle)) = store.following(from).await? else {
         return Err(if covered {
             PrescriptionError::NoSessionScheduled { from }
         } else {
             PrescriptionError::NoPlan { date: from }
         });
     };
-    let found = ride_in(&programme, id, from, week, diary, missed)
+    let found = ride_in(&mesocycle, id, from, week, diary, missed)
         .ok_or(PrescriptionError::NoSessionScheduled { from })?;
-    Ok((programme, found))
+    Ok((mesocycle, found))
 }
 
 /// What one programme puts on the next day it rides, or holds.
@@ -148,45 +148,45 @@ pub async fn next_ride<S: CyclingMesocycleStore + Sync>(
 /// slot asked for: a week holding a single session is still a week to ride,
 /// and answering nothing would be worse than answering the harder ride.
 fn ride_in(
-    programme: &CyclingMesocycle,
+    mesocycle: &CyclingMesocycle,
     id: CyclingMesocycleId,
     from: Date,
     week: &TrainingWeek,
     diary: &Diary,
     missed: &planner::Missed,
 ) -> Option<Due> {
-    let date = programme.next_riding_day(from, week)?;
+    let date = mesocycle.next_riding_day(from, week)?;
     let ordinary = week.role_on(date.weekday())?;
     // A skipped or missed essential ride earlier in the week rides here instead
     // (#392).
     let asked = planner::role_on(diary, date, Discipline::Cycling, missed).unwrap_or(ordinary);
     let eased = planner::eased_by_illness(diary, date, Discipline::Cycling, asked);
 
-    if programme.holds_on(date) {
-        let week = programme
+    if mesocycle.holds_on(date) {
+        let week = mesocycle
             .held()
             .iter()
             .take_while(|monday| **monday <= date)
             .count();
         return Some(Due::Holding(HoldingDay {
-            programme: id,
+            mesocycle: id,
             date,
             week,
             role: eased,
         }));
     }
-    let (microcycle, session, ride) = programme.on(date, week)?;
+    let (microcycle, session, ride) = mesocycle.on(date, week)?;
     let (session, ride) = if eased == ordinary {
         (session, ride)
     } else {
-        programme
+        mesocycle
             .microcycle(microcycle)
             .and_then(|held| held.for_role(eased))
             .unwrap_or((session, ride))
     };
 
     Some(Due::Ride(NextRide {
-        programme: id,
+        mesocycle: id,
         date,
         microcycle,
         session,

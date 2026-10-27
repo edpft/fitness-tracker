@@ -317,7 +317,7 @@ pub async fn ride<C: HoldingRides + Sync, R: RiddenVenues + Sync>(
             detail: "a session position counting from zero".to_owned(),
         })?;
     Ok(crate::cycling::NextRide {
-        programme: day.programme,
+        mesocycle: day.mesocycle,
         date: day.date,
         microcycle: day.week,
         session: session_position,
