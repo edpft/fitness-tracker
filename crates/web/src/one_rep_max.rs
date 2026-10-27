@@ -204,7 +204,12 @@ fn lift_section(lift: &Lift) -> Markup {
 
 /// One chart, its readings and its table. `missing` is what a test with no
 /// figure reads.
-fn chart_section<P: Shown>(lift: &str, over: &str, missing: &str, stretches: &[Stretch<P>]) -> Markup {
+fn chart_section<P: Shown>(
+    lift: &str,
+    over: &str,
+    missing: &str,
+    stretches: &[Stretch<P>],
+) -> Markup {
     html! {
         h3 { "Estimated 1RM " (over) }
         @for (index, stretch) in stretches.iter().enumerate() {
@@ -240,7 +245,9 @@ fn opening<P: Shown>(stretch: &Stretch<P>, missing: &str) -> String {
         (None, 1 | 2) => " · a line needs at least 3",
         _ => "",
     };
-    let test = stretch.test.map_or_else(|| missing.to_owned(), |test| test_reading(&test));
+    let test = stretch
+        .test
+        .map_or_else(|| missing.to_owned(), |test| test_reading(&test));
     format!("test on {} · {test} · {estimates}{line}", stretch.from)
 }
 
@@ -304,7 +311,10 @@ fn reach<P>(stretch: &Stretch<P>) -> u32 {
     let projected = stretch
         .projection
         .map_or(0, |projection| projection.session);
-    let closed = stretch.closed_by.as_ref().map_or(0, |(session, _)| *session);
+    let closed = stretch
+        .closed_by
+        .as_ref()
+        .map_or(0, |(session, _)| *session);
     let estimated = stretch.estimates.last().map_or(0, |(session, _)| *session);
     projected.max(closed).max(estimated)
 }
@@ -702,7 +712,10 @@ mod tests {
             ),
             "{page}"
         );
-        assert!(page.contains("next test 2026-10-23, session 8: predicted 1."), "{page}");
+        assert!(
+            page.contains("next test 2026-10-23, session 8: predicted 1."),
+            "{page}"
+        );
     }
 
     #[test]

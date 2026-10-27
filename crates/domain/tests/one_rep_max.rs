@@ -4,12 +4,11 @@
 use domain::{
     analytical::Rts,
     analytical::{
-        Estimate,
+        Estimate, Weighed,
         one_rep_max::{
             Against, Line, NextTest, Point, Reading, points as read, relative, stretches, tested,
             tests,
         },
-        Weighed,
     },
     canonical::{Attributed, NormalisedSessionId, Occurred},
     gym::{

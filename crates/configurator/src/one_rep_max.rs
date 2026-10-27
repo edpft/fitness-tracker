@@ -40,6 +40,6 @@ pub async fn view(store: &Store, zone: &OperatorZone) -> Result<View, StoreError
         store.weigh_ins(),
         store.plans(zone),
     )
-        .view(today)
-        .await
+    .view(today)
+    .await
 }

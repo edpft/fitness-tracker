@@ -11,8 +11,8 @@ use domain::{
     analytical::{
         OneRepMaxEstimator,
         one_rep_max::{
-            Against, LIFTS, Relative, Stretch, next_test, points, relative, sessions_of,
-            stretches, tests,
+            Against, LIFTS, Relative, Stretch, next_test, points, relative, sessions_of, stretches,
+            tests,
         },
     },
     gym::exercise::RepsExercise,
