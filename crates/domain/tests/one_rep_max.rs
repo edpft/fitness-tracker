@@ -1,10 +1,15 @@
-//! Estimated 1RM as a trend, one planned macrocycle at a time (#420).
+//! Estimated 1RM as a trend, from one test to the next (#420), and over a
+//! body mass (#253).
 
 use domain::{
     analytical::Rts,
     analytical::{
         Estimate,
-        one_rep_max::{Line, NextTest, Point, Reading, points as read, stretches, tested},
+        one_rep_max::{
+            Against, Line, NextTest, Point, Reading, points as read, relative, stretches, tested,
+            tests,
+        },
+        Weighed,
     },
     canonical::{Attributed, NormalisedSessionId, Occurred},
     gym::{
@@ -83,11 +88,12 @@ const NEXT: NextTest = NextTest {
 #[test]
 fn a_stretch_runs_from_a_test_through_the_estimates_after_it() {
     let points = autumn().expect("points");
-    let stretches = stretches(&points, &days(&points), Some(NEXT));
+    let stretches = stretches(&points, &tests(&points), &days(&points), Some(NEXT));
     let [stretch] = stretches.as_slice() else {
         panic!("one stretch: {stretches:?}");
     };
-    assert_eq!(stretch.test.on, date(2026, 9, 25));
+    assert_eq!(stretch.from, date(2026, 9, 25));
+    assert_eq!(stretch.test.map(|test| test.on), Some(date(2026, 9, 25)));
     let sessions: Vec<u32> = stretch.estimates.iter().map(|(at, _)| *at).collect();
     assert_eq!(sessions, [1, 2, 3, 4, 5], "sessions since the test");
     assert_eq!(stretch.closed_by, None);
@@ -96,7 +102,7 @@ fn a_stretch_runs_from_a_test_through_the_estimates_after_it() {
 #[test]
 fn the_line_is_the_estimates_alone_and_projects_to_the_next_test() {
     let points = autumn().expect("points");
-    let stretches = stretches(&points, &days(&points), Some(NEXT));
+    let stretches = stretches(&points, &tests(&points), &days(&points), Some(NEXT));
     let stretch = stretches.first().expect("a stretch");
     let line = stretch.line.expect("five estimates give a line");
     near(line.per_session(), 528.1);
@@ -105,7 +111,7 @@ fn the_line_is_the_estimates_alone_and_projects_to_the_next_test() {
     assert_eq!((line.first(), line.last()), (1, 5));
     let projection = stretch.projection.expect("a test still to come");
     assert_eq!((projection.on, projection.session), (date(2026, 10, 23), 8));
-    near(projection.mass, 96_685.9);
+    near(projection.value, 96_685.9);
     near(projection.low, 82_259.254);
     near(projection.high, 111_112.546);
 }
@@ -116,7 +122,7 @@ fn a_test_performed_closes_its_stretch_and_starts_the_next() {
     points.push(test_on(date(2026, 10, 23), 97_500).expect("a test"));
     let mut performed = days(&points);
     performed.insert(6, date(2026, 10, 19));
-    let stretches = stretches(&points, &performed, Some(NEXT));
+    let stretches = stretches(&points, &tests(&points), &performed, Some(NEXT));
     let [first, second] = stretches.as_slice() else {
         panic!("two stretches: {stretches:?}");
     };
@@ -132,7 +138,7 @@ fn a_test_performed_closes_its_stretch_and_starts_the_next() {
         Some((7, date(2026, 10, 23))),
         "projected to the test that ended it"
     );
-    assert_eq!(second.test.on, date(2026, 10, 23));
+    assert_eq!(second.from, date(2026, 10, 23));
     assert!(second.estimates.is_empty() && second.line.is_none());
 }
 
@@ -140,7 +146,7 @@ fn a_test_performed_closes_its_stretch_and_starts_the_next() {
 fn two_estimates_are_points_and_no_line() {
     let points = autumn().expect("points");
     let early: Vec<Point> = points.into_iter().take(3).collect();
-    let stretches = stretches(&early, &days(&early), Some(NEXT));
+    let stretches = stretches(&early, &tests(&early), &days(&early), Some(NEXT));
     let stretch = stretches.first().expect("a stretch");
     assert_eq!(stretch.estimates.len(), 2);
     assert_eq!(stretch.line, None);
@@ -150,7 +156,7 @@ fn two_estimates_are_points_and_no_line() {
 #[test]
 fn no_test_is_no_stretch() {
     let points = points(&[(date(2026, 9, 29), 90_625)]).expect("points");
-    assert!(stretches(&points, &days(&points), Some(NEXT)).is_empty());
+    assert!(stretches(&points, &tests(&points), &days(&points), Some(NEXT)).is_empty());
 }
 
 #[test]
@@ -285,4 +291,75 @@ fn a_reserve_recorded_beneath_the_failure_is_no_test() {
         tested(&Rts, &session, RepsExercise::FrontSquatBarbell),
         None
     );
+}
+
+fn weighed(on: Date, grams: u64, fat_free: Option<u64>) -> Weighed {
+    Weighed {
+        at: Occurred::On(on),
+        mass: Kg::from_grams(grams),
+        fat_free: fat_free.map(Kg::from_grams),
+    }
+}
+
+fn after_the_test() -> Option<Vec<CanonicalGymSession>> {
+    Some(vec![
+        entry_test()?,
+        front_squat(date(2026, 9, 29), vec![set(725, Some(5), Some(Rir::Two))])?,
+        front_squat(date(2026, 10, 2), vec![set(750, Some(8), Some(Rir::One))])?,
+    ])
+}
+
+#[test]
+fn a_ratio_is_read_against_that_days_weigh_in_and_a_day_without_one_is_a_gap() {
+    let sessions = after_the_test().expect("sessions");
+    // 2026-09-29 has no weigh-in; 2026-10-02 has no fat-free mass.
+    let weigh_ins = [
+        weighed(date(2026, 9, 25), 84_419, Some(65_810)),
+        weighed(date(2026, 9, 28), 84_105, Some(65_610)),
+        weighed(date(2026, 10, 2), 84_248, None),
+    ];
+    let lift = RepsExercise::FrontSquatBarbell;
+    let body = relative(&Rts, &sessions, lift, &weigh_ins, Against::BodyWeight);
+    let read: Vec<(Date, String)> = body
+        .iter()
+        .map(|one| (one.point.on, one.ratio.to_string()))
+        .collect();
+    assert_eq!(
+        read,
+        [
+            (date(2026, 9, 25), "1.09×".to_owned()),
+            (date(2026, 10, 2), "1.14×".to_owned())
+        ]
+    );
+    let lean = relative(&Rts, &sessions, lift, &weigh_ins, Against::FatFreeMass);
+    let read: Vec<(Date, String)> = lean
+        .iter()
+        .map(|one| (one.point.on, one.ratio.to_string()))
+        .collect();
+    assert_eq!(read, [(date(2026, 9, 25), "1.40×".to_owned())]);
+}
+
+#[test]
+fn a_test_with_no_weigh_in_still_ends_a_stretch() {
+    let mut points = autumn().expect("points");
+    points.push(test_on(date(2026, 10, 23), 97_500).expect("a test"));
+    let marked = tests(&points);
+    // Every figure but the second test, as a ratio with no weigh-in that day.
+    let unweighed: Vec<Point> = points
+        .iter()
+        .filter(|point| point.on != date(2026, 10, 23))
+        .copied()
+        .collect();
+    let stretches = stretches(&unweighed, &marked, &days(&points), None);
+    let [first, second] = stretches.as_slice() else {
+        panic!("two stretches: {stretches:?}");
+    };
+    assert_eq!(first.to, Some(date(2026, 10, 23)));
+    assert_eq!(first.closed_by, None, "no figure for the test");
+    assert_eq!(
+        first.projection.map(|projection| projection.on),
+        Some(date(2026, 10, 23)),
+        "still projected to it"
+    );
+    assert_eq!((second.from, second.test), (date(2026, 10, 23), None));
 }

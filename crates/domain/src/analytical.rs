@@ -225,6 +225,9 @@ impl fmt::Display for RelativeStrength {
 pub struct Weighed {
     pub at: Occurred,
     pub mass: Kg,
+    /// The same weigh-in's fat-free mass (#253): stated, or its mass less its
+    /// fat. `None` where it gave neither.
+    pub fat_free: Option<Kg>,
 }
 
 impl From<&BodyScanWeighIn> for Weighed {
@@ -232,6 +235,7 @@ impl From<&BodyScanWeighIn> for Weighed {
         Self {
             at: Occurred::At(weigh_in.measured_at().clone()),
             mass: weigh_in.mass(),
+            fat_free: Some(weigh_in.composition().fat_free_mass),
         }
     }
 }
@@ -411,6 +415,7 @@ mod tests {
         Weighed {
             at,
             mass: kg(grams),
+            fat_free: None,
         }
     }
 

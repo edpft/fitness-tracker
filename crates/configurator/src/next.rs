@@ -610,11 +610,15 @@ mod tests {
                 "fetching garmin.activity_files",
                 "fetching garmin.exercise_sets",
                 "fetching hevy.workouts",
+                "fetching withings.measurements",
                 "normalising btwb.exports",
                 "normalising garmin.activities",
                 "normalising hevy.workouts",
+                "normalising myfitnesspal.exports",
                 "normalising spreadsheets.files",
+                "normalising withings.measurements",
                 "canonicalising gym",
+                "canonicalising weigh-ins",
             ]
         );
         assert_eq!(

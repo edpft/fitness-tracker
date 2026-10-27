@@ -24,6 +24,7 @@ fn measured(on: Date, hour: i8, grams: u64) -> Fallible<Weighed> {
     Ok(Weighed {
         at: Occurred::At(StartedAt::new(at, zone)),
         mass: Kg::from_grams(grams),
+        fat_free: None,
     })
 }
 
@@ -31,6 +32,7 @@ const fn dated(on: Date, grams: u64) -> Weighed {
     Weighed {
         at: Occurred::On(on),
         mass: Kg::from_grams(grams),
+        fat_free: None,
     }
 }
 

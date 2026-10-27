@@ -330,6 +330,7 @@ mod tests {
         Weighed {
             at: Occurred::On(date(2026, 9, d)),
             mass: Kg::from_grams(grams),
+            fat_free: None,
         }
     }
 
@@ -356,6 +357,7 @@ mod tests {
             Weighed {
                 at: Occurred::At(StartedAt::new(at, zone)),
                 mass: Kg::from_grams(84_100),
+                fat_free: None,
             },
         ];
         let page = page(

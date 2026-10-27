@@ -231,6 +231,7 @@ fn the_history_reads_a_weight_dated_to_a_day() {
             Some(&Weighed {
                 at: Occurred::On(date(2014, 12, 29)),
                 mass: domain::measure::Kg::from_grams(70_100),
+                fat_free: None,
             })
         );
     });
