@@ -20,5 +20,8 @@ maud.workspace = true
 tokio = { workspace = true, features = ["net", "sync"] }
 tokio-stream.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

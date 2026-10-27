@@ -86,6 +86,29 @@ impl FileRunLock {
         };
         self.directory.join(format!(".next.{name}.lock"))
     }
+
+    /// The parts of `parts` a run holds now, from either frontend, taking none
+    /// of them (#467).
+    ///
+    /// **Each is tried and let go at once**, so a run starting in that moment
+    /// finds it held only for as long as the try, and joins nothing longer.
+    ///
+    /// # Errors
+    ///
+    /// [`RunLockError::Unavailable`] if a lock cannot be tried.
+    pub fn held(&self, parts: &BTreeSet<Part>) -> Result<BTreeSet<Part>, RunLockError> {
+        let mut held = BTreeSet::new();
+        for part in parts {
+            match acquire(&self.part_path(part)) {
+                Ok(_free) => {}
+                Err(RunLockError::Held) => {
+                    held.insert(part.clone());
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(held)
+    }
 }
 
 /// Every part a run of `next` took, held until dropped.

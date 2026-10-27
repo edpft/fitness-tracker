@@ -1,6 +1,6 @@
 //! The page: the run its opening started, and what follows a run elsewhere.
 
-use maud::{DOCTYPE, Markup, html};
+use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 use crate::run::View;
 
@@ -91,6 +91,63 @@ pub fn following(run: &View) -> Markup {
     }
 }
 
+/// A page whose data a run is collecting, where this server has not drawn it
+/// since it started (#467): the step the run is on, and the page once no run
+/// is collecting what it reads.
+///
+/// The operator, 2026-10-23: *"if we're in the middle of re fetching,
+/// normalising, or canonicalisaing the data for a visualisation, we should just
+/// show a loading spinner or some other place holder."*
+pub fn collecting(here: &str, run: &View) -> Markup {
+    let title = PAGES
+        .iter()
+        .find(|(path, _)| *path == here)
+        .map_or(here, |(_, name)| name);
+    html! {
+        (DOCTYPE)
+        html lang="en" {
+            head {
+                meta charset="utf-8";
+                meta name="viewport" content="width=device-width, initial-scale=1";
+                title { (title) }
+                style { (STYLE) }
+            }
+            body {
+                (following(run))
+                main {
+                    (menu(here))
+                    h1 { (title) }
+                    p.collecting { "Collecting what this page shows…" }
+                    (redrawing())
+                }
+            }
+        }
+    }
+}
+
+/// A page whose data a run is collecting, as it was last drawn before (#467).
+/// The operator, 2026-10-27: *"keep the chart"* until the run has finished
+/// with it.
+///
+/// **The drawing as it was, asking to be drawn again**: inside its `main`,
+/// which is what a redraw replaces, so the asking ends with the first drawing
+/// made with nothing collecting.
+pub fn kept(drawn: &Markup) -> Markup {
+    PreEscaped(
+        drawn
+            .0
+            .replacen("</main>", &format!("{}</main>", redrawing().0), 1),
+    )
+}
+
+/// The page asked for again every two seconds, as well as when this server's
+/// run ends, because a run the terminal started sends this server nothing.
+fn redrawing() -> Markup {
+    html! {
+        div hx-get="" hx-trigger="every 2s" hx-target="main" hx-select="main" hx-swap="outerHTML" {}
+    }
+}
+
 /// Phone width first: one column, nothing wider than the screen.
 pub const STYLE: &str = "
 :root { color-scheme: light dark; --muted: #6b7280; --failed: #b91c1c; }
@@ -103,7 +160,7 @@ button { width: 100%; padding: 14px; font: inherit; font-weight: 600; }
 ol, ul { padding-left: 1.2rem; }
 li { margin: 0.25rem 0; }
 .step { font-weight: 600; }
-.outcome, .estimate { color: var(--muted); }
+.outcome, .estimate, .collecting { color: var(--muted); }
 .failed { color: var(--failed); }
 section { margin-top: 1.5rem; }
 table { border-collapse: collapse; }
