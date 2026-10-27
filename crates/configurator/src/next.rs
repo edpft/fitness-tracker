@@ -10,7 +10,7 @@ use jiff::civil::Date;
 
 use application::{
     Build, CanonicalLayer, DerivedFrom, NormalisationError, NormalisationSummary, NormalisedLayers,
-    Part, Rederivation, StoreError,
+    Part, Rederivation, RunLockError, StoreError,
     commit::{CommitPorts, Committing},
     cycling::{Riding, RidingPorts},
     microcycle::{Microcycle, MicrocyclePorts},
@@ -131,6 +131,19 @@ pub async fn collect(
         Answered::Collected(run) => Ok(run),
         Answered::Report(_) => unreachable_answer(),
     }
+}
+
+/// Whether a run, started by either frontend, holds any part of `scope`
+/// (#467): a page reading what one is collecting shows that rather than the
+/// store mid-derivation.
+///
+/// # Errors
+///
+/// [`RunLockError::Unavailable`] if a lock cannot be tried.
+pub fn collecting(database: &Path, scope: &Scope) -> Result<bool, RunLockError> {
+    FileRunLock::beside(database)
+        .held(scope.parts())
+        .map(|held| !held.is_empty())
 }
 
 /// Which of the use case's two acts is asked for.
@@ -662,6 +675,28 @@ mod tests {
         ] {
             assert!(resting.has(&part), "{part:?}");
         }
+    }
+
+    /// **A run the terminal started is seen by its locks** (#467): the
+    /// estimated 1RM page is collecting while a run holds the gym's canonical
+    /// layer, and body weight, which does not read it, is not.
+    #[test]
+    fn a_run_holding_a_part_a_page_reads_is_collecting_it() {
+        use application::{NextLock as _, Taken};
+
+        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let database = directory.path().join("fitness.db");
+        let one_rep_max = one_rep_max::collects().expect("a scope");
+        let body_weight = body_weight::collects().expect("a scope");
+        assert!(!super::collecting(&database, &one_rep_max).expect("tried"));
+
+        let Ok(Taken::All(_running)) = infrastructure::FileRunLock::beside(&database).try_acquire(
+            &std::collections::BTreeSet::from([Part::Canonicalising(CanonicalLayer::Gym)]),
+        ) else {
+            panic!("the run takes its part");
+        };
+        assert!(super::collecting(&database, &one_rep_max).expect("tried"));
+        assert!(!super::collecting(&database, &body_weight).expect("tried"));
     }
 
     /// **Every stream `next` fetches and derives says what it is landed by**,

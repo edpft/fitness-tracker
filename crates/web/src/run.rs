@@ -12,6 +12,7 @@
 //! locks if the terminal did.
 
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{Arc, Mutex, PoisonError},
 };
@@ -145,6 +146,9 @@ pub struct Runs {
     setting: Setting,
     view: watch::Sender<View>,
     going: Mutex<Vec<Asked>>,
+    /// Each page as it was last drawn with nothing collecting what it reads,
+    /// by page and range, shown while a run is (#467).
+    kept: Mutex<HashMap<String, Markup>>,
 }
 
 impl Runs {
@@ -153,6 +157,7 @@ impl Runs {
             setting,
             view: watch::Sender::new(View::default()),
             going: Mutex::new(Vec::new()),
+            kept: Mutex::new(HashMap::new()),
         }
     }
 
@@ -168,6 +173,54 @@ impl Runs {
 
     pub fn view(&self) -> View {
         self.view.borrow().clone()
+    }
+
+    /// Whether a run is collecting anything `scope` reads, so a page reading
+    /// the store now could find a layer emptied and not yet rebuilt (#467).
+    ///
+    /// **This server's runs and then the store's locks**: a run this server
+    /// has just started is going before its thread takes its parts, and one
+    /// the terminal started is known only by them. A lock that cannot be
+    /// tried says nothing is collecting, and the page reads the store as it
+    /// did before.
+    pub fn collecting(&self, scope: &Scope) -> bool {
+        let here = self
+            .going
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .any(|run| match run {
+                Asked::Everything => true,
+                Asked::Only(going) => !going.parts().is_disjoint(scope.parts()),
+            });
+        here || configurator::next::collecting(&self.setting.database, scope).unwrap_or(false)
+    }
+
+    /// Keep `page` as it was drawn, nothing collecting what it reads.
+    pub fn keep(&self, page: &str, drawn: &Markup) {
+        self.kept
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(page.to_owned(), drawn.clone());
+    }
+
+    /// `page` as it was last drawn with nothing collecting what it reads, if
+    /// this server has drawn it since it started.
+    pub fn kept(&self, page: &str) -> Option<Markup> {
+        self.kept
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(page)
+            .cloned()
+    }
+
+    /// A run going over `asked`, as though this server had started one.
+    #[cfg(test)]
+    pub fn going_over(&self, asked: Asked) {
+        self.going
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(asked);
     }
 
     /// Start a run of what a page asks for, unless this server has one going
@@ -487,6 +540,35 @@ mod tests {
         let step = view.step().into_string();
         assert!(step.contains("Refreshing Peloton's classes"), "{step}");
         assert!(step.contains("…"), "{step}");
+    }
+
+    /// **A page's data is being collected by any run over a part it reads**
+    /// (#467): the whole of `next`, or a chart's run sharing a stream with it,
+    /// and not a chart's run over other streams.
+    #[test]
+    fn a_page_is_collecting_while_a_run_reads_a_part_of_it() {
+        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let fresh = || {
+            Runs::new(Setting {
+                database: directory.path().join("fitness.db"),
+                zone: OperatorZone::try_from("Europe/London").expect("a zone"),
+                credentials: None,
+            })
+        };
+        let Asked::Only(hrv) = only(&["garmin.hrv", "garmin.activities"]) else {
+            panic!("a chart's scope");
+        };
+
+        let runs = fresh();
+        assert!(!runs.collecting(&hrv), "nothing is going");
+        runs.going_over(only(&["withings.measurements"]));
+        assert!(!runs.collecting(&hrv), "a run over other streams");
+        runs.going_over(only(&["garmin.hrv"]));
+        assert!(runs.collecting(&hrv), "a run sharing a stream");
+
+        let runs = fresh();
+        runs.going_over(Asked::Everything);
+        assert!(runs.collecting(&hrv), "the whole of next");
     }
 
     /// **A run covers what it collects and nothing more**: the whole of

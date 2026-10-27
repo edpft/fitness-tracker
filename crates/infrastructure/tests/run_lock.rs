@@ -150,3 +150,28 @@ fn waiting_on_a_part_ends_when_its_run_does() {
         released.expect("released once the run ends");
     });
 }
+
+/// **A page can ask which of its parts a run holds without taking any**
+/// (#467): it is told the ones held, and a run starting after it finds every
+/// part free.
+#[test]
+fn which_parts_are_held_is_asked_without_taking_them() {
+    let directory = TempDir::new().expect("a temporary directory");
+    let lock = FileRunLock::beside(&directory.path().join("fitness.db"));
+    let workouts = part(Part::Normalising, "workouts").expect("a part");
+    let measurements = part(Part::Normalising, "measurements").expect("a part");
+    let read = BTreeSet::from([workouts.clone(), measurements]);
+
+    assert_eq!(lock.held(&read).expect("tried"), BTreeSet::new());
+    let Ok(Taken::All(running)) = NextLock::try_acquire(&lock, &BTreeSet::from([workouts.clone()]))
+    else {
+        panic!("asking took nothing, so the run takes its parts");
+    };
+    assert_eq!(lock.held(&read).expect("tried"), BTreeSet::from([workouts]));
+
+    drop(running);
+    assert!(matches!(
+        NextLock::try_acquire(&lock, &read),
+        Ok(Taken::All(_))
+    ));
+}

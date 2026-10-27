@@ -158,11 +158,7 @@ async fn index(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
 /// **Not when htmx asks**, which is a page redrawing itself because a run
 /// ended: starting another would redraw it again when that one ended, for
 /// ever.
-fn opened(
-    runs: &Arc<Runs>,
-    headers: &HeaderMap,
-    asked: Result<Asked, configurator::wiring::WiringError>,
-) -> run::View {
+fn opened(runs: &Arc<Runs>, headers: &HeaderMap, asked: Result<Asked, String>) -> run::View {
     if !headers.contains_key("hx-request") {
         match asked {
             Ok(asked) => runs.start(&asked),
@@ -174,9 +170,47 @@ fn opened(
 
 /// What a chart's page asks a run to collect: what it reads.
 fn only(
-    collects: Result<application::next::Scope, configurator::wiring::WiringError>,
-) -> Result<Asked, configurator::wiring::WiringError> {
-    collects.map(Asked::Only)
+    collects: &Result<application::next::Scope, configurator::wiring::WiringError>,
+) -> Result<Asked, String> {
+    collects
+        .as_ref()
+        .map(|scope| Asked::Only(scope.clone()))
+        .map_err(ToString::to_string)
+}
+
+/// A chart's page drawn from the store, or while a run is collecting what it
+/// reads, the page as it was last drawn, and the placeholder where it has not
+/// been (#467).
+///
+/// **Asked before the store is read and again after**, so a run that starts
+/// while the page is being drawn is not missed: the read is one snapshot, but
+/// one taken after a layer was emptied and before it was rebuilt.
+async fn drawn(
+    runs: &Runs,
+    collects: &Result<application::next::Scope, configurator::wiring::WiringError>,
+    here: &str,
+    over: Option<domain::analytical::range::Over>,
+    run: &run::View,
+    read: impl Future<Output = Markup>,
+) -> Markup {
+    let Ok(scope) = collects else {
+        return read.await;
+    };
+    let page = format!("{here} {over:?}");
+    let meanwhile = || {
+        runs.kept(&page)
+            .map_or_else(|| page::collecting(here, run), |kept| page::kept(&kept))
+    };
+    if runs.collecting(scope) {
+        return meanwhile();
+    }
+    let drawn = read.await;
+    if runs.collecting(scope) {
+        meanwhile()
+    } else {
+        runs.keep(&page, &drawn);
+        drawn
+    }
 }
 
 /// The range `?over=` names.
@@ -191,19 +225,30 @@ async fn heart_rate(
     query: Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Markup {
-    let run = opened(&runs, &headers, only(configurator::heart_rate::collects()));
-    let setting = runs.setting();
-    let store = match configurator::store::Store::open(&setting.database).await {
-        Ok(store) => store,
-        Err(error) => return chart::unreadable(&error.to_string()),
-    };
-    let rides = configurator::heart_rate::rides(&store).await;
-    let ranges = configurator::ranges::today(&store, &setting.zone).await;
-    store.close().await;
-    match rides.and_then(|rides| Ok((rides, ranges?))) {
-        Ok((rides, ranges)) => chart::page(&rides, &ranges, over(&query), &run),
-        Err(error) => chart::unreadable(&error.to_string()),
-    }
+    let collects = configurator::heart_rate::collects();
+    let run = opened(&runs, &headers, only(&collects));
+    drawn(
+        &runs,
+        &collects,
+        "/heart-rate",
+        Some(over(&query)),
+        &run,
+        async {
+            let setting = runs.setting();
+            let store = match configurator::store::Store::open(&setting.database).await {
+                Ok(store) => store,
+                Err(error) => return chart::unreadable(&error.to_string()),
+            };
+            let rides = configurator::heart_rate::rides(&store).await;
+            let ranges = configurator::ranges::today(&store, &setting.zone).await;
+            store.close().await;
+            match rides.and_then(|rides| Ok((rides, ranges?))) {
+                Ok((rides, ranges)) => chart::page(&rides, &ranges, over(&query), &run),
+                Err(error) => chart::unreadable(&error.to_string()),
+            }
+        },
+    )
+    .await
 }
 
 /// Body weight over a range, read afresh from the store.
@@ -212,19 +257,30 @@ async fn body_weight(
     query: Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Markup {
-    let run = opened(&runs, &headers, only(configurator::body_weight::collects()));
-    let setting = runs.setting();
-    let store = match configurator::store::Store::open(&setting.database).await {
-        Ok(store) => store,
-        Err(error) => return weight::unreadable(&error.to_string()),
-    };
-    let series = configurator::body_weight::series(&store).await;
-    let ranges = configurator::ranges::today(&store, &setting.zone).await;
-    store.close().await;
-    match series.and_then(|series| Ok((series, ranges?))) {
-        Ok((series, ranges)) => weight::page(&series, &ranges, over(&query), &run),
-        Err(error) => weight::unreadable(&error.to_string()),
-    }
+    let collects = configurator::body_weight::collects();
+    let run = opened(&runs, &headers, only(&collects));
+    drawn(
+        &runs,
+        &collects,
+        "/body-weight",
+        Some(over(&query)),
+        &run,
+        async {
+            let setting = runs.setting();
+            let store = match configurator::store::Store::open(&setting.database).await {
+                Ok(store) => store,
+                Err(error) => return weight::unreadable(&error.to_string()),
+            };
+            let series = configurator::body_weight::series(&store).await;
+            let ranges = configurator::ranges::today(&store, &setting.zone).await;
+            store.close().await;
+            match series.and_then(|series| Ok((series, ranges?))) {
+                Ok((series, ranges)) => weight::page(&series, &ranges, over(&query), &run),
+                Err(error) => weight::unreadable(&error.to_string()),
+            }
+        },
+    )
+    .await
 }
 
 /// Body composition over a range, one series per method, read afresh from the
@@ -234,22 +290,33 @@ async fn body_composition(
     query: Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Markup {
-    let run = opened(&runs, &headers, only(configurator::composition::collects()));
-    let setting = runs.setting();
-    let store = match configurator::store::Store::open(&setting.database).await {
-        Ok(store) => store,
-        Err(error) => return composition::unreadable(&error.to_string()),
-    };
-    let components = configurator::composition::by_method(&store).await;
-    let against = configurator::composition::against_phase(&store, &setting.zone).await;
-    let ranges = configurator::ranges::today(&store, &setting.zone).await;
-    store.close().await;
-    match components.and_then(|components| Ok((components, against?, ranges?))) {
-        Ok((components, against, ranges)) => {
-            composition::page(&components, &against, &ranges, over(&query), &run)
-        }
-        Err(error) => composition::unreadable(&error.to_string()),
-    }
+    let collects = configurator::composition::collects();
+    let run = opened(&runs, &headers, only(&collects));
+    drawn(
+        &runs,
+        &collects,
+        "/body-composition",
+        Some(over(&query)),
+        &run,
+        async {
+            let setting = runs.setting();
+            let store = match configurator::store::Store::open(&setting.database).await {
+                Ok(store) => store,
+                Err(error) => return composition::unreadable(&error.to_string()),
+            };
+            let components = configurator::composition::by_method(&store).await;
+            let against = configurator::composition::against_phase(&store, &setting.zone).await;
+            let ranges = configurator::ranges::today(&store, &setting.zone).await;
+            store.close().await;
+            match components.and_then(|components| Ok((components, against?, ranges?))) {
+                Ok((components, against, ranges)) => {
+                    composition::page(&components, &against, &ranges, over(&query), &run)
+                }
+                Err(error) => composition::unreadable(&error.to_string()),
+            }
+        },
+    )
+    .await
 }
 
 /// Overnight HRV over a range, one series per watch and the trend through
@@ -259,24 +326,24 @@ async fn overnight_hrv(
     query: Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Markup {
-    let run = opened(
-        &runs,
-        &headers,
-        only(configurator::per_device::overnight_hrv_collects()),
-    );
-    let shown = daily::OVERNIGHT_HRV;
-    let setting = runs.setting();
-    let store = match configurator::store::Store::open(&setting.database).await {
-        Ok(store) => store,
-        Err(error) => return daily::unreadable(shown, &error.to_string()),
-    };
-    let trended = configurator::per_device::overnight_hrv_trend(&store).await;
-    let ranges = configurator::ranges::today(&store, &setting.zone).await;
-    store.close().await;
-    match trended.and_then(|trended| Ok((trended, ranges?))) {
-        Ok((trended, ranges)) => daily::overnight_hrv(&trended, &ranges, over(&query), &run),
-        Err(error) => daily::unreadable(shown, &error.to_string()),
-    }
+    let collects = configurator::per_device::overnight_hrv_collects();
+    let run = opened(&runs, &headers, only(&collects));
+    drawn(&runs, &collects, "/hrv", Some(over(&query)), &run, async {
+        let shown = daily::OVERNIGHT_HRV;
+        let setting = runs.setting();
+        let store = match configurator::store::Store::open(&setting.database).await {
+            Ok(store) => store,
+            Err(error) => return daily::unreadable(shown, &error.to_string()),
+        };
+        let trended = configurator::per_device::overnight_hrv_trend(&store).await;
+        let ranges = configurator::ranges::today(&store, &setting.zone).await;
+        store.close().await;
+        match trended.and_then(|trended| Ok((trended, ranges?))) {
+            Ok((trended, ranges)) => daily::overnight_hrv(&trended, &ranges, over(&query), &run),
+            Err(error) => daily::unreadable(shown, &error.to_string()),
+        }
+    })
+    .await
 }
 
 /// Resting heart rate over a range, one series per watch with its slow line
@@ -286,39 +353,52 @@ async fn resting_heart_rate(
     query: Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Markup {
-    let run = opened(
+    let collects = configurator::per_device::resting_heart_rate_collects();
+    let run = opened(&runs, &headers, only(&collects));
+    drawn(
         &runs,
-        &headers,
-        only(configurator::per_device::resting_heart_rate_collects()),
-    );
-    let shown = daily::RESTING_HEART_RATE;
-    let setting = runs.setting();
-    let store = match configurator::store::Store::open(&setting.database).await {
-        Ok(store) => store,
-        Err(error) => return daily::unreadable(shown, &error.to_string()),
-    };
-    let trended = configurator::per_device::resting_heart_rate_trend(&store).await;
-    let ranges = configurator::ranges::today(&store, &setting.zone).await;
-    store.close().await;
-    match trended.and_then(|trended| Ok((trended, ranges?))) {
-        Ok((trended, ranges)) => daily::resting_heart_rate(&trended, &ranges, over(&query), &run),
-        Err(error) => daily::unreadable(shown, &error.to_string()),
-    }
+        &collects,
+        "/resting-heart-rate",
+        Some(over(&query)),
+        &run,
+        async {
+            let shown = daily::RESTING_HEART_RATE;
+            let setting = runs.setting();
+            let store = match configurator::store::Store::open(&setting.database).await {
+                Ok(store) => store,
+                Err(error) => return daily::unreadable(shown, &error.to_string()),
+            };
+            let trended = configurator::per_device::resting_heart_rate_trend(&store).await;
+            let ranges = configurator::ranges::today(&store, &setting.zone).await;
+            store.close().await;
+            match trended.and_then(|trended| Ok((trended, ranges?))) {
+                Ok((trended, ranges)) => {
+                    daily::resting_heart_rate(&trended, &ranges, over(&query), &run)
+                }
+                Err(error) => daily::unreadable(shown, &error.to_string()),
+            }
+        },
+    )
+    .await
 }
 
 /// Estimated 1RM in each planned macrocycle, read afresh from the store.
 async fn estimated_one_rep_max(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
-    let run = opened(&runs, &headers, only(configurator::one_rep_max::collects()));
-    let store = match configurator::store::Store::open(&runs.setting().database).await {
-        Ok(store) => store,
-        Err(error) => return one_rep_max::unreadable(&error.to_string()),
-    };
-    let view = configurator::one_rep_max::view(&store, &runs.setting().zone).await;
-    store.close().await;
-    match view {
-        Ok(view) => one_rep_max::page(&view, &run),
-        Err(error) => one_rep_max::unreadable(&error.to_string()),
-    }
+    let collects = configurator::one_rep_max::collects();
+    let run = opened(&runs, &headers, only(&collects));
+    drawn(&runs, &collects, "/estimated-1rm", None, &run, async {
+        let store = match configurator::store::Store::open(&runs.setting().database).await {
+            Ok(store) => store,
+            Err(error) => return one_rep_max::unreadable(&error.to_string()),
+        };
+        let view = configurator::one_rep_max::view(&store, &runs.setting().zone).await;
+        store.close().await;
+        match view {
+            Ok(view) => one_rep_max::page(&view, &run),
+            Err(error) => one_rep_max::unreadable(&error.to_string()),
+        }
+    })
+    .await
 }
 
 /// The equipment, read afresh from the store, with what the last post came to.
@@ -518,4 +598,68 @@ fn script(body: &'static str) -> impl IntoResponse {
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         body,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use application::{Part, next::Scope};
+    use domain::{landing::LandingStream, normalised::OperatorZone};
+    use maud::html;
+
+    use crate::run::{Asked, Runs, Setting, View};
+
+    /// **A page whose data a run is collecting is drawn as it was before, and
+    /// the store is not read** (#467): on 2026-10-16 the estimated 1RM page
+    /// read the gym's canonical layer while a run had emptied it, and said *"No
+    /// test has been recorded."* A page this server has not drawn yet is the
+    /// placeholder.
+    #[test]
+    fn a_page_is_kept_as_it_was_while_its_data_is_collected() {
+        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let fresh = || {
+            Runs::new(Setting {
+                database: directory.path().join("fitness.db"),
+                zone: OperatorZone::try_from("Europe/London").expect("a zone"),
+                credentials: None,
+            })
+        };
+        let collects = Ok(Scope::new([Part::Normalising(
+            LandingStream::try_from("hevy.workouts").expect("a stream"),
+        )]));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("a runtime");
+        let drawn = |runs: &Runs, shown: &'static str| {
+            runtime
+                .block_on(super::drawn(
+                    runs,
+                    &collects,
+                    "/estimated-1rm",
+                    None,
+                    &View::default(),
+                    async move {
+                        html! { main { p { (shown) } } }
+                    },
+                ))
+                .into_string()
+        };
+
+        let runs = fresh();
+        assert!(drawn(&runs, "Front squat 92.5kg").contains("Front squat 92.5kg"));
+        runs.going_over(Asked::Everything);
+        let kept = drawn(&runs, "No test has been recorded.");
+        assert!(kept.contains("Front squat 92.5kg"), "{kept}");
+        assert!(!kept.contains("No test"), "{kept}");
+        assert!(kept.contains(r#"hx-trigger="every 2s""#), "{kept}");
+
+        let runs = fresh();
+        runs.going_over(Asked::Everything);
+        let shown = drawn(&runs, "No test has been recorded.");
+        assert!(
+            shown.contains("Collecting what this page shows…"),
+            "{shown}"
+        );
+        assert!(shown.contains("<title>Estimated 1RM</title>"), "{shown}");
+        assert!(!shown.contains("No test"), "{shown}");
+    }
 }

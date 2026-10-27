@@ -3050,6 +3050,7 @@ dependencies = [
  "domain",
  "jiff",
  "maud",
+ "tempfile",
  "tokio",
  "tokio-stream",
 ]
