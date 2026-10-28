@@ -1584,6 +1584,22 @@ pub trait RestingHeartRateHistory {
     > + Send;
 }
 
+/// Every night's sleep (#255), by the morning it is reported under, normalised
+/// for [`OvernightHrvHistory`]'s reason.
+pub trait SleepHistory {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn nights(
+        &self,
+    ) -> impl Future<
+        Output = Result<
+            Vec<domain::analytical::per_device::Recorded<domain::analytical::sleep::Night>>,
+            StoreError,
+        >,
+    > + Send;
+}
+
 /// Every body composition figure, beside the mass its weigh-in weighed (#256),
 /// normalised for [`OvernightHrvHistory`]'s reason.
 pub trait CompositionHistory {

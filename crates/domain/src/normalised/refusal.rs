@@ -189,6 +189,14 @@ pub enum RefusalReason {
     /// the evidence the day is a gap (§ 37), so it is a declared limitation and
     /// not wrong data: the source is telling the truth.
     NothingWorn,
+    /// A night the source holds and recorded no sleep on (#255).
+    ///
+    /// Garmin answers for every date it is asked about, and on 994 of the
+    /// operator's 3,217 nights its sleep record states nothing at all. Not
+    /// [`Self::NothingWorn`]: on 445 of them the watch was worn that day, so
+    /// what the record says is that no sleep was recorded, not why. A gap
+    /// (§ 37), and a declared limitation for [`Self::NothingWorn`]'s reason.
+    NoSleepRecorded,
     /// A reading the instrument could not attribute to the operator.
     ///
     /// The Body Scan did not recognise who stepped on it, and someone assigned
@@ -259,6 +267,7 @@ impl RefusalReason {
             | Self::Unattributed
             | Self::WithoutBaseline
             | Self::NothingWorn
+            | Self::NoSleepRecorded
             | Self::OnlyTheWatchClassifying
             | Self::NothingHappened
             | Self::WithoutWeighIn { .. } => RefusalKind::DeclaredLimitation,
@@ -287,6 +296,7 @@ impl RefusalReason {
             Self::Unattributed => "unattributed",
             Self::WithoutBaseline => "without-baseline",
             Self::NothingWorn => "nothing-worn",
+            Self::NoSleepRecorded => "no-sleep-recorded",
             Self::WithoutWeighIn { .. } => "without-weigh-in",
             Self::UnguessableMovement { .. } => "unguessable-movement",
             Self::OnlyTheWatchClassifying => "only-the-watch-classifying",
@@ -345,6 +355,7 @@ impl fmt::Display for RefusalReason {
                 f.write_str("a night with no baseline, which is not a night with HRV")
             }
             Self::NothingWorn => f.write_str("a day nothing was worn"),
+            Self::NoSleepRecorded => f.write_str("a night no sleep was recorded"),
             Self::WithoutWeighIn { part } => write!(f, "a {part} reading with no weigh-in"),
             Self::UnguessableMovement { term } => {
                 write!(f, "{term} names no movement in the vocabulary")

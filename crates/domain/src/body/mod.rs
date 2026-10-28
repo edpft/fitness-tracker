@@ -14,6 +14,7 @@ pub mod hrv;
 pub mod manual;
 pub mod quantity;
 pub mod resting;
+pub mod sleep;
 pub mod weigh_in;
 
 pub use canonical::{
@@ -34,6 +35,7 @@ pub use quantity::{
     VisceralFat,
 };
 pub use resting::{RestingHeartRate, RestingHeartRateRecord};
+pub use sleep::{InvalidSleep, Sleep, SleepRecord, SleepWindow};
 pub use weigh_in::{
     BodyScanWeighIn, Composition, HeartReading, MeasuredBy, NerveReading, Rhythm, Segment,
     Segments, VascularReading, WeighInRecord,

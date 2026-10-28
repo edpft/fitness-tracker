@@ -270,10 +270,10 @@ fn hrv_reading(day: &hrv::Day) -> String {
     )
 }
 
-const NOTHING: &str = "Nothing has been recorded.";
+pub const NOTHING: &str = "Nothing has been recorded.";
 
 /// Every day any of the series has a figure on.
-fn recorded<'a, T: 'a>(series: impl Iterator<Item = &'a DeviceSeries<T>>) -> Option<Range> {
+pub fn recorded<'a, T: 'a>(series: impl Iterator<Item = &'a DeviceSeries<T>>) -> Option<Range> {
     Range::spanning(series.flat_map(|one| one.readings.iter().map(|reading| reading.on)))
 }
 
@@ -539,7 +539,7 @@ fn line_points(run: &[Drawn], frame: &Frame) -> String {
         .join(" ")
 }
 
-fn mark(class: &str, sent_by: &SentBy, x: f64, y: f64, title: &str) -> Markup {
+pub fn mark(class: &str, sent_by: &SentBy, x: f64, y: f64, title: &str) -> Markup {
     html! {
         @match sent_by {
             SentBy::Device(_) => circle class=(format!("point {class}")) cx=(x) cy=(y) r=(RADIUS) { title { (title) } },
@@ -548,14 +548,14 @@ fn mark(class: &str, sent_by: &SentBy, x: f64, y: f64, title: &str) -> Markup {
     }
 }
 
-fn class(index: usize, sent_by: &SentBy) -> &'static str {
+pub fn class(index: usize, sent_by: &SentBy) -> &'static str {
     match sent_by {
         SentBy::Device(_) => COLOURS.get(index % COLOURS.len()).copied().unwrap_or("ink"),
         SentBy::Unknown => "ink",
     }
 }
 
-fn name(sent_by: &SentBy) -> String {
+pub fn name(sent_by: &SentBy) -> String {
     match sent_by {
         SentBy::Device(device) => device.name().to_string(),
         SentBy::Unknown => "device unknown".to_owned(),

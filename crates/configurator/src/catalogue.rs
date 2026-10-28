@@ -298,7 +298,7 @@ pub const SOURCES: [KnownSource; 4] = [
 ///
 /// **Wahoo serves files**, as the spreadsheets do: one record is one FIT file
 /// the app shared to Dropbox, whatever its sport (#421).
-pub const KNOWN: [KnownStream; 10] = [
+pub const KNOWN: [KnownStream; 11] = [
     KnownStream {
         served_by: ServedBy::System(&SOURCES[0]),
         entity: "workouts",
@@ -335,6 +335,13 @@ pub const KNOWN: [KnownStream; 10] = [
     KnownStream {
         served_by: ServedBy::System(&SOURCES[3]),
         entity: "daily_heart_rate",
+    },
+    // **A night's sleep** (#255): how long, and when. Collected with the
+    // activities, as the wrist's day is; nameable on its own because it
+    // derives something of its own.
+    KnownStream {
+        served_by: ServedBy::System(&SOURCES[3]),
+        entity: "sleep",
     },
     KnownStream {
         served_by: ServedBy::Folder {

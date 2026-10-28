@@ -38,6 +38,7 @@ pub mod prescribe;
 pub mod published;
 pub mod ranges;
 pub mod reschedule;
+pub mod sleep;
 pub mod status;
 pub mod strength;
 
@@ -65,8 +66,8 @@ pub use ports::{
     ReadUpTo, Reading, RecordedDevices, Rederivation, RefusalReport, RefusalReporter, RefusalStore,
     RenderingDigest, ReplyStatus, RestingHeartRateHistory, ResumptionPointResetter,
     ResumptionPointStore, RiddenSession, RiddenSessionLog, RiddenVenues, RideDestination,
-    RidesPlaced, RunLock, RunSummary, SessionOrdinal, SourceAccount, SourceEvent, StreamStatus,
-    Taken, Terms, Translation, Translator, UnderivableReason, UnderivableSlot, Unexpressed,
-    WearRecord, WeighInHistory, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser,
-    WorkoutPrescriber, WorkoutStore,
+    RidesPlaced, RunLock, RunSummary, SessionOrdinal, SleepHistory, SourceAccount, SourceEvent,
+    StreamStatus, Taken, Terms, Translation, Translator, UnderivableReason, UnderivableSlot,
+    Unexpressed, WearRecord, WeighInHistory, WorkoutEventSource, WorkoutExtractor,
+    WorkoutNormaliser, WorkoutPrescriber, WorkoutStore,
 };

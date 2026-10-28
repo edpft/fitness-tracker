@@ -16,6 +16,7 @@ mod page;
 mod range;
 mod report;
 mod run;
+mod sleep;
 mod weight;
 mod workouts;
 
@@ -126,6 +127,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/body-composition", get(body_composition))
         .route("/hrv", get(overnight_hrv))
         .route("/resting-heart-rate", get(resting_heart_rate))
+        .route("/sleep", get(sleep_page))
         .route("/estimated-1rm", get(estimated_one_rep_max))
         .route("/equipment", get(equipment_page).post(equipment_post))
         .route("/fills", get(fills_page).post(fills_post))
@@ -376,6 +378,39 @@ async fn resting_heart_rate(
                     daily::resting_heart_rate(&trended, &ranges, over(&query), &run)
                 }
                 Err(error) => daily::unreadable(shown, &error.to_string()),
+            }
+        },
+    )
+    .await
+}
+
+/// A night's sleep, how long and when, one series per watch, read afresh from
+/// the store (#255).
+async fn sleep_page(
+    State(runs): State<Arc<Runs>>,
+    query: Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Markup {
+    let collects = configurator::sleep::collects();
+    let run = opened(&runs, &headers, only(&collects));
+    drawn(
+        &runs,
+        &collects,
+        sleep::PATH,
+        Some(over(&query)),
+        &run,
+        async {
+            let setting = runs.setting();
+            let store = match configurator::store::Store::open(&setting.database).await {
+                Ok(store) => store,
+                Err(error) => return sleep::unreadable(&error.to_string()),
+            };
+            let nights = configurator::sleep::nights(&store).await;
+            let ranges = configurator::ranges::today(&store, &setting.zone).await;
+            store.close().await;
+            match nights.and_then(|nights| Ok((nights, ranges?))) {
+                Ok((nights, ranges)) => sleep::page(&nights, &ranges, over(&query), &run),
+                Err(error) => sleep::unreadable(&error.to_string()),
             }
         },
     )

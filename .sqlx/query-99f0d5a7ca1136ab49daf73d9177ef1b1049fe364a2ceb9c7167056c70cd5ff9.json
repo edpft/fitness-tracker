@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO sleep (\n            landing_record_id, source_record_id, morning_of, fell_asleep_utc,\n            woke_utc, zone, asleep_seconds, recorded_by,\n            endpoint, event_kind, event_time, run_id\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 12
+    },
+    "nullable": []
+  },
+  "hash": "99f0d5a7ca1136ab49daf73d9177ef1b1049fe364a2ceb9c7167056c70cd5ff9"
+}

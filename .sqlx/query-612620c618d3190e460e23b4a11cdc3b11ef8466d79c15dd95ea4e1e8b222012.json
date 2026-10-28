@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM sleep WHERE landing_record_id IN (SELECT value FROM json_each(?))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "612620c618d3190e460e23b4a11cdc3b11ef8466d79c15dd95ea4e1e8b222012"
+}
