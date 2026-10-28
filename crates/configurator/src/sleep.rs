@@ -2,7 +2,7 @@
 //! build's store (#255).
 
 use application::{StoreError, devices::DeviceRegister, next::Scope, sleep::Sleeping};
-use domain::analytical::{per_device::DeviceSeries, sleep::Night};
+use domain::analytical::sleep::Trended;
 use infrastructure::{
     GarminRecordedDevices, GarminSleepLandingStore, GarminWear, SqliteSleepHistory,
 };
@@ -26,12 +26,12 @@ pub fn collects() -> Result<Scope, WiringError> {
     )
 }
 
-/// Every night's sleep, one series per watch.
+/// Every night's sleep, one series per watch, with its trends.
 ///
 /// # Errors
 ///
 /// [`StoreError`] if the store cannot be read.
-pub async fn nights(store: &Store) -> Result<Vec<DeviceSeries<Night>>, StoreError> {
+pub async fn nights(store: &Store) -> Result<Vec<Trended>, StoreError> {
     let pool = store.pool();
     Sleeping::new(
         SqliteSleepHistory::new(pool.clone()),
