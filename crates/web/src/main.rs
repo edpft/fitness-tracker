@@ -35,7 +35,7 @@ use axum::{
     routing::get,
 };
 use clap::{Arg, ArgMatches, Command, value_parser};
-use maud::Markup;
+use maud::{Markup, PreEscaped};
 use tokio_stream::{Stream, StreamExt as _, wrappers::WatchStream};
 
 use run::{Asked, Runs, Setting};
@@ -191,6 +191,10 @@ fn only(
 /// **Asked before the store is read and again after**, so a run that starts
 /// while the page is being drawn is not missed: the read is one snapshot, but
 /// one taken after a layer was emptied and before it was rebuilt.
+///
+/// **The last drawing is kept in the store** (#605), so a page opened just
+/// after `fitness-web` restarts, which is when a run is surest to be going, is
+/// shown at once rather than the placeholder.
 async fn drawn(
     runs: &Runs,
     collects: &Result<application::next::Scope, configurator::wiring::WiringError>,
@@ -202,21 +206,56 @@ async fn drawn(
     let Ok(scope) = collects else {
         return read.await;
     };
-    let page = format!("{here} {over:?}");
-    let meanwhile = || {
-        runs.kept(&page)
-            .map_or_else(|| page::collecting(here, run), |kept| page::kept(&kept))
-    };
+    let address = over.map_or_else(
+        || here.to_owned(),
+        |over| format!("{here}?over={}", range::name(over)),
+    );
     if runs.collecting(scope) {
-        return meanwhile();
+        return Box::pin(meanwhile(runs, here, &address, run)).await;
     }
     let drawn = read.await;
     if runs.collecting(scope) {
-        meanwhile()
+        Box::pin(meanwhile(runs, here, &address, run)).await
     } else {
-        runs.keep(&page, &drawn);
+        keep(runs, address, &drawn);
         drawn
     }
+}
+
+/// The page at `address` as it was last drawn, asking to be drawn again, or
+/// the placeholder where it has not been.
+///
+/// **A drawing that cannot be read is one not kept**: the placeholder costs a
+/// wait, and saying the store is unreadable would be wrong about the page.
+async fn meanwhile(runs: &Runs, here: &str, address: &str, run: &run::View) -> Markup {
+    let kept = match configurator::store::Store::open(&runs.setting().database).await {
+        Ok(store) => {
+            let kept = store.kept_drawing(address).await;
+            store.close().await;
+            kept.ok().flatten()
+        }
+        Err(_) => None,
+    };
+    kept.map_or_else(
+        || page::collecting(here, run),
+        |kept| page::kept(&PreEscaped(kept)),
+    )
+}
+
+/// Keep `drawn` as the page at `address`, without the page waiting on it.
+///
+/// **A drawing that cannot be kept is let go**: it is drawn again the next
+/// time the page is opened with nothing collecting, and a run writing to the
+/// store must not hold up the page that is already drawn.
+fn keep(runs: &Runs, address: String, drawn: &Markup) {
+    let database = runs.setting().database.clone();
+    let drawing = drawn.0.clone();
+    tokio::spawn(async move {
+        if let Ok(store) = configurator::store::Store::open(&database).await {
+            let _kept = store.keep_drawing(&address, &drawing).await;
+            store.close().await;
+        }
+    });
 }
 
 /// The range `?over=` names.
@@ -710,7 +749,7 @@ fn script(body: &'static str) -> impl IntoResponse {
 #[cfg(test)]
 mod tests {
     use application::{Part, next::Scope};
-    use domain::{landing::LandingStream, normalised::OperatorZone};
+    use domain::{analytical::range::Over, landing::LandingStream, normalised::OperatorZone};
     use maud::html;
 
     use crate::run::{Asked, Runs, Setting, View};
@@ -718,8 +757,11 @@ mod tests {
     /// **A page whose data a run is collecting is drawn as it was before, and
     /// the store is not read** (#467): on 2026-10-16 the estimated 1RM page
     /// read the gym's canonical layer while a run had emptied it, and said *"No
-    /// test has been recorded."* A page this server has not drawn yet is the
+    /// test has been recorded."* A page never drawn on this store is the
     /// placeholder.
+    ///
+    /// **Kept across a restart** (#605): a server started afresh on the same
+    /// store, a run going, is served the drawing the last one kept.
     #[test]
     fn a_page_is_kept_as_it_was_while_its_data_is_collected() {
         let directory = tempfile::TempDir::new().expect("a temporary directory");
@@ -734,15 +776,16 @@ mod tests {
             LandingStream::try_from("hevy.workouts").expect("a stream"),
         )]));
         let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
             .build()
             .expect("a runtime");
-        let drawn = |runs: &Runs, shown: &'static str| {
+        let drawn = |runs: &Runs, over: Option<Over>, shown: &'static str| {
             runtime
                 .block_on(super::drawn(
                     runs,
                     &collects,
                     "/estimated-1rm",
-                    None,
+                    over,
                     &View::default(),
                     async move {
                         html! { main { p { (shown) } } }
@@ -751,17 +794,50 @@ mod tests {
                 .into_string()
         };
 
-        let runs = fresh();
-        assert!(drawn(&runs, "Front squat 92.5kg").contains("Front squat 92.5kg"));
-        runs.going_over(Asked::Everything);
-        let kept = drawn(&runs, "No test has been recorded.");
-        assert!(kept.contains("Front squat 92.5kg"), "{kept}");
-        assert!(!kept.contains("No test"), "{kept}");
-        assert!(kept.contains(r#"hx-trigger="every 2s""#), "{kept}");
+        // Migrated before anything is drawn, as `serve` does in reading the
+        // zone, so the keeping does not race a first open.
+        let database = directory.path().join("fitness.db");
+        runtime.block_on(async {
+            configurator::store::Store::open(&database)
+                .await
+                .expect("the store")
+                .close()
+                .await;
+        });
 
         let runs = fresh();
+        assert!(drawn(&runs, None, "Front squat 92.5kg").contains("Front squat 92.5kg"));
+        // Kept without the page waiting on it, so wait for it here.
+        let mut kept = None;
+        for _ in 0..100 {
+            kept = runtime.block_on(async {
+                let store = configurator::store::Store::open(&database)
+                    .await
+                    .expect("the store");
+                let kept = store.kept_drawing("/estimated-1rm").await.expect("a read");
+                store.close().await;
+                kept
+            });
+            if kept.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(kept.is_some(), "the drawing was never kept");
+
         runs.going_over(Asked::Everything);
-        let shown = drawn(&runs, "No test has been recorded.");
+        let shown = drawn(&runs, None, "No test has been recorded.");
+        assert!(shown.contains("Front squat 92.5kg"), "{shown}");
+        assert!(!shown.contains("No test"), "{shown}");
+        assert!(shown.contains(r#"hx-trigger="every 2s""#), "{shown}");
+
+        let restarted = fresh();
+        restarted.going_over(Asked::Everything);
+        let shown = drawn(&restarted, None, "No test has been recorded.");
+        assert!(shown.contains("Front squat 92.5kg"), "{shown}");
+        assert!(!shown.contains("No test"), "{shown}");
+
+        let shown = drawn(&restarted, Some(Over::All), "No test has been recorded.");
         assert!(
             shown.contains("Collecting what this page shows…"),
             "{shown}"

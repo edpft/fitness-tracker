@@ -12,7 +12,6 @@
 //! locks if the terminal did.
 
 use std::{
-    collections::HashMap,
     path::PathBuf,
     sync::{Arc, Mutex, PoisonError},
 };
@@ -146,9 +145,6 @@ pub struct Runs {
     setting: Setting,
     view: watch::Sender<View>,
     going: Mutex<Vec<Asked>>,
-    /// Each page as it was last drawn with nothing collecting what it reads,
-    /// by page and range, shown while a run is (#467).
-    kept: Mutex<HashMap<String, Markup>>,
 }
 
 impl Runs {
@@ -157,7 +153,6 @@ impl Runs {
             setting,
             view: watch::Sender::new(View::default()),
             going: Mutex::new(Vec::new()),
-            kept: Mutex::new(HashMap::new()),
         }
     }
 
@@ -194,24 +189,6 @@ impl Runs {
                 Asked::Only(going) => !going.parts().is_disjoint(scope.parts()),
             });
         here || configurator::next::collecting(&self.setting.database, scope).unwrap_or(false)
-    }
-
-    /// Keep `page` as it was drawn, nothing collecting what it reads.
-    pub fn keep(&self, page: &str, drawn: &Markup) {
-        self.kept
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(page.to_owned(), drawn.clone());
-    }
-
-    /// `page` as it was last drawn with nothing collecting what it reads, if
-    /// this server has drawn it since it started.
-    pub fn kept(&self, page: &str) -> Option<Markup> {
-        self.kept
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(page)
-            .cloned()
     }
 
     /// A run going over `asked`, as though this server had started one.

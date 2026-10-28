@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO kept_drawing (address, drawing)\n            VALUES (?1, ?2)\n            ON CONFLICT (address) DO UPDATE SET drawing = excluded.drawing\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "d261227b17faad3f67bb337b0b8297c6b11994c51b163f77b772e99ade5258ec"
+}
