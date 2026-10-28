@@ -18,7 +18,9 @@ use crate::{
 
 /// What the heart rate chart reads: the canonical rides, the FTP derived with
 /// them and the monitor each was ridden with, and which watch was in use (#559,
-/// #569). What each class prescribed is the catalogue's, as it stands.
+/// #569).
+///
+/// What each class prescribed is the catalogue's, as it stands.
 ///
 /// # Errors
 ///

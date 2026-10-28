@@ -147,7 +147,7 @@ impl Trended {
                         .filter(|point| range.covers(point.on))
                         .copied()
                         .collect();
-                    (!points.is_empty()).then(|| Period {
+                    (!points.is_empty()).then_some(Period {
                         ftp: period.ftp,
                         points,
                         rides: period.rides,
@@ -160,7 +160,7 @@ impl Trended {
 
     /// Whether there is any ride to show.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.periods.is_empty()
     }
 }

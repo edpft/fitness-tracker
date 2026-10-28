@@ -369,23 +369,20 @@ fn class(warm_up: u64, intervals: &[(PowerZone, u64)]) -> Fallible<CyclingSessio
 fn in_intervals(
     prescribed: &CyclingSession,
     beats: impl Fn(u64) -> u32,
-) -> Option<(u32, u64, usize)> {
+) -> Fallible<Option<(u32, u64, usize)>> {
     let power = held(0, 2_000, 140);
     let beats: Vec<(u64, u32)> = (0..=2_000).map(|at| (at, beats(at))).collect();
-    let session = main_ride(ride(&power, Some(&beats)).expect("a ride"));
-    let read = heart_rate_by_zone(
-        &session,
-        Some(ftp().expect("an FTP")),
-        Some(prescribed),
-        &nobody(),
-    )
-    .expect("a main ride")
-    .in_intervals?;
-    Some((
-        read.average.as_u32(),
-        read.over.as_seconds(),
-        read.intervals,
-    ))
+    let session = main_ride(ride(&power, Some(&beats))?);
+    let read = heart_rate_by_zone(&session, Some(ftp()?), Some(prescribed), &nobody())
+        .ok_or("a main ride")?
+        .in_intervals;
+    Ok(read.map(|read| {
+        (
+            read.average.as_u32(),
+            read.over.as_seconds(),
+            read.intervals,
+        )
+    }))
 }
 
 #[test]
@@ -401,7 +398,7 @@ fn a_z3_interval_is_read_after_its_first_two_minutes_on_the_class_s_clock() {
     )
     .expect("a class");
     // 150 until two minutes into the interval, and 140 after.
-    let read = in_intervals(&prescribed, |at| if at < 1_020 { 150 } else { 140 });
+    let read = in_intervals(&prescribed, |at| if at < 1_020 { 150 } else { 140 }).expect("a ride");
     assert_eq!(read, Some((140, 120, 1)), "seconds 1020 to 1139");
 }
 
@@ -427,12 +424,13 @@ fn only_z3_intervals_of_three_minutes_with_none_harder_before_are_read() {
         } else {
             170
         }
-    });
+    })
+    .expect("a ride");
     assert_eq!(read, Some((140, 60, 1)));
 }
 
 #[test]
 fn a_class_with_no_such_interval_reads_nothing() {
     let prescribed = class(600, &[(PowerZone::Two, 600), (PowerZone::Four, 300)]).expect("a class");
-    assert_eq!(in_intervals(&prescribed, |_| 140), None);
+    assert_eq!(in_intervals(&prescribed, |_| 140).expect("a ride"), None);
 }
