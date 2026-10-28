@@ -26,6 +26,7 @@ pub mod equipment;
 pub mod error;
 pub mod extract;
 pub mod fills;
+pub mod ftp_tests;
 pub mod heart_rate;
 pub mod holding;
 pub mod microcycle;
