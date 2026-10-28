@@ -1,4 +1,5 @@
-//! A night's sleep, as two charts: how long, and when (#255).
+//! A night's sleep, as three charts: how long, when, and how regularly (#255,
+//! #418).
 //!
 //! **Both by the morning Garmin reports the night under**, one mark per night
 //! and one colour per watch, as [`crate::daily`]'s are. A night with no sleep
@@ -6,13 +7,18 @@
 //!
 //! **When is a bar from falling asleep to waking**, on a clock that runs down
 //! the page from the evening before to the morning's noon, so a later night
-//! sits lower. That is the regularity series' data point; a figure over the
-//! windows is the trend's (#418).
+//! sits lower. That is the regularity series' data point.
+//!
+//! **Each figure's trend is drawn over its published band**, the NHS's for
+//! time asleep and Windred et al.'s fifths for regularity, and the page says
+//! where each watch's latest trend sits and which way it is going.
 
 use domain::analytical::{
+    body_weight::Direction,
+    hrv::Against,
     per_device::DeviceSeries,
     range::{Over, Range, Ranges},
-    sleep::Night,
+    sleep::{self, Fifth, Night, Trend, Trended},
 };
 use jiff::civil::{Date, DateTime};
 use maud::{DOCTYPE, Markup, html};
@@ -37,9 +43,14 @@ const FLOOR: f64 = 276.0;
 /// Seconds in an hour, for the axes.
 const HOUR: f64 = 3600.0;
 
-/// The page: each watch's nights over the range chosen.
-pub fn page(nights: &[DeviceSeries<Night>], ranges: &Ranges, over: Over, run: &View) -> Markup {
-    let range = crate::range::chosen(ranges, over, recorded(nights.iter()), NOTHING);
+/// The page: each watch's nights and their trends over the range chosen.
+pub fn page(nights: &[Trended], ranges: &Ranges, over: Over, run: &View) -> Markup {
+    let range = crate::range::chosen(
+        ranges,
+        over,
+        recorded(nights.iter().map(|one| &one.series)),
+        NOTHING,
+    );
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -78,9 +89,10 @@ pub fn unreadable(error: &str) -> Markup {
     )
 }
 
-/// Both charts over `range`, the legend and the table.
-fn charts(nights: &[DeviceSeries<Night>], range: Range) -> Markup {
-    let within: Vec<DeviceSeries<Night>> = nights.iter().map(|one| one.within(range)).collect();
+/// The charts over `range`, the legend and the table.
+fn charts(nights: &[Trended], range: Range) -> Markup {
+    let trended: Vec<Trended> = nights.iter().map(|one| one.within(range)).collect();
+    let within: Vec<DeviceSeries<Night>> = trended.iter().map(|one| one.series.clone()).collect();
     if within.iter().all(|one| one.readings.is_empty()) {
         return html! { p { "Nothing recorded in this range." } };
     }
@@ -91,9 +103,26 @@ fn charts(nights: &[DeviceSeries<Night>], range: Range) -> Markup {
     };
     html! {
         h2 { "Time asleep" }
-        div.plot { (asleep(&within, &dates)) }
+        @for one in &trended {
+            @if let Some(latest) = latest_asleep(one) { p.reading { (latest) } }
+        }
+        div.plot { (asleep(&trended, &dates)) }
+        p.method {
+            "points: each night · line: the " (sleep::METHOD)
+            " · shaded: the NHS's 7 to 9 hours for adults · against 28 days before: rising or falling beyond 15 minutes, maintaining within it"
+        }
         h2 { "Fell asleep to woke" }
         div.plot { (window(&within, &dates)) }
+        h2 { "Regularity" }
+        @for one in &trended {
+            @if let Some(latest) = latest_regular(one) { p.reading { (latest) } }
+        }
+        div.plot { (regularity(&trended, &dates)) }
+        p.method {
+            "points: each morning's Sleep Regularity Index against the night before, from falling asleep to waking · line: the "
+            (sleep::METHOD)
+            " · shaded: the fifths of Windred et al. (Sleep, 2024), 7 days of wrist actigraphy in 61,000 UK adults, among whom higher was better throughout · against 28 days before: rising or falling beyond 2, maintaining within it"
+        }
         ul.legend {
             @for (index, one) in within.iter().enumerate().filter(|(_, one)| !one.readings.is_empty()) {
                 li {
@@ -166,12 +195,13 @@ fn length(night: &Night) -> String {
     format!("{} h {:02} min", minutes / 60, minutes % 60)
 }
 
-/// Time asleep, 0 h on the floor, in whole two hours.
-fn asleep(series: &[DeviceSeries<Night>], dates: &Dates) -> Markup {
-    let longest = series
+/// Time asleep, 0 h on the floor, in whole two hours, over the NHS's band.
+fn asleep(trended: &[Trended], dates: &Dates) -> Markup {
+    let longest = trended
         .iter()
         .flat_map(|one| {
-            one.readings
+            one.series
+                .readings
                 .iter()
                 .map(|reading| hours_asleep(&reading.value))
         })
@@ -182,14 +212,18 @@ fn asleep(series: &[DeviceSeries<Night>], dates: &Dates) -> Markup {
         .take_while(|hours| *hours <= high);
     html! {
         svg.chart viewBox=(format!("0 0 {WIDTH} {HEIGHT}")) role="img"
-            aria-label="Time asleep, one point per night, by date" {
+            aria-label="Time asleep, one point per night, by date, and the trend through them" {
+            @let (nhs_low, nhs_high) = sleep::NHS;
+            rect.band x=(LEFT) width=(WIDTH - LEFT - RIGHT)
+                y=(rising(nhs_high / 60.0, 0.0, high))
+                height=(rising(nhs_low / 60.0, 0.0, high) - rising(nhs_high / 60.0, 0.0, high)) {}
             @for hours in marks {
                 @let y = rising(hours, 0.0, high);
                 line.grid x1=(LEFT) x2=(WIDTH - RIGHT) y1=(y) y2=(y) {}
                 text.axis x=(LEFT - 6.0) y=(y + 4.0) text-anchor="end" { (format!("{hours} h")) }
             }
             (dates.grid())
-            @for (index, one) in series.iter().enumerate() {
+            @for (index, one) in trended.iter().map(|one| &one.series).enumerate() {
                 @for reading in &one.readings {
                     (mark(
                         class(index, &one.sent_by),
@@ -200,8 +234,156 @@ fn asleep(series: &[DeviceSeries<Night>], dates: &Dates) -> Markup {
                     ))
                 }
             }
+            @for one in trended {
+                (line(&one.asleep, dates, |minutes| rising(minutes / 60.0, 0.0, high), |day| {
+                    format!("{} · {} · {}", day.on, asleep_reading(day), name(&one.series.sent_by))
+                }))
+            }
         }
     }
+}
+
+/// Each morning's SRI and its trend, over Windred et al.'s fifths, 100 at
+/// the top and the floor low enough for every morning in 20s.
+fn regularity(trended: &[Trended], dates: &Dates) -> Markup {
+    let lowest = trended
+        .iter()
+        .flat_map(|one| one.regularity.values())
+        .fold(100.0_f64, |low, index| low.min(*index));
+    let low = ((lowest / 20.0).floor() * 20.0).min(60.0);
+    let y = |index: f64| rising(index, low, 100.0);
+    let edges: Vec<f64> = std::iter::once(low)
+        .chain(sleep::WINDRED)
+        .chain(std::iter::once(100.0))
+        .collect();
+    html! {
+        svg.chart viewBox=(format!("0 0 {WIDTH} {HEIGHT}")) role="img"
+            aria-label="Sleep Regularity Index, one point per morning, by date, and the trend through them" {
+            @for (fifth, pair) in edges.windows(2).enumerate() {
+                @if let [from, to] = pair {
+                    rect class=(format!("fifth f{fifth}")) x=(LEFT) width=(WIDTH - LEFT - RIGHT)
+                        y=(y(*to)) height=(y(*from) - y(*to)) {}
+                }
+            }
+            @for edge in &edges {
+                line.grid x1=(LEFT) x2=(WIDTH - RIGHT) y1=(y(*edge)) y2=(y(*edge)) {}
+                text.axis x=(LEFT - 6.0) y=(y(*edge) + 4.0) text-anchor="end" { (edge) }
+            }
+            (dates.grid())
+            @for (index, one) in trended.iter().enumerate() {
+                @for (on, value) in &one.regularity {
+                    (mark(
+                        class(index, &one.series.sent_by),
+                        &one.series.sent_by,
+                        dates.x(*on),
+                        y(*value),
+                        &format!("{on} · {value:.1} against the night before · {}", name(&one.series.sent_by)),
+                    ))
+                }
+            }
+            @for one in trended {
+                (line(&one.regular, dates, y, |day| {
+                    format!("{} · {} · {}", day.on, regular_reading(day), name(&one.series.sent_by))
+                }))
+            }
+        }
+    }
+}
+
+/// A trend's unbroken runs, each a line, with a title on every day.
+fn line(
+    runs: &[Vec<Trend>],
+    dates: &Dates,
+    y: impl Fn(f64) -> f64,
+    title: impl Fn(&Trend) -> String,
+) -> Markup {
+    html! {
+        @for run in runs {
+            polyline.trend points=(run.iter().map(|day| format!("{:.1},{:.1}", dates.x(day.on), y(day.value))).collect::<Vec<_>>().join(" ")) {}
+            @for day in run {
+                circle.hover cx=(dates.x(day.on)) cy=(y(day.value)) r="3" { title { (title(day)) } }
+            }
+        }
+    }
+}
+
+/// Which way a trend went, and by how much, in `unit`.
+fn moved(day: &Trend, by: impl Fn(f64) -> String) -> String {
+    match (day.direction, day.change) {
+        (Some(direction), Some(change)) => format!(
+            "{} ({} against 28 days before)",
+            match direction {
+                Direction::Rising => "rising",
+                Direction::Maintaining => "maintaining",
+                Direction::Falling => "falling",
+            },
+            by(change)
+        ),
+        _ => "no direction yet".to_owned(),
+    }
+}
+
+/// A day's trend in time asleep, against the NHS's band.
+fn asleep_reading(day: &Trend) -> String {
+    let against = match sleep::against_nhs(day.value) {
+        Against::Below => "below",
+        Against::Within => "within",
+        Against::Above => "above",
+    };
+    format!(
+        "last 28 nights {}, {against} the NHS's 7 to 9 hours, {}",
+        minutes(day.value),
+        moved(day, |change| {
+            let sign = if change < 0.0 { "−" } else { "+" };
+            format!("{sign}{:.0} min", change.abs())
+        })
+    )
+}
+
+/// A day's trend in regularity, against Windred et al.'s fifths.
+fn regular_reading(day: &Trend) -> String {
+    let fifth = match Fifth::of(day.value) {
+        Fifth::Lowest => "lowest",
+        Fifth::Second => "second",
+        Fifth::Third => "middle",
+        Fifth::Fourth => "fourth",
+        Fifth::Highest => "highest",
+    };
+    format!(
+        "last 28 nights {:.1}, in Windred et al.'s {fifth} fifth, {}",
+        day.value,
+        moved(day, |change| {
+            let sign = if change < 0.0 { "−" } else { "+" };
+            format!("{sign}{:.1}", change.abs())
+        })
+    )
+}
+
+fn latest_asleep(one: &Trended) -> Option<String> {
+    let day = one.asleep.iter().flatten().next_back()?;
+    Some(format!(
+        "{}, {}: {}",
+        name(&one.series.sent_by),
+        day.on,
+        asleep_reading(day)
+    ))
+}
+
+fn latest_regular(one: &Trended) -> Option<String> {
+    let day = one.regular.iter().flatten().next_back()?;
+    Some(format!(
+        "{}, {}: {}",
+        name(&one.series.sent_by),
+        day.on,
+        regular_reading(day)
+    ))
+}
+
+/// Minutes as hours and minutes, to the nearest minute.
+fn minutes(minutes: f64) -> String {
+    let whole = jiff::SignedDuration::try_from_secs_f64(minutes.round() * 60.0)
+        .map_or(0, |duration| duration.as_mins());
+    format!("{} h {:02} min", whole / 60, whole % 60)
 }
 
 /// Fell asleep to woke, 18:00 the evening before at the top and noon at the
@@ -293,6 +475,9 @@ const STYLE: &str = "
 .slept.d1 { stroke: var(--z1); } .slept.d2 { stroke: var(--z6); }
 .slept.d3 { stroke: var(--z5); } .slept.d4 { stroke: var(--z2); }
 .slept.ink { stroke: var(--ink); }
+.fifth { fill: var(--ink); stroke: none; }
+.f0 { fill-opacity: 0; } .f1 { fill-opacity: 0.03; } .f2 { fill-opacity: 0.06; }
+.f3 { fill-opacity: 0.09; } .f4 { fill-opacity: 0.12; }
 ";
 
 #[cfg(test)]
@@ -301,7 +486,7 @@ mod tests {
         analytical::{
             per_device::{DeviceSeries, Reading, SentBy},
             range::{Over, Range, Ranges},
-            sleep::Night,
+            sleep::{Night, Trended},
         },
         measure::PositiveDuration,
     };
@@ -324,15 +509,34 @@ mod tests {
         }
     }
 
-    fn week() -> [DeviceSeries<Night>; 1] {
-        [DeviceSeries {
+    fn week() -> [Trended; 1] {
+        [Trended::of(DeviceSeries {
             sent_by: SentBy::Unknown,
             readings: vec![
                 night(22, 29_040, (21, 22, 26), (6, 30)),
                 night(25, 28_380, (24, 22, 23), (6, 16)),
                 night(27, 24_300, (27, 0, 12), (6, 57)),
             ],
-        }]
+        })]
+    }
+
+    /// Every night from 2 to 27 October: 7 h 30 min from 23:00 to 06:30,
+    /// but an hour later at both ends from the 14th, and the 20th missing.
+    fn october() -> [Trended; 1] {
+        let readings = (2..=27)
+            .filter(|day| *day != 20)
+            .map(|day| {
+                if day < 14 {
+                    night(day, 27_000, (day - 1, 23, 0), (6, 30))
+                } else {
+                    night(day, 27_000, (day, 0, 0), (7, 30))
+                }
+            })
+            .collect();
+        [Trended::of(DeviceSeries {
+            sent_by: SentBy::Unknown,
+            readings,
+        })]
     }
 
     #[test]
@@ -350,6 +554,29 @@ mod tests {
         assert_eq!(page.matches(r#"class="slept ink""#).count(), 3);
         assert!(!page.contains("<polyline"), "nothing joins two nights");
         assert!(page.contains("device unknown · 3 nights"));
+    }
+
+    #[test]
+    fn each_trend_is_read_against_its_band() {
+        let page = super::page(
+            &october(),
+            &NO_PLAN,
+            Over::All,
+            &crate::run::View::default(),
+        )
+        .into_string();
+
+        assert!(page.contains(
+            "device unknown, 2026-10-27: last 28 nights 7 h 30 min, within the NHS's 7 to 9 hours, no direction yet"
+        ));
+        assert!(page.contains("device unknown, 2026-10-27: last 28 nights 99.3, in Windred et al.'s highest fifth, no direction yet"));
+        assert!(page.contains("2026-10-14 · 83.3 against the night before"));
+        assert!(
+            !page.contains("2026-10-20 · 100") && !page.contains("2026-10-21 · 100"),
+            "a missing night has no index, nor does the morning after it"
+        );
+        assert_eq!(page.matches(r#"class="trend""#).count(), 2);
+        assert_eq!(page.matches(r#"class="band""#).count(), 1);
     }
 
     #[test]
