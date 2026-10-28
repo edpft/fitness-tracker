@@ -102,21 +102,30 @@ impl Trended {
 
 /// The slow line, from the first day to the last and never past.
 pub fn line(readings: &[Reading<BeatsPerMinute>]) -> Vec<Vec<Day>> {
-    let days = by_day(readings);
+    slow_line(&by_day(readings))
+        .into_iter()
+        .map(|run| run.into_iter().map(|(on, bpm)| Day { on, bpm }).collect())
+        .collect()
+}
+
+/// The mean of the 90 days ending on each day, at least 39 of them recorded,
+/// from the first day to the last and never past, as unbroken runs. Pulse
+/// wave velocity's line is this one too (#471).
+pub(super) fn slow_line(days: &BTreeMap<Date, f64>) -> Vec<Vec<(Date, f64)>> {
     let (Some(&first), Some(&last)) = (days.keys().next(), days.keys().next_back()) else {
         return Vec::new();
     };
-    let mut runs: Vec<Vec<Day>> = Vec::new();
-    let mut run: Vec<Day> = Vec::new();
+    let mut runs: Vec<Vec<(Date, f64)>> = Vec::new();
+    let mut run: Vec<(Date, f64)> = Vec::new();
     for on in first
         .series(jiff::Span::new().days(1))
         .take_while(|on| *on <= last)
     {
-        let mean = window(&days, on, 0, LINE_DAYS)
+        let mean = window(days, on, 0, LINE_DAYS)
             .filter(|values| values.len() >= LINE_RECORDED)
             .map(|values| mean(&values));
         match mean {
-            Some(bpm) => run.push(Day { on, bpm }),
+            Some(value) => run.push((on, value)),
             None if run.is_empty() => {}
             None => runs.push(std::mem::take(&mut run)),
         }

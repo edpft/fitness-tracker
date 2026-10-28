@@ -343,3 +343,41 @@ fn an_incremental_derivation_writes_what_a_whole_one_would() {
         panic!("{error}");
     }
 }
+
+/// Pulse wave velocity reads back with the day it was measured on and the
+/// algorithm that took it (#471), and a weigh-in with no vascular group has
+/// none.
+#[test]
+fn pulse_wave_velocity_reads_back_by_day_and_algorithm() {
+    use application::PulseWaveVelocityHistory as _;
+    use domain::{analytical::pulse_wave_velocity::Measured, body::PulseWaveVelocity};
+
+    let outcome: Result<(), Failure> = (|| {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        runtime.block_on(async {
+            let directory = tempfile::tempdir()?;
+            let pool = infrastructure::connect(&directory.path().join("store.db")).await?;
+            land(&pool, first_batch()).await?;
+            land(&pool, second_batch()).await?;
+            derive(&pool, application::Rederivation::Whole).await?;
+
+            let measured = infrastructure::SqlitePulseWaveVelocityHistory::new(pool.clone())
+                .measured()
+                .await?;
+            assert_eq!(
+                measured,
+                [Measured {
+                    on: jiff::civil::date(2026, 9, 10),
+                    algorithm: 42,
+                    velocity: PulseWaveVelocity::from_millimetres_per_second(7_100),
+                }]
+            );
+            Ok(())
+        })
+    })();
+    if let Err(error) = outcome {
+        panic!("{error}");
+    }
+}

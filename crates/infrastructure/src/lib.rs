@@ -64,10 +64,11 @@ pub use store::{
     SqliteNormalisedCyclingSessionReader, SqliteNormalisedGymSessionReader,
     SqliteNormalisedWeighInReader, SqliteOperatorSettingsStore, SqliteOvernightHrvHistory,
     SqliteOvernightHrvStore, SqlitePelotonClassStore, SqlitePlanStore,
-    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,
-    SqliteRestingHeartRateHistory, SqliteRestingHeartRateStore, SqliteResumptionPointStore,
-    SqliteSleepHistory, SqliteSleepStore, SqliteSpreadsheetStore, SqliteWeighInStore,
-    WahooFileLandingStore, WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqlitePulseWaveVelocityHistory,
+    SqliteRefusalStore, SqliteRestingHeartRateHistory, SqliteRestingHeartRateStore,
+    SqliteResumptionPointStore, SqliteSleepHistory, SqliteSleepStore, SqliteSpreadsheetStore,
+    SqliteWeighInStore, WahooFileLandingStore, WithingsMeasurementLandingStore,
+    WithingsWeighInAccountReader, connect,
 };
 pub use store::{CanonicalGymReading, Held};
 pub use store::{

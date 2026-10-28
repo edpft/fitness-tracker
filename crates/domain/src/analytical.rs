@@ -27,6 +27,7 @@ pub mod heart_rate_trend;
 pub mod hrv;
 pub mod one_rep_max;
 pub mod per_device;
+pub mod pulse_wave_velocity;
 pub mod range;
 pub mod recomposition;
 pub mod resting;

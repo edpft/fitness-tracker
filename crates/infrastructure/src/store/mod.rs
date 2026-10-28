@@ -47,6 +47,7 @@ pub mod peloton_samples_landing;
 pub mod plan;
 pub mod pool;
 pub mod prescription;
+pub mod pulse_wave_velocity;
 pub mod refusals;
 pub mod resting_heart_rate;
 pub mod resumption;
@@ -117,6 +118,7 @@ pub use peloton_samples_landing::PelotonRideSampleLandingStore;
 pub use plan::SqlitePlanStore;
 pub use pool::connect;
 pub use prescription::SqlitePrescribedWorkoutStore;
+pub use pulse_wave_velocity::SqlitePulseWaveVelocityHistory;
 pub use refusals::SqliteRefusalStore;
 pub use resting_heart_rate::{
     GarminDailyHeartRateAccountReader, SqliteDailyHeartRateStore, SqliteOvernightHrvHistory,

@@ -111,7 +111,11 @@ impl CompositionHistory for SqliteCompositionHistory {
 }
 
 /// The day a weigh-in fell on, by the zone it was weighed in.
-fn day(on_day: Option<&str>, at: Option<&str>, zone: Option<&str>) -> Result<Date, StoreError> {
+pub(super) fn day(
+    on_day: Option<&str>,
+    at: Option<&str>,
+    zone: Option<&str>,
+) -> Result<Date, StoreError> {
     match (on_day, at, zone) {
         (Some(on_day), None, None) => on_day.parse().map_err(|error| corrupt(&error)),
         (None, Some(at), Some(zone)) => {
