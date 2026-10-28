@@ -31,7 +31,7 @@ pub use folder::FolderFiles;
 pub use garmin::{
     GarminActivityTranslator, GarminAuth, GarminCredentials, GarminDailyHeartRateTranslator,
     GarminGymTranslator, GarminHrv, GarminHrvTranslator, GarminRecordedSets,
-    GarminRestingHeartRateTranslator,
+    GarminRestingHeartRateTranslator, GarminSleepTranslator,
 };
 pub use hevy::{
     HevyRoutinePreview, HevyRoutines, HevySessionTranslator, HevyStandIns, HevyWorkoutEvents,
@@ -49,11 +49,12 @@ pub use store::{
     GarminActivityLandingStore, GarminDailyHeartRateAccountReader,
     GarminDailyHeartRateLandingStore, GarminExerciseSetLandingStore, GarminGymAccountReader,
     GarminGymRawExtent, GarminHrvAccountReader, GarminHrvLandingStore, GarminRecordedDevices,
-    GarminWear, HevySessionAccountReader, HevyWorkoutLandingStore, MyFitnessPalExportAccountReader,
-    MyFitnessPalExportLandingStore, OverlayError, PelotonAccountLandingStore, PelotonRawExtent,
-    PelotonRideDetailLandingStore, PelotonRideLandingStore, PelotonRideSampleLandingStore,
-    PelotonSessionAccountReader, SpreadsheetFileAccountReader, SpreadsheetFileLandingStore,
-    SqliteBtwbStore, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
+    GarminSleepAccountReader, GarminWear, HevySessionAccountReader, HevyWorkoutLandingStore,
+    MyFitnessPalExportAccountReader, MyFitnessPalExportLandingStore, OverlayError,
+    PelotonAccountLandingStore, PelotonRawExtent, PelotonRideDetailLandingStore,
+    PelotonRideLandingStore, PelotonRideSampleLandingStore, PelotonSessionAccountReader,
+    SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SqliteBtwbStore,
+    SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
     SqliteCanonicalWeighInStore, SqliteCompositionHistory, SqliteCyclingDeliveryStore,
     SqliteCyclingMesocycleStore, SqliteCyclingSessionStore, SqliteDailyHeartRateStore,
     SqliteDerivationLedger, SqliteDiaryStore, SqliteEditOverlayStore, SqliteEquipmentStore,
@@ -65,8 +66,8 @@ pub use store::{
     SqliteOvernightHrvStore, SqlitePelotonClassStore, SqlitePlanStore,
     SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRefusalStore,
     SqliteRestingHeartRateHistory, SqliteRestingHeartRateStore, SqliteResumptionPointStore,
-    SqliteSpreadsheetStore, SqliteWeighInStore, WahooFileLandingStore,
-    WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
+    SqliteSleepHistory, SqliteSleepStore, SqliteSpreadsheetStore, SqliteWeighInStore,
+    WahooFileLandingStore, WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
 };
 pub use store::{CanonicalGymReading, Held};
 pub use store::{

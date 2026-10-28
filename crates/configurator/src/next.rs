@@ -361,6 +361,7 @@ fn landed_from(normalised: &str) -> &'static [&'static str] {
             GarminDailyHeartRateLandingStore::STREAM,
             GarminSleepLandingStore::STREAM,
         ],
+        GarminSleepLandingStore::STREAM => &[GarminSleepLandingStore::STREAM],
         _ => &[],
     }
 }

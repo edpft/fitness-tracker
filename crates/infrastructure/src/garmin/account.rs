@@ -140,6 +140,46 @@ pub fn days(records: Vec<LandedRecord>) -> Vec<DayAccount> {
         .collect()
 }
 
+/// One night of Garmin's sleep record, and the servings of it that a later one
+/// replaced (#255). Supersession as [`NightAccount`]'s, for its reason.
+#[derive(Debug, Clone)]
+pub struct SleepAccount {
+    sleep: LandedRecord,
+    superseded: Vec<LandedRecord>,
+}
+
+impl SleepAccount {
+    /// The serving that stands.
+    pub const fn sleep(&self) -> &LandedRecord {
+        &self.sleep
+    }
+}
+
+impl SourceAccount for SleepAccount {
+    fn records(&self) -> usize {
+        self.superseded.len().saturating_add(1)
+    }
+
+    fn landed(&self) -> Vec<&LandedRecord> {
+        std::iter::once(&self.sleep)
+            .chain(&self.superseded)
+            .collect()
+    }
+
+    fn superseded(&self) -> usize {
+        self.superseded.len()
+    }
+}
+
+/// Keep the last serving of each night's sleep and set the earlier ones
+/// aside, as [`nights`] does.
+pub fn sleeps(records: Vec<LandedRecord>) -> Vec<SleepAccount> {
+    last_of_each(records)
+        .into_iter()
+        .map(|(sleep, superseded)| SleepAccount { sleep, superseded })
+        .collect()
+}
+
 /// The last serving of each source record and the ones it replaced, oldest
 /// first by the serving that stands.
 fn last_of_each(records: Vec<LandedRecord>) -> Vec<(LandedRecord, Vec<LandedRecord>)> {

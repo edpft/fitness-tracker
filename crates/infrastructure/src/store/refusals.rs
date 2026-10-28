@@ -148,6 +148,7 @@ fn reason_from_row(reason: &str, detail: Option<String>) -> Result<RefusalReason
         "unattributed" => Ok(RefusalReason::Unattributed),
         "without-baseline" => Ok(RefusalReason::WithoutBaseline),
         "nothing-worn" => Ok(RefusalReason::NothingWorn),
+        "no-sleep-recorded" => Ok(RefusalReason::NoSleepRecorded),
         "without-weigh-in" => Ok(RefusalReason::WithoutWeighIn {
             part: match detail.as_str() {
                 "heart" => "heart",

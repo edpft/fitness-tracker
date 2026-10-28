@@ -28,6 +28,7 @@ pub mod per_device;
 pub mod range;
 pub mod recomposition;
 pub mod resting;
+pub mod sleep;
 
 use std::fmt;
 

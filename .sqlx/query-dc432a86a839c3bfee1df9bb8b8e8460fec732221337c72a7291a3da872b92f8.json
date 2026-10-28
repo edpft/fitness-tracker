@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT morning_of AS \"morning_of!: String\",\n                   fell_asleep_utc AS \"fell_asleep!: String\",\n                   woke_utc AS \"woke!: String\",\n                   zone AS \"zone!: String\",\n                   asleep_seconds AS \"asleep!: i64\",\n                   recorded_by\n            FROM sleep\n            ORDER BY morning_of ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "morning_of!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sleep",
+            "name": "morning_of"
+          }
+        }
+      },
+      {
+        "name": "fell_asleep!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sleep",
+            "name": "fell_asleep_utc"
+          }
+        }
+      },
+      {
+        "name": "woke!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sleep",
+            "name": "woke_utc"
+          }
+        }
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sleep",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "asleep!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "sleep",
+            "name": "asleep_seconds"
+          }
+        }
+      },
+      {
+        "name": "recorded_by",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sleep",
+            "name": "recorded_by"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "dc432a86a839c3bfee1df9bb8b8e8460fec732221337c72a7291a3da872b92f8"
+}

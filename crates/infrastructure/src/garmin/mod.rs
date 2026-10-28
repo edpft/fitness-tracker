@@ -33,7 +33,7 @@ pub mod sleep;
 pub mod translate;
 pub mod wear;
 
-pub use account::{ActivityAccount, DayAccount, NightAccount, days, nights};
+pub use account::{ActivityAccount, DayAccount, NightAccount, SleepAccount, days, nights, sleeps};
 pub use activities::{ActivityPage, GarminActivities};
 pub use activity::{ActivityDevices, GarminActivityEntity, GarminActivityTranslator};
 pub use auth::{GarminAuth, GarminCredentials};
@@ -43,6 +43,7 @@ pub use files::{ActivityFilePage, GarminActivityFiles};
 pub use gym::GarminGymTranslator;
 pub use hrv::{GarminHrv, HrvWalk};
 pub use resting::GarminRestingHeartRateTranslator;
+pub use sleep::GarminSleepTranslator;
 pub use translate::GarminHrvTranslator;
 pub use wear::{GarminDailyHeartRateTranslator, GarminDayEntity, WearDay};
 

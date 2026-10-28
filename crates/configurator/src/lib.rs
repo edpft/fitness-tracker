@@ -29,6 +29,7 @@ pub mod ranges;
 pub mod rescheduling;
 pub mod rides;
 pub mod setup;
+pub mod sleep;
 pub mod store;
 pub mod templates;
 pub mod wiring;
