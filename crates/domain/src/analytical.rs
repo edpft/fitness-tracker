@@ -21,6 +21,7 @@
 
 pub mod body_weight;
 pub mod composition;
+pub mod ftp_test;
 pub mod heart_rate;
 pub mod heart_rate_trend;
 pub mod hrv;

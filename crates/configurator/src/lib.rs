@@ -18,6 +18,7 @@ pub mod design;
 pub mod devices;
 pub mod equipment;
 pub mod fills;
+pub mod ftp_tests;
 pub mod heart_rate;
 pub mod holidays;
 pub mod next;

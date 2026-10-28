@@ -11,6 +11,7 @@ mod composition;
 mod daily;
 mod equipment;
 mod fills;
+mod ftp;
 mod one_rep_max;
 mod page;
 mod range;
@@ -123,6 +124,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
     let app = Router::new()
         .route("/", get(index))
         .route("/heart-rate", get(heart_rate))
+        .route(ftp::PATH, get(ftp_tests))
         .route("/body-weight", get(body_weight))
         .route("/body-composition", get(body_composition))
         .route("/hrv", get(overnight_hrv))
@@ -247,6 +249,39 @@ async fn heart_rate(
             match rides.and_then(|rides| Ok((rides, ranges?))) {
                 Ok((rides, ranges)) => chart::page(&rides, &ranges, over(&query), &run),
                 Err(error) => chart::unreadable(&error.to_string()),
+            }
+        },
+    )
+    .await
+}
+
+/// The FTP tests over a range, in watts and over body weight, read afresh
+/// from the store (#469).
+async fn ftp_tests(
+    State(runs): State<Arc<Runs>>,
+    query: Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Markup {
+    let collects = configurator::ftp_tests::collects();
+    let run = opened(&runs, &headers, only(&collects));
+    drawn(
+        &runs,
+        &collects,
+        ftp::PATH,
+        Some(over(&query)),
+        &run,
+        async {
+            let setting = runs.setting();
+            let store = match configurator::store::Store::open(&setting.database).await {
+                Ok(store) => store,
+                Err(error) => return ftp::unreadable(&error.to_string()),
+            };
+            let tests = configurator::ftp_tests::tests(&store).await;
+            let ranges = configurator::ranges::today(&store, &setting.zone).await;
+            store.close().await;
+            match tests.and_then(|tests| Ok((tests, ranges?))) {
+                Ok((tests, ranges)) => ftp::page(&tests, &ranges, over(&query), &run),
+                Err(error) => ftp::unreadable(&error.to_string()),
             }
         },
     )
