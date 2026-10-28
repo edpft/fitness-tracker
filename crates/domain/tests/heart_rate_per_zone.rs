@@ -2,6 +2,9 @@
 //!
 //! The method is the operator's, 2026-10-14: a 30-second mean of power, and a
 //! second counts only once the ride has been in its zone for 120 seconds.
+//!
+//! Beside it, the class's Z3 intervals of at least 3 minutes with no harder
+//! interval before them (operator, 2026-10-19, #415).
 
 use std::collections::BTreeSet;
 
@@ -9,14 +12,17 @@ use domain::{
     analytical::heart_rate::{ByZone, RideHeartRate, SentBy, heart_rate_by_zone},
     canonical::{Attributed, NormalisedSessionId},
     cycling::{
-        Cadence, CanonicalBikePlusRide, CanonicalCyclingSession, CanonicalRideRecord, Ftp,
-        FtpProvenance, PowerZone, Resistance, RideSample, RideVenue, Speed, Watts,
+        Cadence, CanonicalBikePlusRide, CanonicalCyclingSession, CanonicalRideRecord,
+        CyclingSession, Ftp, FtpProvenance, Interval, PowerZone, Resistance, Ride, RideSample,
+        RideVenue, Speed, Watts,
     },
     device::{
         AntDeviceNumber, DeviceIdentifier, DeviceName, Measurand, Register, Role, SerialNumber,
         Sighting, Wear, register,
     },
-    measure::{BeatsPerMinute, Duration, HeartRateSample, HeartRateSeries, Metres},
+    measure::{
+        BeatsPerMinute, Duration, HeartRateSample, HeartRateSeries, Metres, PositiveDuration,
+    },
     normalised::{OperatorZone, StartedAt},
     sequence::NonEmpty,
 };
@@ -114,7 +120,7 @@ fn nobody() -> Register {
 }
 
 fn of(session: &CanonicalCyclingSession, register: &Register) -> Fallible<RideHeartRate> {
-    Ok(heart_rate_by_zone(session, Some(ftp()?), register).ok_or("a main ride")?)
+    Ok(heart_rate_by_zone(session, Some(ftp()?), None, register).ok_or("a main ride")?)
 }
 
 /// Every zone's average, lowest zone first.
@@ -201,7 +207,7 @@ fn a_ride_with_no_heart_rate_says_so() {
 fn a_ride_before_any_ftp_has_no_zones() {
     let beats: Vec<(u64, u32)> = (1..=300).map(|at| (at, 120)).collect();
     let session = main_ride(ride(&held(1, 300, 140), Some(&beats)).expect("a ride"));
-    let ride = heart_rate_by_zone(&session, None, &nobody()).expect("a main ride");
+    let ride = heart_rate_by_zone(&session, None, None, &nobody()).expect("a main ride");
     assert_eq!(ride.by_zone, ByZone::NoFtp);
 }
 
@@ -226,7 +232,7 @@ fn a_test_is_not_a_main_ride() {
         cool_down: None,
     };
     assert_eq!(
-        heart_rate_by_zone(&session, Some(ftp().expect("an FTP")), &nobody()),
+        heart_rate_by_zone(&session, Some(ftp().expect("an FTP")), None, &nobody()),
         None
     );
 }
@@ -338,4 +344,93 @@ fn a_ride_ridden_with_a_named_monitor_is_placed_on_it() {
         panic!("a monitor the register does not hold is still the one named");
     };
     assert_eq!(device.name().as_str(), "Device: 3629");
+}
+
+/// A class: `warm_up` seconds, then each interval in turn.
+fn class(warm_up: u64, intervals: &[(PowerZone, u64)]) -> Fallible<CyclingSession> {
+    let intervals = intervals
+        .iter()
+        .map(|&(zone, seconds)| {
+            Ok(Interval::new(
+                zone,
+                PositiveDuration::from_seconds(seconds)?,
+            ))
+        })
+        .collect::<Fallible<Vec<_>>>()?;
+    Ok(CyclingSession::new(
+        PositiveDuration::from_seconds(warm_up)?,
+        Ride::Intervals(NonEmpty::new(intervals)?),
+        None,
+    ))
+}
+
+/// The heart rate over a class's Z3 intervals, for a ride whose heart rate
+/// is `beats` at every second.
+fn in_intervals(
+    prescribed: &CyclingSession,
+    beats: impl Fn(u64) -> u32,
+) -> Fallible<Option<(u32, u64, usize)>> {
+    let power = held(0, 2_000, 140);
+    let beats: Vec<(u64, u32)> = (0..=2_000).map(|at| (at, beats(at))).collect();
+    let session = main_ride(ride(&power, Some(&beats))?);
+    let read = heart_rate_by_zone(&session, Some(ftp()?), Some(prescribed), &nobody())
+        .ok_or("a main ride")?
+        .in_intervals;
+    Ok(read.map(|read| {
+        (
+            read.average.as_u32(),
+            read.over.as_seconds(),
+            read.intervals,
+        )
+    }))
+}
+
+#[test]
+fn a_z3_interval_is_read_after_its_first_two_minutes_on_the_class_s_clock() {
+    // 600 s of warm-up, 300 s at Z2, then 240 s at Z3 from second 900.
+    let prescribed = class(
+        600,
+        &[
+            (PowerZone::Two, 300),
+            (PowerZone::Three, 240),
+            (PowerZone::One, 120),
+        ],
+    )
+    .expect("a class");
+    // 150 until two minutes into the interval, and 140 after.
+    let read = in_intervals(&prescribed, |at| if at < 1_020 { 150 } else { 140 }).expect("a ride");
+    assert_eq!(read, Some((140, 120, 1)), "seconds 1020 to 1139");
+}
+
+#[test]
+fn only_z3_intervals_of_three_minutes_with_none_harder_before_are_read() {
+    let prescribed = class(
+        600,
+        &[
+            // Too short.
+            (PowerZone::Three, 179),
+            (PowerZone::Two, 121),
+            // Read: 900 to 1080, from 1020.
+            (PowerZone::Three, 180),
+            (PowerZone::Four, 120),
+            // After a harder interval.
+            (PowerZone::Three, 300),
+        ],
+    )
+    .expect("a class");
+    let read = in_intervals(&prescribed, |at| {
+        if (1_020..1_080).contains(&at) {
+            140
+        } else {
+            170
+        }
+    })
+    .expect("a ride");
+    assert_eq!(read, Some((140, 60, 1)));
+}
+
+#[test]
+fn a_class_with_no_such_interval_reads_nothing() {
+    let prescribed = class(600, &[(PowerZone::Two, 600), (PowerZone::Four, 300)]).expect("a class");
+    assert_eq!(in_intervals(&prescribed, |_| 140).expect("a ride"), None);
 }

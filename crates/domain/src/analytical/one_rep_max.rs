@@ -252,6 +252,12 @@ impl Line {
     pub const fn per_session(&self) -> f64 {
         self.slope
     }
+
+    /// How far either side of [`Self::per_session`] the slope could lie, at
+    /// the band's confidence.
+    pub fn slope_margin(&self) -> f64 {
+        self.margin / self.spread_of_days.sqrt()
+    }
 }
 
 /// Student's t for a 95% interval. Past the table, the value at the next

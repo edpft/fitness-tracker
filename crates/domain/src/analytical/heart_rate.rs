@@ -22,11 +22,23 @@
 //! throughout a ride (167 times in the hour of 2024-01-19), so the window is
 //! the samples in the last 30 seconds, and the time in a zone is from the
 //! sample that entered it.
+//!
+//! **Beside it, the class's Z3 intervals** (operator, 2026-10-16 and
+//! 2026-10-19, #415): the heart rate over every interval the class prescribes
+//! at Z3 for at least 3 minutes with no harder interval before it in the ride,
+//! read after the same 120 seconds. Mixing whole rides gives a Z3 interval
+//! after Z6 a different heart rate from one after Z1; one repeated stretch at
+//! one power is compared like with like, as the Lamberts Submaximal Cycle Test
+//! does. It is read off the prescription, not the power ridden, so it is the
+//! same stretch from ride to ride.
 
 use std::collections::{BTreeMap, VecDeque};
 
 use crate::{
-    cycling::{CanonicalBikePlusRide, CanonicalCyclingSession, Ftp, PowerZone, RideVenue, Watts},
+    cycling::{
+        CanonicalBikePlusRide, CanonicalCyclingSession, CyclingSession, Ftp, PowerZone, Ride,
+        RideVenue, Watts,
+    },
     device::{Device, InUse, Measurand, Register},
     measure::{BeatsPerMinute, Duration},
     normalised::StartedAt,
@@ -35,6 +47,13 @@ use crate::{
 
 /// What the series is called, so a different method is never mistaken for it.
 pub const METHOD: &str = "30 s mean power, counted after 120 s in one zone";
+
+/// What the Z3 intervals series is called.
+pub const INTERVALS_METHOD: &str = "the class's Z3 intervals of at least 3 min with no harder \
+                                    interval before them, counted after 120 s in each";
+
+/// The shortest Z3 interval read.
+const INTERVAL_SECONDS: u64 = 180;
 
 /// How many seconds the power is averaged over.
 const WINDOW_SECONDS: u64 = 30;
@@ -59,6 +78,16 @@ pub struct ZoneHeartRate {
     pub over: Duration,
 }
 
+/// A ride's average heart rate over its class's Z3 intervals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IntervalHeartRate {
+    pub average: BeatsPerMinute,
+    /// How many seconds the average is over.
+    pub over: Duration,
+    /// How many intervals it is read from.
+    pub intervals: usize,
+}
+
 /// What a ride's heart rate says per zone, or why it says nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ByZone {
@@ -80,6 +109,9 @@ pub struct RideHeartRate {
     pub ftp: Option<Ftp>,
     pub sent_by: SentBy,
     pub by_zone: ByZone,
+    /// [`None`] where the class prescribes no such interval, the catalogue
+    /// has not read the class, or no heart rate was recorded in them.
+    pub in_intervals: Option<IntervalHeartRate>,
 }
 
 impl RideHeartRate {
@@ -95,11 +127,13 @@ impl RideHeartRate {
 /// **Main rides only.** A test's effort is one zone held as hard as can be,
 /// and a cool-down is not a ride anything is compared across.
 ///
-/// `ftp` is the value in force on the ride's date (§ 13).
+/// `ftp` is the value in force on the ride's date (§ 13), and `prescribed`
+/// what the ride's class prescribes, where the catalogue has read it.
 #[must_use]
 pub fn heart_rate_by_zone(
     session: &CanonicalCyclingSession,
     ftp: Option<Ftp>,
+    prescribed: Option<&CyclingSession>,
     register: &Register,
 ) -> Option<RideHeartRate> {
     let CanonicalCyclingSession::Ride { main, .. } = session else {
@@ -120,6 +154,7 @@ pub fn heart_rate_by_zone(
     Some(RideHeartRate {
         venue: main.at().value().clone(),
         by_zone: by_zone(main, ftp),
+        in_intervals: prescribed.and_then(|prescribed| in_intervals(main, prescribed)),
         started_at,
         ftp,
         sent_by,
@@ -185,6 +220,53 @@ fn by_zone(ride: &CanonicalBikePlusRide, ftp: Option<Ftp>) -> ByZone {
         })
         .collect();
     NonEmpty::new(zones).map_or(ByZone::NoZoneHeld, ByZone::Zones)
+}
+
+/// The heart rate over the class's Z3 intervals.
+///
+/// **The ride's clock is the class's**: its first second is the warm-up's,
+/// so an interval starts the warm-up and every interval before it into the
+/// ride.
+fn in_intervals(
+    ride: &CanonicalBikePlusRide,
+    prescribed: &CyclingSession,
+) -> Option<IntervalHeartRate> {
+    let Ride::Intervals(intervals) = prescribed.ride() else {
+        return None;
+    };
+    let beats: BTreeMap<u64, u32> = ride
+        .heart_rate()?
+        .value()
+        .samples()
+        .iter()
+        .map(|sample| (sample.at.as_seconds(), sample.beats_per_minute.as_u32()))
+        .collect();
+    let mut starts = prescribed.warm_up().as_seconds();
+    let mut hardest = PowerZone::One;
+    let (mut read, mut seconds, mut total) = (0_usize, 0_u64, 0_u64);
+    for interval in intervals.iter() {
+        let length = interval.duration().as_seconds();
+        if interval.zone() == PowerZone::Three
+            && length >= INTERVAL_SECONDS
+            && hardest <= PowerZone::Three
+        {
+            read += 1;
+            for (_, &beats) in
+                beats.range(starts.saturating_add(STEADY_SECONDS)..starts.saturating_add(length))
+            {
+                seconds = seconds.saturating_add(1);
+                total = total.saturating_add(u64::from(beats));
+            }
+        }
+        hardest = hardest.max(interval.zone());
+        starts = starts.saturating_add(length);
+    }
+    let average = BeatsPerMinute::new(u32::try_from(rounded(total, seconds)).ok()?).ok()?;
+    (seconds > 0).then_some(IntervalHeartRate {
+        average,
+        over: Duration::from_seconds(seconds),
+        intervals: read,
+    })
 }
 
 /// The window's mean power, to the nearest watt.

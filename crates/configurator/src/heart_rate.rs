@@ -6,6 +6,7 @@ use application::{
 use domain::analytical::heart_rate::RideHeartRate;
 use infrastructure::{
     GarminRecordedDevices, GarminWear, SqliteCanonicalCyclingSessionStore, SqliteFtpHistory,
+    SqlitePelotonClassStore,
 };
 
 use crate::{
@@ -18,6 +19,8 @@ use crate::{
 /// What the heart rate chart reads: the canonical rides, the FTP derived with
 /// them and the monitor each was ridden with, and which watch was in use (#559,
 /// #569).
+///
+/// What each class prescribed is the catalogue's, as it stands.
 ///
 /// # Errors
 ///
@@ -36,6 +39,7 @@ pub async fn rides(store: &Store) -> Result<Vec<RideHeartRate>, StoreError> {
     HeartRatePerZone::new(
         SqliteCanonicalCyclingSessionStore::new(pool.clone()),
         SqliteFtpHistory::new(pool.clone()),
+        SqlitePelotonClassStore::new(pool.clone()),
         DeviceRegister::new(
             GarminRecordedDevices::new(pool.clone()),
             GarminWear::new(pool.clone()),
