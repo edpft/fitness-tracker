@@ -37,6 +37,7 @@ pub mod per_device;
 pub mod ports;
 pub mod prescribe;
 pub mod published;
+pub mod pulse_wave_velocity;
 pub mod ranges;
 pub mod reschedule;
 pub mod sleep;
@@ -63,12 +64,12 @@ pub use ports::{
     PerformedGymSessions, PerformedSessionLog, PerformedSetSummary, Placed, PlanAuthor, PlanStore,
     PlannedWith, PrescribedWorkoutId, PrescribedWorkoutStore, Prescription, PrescriptionDeliverer,
     PrescriptionDeliveryStore, PrescriptionDestination, PrescriptionLifecycle, ProgressionStore,
-    PublishedCell, PublishedCycling, PublishedProgrammes, PublishedRead, RawExtent, Reached,
-    ReadUpTo, Reading, RecordedDevices, Rederivation, RefusalReport, RefusalReporter, RefusalStore,
-    RenderingDigest, ReplyStatus, RestingHeartRateHistory, ResumptionPointResetter,
-    ResumptionPointStore, RiddenSession, RiddenSessionLog, RiddenVenues, RideDestination,
-    RidesPlaced, RunLock, RunSummary, SessionOrdinal, SleepHistory, SourceAccount, SourceEvent,
-    StreamStatus, Taken, Terms, Translation, Translator, UnderivableReason, UnderivableSlot,
-    Unexpressed, WearRecord, WeighInHistory, WorkoutEventSource, WorkoutExtractor,
+    PublishedCell, PublishedCycling, PublishedProgrammes, PublishedRead, PulseWaveVelocityHistory,
+    RawExtent, Reached, ReadUpTo, Reading, RecordedDevices, Rederivation, RefusalReport,
+    RefusalReporter, RefusalStore, RenderingDigest, ReplyStatus, RestingHeartRateHistory,
+    ResumptionPointResetter, ResumptionPointStore, RiddenSession, RiddenSessionLog, RiddenVenues,
+    RideDestination, RidesPlaced, RunLock, RunSummary, SessionOrdinal, SleepHistory, SourceAccount,
+    SourceEvent, StreamStatus, Taken, Terms, Translation, Translator, UnderivableReason,
+    UnderivableSlot, Unexpressed, WearRecord, WeighInHistory, WorkoutEventSource, WorkoutExtractor,
     WorkoutNormaliser, WorkoutPrescriber, WorkoutStore,
 };

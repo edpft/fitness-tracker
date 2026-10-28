@@ -1600,6 +1600,19 @@ pub trait SleepHistory {
     > + Send;
 }
 
+/// Every pulse wave velocity the scale took (#471), and the algorithm that took
+/// it, normalised for [`OvernightHrvHistory`]'s reason.
+pub trait PulseWaveVelocityHistory {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn measured(
+        &self,
+    ) -> impl Future<
+        Output = Result<Vec<domain::analytical::pulse_wave_velocity::Measured>, StoreError>,
+    > + Send;
+}
+
 /// Every body composition figure, beside the mass its weigh-in weighed (#256),
 /// normalised for [`OvernightHrvHistory`]'s reason.
 pub trait CompositionHistory {

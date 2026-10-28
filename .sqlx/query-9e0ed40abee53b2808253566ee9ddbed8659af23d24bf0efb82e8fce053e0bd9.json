@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT w.on_day AS \"on_day: String\",\n                   w.measured_at_utc AS \"measured_at_utc: String\",\n                   w.zone AS \"zone: String\",\n                   v.pulse_wave_velocity_millimetres_per_second AS \"millimetres!: i64\",\n                   p.algorithm AS \"algorithm!: i64\"\n            FROM body_scan_vascular v\n            JOIN body_scan_weigh_in b ON b.landing_record_id = v.weigh_in\n            JOIN weigh_in w ON w.id = b.weigh_in\n            JOIN body_scan_part p\n                ON p.weigh_in = v.weigh_in AND p.part = 'vascular'\n            ORDER BY COALESCE(w.measured_at_utc, w.on_day), w.id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "on_day: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "on_day"
+          }
+        }
+      },
+      {
+        "name": "measured_at_utc: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "measured_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "millimetres!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "body_scan_vascular",
+            "name": "pulse_wave_velocity_millimetres_per_second"
+          }
+        }
+      },
+      {
+        "name": "algorithm!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "body_scan_part",
+            "name": "algorithm"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "9e0ed40abee53b2808253566ee9ddbed8659af23d24bf0efb82e8fce053e0bd9"
+}

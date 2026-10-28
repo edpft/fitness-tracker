@@ -14,6 +14,7 @@ mod fills;
 mod ftp;
 mod one_rep_max;
 mod page;
+mod pulse_wave_velocity;
 mod range;
 mod report;
 mod run;
@@ -127,6 +128,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route(ftp::PATH, get(ftp_tests))
         .route("/body-weight", get(body_weight))
         .route("/body-composition", get(body_composition))
+        .route(pulse_wave_velocity::PATH, get(pulse_wave_velocity_page))
         .route("/hrv", get(overnight_hrv))
         .route("/resting-heart-rate", get(resting_heart_rate))
         .route("/sleep", get(sleep_page))
@@ -380,6 +382,41 @@ async fn overnight_hrv(
             Err(error) => daily::unreadable(shown, &error.to_string()),
         }
     })
+    .await
+}
+
+/// Pulse wave velocity over a range, with its slow line, read afresh from the
+/// store (#471).
+async fn pulse_wave_velocity_page(
+    State(runs): State<Arc<Runs>>,
+    query: Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Markup {
+    let collects = configurator::pulse_wave_velocity::collects();
+    let run = opened(&runs, &headers, only(&collects));
+    drawn(
+        &runs,
+        &collects,
+        pulse_wave_velocity::PATH,
+        Some(over(&query)),
+        &run,
+        async {
+            let setting = runs.setting();
+            let store = match configurator::store::Store::open(&setting.database).await {
+                Ok(store) => store,
+                Err(error) => return pulse_wave_velocity::unreadable(&error.to_string()),
+            };
+            let series = configurator::pulse_wave_velocity::by_algorithm(&store).await;
+            let ranges = configurator::ranges::today(&store, &setting.zone).await;
+            store.close().await;
+            match series.and_then(|series| Ok((series, ranges?))) {
+                Ok((series, ranges)) => {
+                    pulse_wave_velocity::page(&series, &ranges, over(&query), &run)
+                }
+                Err(error) => pulse_wave_velocity::unreadable(&error.to_string()),
+            }
+        },
+    )
     .await
 }
 
