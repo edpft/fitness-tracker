@@ -56,6 +56,7 @@
 //! so a reader fault is never recorded as the source withholding anything.
 
 use application::StoreError;
+use domain::cycling::{CyclingSession, RideVenue};
 use jiff::Timestamp;
 use sqlx::SqlitePool;
 
@@ -453,5 +454,21 @@ impl SqlitePelotonClassStore {
                 aired_at: row.aired_at,
             })
             .collect())
+    }
+}
+
+impl application::ClassPrescriptions for SqlitePelotonClassStore {
+    /// **One class, one session**, joined by the rule a holding ride's is
+    /// (decision 0033). A class that is not a session alone, such as the FTP
+    /// warm-up, prescribes nothing here.
+    async fn prescribed(&self, venue: &RideVenue) -> Result<Option<CyclingSession>, StoreError> {
+        let Some(class) = self.class(venue.reference()).await? else {
+            return Ok(None);
+        };
+        Ok(
+            crate::peloton::provider::session((1, 1), std::slice::from_ref(&class))
+                .ok()
+                .map(|(session, _)| session),
+        )
     }
 }

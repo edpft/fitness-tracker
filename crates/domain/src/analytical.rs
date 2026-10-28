@@ -22,6 +22,7 @@
 pub mod body_weight;
 pub mod composition;
 pub mod heart_rate;
+pub mod heart_rate_trend;
 pub mod hrv;
 pub mod one_rep_max;
 pub mod per_device;

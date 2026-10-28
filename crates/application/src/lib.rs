@@ -48,12 +48,12 @@ pub use error::{
 };
 pub use ports::{
     AccountReader, Authored, Build, ByReason, CanonicalCyclingSessionStore,
-    CanonicalGymSessionStore, CanonicalLayer, CanonicalWeighInStore, ClassSource, ClassesListed,
-    ClassesRead, Clock, CompositionHistory, CyclingDeliveryStore, CyclingMesocycleStore,
-    Deliverable, Delivered, Delivery, DeliveryAttempt, DeliveryReference, DerivationLedger,
-    DerivationStatus, DerivationStatusReporter, DerivedFrom, DestinationName, DestinationReply,
-    DiaryAuthor, DiaryStore, EquipmentStore, EventBatch, ExerciseHistory, ExtractionRunLog,
-    ExtractionStatusReporter, FillChangeStore, FtpHistory, FulfilledSession,
+    CanonicalGymSessionStore, CanonicalLayer, CanonicalWeighInStore, ClassPrescriptions,
+    ClassSource, ClassesListed, ClassesRead, Clock, CompositionHistory, CyclingDeliveryStore,
+    CyclingMesocycleStore, Deliverable, Delivered, Delivery, DeliveryAttempt, DeliveryReference,
+    DerivationLedger, DerivationStatus, DerivationStatusReporter, DerivedFrom, DestinationName,
+    DestinationReply, DiaryAuthor, DiaryStore, EquipmentStore, EventBatch, ExerciseHistory,
+    ExtractionRunLog, ExtractionStatusReporter, FillChangeStore, FtpHistory, FulfilledSession,
     GenerationParameterStore, HoldingRides, HolidayCalendar, Issuance, LadderStanding,
     LandingStore, LastPerformance, Mark, MesocycleInForce, MesocycleStore, NewestObservation,
     NextLock, NormalisationRunLog, NormalisationSummary, NormalisedCyclingSessionReader,
