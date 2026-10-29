@@ -33,6 +33,7 @@ pub mod rides;
 pub mod setup;
 pub mod sleep;
 pub mod store;
+pub mod telemetry;
 pub mod templates;
 pub mod wiring;
 

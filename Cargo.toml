@@ -27,6 +27,7 @@ domain = { path = "crates/domain" }
 application = { path = "crates/application" }
 infrastructure = { path = "crates/infrastructure" }
 configurator = { path = "crates/configurator" }
+telemetry = { path = "crates/telemetry" }
 
 # Data types. These are allowed in `domain`: they describe values rather than
 # machinery, and a core that cannot name a timestamp ends up passing strings
@@ -80,6 +81,14 @@ sqlx = { version = "0.9.0", default-features = false, features = [
   "runtime-tokio",
   "migrate",
   "macros",
+] }
+# Informational telemetry (#631): each run, step, request and command is a
+# span, and `telemetry` writes closed ones to `telemetry.db`. The subscriber
+# without its formatter: nothing here prints a span.
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = [
+  "registry",
+  "std",
 ] }
 clap = { version = "4.6.6", features = ["derive", "env"] }
 # Reading a secret without echoing it. A prompted key never reaches argv, so

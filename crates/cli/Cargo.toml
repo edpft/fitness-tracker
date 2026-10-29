@@ -24,6 +24,8 @@ tokio.workspace = true
 rpassword.workspace = true
 
 [dev-dependencies]
+# Reading back the `telemetry.db` a command leaves beside its store (#631).
+sqlx.workspace = true
 tempfile.workspace = true
 # A stub Peloton, for the one test that has to get through an Auth0 login before
 # it reaches what it is about. That flow is a redirect chain, a cookie and a
