@@ -33,13 +33,12 @@ use infrastructure::{
     MyFitnessPalExportLandingStore, PelotonAccountLandingStore, PelotonRideDetailLandingStore,
     PelotonRideLandingStore, PelotonRideSampleLandingStore, SpreadsheetFileLandingStore,
     SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
-    SqliteCanonicalWeighInStore, SqliteCanonicalisationRunLog, SqliteCyclingDeliveryStore,
-    SqliteCyclingMesocycleStore, SqliteDerivationLedger, SqliteDiaryStore, SqliteExerciseHistory,
-    SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
-    SqliteNormalisedCyclingSessionReader, SqliteNormalisedGymSessionReader,
-    SqliteNormalisedWeighInReader, SqlitePelotonClassStore, SqlitePlanStore,
-    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, WithingsMeasurementLandingStore,
-    connect,
+    SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
+    SqliteDerivationLedger, SqliteDiaryStore, SqliteExerciseHistory, SqliteFtpHistory,
+    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteNormalisedCyclingSessionReader,
+    SqliteNormalisedGymSessionReader, SqliteNormalisedWeighInReader, SqlitePelotonClassStore,
+    SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
+    WithingsMeasurementLandingStore, connect,
     peloton::{
         PelotonClassSource, PelotonHoldingRides, PelotonProgrammes, PelotonRideDestination,
         catalogue::ClassCatalogue,
@@ -51,7 +50,7 @@ use crate::{
     config::{SourceAccess, source_access_for},
     holidays::Calendars,
     telemetry::{self, Run, Spanned},
-    wiring::{self, Command, Outcome, SystemClock, Unreported, WiringError},
+    wiring::{self, Command, Outcome, Unreported, WiringError},
 };
 
 /// Why `next` could not be started, or could not answer.
@@ -406,8 +405,6 @@ pub(crate) fn canonical(
     SqliteCanonicalCyclingSessionStore,
     SqliteNormalisedWeighInReader,
     SqliteCanonicalWeighInStore,
-    SqliteCanonicalisationRunLog,
-    SystemClock,
 > {
     CanonicalPorts {
         normalised_gym: SqliteNormalisedGymSessionReader::new(pool.clone()),
@@ -416,8 +413,6 @@ pub(crate) fn canonical(
         canonical_cycling: SqliteCanonicalCyclingSessionStore::new(pool.clone()),
         normalised_weigh_ins: SqliteNormalisedWeighInReader::new(pool.clone()),
         canonical_weigh_ins: SqliteCanonicalWeighInStore::new(pool.clone()),
-        runs: SqliteCanonicalisationRunLog::new(pool.clone()),
-        clock: SystemClock,
     }
 }
 

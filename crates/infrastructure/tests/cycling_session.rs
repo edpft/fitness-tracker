@@ -254,10 +254,6 @@ async fn canonicalise(pool: &SqlitePool) -> Built<Canonicalised> {
     Ok(canonicalise::cycling_sessions(
         &SqliteNormalisedCyclingSessionReader::new(pool.clone()),
         &SqliteCanonicalCyclingSessionStore::new(pool.clone()),
-        &canonicalise::Logged {
-            runs: &infrastructure::SqliteCanonicalisationRunLog::new(pool.clone()),
-            clock: &FixedClock,
-        },
     )
     .await?)
 }
