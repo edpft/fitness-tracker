@@ -450,6 +450,17 @@ fn a_cleared_layer_answers_the_performed_log_with_nothing() {
     });
 }
 
+/// One row of the rebuild log, as the store holds it.
+#[derive(Debug, PartialEq, Eq, sqlx::FromRow)]
+struct LoggedRun {
+    layer: String,
+    started_at: String,
+    finished_at: Option<String>,
+    outcome: Option<String>,
+    read: Option<i64>,
+    written: Option<i64>,
+}
+
 /// Each rebuild is logged: when it started and finished, how it ended, and what
 /// it read and wrote (#609).
 #[test]
@@ -468,16 +479,9 @@ fn a_rebuild_is_logged_with_what_it_read_and_wrote() {
         .await
         .expect("a canonicalising run");
 
-        let logged: Vec<(
-            String,
-            String,
-            Option<String>,
-            Option<String>,
-            Option<i64>,
-            Option<i64>,
-        )> = sqlx::query_as(
+        let logged: Vec<LoggedRun> = sqlx::query_as(
             "SELECT layer, started_at, finished_at, outcome, read, written
-                 FROM canonicalisation_run",
+             FROM canonicalisation_run",
         )
         .fetch_all(&pool)
         .await
@@ -485,14 +489,14 @@ fn a_rebuild_is_logged_with_what_it_read_and_wrote() {
         let epoch = FetchedAt::EPOCH.to_string();
         assert_eq!(
             logged,
-            vec![(
-                "gym".to_owned(),
-                epoch.clone(),
-                Some(epoch),
-                Some("succeeded".to_owned()),
-                i64::try_from(done.read.as_usize()).ok(),
-                i64::try_from(done.written.as_usize()).ok(),
-            )]
+            vec![LoggedRun {
+                layer: "gym".to_owned(),
+                started_at: epoch.clone(),
+                finished_at: Some(epoch),
+                outcome: Some("succeeded".to_owned()),
+                read: i64::try_from(done.read.as_usize()).ok(),
+                written: i64::try_from(done.written.as_usize()).ok(),
+            }]
         );
     });
 }
