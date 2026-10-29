@@ -1,0 +1,4 @@
+# Each run's JUnit report, which `cargo xtask` records as `test` spans (#629).
+# Under `default`, which every other profile inherits from.
+[profile.default.junit]
+path = "junit.xml"

@@ -2630,6 +2630,7 @@ dependencies = [
  "jiff",
  "rand",
  "serde_json",
+ "sha2 0.11.1",
  "sqlx",
  "tempfile",
  "tokio",
@@ -3274,6 +3275,17 @@ name = "writeable"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
+
+[[package]]
+name = "xtask"
+version = "0.0.0"
+dependencies = [
+ "jiff",
+ "quick-xml",
+ "serde",
+ "serde_json",
+ "telemetry",
+]
 
 [[package]]
 name = "yoke"

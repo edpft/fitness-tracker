@@ -171,3 +171,48 @@ fn a_file_that_cannot_be_written_loses_the_spans_and_nothing_else() {
 
     assert!(database.is_dir());
 }
+
+fn timed(name: &'static str, key: Option<&str>, children: Vec<telemetry::Timed>) -> telemetry::Timed {
+    telemetry::Timed {
+        name,
+        key: key.map(str::to_owned),
+        started_at: jiff::Timestamp::constant(1_793_268_000, 0),
+        ended_at: jiff::Timestamp::constant(1_793_269_080, 0),
+        outcome: Some(Outcome::Succeeded),
+        fields: serde_json::Map::new(),
+        children,
+    }
+}
+
+#[test]
+fn a_span_timed_elsewhere_keeps_its_times_and_its_children() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("telemetry.db");
+    let gate = timed("gate", None, vec![timed("check", None, vec![timed("test", None, vec![])])]);
+
+    telemetry::write(&database, Some("abc1234 (2026-10-29)"), &[gate]).unwrap();
+
+    let rows = spans(&database).unwrap();
+    assert_eq!(rows.len(), 3);
+    let named = |name: &str| rows.iter().find(|row| row.name == name).unwrap();
+    assert_eq!(named("gate").parent, None);
+    assert_eq!(named("check").parent, Some(named("gate").id));
+    assert_eq!(named("test").parent, Some(named("check").id));
+    assert_eq!(named("gate").started_at, "2026-10-29T10:00:00Z");
+    assert_eq!(named("gate").ended_at, "2026-10-29T10:18:00Z");
+    assert_eq!(named("test").build.as_deref(), Some("abc1234 (2026-10-29)"));
+}
+
+#[test]
+fn a_keyed_span_written_twice_is_one_row() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("telemetry.db");
+    let run = || timed("gate", Some("ci/run/1"), vec![timed("check", Some("ci/job/2"), vec![])]);
+
+    telemetry::write(&database, None, &[run()]).unwrap();
+    telemetry::write(&database, None, &[run()]).unwrap();
+
+    assert_eq!(spans(&database).unwrap().len(), 2);
+    assert!(telemetry::is_written(&database, "ci/job/2").unwrap());
+    assert!(!telemetry::is_written(&database, "ci/job/3").unwrap());
+}

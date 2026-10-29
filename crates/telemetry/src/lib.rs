@@ -9,6 +9,10 @@
 //! a thread of its own, which opens the file at the first span and not before,
 //! so a command that records nothing creates nothing. Dropping the
 //! [`Recording`] waits for that thread to write what it was given.
+//!
+//! **Or timed by something else.** A check nix-fast-build ran, a test nextest
+//! ran or a job CI ran was timed by that tool, and [`write`] records it with
+//! the times it reports (#629).
 
 use std::{
     path::{Path, PathBuf},
@@ -18,6 +22,7 @@ use std::{
 use jiff::Timestamp;
 use rand::Rng as _;
 use serde_json::{Map, Value};
+use sha2::{Digest as _, Sha256};
 use sqlx::{
     Connection as _, SqliteConnection,
     sqlite::{SqliteConnectOptions, SqliteJournalMode},
@@ -32,7 +37,9 @@ use tracing_subscriber::{Layer, layer::Context, registry::LookupSpan};
 
 /// The span names recorded, and the only ones: anything else — a dependency's
 /// own instrumentation above all — is not this tool's telemetry.
-pub const NAMES: [&str; 7] = ["command", "request", "run", "step", "gate", "check", "test"];
+pub const NAMES: [&str; 8] = [
+    "command", "request", "run", "step", "gate", "check", "test", "job",
+];
 
 /// The field a span's outcome is recorded in, by [`Outcome::as_str`].
 pub const OUTCOME: &str = "outcome";
@@ -94,7 +101,7 @@ pub fn record(database: &Path, build: Option<&str>) -> (Recorder, Recording) {
     let database = database.to_path_buf();
     let writer = std::thread::Builder::new()
         .name("telemetry".into())
-        .spawn(move || write(&database, receiver))
+        .spawn(move || writing(&database, receiver))
         .ok();
     (
         Recorder {
@@ -106,6 +113,90 @@ pub fn record(database: &Path, build: Option<&str>) -> (Recorder, Recording) {
             writer,
         },
     )
+}
+
+/// A span something else timed, with the spans that ran inside it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Timed {
+    /// One of [`NAMES`].
+    pub name: &'static str,
+    /// What identifies it wherever it came from, so that writing it twice
+    /// leaves one row: a CI job's id, say. Without one it is a row each time.
+    pub key: Option<String>,
+    pub started_at: Timestamp,
+    pub ended_at: Timestamp,
+    pub outcome: Option<Outcome>,
+    pub fields: Map<String, Value>,
+    pub children: Vec<Self>,
+}
+
+/// Write `spans`, and the spans inside them, to the `telemetry.db` at
+/// `database`, each stamped with `build`.
+///
+/// # Errors
+///
+/// If the file cannot be opened or a row cannot be written. Unlike a
+/// [`Recorder`]'s, this is said: whoever imports a run wants to know it did
+/// not land.
+pub fn write(database: &Path, build: Option<&str>, spans: &[Timed]) -> Result<(), sqlx::Error> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async {
+        let mut connection = connect(database).await?;
+        for span in spans {
+            written_with(&mut connection, None, build, span).await?;
+        }
+        connection.close().await
+    })
+}
+
+/// Whether a span with `key` is already in the `telemetry.db` at `database`,
+/// so that an import can pass over what it has.
+///
+/// # Errors
+///
+/// If the file cannot be opened or read.
+pub fn is_written(database: &Path, key: &str) -> Result<bool, sqlx::Error> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async {
+        let mut connection = connect(database).await?;
+        let found = sqlx::query("SELECT 1 FROM span WHERE id = ?")
+            .bind(keyed_id(key))
+            .fetch_optional(&mut connection)
+            .await?;
+        connection.close().await?;
+        Ok(found.is_some())
+    })
+}
+
+async fn written_with(
+    connection: &mut SqliteConnection,
+    parent: Option<i64>,
+    build: Option<&str>,
+    span: &Timed,
+) -> Result<(), sqlx::Error> {
+    let id = span.key.as_deref().map_or_else(span_id, keyed_id);
+    insert(
+        connection,
+        &Row {
+            id,
+            parent,
+            name: span.name,
+            build,
+            started_at: span.started_at,
+            ended_at: span.ended_at,
+            outcome: span.outcome,
+            fields: &span.fields,
+        },
+    )
+    .await?;
+    for child in &span.children {
+        Box::pin(written_with(connection, Some(id), build, child)).await?;
+    }
+    Ok(())
 }
 
 /// A span while it is open.
@@ -132,6 +223,14 @@ struct Closed {
 fn span_id() -> i64 {
     let mut bytes = [0_u8; 8];
     rand::rng().fill_bytes(&mut bytes);
+    i64::from_le_bytes(bytes)
+}
+
+/// The same for the same key, in any process and any build.
+fn keyed_id(key: &str) -> i64 {
+    let digest = Sha256::digest(key.as_bytes());
+    let mut bytes = [0_u8; 8];
+    bytes.copy_from_slice(digest.get(..8).unwrap_or_default());
     i64::from_le_bytes(bytes)
 }
 
@@ -246,7 +345,7 @@ impl Visit for Fields<'_> {
 /// The writer thread: open the file at the first span, then write each one.
 /// A file that will not open is given up on, and what arrives after is
 /// dropped.
-fn write(database: &Path, spans: UnboundedReceiver<Closed>) {
+fn writing(database: &Path, spans: UnboundedReceiver<Closed>) {
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -268,7 +367,20 @@ async fn written(database: PathBuf, mut spans: UnboundedReceiver<Closed>) {
             unwritable = connection.is_none();
         }
         if let Some(connection) = connection.as_mut() {
-            let _ = insert(connection, &span).await;
+            let _ = insert(
+                connection,
+                &Row {
+                    id: span.id,
+                    parent: span.parent,
+                    name: span.name,
+                    build: span.build.as_deref(),
+                    started_at: span.started_at,
+                    ended_at: span.ended_at,
+                    outcome: span.outcome,
+                    fields: &span.fields,
+                },
+            )
+            .await;
         }
     }
     if let Some(connection) = connection {
@@ -277,28 +389,46 @@ async fn written(database: PathBuf, mut spans: UnboundedReceiver<Closed>) {
 }
 
 async fn open(database: &Path) -> Option<SqliteConnection> {
+    connect(database).await.ok()
+}
+
+async fn connect(database: &Path) -> Result<SqliteConnection, sqlx::Error> {
     let options = SqliteConnectOptions::new()
         .filename(database)
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
         .busy_timeout(std::time::Duration::from_secs(1));
-    let mut connection = SqliteConnection::connect_with(&options).await.ok()?;
-    sqlx::migrate!().run(&mut connection).await.ok()?;
-    Some(connection)
+    let mut connection = SqliteConnection::connect_with(&options).await?;
+    sqlx::migrate!().run(&mut connection).await?;
+    Ok(connection)
+}
+
+/// One row, however its span was timed.
+struct Row<'a> {
+    id: i64,
+    parent: Option<i64>,
+    name: &'a str,
+    build: Option<&'a str>,
+    started_at: Timestamp,
+    ended_at: Timestamp,
+    outcome: Option<Outcome>,
+    fields: &'a Map<String, Value>,
 }
 
 // Unchecked at compile time, unlike the store's queries: `query!` checks
 // against the one schema `.sqlx` is prepared from, and that is the store's.
 // The suite in `tests/` writes and reads it back.
-async fn insert(connection: &mut SqliteConnection, span: &Closed) -> Result<(), sqlx::Error> {
+//
+// `OR IGNORE` so that a keyed span written twice is one row.
+async fn insert(connection: &mut SqliteConnection, span: &Row<'_>) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO span (id, parent, name, build, started_at, ended_at, outcome, fields)
+        "INSERT OR IGNORE INTO span (id, parent, name, build, started_at, ended_at, outcome, fields)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(span.id)
     .bind(span.parent)
     .bind(span.name)
-    .bind(span.build.as_deref())
+    .bind(span.build)
     .bind(span.started_at.to_string())
     .bind(span.ended_at.to_string())
     .bind(span.outcome.map(Outcome::as_str))
