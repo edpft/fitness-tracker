@@ -12,9 +12,12 @@ publish.workspace = true
 application.workspace = true
 domain.workspace = true
 infrastructure.workspace = true
+telemetry.workspace = true
 
 jiff.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -1404,6 +1404,9 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
         database,
     } = locations(matches).await?;
     let stated_timezone = timezone.as_deref();
+    // Held to the end of the command, so that what it recorded is written
+    // before it exits (#631).
+    let _recording = configurator::telemetry::record(&database);
 
     if let Some(outcome) =
         authored_command(name, sub, &credentials, stated_timezone, &database).await

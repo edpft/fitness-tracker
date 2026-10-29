@@ -124,10 +124,11 @@ impl Store {
         SqliteCanonicalGymSessionStore::new(self.pool.clone())
     }
 
-    /// Rebuilding each canonical layer from the normalised ones, logged.
+    /// Rebuilding each canonical layer from the normalised ones, logged, each
+    /// rebuild a `step` span (#631).
     #[must_use]
     pub fn canonicalising(&self) -> impl Canonicalising + Send + Sync + use<> {
-        crate::next::canonical(&self.pool)
+        crate::telemetry::Traced(crate::next::canonical(&self.pool))
     }
 
     /// The rides performed, as the canonical layer holds them.

@@ -66,6 +66,7 @@
             (craneLib.fileset.commonCargoSources ./crates/application)
             (craneLib.fileset.commonCargoSources ./crates/infrastructure)
             (craneLib.fileset.commonCargoSources ./crates/configurator)
+            (craneLib.fileset.commonCargoSources ./crates/telemetry)
             (craneLib.fileset.commonCargoSources ./crates/web)
             (craneLib.fileset.commonCargoSources ./crates/cli)
             # htmx and its server-sent events extension, which `web` embeds
@@ -74,6 +75,8 @@
             # `sqlx::migrate!` embeds these, and `query!` is verified against
             # the schema they produce.
             ./migrations
+            # `telemetry.db` has its own, which are not the store's (#631).
+            ./crates/telemetry/migrations
             # The landed corpus, which the normalisation suites assert against.
             # `commonCargoSources` takes `.rs` and `Cargo.toml` and nothing
             # else, so a fixture in any other format has to be named here or
@@ -184,6 +187,10 @@
           domain = 0;
           application = 1;
           infrastructure = 2;
+          # Beside the adapters, but any ring above may record spans with it,
+          # and the tooling outside the rings will (#629). It depends on
+          # nothing in the app.
+          telemetry = 2;
           configurator = 3;
           web = 4;
           cli = 4;
@@ -223,6 +230,13 @@
           individualCrateArgs
           // {
             cargoExtraArgs = "-p infrastructure";
+          }
+        );
+
+        telemetry = craneLib.buildPackage (
+          individualCrateArgs
+          // {
+            cargoExtraArgs = "-p telemetry";
           }
         );
 
@@ -435,6 +449,7 @@
             domain
             application
             infrastructure
+            telemetry
             configurator
             web
             cli

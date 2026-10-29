@@ -1,0 +1,24 @@
+[package]
+name = "telemetry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Informational telemetry (#631): closed `tracing` spans, written to a
+# `telemetry.db` of their own. It depends on nothing in the app, so the tooling
+# can record spans the same way (#629).
+[dependencies]
+jiff.workspace = true
+rand.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

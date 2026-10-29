@@ -1396,3 +1396,95 @@ fn a_refused_credential_refuses_both_walks_and_claims_no_success() {
         "and the run log holds no success either: {reported}"
     );
 }
+
+// --- Telemetry --------------------------------------------------------------
+
+/// One recorded span, as `telemetry.db` holds it.
+#[derive(Debug)]
+struct Span {
+    name: String,
+    layer: Option<String>,
+    read: Option<i64>,
+    written: Option<i64>,
+    started_at: String,
+    ended_at: String,
+    outcome: Option<String>,
+}
+
+fn telemetry(database: &Path) -> Result<Vec<Span>, Box<dyn std::error::Error>> {
+    use sqlx::{Connection as _, Row as _};
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async {
+        let options = sqlx::sqlite::SqliteConnectOptions::new().filename(database);
+        let mut connection = sqlx::SqliteConnection::connect_with(&options).await?;
+        let rows = sqlx::query(
+            "SELECT name, json_extract(fields, '$.layer') AS layer,
+                    json_extract(fields, '$.read') AS read,
+                    json_extract(fields, '$.written') AS written,
+                    started_at, ended_at, outcome
+             FROM span",
+        )
+        .fetch_all(&mut connection)
+        .await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(Span {
+                    name: row.try_get("name")?,
+                    layer: row.try_get("layer")?,
+                    read: row.try_get("read")?,
+                    written: row.try_get("written")?,
+                    started_at: row.try_get("started_at")?,
+                    ended_at: row.try_get("ended_at")?,
+                    outcome: row.try_get("outcome")?,
+                })
+            })
+            .collect()
+    })
+}
+
+/// A rebuild leaves one span in the `telemetry.db` beside the store it was
+/// given, with the layer, what it read and wrote, and when (#631).
+#[test]
+fn canonicalising_leaves_one_span_beside_the_store() {
+    let directory = TempDir::new().expect("a temporary directory is available");
+    let database = directory.path().join("store.db");
+
+    let output = fitness(&["canonicalise", "gym"], Some(&database), None).expect("the binary runs");
+
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let spans = telemetry(&directory.path().join("telemetry.db")).expect("telemetry.db reads");
+    assert_eq!(spans.len(), 1, "{spans:?}");
+    let span = &spans[0];
+    assert_eq!(span.name, "step");
+    assert_eq!(span.layer.as_deref(), Some("gym"));
+    assert_eq!((span.read, span.written), (Some(0), Some(0)));
+    assert_eq!(span.outcome.as_deref(), Some("succeeded"));
+    assert!(span.started_at <= span.ended_at, "{span:?}");
+}
+
+/// **Informational only** (#631): a `telemetry.db` that cannot be written to
+/// costs its spans, and the command neither fails nor says anything more.
+#[test]
+fn an_unwritable_telemetry_db_changes_nothing_the_command_does() {
+    let written = TempDir::new().expect("a temporary directory is available");
+    let unwritable = TempDir::new().expect("a temporary directory is available");
+    std::fs::create_dir(unwritable.path().join("telemetry.db")).expect("a directory in its place");
+
+    let run = |directory: &TempDir| {
+        fitness(
+            &["canonicalise", "gym"],
+            Some(&directory.path().join("store.db")),
+            None,
+        )
+        .expect("the binary runs")
+    };
+    let recorded = run(&written);
+    let unrecorded = run(&unwritable);
+
+    assert_eq!(code(&unrecorded), 0, "{}", stderr(&unrecorded));
+    assert_eq!(stdout(&unrecorded), stdout(&recorded));
+    assert_eq!(stderr(&unrecorded), stderr(&recorded));
+}
