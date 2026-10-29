@@ -165,6 +165,26 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for Recorder {
         }
     }
 
+    /// **A span that outlives what started it** names it with
+    /// `follows_from`, since a parent stays open until its last child closes:
+    /// a page load that starts a run would end when the run did (#628). One
+    /// with no parent of its own is recorded as the child of what it follows
+    /// from, which must still be open when it is named.
+    fn on_follows_from(&self, id: &Id, follows: &Id, context: Context<'_, S>) {
+        let Some(cause) = context
+            .span(follows)
+            .and_then(|cause| cause.extensions().get::<Open>().map(|open| open.id))
+        else {
+            return;
+        };
+        if let Some(span) = context.span(id)
+            && let Some(open) = span.extensions_mut().get_mut::<Open>()
+            && open.parent.is_none()
+        {
+            open.parent = Some(cause);
+        }
+    }
+
     fn on_close(&self, id: Id, context: Context<'_, S>) {
         let Some(span) = context.span(&id) else {
             return;

@@ -50,7 +50,7 @@ use crate::{
     access, catalogue,
     config::{SourceAccess, source_access_for},
     holidays::Calendars,
-    telemetry::{self, Frontend, Spanned},
+    telemetry::{self, Run, Spanned},
     wiring::{self, Command, Outcome, SystemClock, Unreported, WiringError},
 };
 
@@ -86,10 +86,11 @@ pub async fn run(
     credentials: &infrastructure::Credentials,
     now: DayPart,
     skip: Option<&str>,
-    frontend: Frontend,
+    run: Run,
     progress: &(impl Progress + Sync),
 ) -> Result<Report, NextFailure> {
-    let spanned = Spanned::new(progress, telemetry::run(frontend, "everything"));
+    let if_going = run.if_going();
+    let spanned = Spanned::new(progress, run.span);
     let answered = over(
         database,
         zone,
@@ -97,7 +98,7 @@ pub async fn run(
         Asked::Next {
             now,
             skip,
-            if_going: frontend.if_going(),
+            if_going,
         },
         &spanned,
     )
@@ -123,11 +124,10 @@ pub async fn collect(
     credentials: &infrastructure::Credentials,
     today: Date,
     scope: &Scope,
-    frontend: Frontend,
+    run: Run,
     progress: &(impl Progress + Sync),
 ) -> Result<Vec<Done>, NextFailure> {
-    let covered = telemetry::covered(scope.parts());
-    let spanned = Spanned::new(progress, telemetry::run(frontend, &covered));
+    let spanned = Spanned::new(progress, run.span);
     let answered = over(
         database,
         zone,

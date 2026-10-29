@@ -121,6 +121,31 @@ fn a_step_is_the_child_of_the_run_it_was_in() {
     assert_eq!(step.outcome, None);
 }
 
+/// **A run a page load started is that load's child, and the load ends when
+/// it is served** (#628): the run follows from the load rather than sitting
+/// inside it, which would hold the load open until the run ended.
+#[test]
+fn a_span_following_from_another_is_its_child_without_outliving_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("telemetry.db");
+
+    recorded(&database, None, || {
+        let request = tracing::info_span!("request");
+        let run = tracing::info_span!(parent: None, "run");
+        run.follows_from(&request);
+        drop(request);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        drop(run);
+    });
+
+    let rows = spans(&database).unwrap();
+    let request = rows.iter().find(|row| row.name == "request").unwrap();
+    let run = rows.iter().find(|row| row.name == "run").unwrap();
+    assert_eq!(run.parent, Some(request.id));
+    let ended = |row: &Row| row.ended_at.parse::<jiff::Timestamp>().unwrap();
+    assert!(ended(request) < ended(run));
+}
+
 #[test]
 fn nothing_recorded_creates_no_file() {
     let directory = tempfile::tempdir().unwrap();

@@ -26,8 +26,9 @@ use std::{collections::HashMap, convert::Infallible, net::SocketAddr, path::Path
 
 use axum::{
     Form, Router,
-    extract::{Query, State},
+    extract::{Query, Request, State},
     http::{HeaderMap, header},
+    middleware::{self, Next},
     response::{
         IntoResponse, Redirect, Response,
         sse::{Event, KeepAlive, Sse},
@@ -35,8 +36,10 @@ use axum::{
     routing::get,
 };
 use clap::{Arg, ArgMatches, Command, value_parser};
+use configurator::telemetry::Served;
 use maud::{Markup, PreEscaped};
 use tokio_stream::{Stream, StreamExt as _, wrappers::WatchStream};
+use tracing::Instrument as _;
 
 use run::{Asked, Runs, Setting};
 
@@ -117,13 +120,16 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
     let credentials =
         configurator::paths::credentials(&configurator::paths::SystemEnvironment).ok();
 
+    // Held until the server stops, when what it was given is written.
+    let _recording = configurator::telemetry::record(&database);
     let runs = Arc::new(Runs::new(Setting {
         database,
         zone,
         credentials,
     }));
-    let app = Router::new()
-        .route("/", get(index))
+    // **Only the chart pages are recorded** (#628): each is a page drawn from
+    // the store, and how long that takes is what is in question.
+    let charts = Router::new()
         .route("/heart-rate", get(heart_rate))
         .route(ftp::PATH, get(ftp_tests))
         .route("/body-weight", get(body_weight))
@@ -133,6 +139,10 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/resting-heart-rate", get(resting_heart_rate))
         .route("/sleep", get(sleep_page))
         .route("/estimated-1rm", get(estimated_one_rep_max))
+        .route_layer(middleware::from_fn(recorded));
+    let app = Router::new()
+        .route("/", get(index))
+        .merge(charts)
         .route("/equipment", get(equipment_page).post(equipment_post))
         .route("/fills", get(fills_page).post(fills_post))
         .route("/workouts", get(workouts_page).post(workouts_post))
@@ -152,6 +162,17 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
     axum::serve(listener, app)
         .await
         .map_err(|error| error.to_string())
+}
+
+/// Each chart page load as a `request` span (#628), whatever it was served.
+async fn recorded(request: Request, next: Next) -> Response {
+    let span = configurator::telemetry::request(
+        request.uri().path(),
+        request.headers().contains_key("hx-request"),
+    );
+    let response = next.run(request).instrument(span.clone()).await;
+    configurator::telemetry::request_ended(&span, response.status().is_success());
+    response
 }
 
 async fn index(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
@@ -203,7 +224,11 @@ async fn drawn(
     run: &run::View,
     read: impl Future<Output = Markup>,
 ) -> Markup {
+    if let Some(over) = over {
+        configurator::telemetry::ranged(range::name(over));
+    }
     let Ok(scope) = collects else {
+        configurator::telemetry::served(Served::Drawn);
         return read.await;
     };
     let address = over.map_or_else(
@@ -217,6 +242,7 @@ async fn drawn(
     if runs.collecting(scope) {
         Box::pin(meanwhile(runs, here, &address, run)).await
     } else {
+        configurator::telemetry::served(Served::Drawn);
         keep(runs, address, &drawn);
         drawn
     }
@@ -237,8 +263,14 @@ async fn meanwhile(runs: &Runs, here: &str, address: &str, run: &run::View) -> M
         Err(_) => None,
     };
     kept.map_or_else(
-        || page::collecting(here, run),
-        |kept| page::kept(&PreEscaped(kept)),
+        || {
+            configurator::telemetry::served(Served::Placeholder);
+            page::collecting(here, run)
+        },
+        |kept| {
+            configurator::telemetry::served(Served::Kept);
+            page::kept(&PreEscaped(kept))
+        },
     )
 }
 
