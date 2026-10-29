@@ -17,7 +17,8 @@ pub fn named(over: Option<&str>) -> Over {
         .unwrap_or(Over::Macrocycle)
 }
 
-const fn name(over: Over) -> &'static str {
+/// What `?over=` calls `over`.
+pub const fn name(over: Over) -> &'static str {
     match over {
         Over::Mesocycle => "mesocycle",
         Over::Macrocycle => "macrocycle",

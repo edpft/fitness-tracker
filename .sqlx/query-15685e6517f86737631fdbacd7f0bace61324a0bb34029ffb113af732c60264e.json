@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT drawing AS \"drawing!: String\"\n            FROM kept_drawing\n            WHERE address = ?1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "drawing!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "kept_drawing",
+            "name": "drawing"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "15685e6517f86737631fdbacd7f0bace61324a0bb34029ffb113af732c60264e"
+}

@@ -94,8 +94,8 @@ pub fn following(run: &View) -> Markup {
     }
 }
 
-/// A page whose data a run is collecting, where this server has not drawn it
-/// since it started (#467): the step the run is on, and the page once no run
+/// A page whose data a run is collecting, where it has never been drawn on
+/// this store (#467, #605): the step the run is on, and the page once no run
 /// is collecting what it reads.
 ///
 /// The operator, 2026-10-23: *"if we're in the middle of re fetching,

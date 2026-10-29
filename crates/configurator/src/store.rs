@@ -21,7 +21,7 @@ use infrastructure::{
     SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
     SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteDiaryStore,
     SqliteEquipmentStore, SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqliteNormalisedCyclingSessionReader,
+    SqliteGymMesocycleStore, SqliteKeptDrawings, SqliteNormalisedCyclingSessionReader,
     SqliteNormalisedGymSessionReader, SqliteNormalisedWeighInReader, SqliteOperatorSettingsStore,
     SqlitePlanStore, SqlitePool, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
     connect,
@@ -200,6 +200,30 @@ impl Store {
     pub async fn state_timezone(&self, at: jiff::Timestamp, zone: &str) -> Result<(), StoreError> {
         SqliteOperatorSettingsStore::new(self.pool.clone())
             .author(at, zone)
+            .await
+    }
+
+    /// Keep `drawing` as the page at `address`, so it can be shown at once
+    /// the next time that page is opened, by this server or after a restart
+    /// (#605).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be written.
+    pub async fn keep_drawing(&self, address: &str, drawing: &str) -> Result<(), StoreError> {
+        SqliteKeptDrawings::new(self.pool.clone())
+            .keep(address, drawing)
+            .await
+    }
+
+    /// The page at `address` as it was last kept, if it has been.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub async fn kept_drawing(&self, address: &str) -> Result<Option<String>, StoreError> {
+        SqliteKeptDrawings::new(self.pool.clone())
+            .kept(address)
             .await
     }
 
