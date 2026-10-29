@@ -354,7 +354,7 @@ mod store {
             .await?;
             let canonical = SqliteCanonicalWeighInStore::new(pool.clone());
             let normalised = SqliteNormalisedWeighInReader::new(pool.clone());
-            canonicalise::weigh_ins(&normalised, &canonical).await?;
+            canonicalise::weigh_ins(&normalised, &canonical, &canonicalise::Logged { runs: &infrastructure::SqliteCanonicalisationRunLog::new(pool.clone()), clock: &EpochClock }).await?;
 
             // **The canonical rows name the ones this deletes**, so a
             // re-derivation that did not clear them first would fail here.
@@ -395,7 +395,7 @@ mod store {
                 "every copy says when its workbook was last saved, by the workbook's own dcterms:modified"
             );
 
-            let done = canonicalise::weigh_ins(&normalised, &canonical).await?;
+            let done = canonicalise::weigh_ins(&normalised, &canonical, &canonicalise::Logged { runs: &infrastructure::SqliteCanonicalisationRunLog::new(pool.clone()), clock: &EpochClock }).await?;
             assert_eq!(done.read.as_usize(), 6);
             assert!(done.left_out.is_empty());
             let history = canonical.weigh_ins().await?;

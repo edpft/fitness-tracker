@@ -3327,6 +3327,60 @@ impl CanonicalLayer {
     }
 }
 
+/// The store's identifier for one rebuild of a canonical layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CanonicalisationRunId(i64);
+
+impl From<i64> for CanonicalisationRunId {
+    fn from(id: i64) -> Self {
+        Self(id)
+    }
+}
+
+impl CanonicalisationRunId {
+    pub const fn as_i64(self) -> i64 {
+        self.0
+    }
+}
+
+/// How one rebuild of a canonical layer ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanonicalisationOutcome {
+    /// What it read from the normalised layer and wrote to the canonical one:
+    /// sessions, or weigh-ins.
+    Succeeded {
+        finished_at: FetchedAt,
+        read: usize,
+        written: usize,
+    },
+    /// Only ever the store, so there is no reason to record beside it.
+    Failed { finished_at: FetchedAt },
+}
+
+/// What happened on each rebuild of a canonical layer (#609).
+///
+/// Extraction and normalisation keep one, and until this the canonical layers'
+/// timings were printed and lost.
+pub trait CanonicalisationRunLog {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn begin(
+        &self,
+        layer: CanonicalLayer,
+        at: FetchedAt,
+    ) -> impl Future<Output = Result<CanonicalisationRunId, StoreError>> + Send;
+
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn finish(
+        &self,
+        run: CanonicalisationRunId,
+        outcome: CanonicalisationOutcome,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+}
+
 /// What each layer standing in the store was derived from, and by which build.
 pub trait DerivationLedger {
     /// The build that last derived every layer.

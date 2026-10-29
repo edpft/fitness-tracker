@@ -7,12 +7,12 @@
 //! where `extract` and `normalise` both have one. What it takes instead is the
 //! entity: `gym` or `cycling`.
 //!
-//! It contacts nothing and holds no run of its own. The inputs are already in
-//! our terms, so there is nothing to refuse and nothing to resume.
+//! It contacts nothing, and there is nothing to refuse or resume: the inputs are
+//! already in our terms. Each rebuild is logged, as `next`'s are (#609).
 
 use std::path::Path;
 
-use application::canonicalise;
+use application::next::Canonicalising;
 use configurator::store::Store;
 use domain::schedule::Discipline;
 
@@ -21,11 +21,8 @@ use crate::{Failure, output};
 /// Rebuild the canonical gym layer and report what it now holds.
 pub async fn gym(database: &Path) -> Result<(), Failure> {
     let store = Store::open(database).await?;
-    let normalised = store.normalised_gym();
-    let canonical = store.canonical_gym();
-
     output::canonicalising_started(Discipline::Gym);
-    let done = canonicalise::gym_sessions(&normalised, &canonical).await?;
+    let done = store.canonicalising().gym().await?;
     output::canonicalised(done.read, done.written);
     Ok(())
 }
@@ -34,11 +31,8 @@ pub async fn gym(database: &Path) -> Result<(), Failure> {
 /// weighing left out (#409).
 pub async fn body_weight(database: &Path) -> Result<(), Failure> {
     let store = Store::open(database).await?;
-    let normalised = store.normalised_weigh_ins();
-    let canonical = store.canonical_weigh_ins();
-
     output::canonicalising_weigh_ins_started();
-    let done = canonicalise::weigh_ins(&normalised, &canonical).await?;
+    let done = store.canonicalising().weigh_ins().await?;
     output::weigh_ins_canonicalised(&done);
     Ok(())
 }
@@ -46,11 +40,8 @@ pub async fn body_weight(database: &Path) -> Result<(), Failure> {
 /// Rebuild the canonical cycling layer and report what it now holds.
 pub async fn cycling(database: &Path) -> Result<(), Failure> {
     let store = Store::open(database).await?;
-    let normalised = store.normalised_cycling();
-    let canonical = store.canonical_cycling();
-
     output::canonicalising_started(Discipline::Cycling);
-    let done = canonicalise::cycling_sessions(&normalised, &canonical).await?;
+    let done = store.canonicalising().cycling().await?;
     output::canonicalised(done.read, done.written);
     Ok(())
 }

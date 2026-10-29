@@ -201,9 +201,16 @@ fn a_visit_two_sources_recorded_is_one_canonical_session() {
         let reader = SqliteNormalisedGymSessionReader::new(pool.clone());
         let canonical = SqliteCanonicalGymSessionStore::new(pool.clone());
 
-        let done = canonicalise::gym_sessions(&reader, &canonical)
-            .await
-            .expect("a canonicalising run");
+        let done = canonicalise::gym_sessions(
+            &reader,
+            &canonical,
+            &canonicalise::Logged {
+                runs: &infrastructure::SqliteCanonicalisationRunLog::new(pool.clone()),
+                clock: &corpus::FixedClock,
+            },
+        )
+        .await
+        .expect("a canonicalising run");
         assert!(
             done.written.as_usize() < done.read.as_usize(),
             "accounts merged and the sessionless recording wrote nothing: \
@@ -255,12 +262,26 @@ fn the_layer_is_replaced_not_appended() {
         let reader = SqliteNormalisedGymSessionReader::new(pool.clone());
         let canonical = SqliteCanonicalGymSessionStore::new(pool.clone());
 
-        let first = canonicalise::gym_sessions(&reader, &canonical)
-            .await
-            .expect("a first run");
-        let again = canonicalise::gym_sessions(&reader, &canonical)
-            .await
-            .expect("a second run");
+        let first = canonicalise::gym_sessions(
+            &reader,
+            &canonical,
+            &canonicalise::Logged {
+                runs: &infrastructure::SqliteCanonicalisationRunLog::new(pool.clone()),
+                clock: &corpus::FixedClock,
+            },
+        )
+        .await
+        .expect("a first run");
+        let again = canonicalise::gym_sessions(
+            &reader,
+            &canonical,
+            &canonicalise::Logged {
+                runs: &infrastructure::SqliteCanonicalisationRunLog::new(pool.clone()),
+                clock: &corpus::FixedClock,
+            },
+        )
+        .await
+        .expect("a second run");
         assert_eq!(first, again, "the same inputs give the same layer");
         assert_eq!(
             canonical.count().await.expect("a count"),
@@ -289,9 +310,16 @@ fn re_deriving_a_stream_leaves_the_layer_rebuildable() {
         let reader = SqliteNormalisedGymSessionReader::new(pool.clone());
         let canonical = SqliteCanonicalGymSessionStore::new(pool.clone());
 
-        let first = canonicalise::gym_sessions(&reader, &canonical)
-            .await
-            .expect("a first run");
+        let first = canonicalise::gym_sessions(
+            &reader,
+            &canonical,
+            &canonicalise::Logged {
+                runs: &infrastructure::SqliteCanonicalisationRunLog::new(pool.clone()),
+                clock: &corpus::FixedClock,
+            },
+        )
+        .await
+        .expect("a first run");
         assert!(first.written.as_usize() > 0, "the layer was built");
 
         // The same derivation again, over the same raw: the normalised rows are
@@ -318,9 +346,16 @@ fn re_deriving_a_stream_leaves_the_layer_rebuildable() {
             "the stale layer is gone rather than left pointing at deleted rows"
         );
 
-        let again = canonicalise::gym_sessions(&reader, &canonical)
-            .await
-            .expect("a second canonicalising");
+        let again = canonicalise::gym_sessions(
+            &reader,
+            &canonical,
+            &canonicalise::Logged {
+                runs: &infrastructure::SqliteCanonicalisationRunLog::new(pool.clone()),
+                clock: &corpus::FixedClock,
+            },
+        )
+        .await
+        .expect("a second canonicalising");
         assert_eq!(again, first, "and it rebuilds to the same layer");
     });
 }
@@ -347,9 +382,16 @@ fn a_cleared_layer_answers_the_performed_log_with_nothing() {
             jiff::civil::Date::constant(2030, 1, 1),
         );
 
-        canonicalise::gym_sessions(&reader, &canonical)
-            .await
-            .expect("a first run");
+        canonicalise::gym_sessions(
+            &reader,
+            &canonical,
+            &canonicalise::Logged {
+                runs: &infrastructure::SqliteCanonicalisationRunLog::new(pool.clone()),
+                clock: &corpus::FixedClock,
+            },
+        )
+        .await
+        .expect("a first run");
         let performed = canonical
             .performed_between(from, to)
             .await
@@ -386,9 +428,16 @@ fn a_cleared_layer_answers_the_performed_log_with_nothing() {
              invisible — not reported as stale, but as never having happened",
         );
 
-        canonicalise::gym_sessions(&reader, &canonical)
-            .await
-            .expect("a rebuild");
+        canonicalise::gym_sessions(
+            &reader,
+            &canonical,
+            &canonicalise::Logged {
+                runs: &infrastructure::SqliteCanonicalisationRunLog::new(pool.clone()),
+                clock: &corpus::FixedClock,
+            },
+        )
+        .await
+        .expect("a rebuild");
         assert_eq!(
             canonical
                 .performed_between(from, to)
@@ -397,6 +446,53 @@ fn a_cleared_layer_answers_the_performed_log_with_nothing() {
                 .len(),
             performed.len(),
             "the rebuild puts them back",
+        );
+    });
+}
+
+/// Each rebuild is logged: when it started and finished, how it ended, and what
+/// it read and wrote (#609).
+#[test]
+fn a_rebuild_is_logged_with_what_it_read_and_wrote() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = derived().await.expect("a derived store");
+        let done = canonicalise::gym_sessions(
+            &SqliteNormalisedGymSessionReader::new(pool.clone()),
+            &SqliteCanonicalGymSessionStore::new(pool.clone()),
+            &canonicalise::Logged {
+                runs: &infrastructure::SqliteCanonicalisationRunLog::new(pool.clone()),
+                clock: &corpus::FixedClock,
+            },
+        )
+        .await
+        .expect("a canonicalising run");
+
+        let logged: Vec<(
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+        )> = sqlx::query_as(
+            "SELECT layer, started_at, finished_at, outcome, read, written
+                 FROM canonicalisation_run",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("the run log");
+        let epoch = FetchedAt::EPOCH.to_string();
+        assert_eq!(
+            logged,
+            vec![(
+                "gym".to_owned(),
+                epoch.clone(),
+                Some(epoch),
+                Some("succeeded".to_owned()),
+                i64::try_from(done.read.as_usize()).ok(),
+                i64::try_from(done.written.as_usize()).ok(),
+            )]
         );
     });
 }

@@ -7,11 +7,10 @@
 
 use std::path::Path;
 
+use application::next::Canonicalising;
 use application::{
-    CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalWeighInStore,
-    CyclingDeliveryStore, DiaryAuthor, DiaryStore, EquipmentStore, ExerciseHistory,
-    FillChangeStore, FtpHistory, GenerationParameterStore, MesocycleStore,
-    NormalisedCyclingSessionReader, NormalisedGymSessionReader, NormalisedWeighInReader,
+    CanonicalGymSessionStore, CyclingDeliveryStore, DiaryAuthor, DiaryStore, EquipmentStore,
+    ExerciseHistory, FillChangeStore, FtpHistory, GenerationParameterStore, MesocycleStore,
     PerformedGymSessions, PerformedSessionLog, PlanStore, PrescribedWorkoutStore,
     PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore, RiddenSessionLog,
     RiddenVenues, StoreError, WeighInHistory, WorkoutStore,
@@ -21,10 +20,8 @@ use infrastructure::{
     SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
     SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteDiaryStore,
     SqliteEquipmentStore, SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqliteKeptDrawings, SqliteNormalisedCyclingSessionReader,
-    SqliteNormalisedGymSessionReader, SqliteNormalisedWeighInReader, SqliteOperatorSettingsStore,
-    SqlitePlanStore, SqlitePool, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
-    connect,
+    SqliteGymMesocycleStore, SqliteKeptDrawings, SqliteOperatorSettingsStore, SqlitePlanStore,
+    SqlitePool, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, connect,
 };
 
 /// The operator's store, opened.
@@ -127,22 +124,10 @@ impl Store {
         SqliteCanonicalGymSessionStore::new(self.pool.clone())
     }
 
-    /// Every gym session each source recorded, in our terms.
+    /// Rebuilding each canonical layer from the normalised ones, logged.
     #[must_use]
-    pub fn normalised_gym(&self) -> impl NormalisedGymSessionReader + Send + Sync + use<> {
-        SqliteNormalisedGymSessionReader::new(self.pool.clone())
-    }
-
-    /// Every cycling session, however many sources recorded it.
-    #[must_use]
-    pub fn canonical_cycling(&self) -> impl CanonicalCyclingSessionStore + Send + Sync + use<> {
-        SqliteCanonicalCyclingSessionStore::new(self.pool.clone())
-    }
-
-    /// Every cycling session each source recorded, in our terms.
-    #[must_use]
-    pub fn normalised_cycling(&self) -> impl NormalisedCyclingSessionReader + Send + Sync + use<> {
-        SqliteNormalisedCyclingSessionReader::new(self.pool.clone())
+    pub fn canonicalising(&self) -> impl Canonicalising + Send + Sync + use<> {
+        crate::next::canonical(&self.pool)
     }
 
     /// The rides performed, as the canonical layer holds them.
@@ -167,18 +152,6 @@ impl Store {
     #[must_use]
     pub fn weigh_ins(&self) -> impl WeighInHistory + Send + Sync + use<> {
         SqliteCanonicalWeighInStore::new(self.pool.clone())
-    }
-
-    /// Every weigh-in, however many sources recorded it.
-    #[must_use]
-    pub fn canonical_weigh_ins(&self) -> impl CanonicalWeighInStore + Send + Sync + use<> {
-        SqliteCanonicalWeighInStore::new(self.pool.clone())
-    }
-
-    /// Every weigh-in each source recorded, in our terms.
-    #[must_use]
-    pub fn normalised_weigh_ins(&self) -> impl NormalisedWeighInReader + Send + Sync + use<> {
-        SqliteNormalisedWeighInReader::new(self.pool.clone())
     }
 
     /// The zone the operator stated, if they stated one.
