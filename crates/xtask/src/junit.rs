@@ -43,7 +43,11 @@ fn test(case: &BytesStart<'_>) -> Option<Timed> {
         case.try_get_attribute(name)
             .ok()
             .flatten()
-            .and_then(|attribute| attribute.normalized_value(quick_xml::XmlVersion::Explicit1_0).ok())
+            .and_then(|attribute| {
+                attribute
+                    .normalized_value(quick_xml::XmlVersion::Explicit1_0)
+                    .ok()
+            })
             .map(std::borrow::Cow::into_owned)
     };
     let started_at: Timestamp = attribute("timestamp")?.parse().ok()?;

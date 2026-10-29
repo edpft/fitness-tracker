@@ -151,19 +151,30 @@ fn span(run: &Map<String, Value>, job: &Job, results: impl Fn(&str) -> Results) 
     let mut fields = run.clone();
     fields.insert("job_id".into(), job.id.into());
     let step = |name: &str| job.steps.iter().find(|step| step.name == name);
-    let ran = |step: &Step| step.started_at.is_some() && step.conclusion.as_deref() != Some("skipped");
+    let ran =
+        |step: &Step| step.started_at.is_some() && step.conclusion.as_deref() != Some("skipped");
     let name = job.name.strip_prefix(REUSED).unwrap_or(&job.name);
 
     if let Some(skip) = step(SKIP_CHECK).filter(|skip| ran(skip)) {
         fields.insert("check".into(), name.into());
         fields.insert("cache_status".into(), "unchanged".into());
-        return timed("check", job, skip, Some(Outcome::Skipped), fields, Vec::new());
+        return timed(
+            "check",
+            job,
+            skip,
+            Some(Outcome::Skipped),
+            fields,
+            Vec::new(),
+        );
     }
     let check = step(RUN_CHECK)
         .map(|step| (name, step))
         .or_else(|| step(RUN_AUDIT).map(|step| (AUDIT, step)));
     if let Some((check, step)) = check.filter(|(_, step)| ran(step)) {
-        let Results { cache_status, tests } = results(check);
+        let Results {
+            cache_status,
+            tests,
+        } = results(check);
         fields.insert("check".into(), check.into());
         if let Some(cache_status) = cache_status {
             fields.insert("cache_status".into(), cache_status.into());
@@ -241,7 +252,10 @@ pub fn uploaded(directory: &Path, check: &str) -> Results {
     let tests = std::fs::read_to_string(here.join(super::REPORT))
         .map(|report| super::junit::tests(&report))
         .unwrap_or_default();
-    Results { cache_status, tests }
+    Results {
+        cache_status,
+        tests,
+    }
 }
 
 /// How many runs an import recorded, and how many it could not read.
@@ -252,7 +266,14 @@ pub struct Imported {
 
 /// Import every completed run not already in `database`.
 pub fn import(database: &Path) -> Result<Imported, String> {
-    let repository = gh(&["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"])?;
+    let repository = gh(&[
+        "repo",
+        "view",
+        "--json",
+        "nameWithOwner",
+        "--jq",
+        ".nameWithOwner",
+    ])?;
     let repository = repository.trim();
     let runs = listed(repository)?;
     let mut pending = Vec::new();
@@ -370,7 +391,10 @@ fn downloaded(repository: &str, run: &Run) -> Option<PathBuf> {
     }
     let names = gh(&[
         "api",
-        &format!("repos/{repository}/actions/runs/{}/artifacts?per_page=100", run.id),
+        &format!(
+            "repos/{repository}/actions/runs/{}/artifacts?per_page=100",
+            run.id
+        ),
         "--jq",
         r#".artifacts[] | select(.expired | not) | .name | select(startswith("check-"))"#,
     ])
@@ -522,7 +546,12 @@ mod tests {
 
     #[test]
     fn any_other_job_is_a_job_timed_as_the_job() {
-        let gate = spans(&run(GATE), &[job("publish", &serde_json::json!([]))], nothing).remove(0);
+        let gate = spans(
+            &run(GATE),
+            &[job("publish", &serde_json::json!([]))],
+            nothing,
+        )
+        .remove(0);
 
         let job = &gate.children[0];
         assert_eq!(job.name, "job");
@@ -536,7 +565,11 @@ mod tests {
             {"name": RUN_AUDIT, "conclusion": "success", "started_at": "2026-10-29T00:01:00Z", "completed_at": "2026-10-29T00:03:00Z"},
         ]);
 
-        let spans = spans(&run("Security audit"), &[job("audit / Audit dependencies", &steps)], nothing);
+        let spans = spans(
+            &run("Security audit"),
+            &[job("audit / Audit dependencies", &steps)],
+            nothing,
+        );
 
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].name, "check");

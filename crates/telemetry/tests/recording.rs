@@ -172,7 +172,11 @@ fn a_file_that_cannot_be_written_loses_the_spans_and_nothing_else() {
     assert!(database.is_dir());
 }
 
-fn timed(name: &'static str, key: Option<&str>, children: Vec<telemetry::Timed>) -> telemetry::Timed {
+fn timed(
+    name: &'static str,
+    key: Option<&str>,
+    children: Vec<telemetry::Timed>,
+) -> telemetry::Timed {
     telemetry::Timed {
         name,
         key: key.map(str::to_owned),
@@ -188,7 +192,11 @@ fn timed(name: &'static str, key: Option<&str>, children: Vec<telemetry::Timed>)
 fn a_span_timed_elsewhere_keeps_its_times_and_its_children() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("telemetry.db");
-    let gate = timed("gate", None, vec![timed("check", None, vec![timed("test", None, vec![])])]);
+    let gate = timed(
+        "gate",
+        None,
+        vec![timed("check", None, vec![timed("test", None, vec![])])],
+    );
 
     telemetry::write(&database, Some("abc1234 (2026-10-29)"), &[gate]).unwrap();
 
@@ -207,7 +215,13 @@ fn a_span_timed_elsewhere_keeps_its_times_and_its_children() {
 fn a_keyed_span_written_twice_is_one_row() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("telemetry.db");
-    let run = || timed("gate", Some("ci/run/1"), vec![timed("check", Some("ci/job/2"), vec![])]);
+    let run = || {
+        timed(
+            "gate",
+            Some("ci/run/1"),
+            vec![timed("check", Some("ci/job/2"), vec![])],
+        )
+    };
 
     telemetry::write(&database, None, &[run()]).unwrap();
     telemetry::write(&database, None, &[run()]).unwrap();

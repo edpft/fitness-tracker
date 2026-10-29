@@ -50,7 +50,12 @@ pub fn ended(line: &str, now: Timestamp, tests: impl Fn(&Path) -> Vec<Timed>) ->
                 Outcome::Failed
             };
             // Only a check nothing had already built is built.
-            (now.checked_sub(took).ok()?, outcome, Some("notBuilt".to_owned()), children)
+            (
+                now.checked_sub(took).ok()?,
+                outcome,
+                Some("notBuilt".to_owned()),
+                children,
+            )
         }
         _ => return None,
     };
@@ -100,7 +105,10 @@ mod tests {
     fn a_failed_build_is_a_failed_check() {
         let line = r#"{"type": "BUILD", "attr": "x", "success": false, "duration": 1.0, "error": "build exited with 1", "outputs": {"out": "/nix/store/x"}}"#;
 
-        assert_eq!(ended(line, now(), none).unwrap().outcome, Some(Outcome::Failed));
+        assert_eq!(
+            ended(line, now(), none).unwrap().outcome,
+            Some(Outcome::Failed)
+        );
     }
 
     #[test]
@@ -125,7 +133,10 @@ mod tests {
     fn a_check_that_does_not_evaluate_is_a_failed_check() {
         let line = r#"{"type": "EVAL", "attr": "lint", "success": false, "duration": 0.0, "error": "error: undefined variable"}"#;
 
-        assert_eq!(ended(line, now(), none).unwrap().outcome, Some(Outcome::Failed));
+        assert_eq!(
+            ended(line, now(), none).unwrap().outcome,
+            Some(Outcome::Failed)
+        );
     }
 
     #[test]

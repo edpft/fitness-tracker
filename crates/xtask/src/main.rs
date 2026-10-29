@@ -104,7 +104,9 @@ fn imported() -> bool {
         Ok(import::Imported { runs, passed_over }) => {
             eprintln!("xtask: imported {runs} CI runs");
             if passed_over > 0 {
-                eprintln!("xtask: {passed_over} could not be read, and the next import tries them again");
+                eprintln!(
+                    "xtask: {passed_over} could not be read, and the next import tries them again"
+                );
             }
             true
         }
@@ -148,7 +150,12 @@ fn run_checks(only: Option<&str>) -> (Vec<Timed>, std::io::Result<ExitStatus>) {
     };
     let mut command = Command::new("nix-fast-build");
     command
-        .args(["--no-nom", "--skip-cached", "--stream-json-lines", "--flake"])
+        .args([
+            "--no-nom",
+            "--skip-cached",
+            "--stream-json-lines",
+            "--flake",
+        ])
         .arg(format!(".#checks.{system}"))
         .current_dir(ROOT)
         .stdin(Stdio::null())
@@ -212,7 +219,8 @@ fn profile(arguments: &[OsString]) -> String {
 }
 
 fn target() -> PathBuf {
-    std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| Path::new(ROOT).join("target"), PathBuf::from)
+    std::env::var_os("CARGO_TARGET_DIR")
+        .map_or_else(|| Path::new(ROOT).join("target"), PathBuf::from)
 }
 
 fn outcome(status: &std::io::Result<ExitStatus>) -> Outcome {
