@@ -1,0 +1,20 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Tooling, not the app (#629): the front door to the gate, which runs the flake
+# checks and the tests and records them as spans in `telemetry.db`. Outside the
+# rings, and the `architecture` check holds it to `telemetry` alone.
+[dependencies]
+telemetry.workspace = true
+
+jiff.workspace = true
+quick-xml.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -69,6 +69,7 @@
             (craneLib.fileset.commonCargoSources ./crates/telemetry)
             (craneLib.fileset.commonCargoSources ./crates/web)
             (craneLib.fileset.commonCargoSources ./crates/cli)
+            (craneLib.fileset.commonCargoSources ./crates/xtask)
             # htmx and its server-sent events extension, which `web` embeds
             # with `include_str!` and serves (§ 20).
             ./crates/web/assets
@@ -88,6 +89,8 @@
             ./.sqlx
             # Tool config files — add as you create them:
             ./clippy.toml
+            # nextest's JUnit report, which the `test` check keeps (#629).
+            ./.config/nextest.toml
             # ./rustfmt.toml
             ./deny.toml
             ./taplo.toml
@@ -203,6 +206,12 @@
         crateOnlyDependent = {
           infrastructure = "configurator";
         };
+
+        # Tooling, not the app, so in no ring (#629). A tooling crate may depend
+        # on what is named here and on nothing else in the app, and nothing in
+        # the app may depend on a tooling crate.
+        toolingCrates = [ "xtask" ];
+        toolingMayUse = [ "telemetry" ];
 
         # Add one of these per workspace member you want to build.
         domain = craneLib.buildPackage (
@@ -487,6 +496,13 @@
               # hash of the vendored-dependency derivation and rebuild all ~300
               # crates. Only the tests run code that needs this.
               SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+
+              # nextest's report, so `cargo xtask` can record each test (#629).
+              # A run that fails keeps nothing: nix keeps no output of a failed
+              # build, so only a passing suite's tests are recorded from here.
+              postCheck = ''
+                cp "''${CARGO_TARGET_DIR:-target}/nextest/default/junit.xml" "$out/junit.xml"
+              '';
             }
           );
 
@@ -561,9 +577,21 @@
                   )
                 } > only
 
+                printf '%s\n' ${lib.escapeShellArgs toolingCrates} > tooling
+                printf '%s\n' ${lib.escapeShellArgs toolingMayUse} > usable
+
                 awk '
                   FILENAME == "rings" { ring[$1] = $2; next }
                   FILENAME == "only" { only[$1] = $2; next }
+                  FILENAME == "tooling" { tooling[$1] = 1; next }
+                  FILENAME == "usable" { usable[$1] = 1; next }
+                  ($1 in tooling) && !($2 in tooling) && !($2 in usable) {
+                    print "  " $1 " is tooling, and depends on " $2; bad = 1; next
+                  }
+                  ($2 in tooling) && !($1 in tooling) {
+                    print "  " $1 " depends on " $2 ", which is tooling"; bad = 1; next
+                  }
+                  ($1 in tooling) { next }
                   !($1 in ring) { print "  " $1 " is in no ring"; bad = 1; next }
                   !($2 in ring) { print "  " $2 " is in no ring"; bad = 1; next }
                   ring[$2] >= ring[$1] {
@@ -575,7 +603,7 @@
                     bad = 1
                   }
                   END { exit bad }
-                ' rings only edges && exit_code=0 || exit_code=1
+                ' rings only tooling usable edges && exit_code=0 || exit_code=1
 
                 if [ "$exit_code" -ne 0 ]; then
                   echo
@@ -584,6 +612,7 @@
                   echo "in no ring is a new one: give it a ring in flake.nix,"
                   echo "which is the decision worth making deliberately. A frontend"
                   echo "gets its adapters from the configurator, never directly."
+                  echo "Tooling sits outside the rings and uses telemetry alone."
                   exit 1
                 fi
 
@@ -811,6 +840,8 @@
             cargo-deny
             cargo-nextest
             gitleaks
+            # What `cargo xtask` runs the checks with (#629).
+            nix-fast-build
             nixfmt
             # Regenerating `.sqlx` after a query changes, and reading the store
             # by hand during validation.
