@@ -421,14 +421,15 @@ mod tests {
     use std::{path::Path, time::Duration};
 
     use application::{
-        Part,
-        next::{Done, Found, NoAccess, Progress, Step, StepFailure},
+        CanonicalLayer, DerivedFrom, Part, StoreError,
+        canonicalise::{Canonicalised, WeighInsCanonicalised},
+        next::{Canonicalising, Done, Found, NoAccess, Progress, Step, StepFailure},
     };
-    use domain::{landing::LandingStream, schedule::Discipline};
+    use domain::{canonical::SessionCount, landing::LandingStream, schedule::Discipline};
     use sqlx::{Connection as _, Row as _};
     use tracing_subscriber::layer::SubscriberExt as _;
 
-    use super::{Frontend, Run, Served, Spanned};
+    use super::{Frontend, Run, Served, Spanned, Traced};
 
     /// A frontend's progress, which hears nothing it would not have.
     #[derive(Default)]
@@ -488,6 +489,76 @@ mod tests {
             outcome,
             took: Duration::ZERO,
         }
+    }
+
+    /// A layer that reads three and writes two, and fails nothing else.
+    struct Rebuilt;
+
+    impl Canonicalising for Rebuilt {
+        async fn gym(&self) -> Result<Canonicalised, StoreError> {
+            Ok(Canonicalised {
+                read: SessionCount::from(3),
+                written: SessionCount::from(2),
+            })
+        }
+
+        async fn cycling(&self) -> Result<Canonicalised, StoreError> {
+            Err(StoreError::Unavailable {
+                detail: "gone".to_owned(),
+            })
+        }
+
+        async fn weigh_ins(&self) -> Result<WeighInsCanonicalised, StoreError> {
+            Err(StoreError::Unavailable {
+                detail: "gone".to_owned(),
+            })
+        }
+
+        async fn inputs(&self, _: CanonicalLayer) -> Result<DerivedFrom, StoreError> {
+            Err(StoreError::Unavailable {
+                detail: "gone".to_owned(),
+            })
+        }
+    }
+
+    /// **A rebuild is a `step` span with its layer and what it read and
+    /// wrote**, timed by the span, so the store keeps no log of it (#633).
+    #[test]
+    fn a_rebuild_is_a_span_with_what_it_read_and_wrote() {
+        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let database = directory.path().join("telemetry.db");
+
+        let (recorder, recording) = ::telemetry::record(&database, None);
+        tracing::subscriber::with_default(tracing_subscriber::registry().with(recorder), || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("a runtime");
+            runtime.block_on(async {
+                let traced = Traced(Rebuilt);
+                traced.gym().await.expect("a rebuild");
+                let _ = traced.cycling().await;
+            });
+        });
+        drop(recording);
+
+        let rows = spans(&database).expect("telemetry.db reads");
+        let step = |layer: &str| {
+            rows.iter()
+                .find(|row| row.name == "step" && row.fields["layer"] == layer)
+                .unwrap_or_else(|| panic!("a {layer} step"))
+        };
+        let gym = step("gym");
+        assert_eq!(gym.outcome.as_deref(), Some("succeeded"));
+        assert_eq!(
+            gym.fields,
+            serde_json::json!({
+                "step": "canonicalising",
+                "layer": "gym",
+                "read": 3,
+                "written": 2,
+            })
+        );
+        assert_eq!(step("cycling").outcome.as_deref(), Some("failed"));
     }
 
     /// **Every step its run reports is a `step` span under the run's**, the

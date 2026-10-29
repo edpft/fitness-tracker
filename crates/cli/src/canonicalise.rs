@@ -8,7 +8,7 @@
 //! entity: `gym` or `cycling`.
 //!
 //! It contacts nothing, and there is nothing to refuse or resume: the inputs are
-//! already in our terms. Each rebuild is logged, as `next`'s are (#609).
+//! already in our terms. Each rebuild is a `step` span, as `next`'s are (#633).
 
 use std::path::Path;
 

@@ -216,27 +216,13 @@ fn the_history_reads_a_weight_dated_to_a_day() {
         normalise(&pool).await.expect("derives");
         let canonical = SqliteCanonicalWeighInStore::new(pool.clone());
         let normalised = SqliteNormalisedWeighInReader::new(pool.clone());
-        canonicalise::weigh_ins(
-            &normalised,
-            &canonical,
-            &canonicalise::Logged {
-                runs: &infrastructure::SqliteCanonicalisationRunLog::new(pool.clone()),
-                clock: &FixedClock,
-            },
-        )
-        .await
-        .expect("canonicalises");
+        canonicalise::weigh_ins(&normalised, &canonical)
+            .await
+            .expect("canonicalises");
         normalise(&pool).await.expect("derives again");
-        canonicalise::weigh_ins(
-            &normalised,
-            &canonical,
-            &canonicalise::Logged {
-                runs: &infrastructure::SqliteCanonicalisationRunLog::new(pool.clone()),
-                clock: &FixedClock,
-            },
-        )
-        .await
-        .expect("canonicalises again");
+        canonicalise::weigh_ins(&normalised, &canonical)
+            .await
+            .expect("canonicalises again");
 
         let history = canonical.weigh_ins().await.expect("the history");
         assert_eq!(history.len(), 3, "a rebuild replaces rather than adds");
