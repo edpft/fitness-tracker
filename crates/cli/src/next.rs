@@ -8,10 +8,8 @@
 
 use std::{io::Write as _, path::Path, sync::Mutex};
 
-use application::next::{
-    Done, IfGoing, NextError, Prescribed, Progress, Step, Undelivered, WhatIsNext,
-};
-use configurator::next::NextFailure;
+use application::next::{Done, NextError, Prescribed, Progress, Step, Undelivered, WhatIsNext};
+use configurator::{next::NextFailure, telemetry::Frontend};
 use domain::{
     normalised::OperatorZone,
     schedule::{DayPart, PartOfDay},
@@ -44,7 +42,7 @@ pub async fn next(
         credentials,
         now,
         skip,
-        IfGoing::Refuse,
+        Frontend::Cli,
         &Terminal::default(),
     ))
     .await

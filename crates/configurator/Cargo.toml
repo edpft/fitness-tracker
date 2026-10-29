@@ -20,6 +20,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+# Reading back the spans a run leaves in `telemetry.db` (#632).
+serde_json.workspace = true
+sqlx.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 
