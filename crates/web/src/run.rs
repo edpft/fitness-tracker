@@ -18,7 +18,10 @@ use std::{
 
 use application::next::NextError;
 use application::next::{Done, Progress, Scope, Step};
-use configurator::{next::NextFailure, telemetry::Frontend};
+use configurator::{
+    next::NextFailure,
+    telemetry::{Frontend, Run},
+};
 use domain::{normalised::OperatorZone, schedule::DayPart};
 use maud::{Markup, PreEscaped, html};
 use tokio::sync::watch;
@@ -212,6 +215,7 @@ impl Runs {
         {
             let mut going = self.going.lock().unwrap_or_else(PoisonError::into_inner);
             if going.iter().any(|run| run.covers(asked)) {
+                configurator::telemetry::joined();
                 return;
             }
             // **The steps shown are this server's runs since none was going**,
@@ -227,11 +231,17 @@ impl Runs {
             going.push(asked.clone());
         }
 
+        // Made here, while the page load that asked for it is going, so the
+        // run is recorded as its child (#628).
+        let run = match asked {
+            Asked::Everything => Run::everything(Frontend::Web),
+            Asked::Only(scope) => Run::over(Frontend::Web, scope),
+        };
         let runs = Arc::clone(self);
         let started = asked.clone();
         if let Err(error) = std::thread::Builder::new()
             .name("next".to_owned())
-            .spawn(move || runs.run(&started))
+            .spawn(move || runs.run(&started, run))
         {
             self.end(
                 asked,
@@ -253,7 +263,7 @@ impl Runs {
     ///
     /// **Only a run of the whole of `next` ends on a report**: a chart's run
     /// delivers nothing, and its page redraws from the store.
-    fn run(&self, asked: &Asked) {
+    fn run(&self, asked: &Asked, run: Run) {
         let setting = &self.setting;
         let started = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -283,7 +293,7 @@ impl Runs {
                     &credentials,
                     DayPart::containing(here.datetime()),
                     None,
-                    Frontend::Web,
+                    run,
                     &following,
                 )) {
                     Ok(answered) => report::report(&answered),
@@ -299,7 +309,7 @@ impl Runs {
                 &credentials,
                 here.date(),
                 scope,
-                Frontend::Web,
+                run,
                 &following,
             )) {
                 Ok(_) => None,

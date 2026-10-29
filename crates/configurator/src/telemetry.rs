@@ -92,6 +92,71 @@ impl<C: Canonicalising + Sync> Canonicalising for Traced<C> {
     }
 }
 
+/// A chart page load as a `request` span (#628).
+///
+/// Its page, and whether it is a redraw: the page asking for itself again as
+/// htmx. Its range and how it was served are recorded as the page learns
+/// them, and a run it starts is its child.
+pub fn request(page: &str, redraw: bool) -> Span {
+    tracing::info_span!(
+        "request",
+        page,
+        range = Empty,
+        served = Empty,
+        redraw,
+        joined = Empty,
+        outcome = Empty,
+    )
+}
+
+/// How a chart page was served.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Served {
+    /// As it was last drawn, while a run collects what it reads: fast, but
+    /// not yet whole.
+    Kept,
+    /// The placeholder, where it has never been drawn on this store.
+    Placeholder,
+    /// Drawn from the store.
+    Drawn,
+}
+
+impl Served {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Kept => "kept",
+            Self::Placeholder => "placeholder",
+            Self::Drawn => "drawn",
+        }
+    }
+}
+
+/// The range of the page being loaded, where it has one, on its span.
+pub fn ranged(range: &str) {
+    Span::current().record("range", range);
+}
+
+/// How the page being loaded was served, on its span.
+pub fn served(served: Served) {
+    Span::current().record("served", served.as_str());
+}
+
+/// The page being loaded joined a run this frontend already had going, so it
+/// started none of its own.
+pub fn joined() {
+    Span::current().record("joined", true);
+}
+
+/// How a page load ended, on its span.
+pub fn request_ended(span: &Span, succeeded: bool) {
+    let outcome = if succeeded {
+        Outcome::Succeeded
+    } else {
+        Outcome::Failed
+    };
+    span.record(OUTCOME, outcome.as_str());
+}
+
 /// Which frontend started a run of `next`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Frontend {
@@ -117,17 +182,46 @@ impl Frontend {
     }
 }
 
-/// A run of `next` as a `run` span (#632): its frontend, what it covered, and
-/// whether it joined another run or was refused because one was going.
-pub(crate) fn run(frontend: Frontend, covered: &str) -> Span {
-    tracing::info_span!(
-        "run",
-        frontend = frontend.as_str(),
-        covered,
-        joined = Empty,
-        refused = Empty,
-        outcome = Empty,
-    )
+/// A run of `next` from the moment it is asked for: its frontend, and a `run`
+/// span (#632) with what it covered, and whether it joined another run or was
+/// refused because one was going.
+///
+/// **Made where it is asked for, not where it runs** (#628): the span follows
+/// from whatever was going when it was made, a page load for a page, so the
+/// run is recorded as that load's child although it outlives it.
+pub struct Run {
+    frontend: Frontend,
+    pub(crate) span: Span,
+}
+
+impl Run {
+    /// The whole of `next`.
+    pub fn everything(frontend: Frontend) -> Self {
+        Self::new(frontend, "everything")
+    }
+
+    /// Only what `scope` reads, as a chart page asks for.
+    pub fn over(frontend: Frontend, scope: &application::next::Scope) -> Self {
+        Self::new(frontend, &covered(scope.parts()))
+    }
+
+    fn new(frontend: Frontend, covered: &str) -> Self {
+        let span = tracing::info_span!(
+            parent: None,
+            "run",
+            frontend = frontend.as_str(),
+            covered,
+            joined = Empty,
+            refused = Empty,
+            outcome = Empty,
+        );
+        span.follows_from(Span::current());
+        Self { frontend, span }
+    }
+
+    pub(crate) const fn if_going(&self) -> IfGoing {
+        self.frontend.if_going()
+    }
 }
 
 /// How a run ended, on its span.
@@ -146,7 +240,7 @@ pub(crate) fn run_ended<T>(span: &Span, done: &Result<T, crate::next::NextFailur
 }
 
 /// What a run covered: everything, or the parts a page collects.
-pub(crate) fn covered(parts: &std::collections::BTreeSet<application::Part>) -> String {
+fn covered(parts: &std::collections::BTreeSet<application::Part>) -> String {
     use application::Part;
     parts
         .iter()
@@ -334,7 +428,7 @@ mod tests {
     use sqlx::{Connection as _, Row as _};
     use tracing_subscriber::layer::SubscriberExt as _;
 
-    use super::{Frontend, Spanned, run};
+    use super::{Frontend, Run, Served, Spanned};
 
     /// A frontend's progress, which hears nothing it would not have.
     #[derive(Default)]
@@ -408,7 +502,7 @@ mod tests {
 
         let (recorder, recording) = ::telemetry::record(&database, None);
         tracing::subscriber::with_default(tracing_subscriber::registry().with(recorder), || {
-            let spanned = Spanned::new(&heard, run(Frontend::Cli, "everything"));
+            let spanned = Spanned::new(&heard, Run::everything(Frontend::Cli).span);
             let joined = Step::Joining([Part::Delivering].into());
             spanned.started(&joined);
             spanned.finished(&done(joined, Ok(Found::Joined)));
@@ -457,5 +551,51 @@ mod tests {
 
         let heard = heard.0.into_inner().expect("unpoisoned");
         assert_eq!(heard.len(), 7, "{heard:?}");
+    }
+
+    /// **A run a page load starts is that load's child, and the load ends as
+    /// it is served** (#628), with its page, range and how it was served.
+    #[test]
+    fn a_run_a_page_load_starts_is_its_child() {
+        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let database = directory.path().join("telemetry.db");
+        let hrv = application::next::Scope::new([Part::Normalising(
+            LandingStream::try_from("garmin.hrv").expect("a stream name"),
+        )]);
+
+        let (recorder, recording) = ::telemetry::record(&database, None);
+        tracing::subscriber::with_default(tracing_subscriber::registry().with(recorder), || {
+            let request = super::request("/hrv", false);
+            let run = request.in_scope(|| {
+                super::ranged("macrocycle");
+                super::served(Served::Kept);
+                Run::over(Frontend::Web, &hrv)
+            });
+            super::request_ended(&request, true);
+            drop(request);
+            std::thread::sleep(Duration::from_millis(20));
+            drop(run);
+        });
+        drop(recording);
+
+        let rows = spans(&database).expect("telemetry.db reads");
+        let request = rows
+            .iter()
+            .find(|row| row.name == "request")
+            .expect("a request");
+        let run = rows.iter().find(|row| row.name == "run").expect("a run");
+        assert_eq!(run.parent, Some(request.id));
+        assert_eq!(run.fields["covered"], "normalising garmin.hrv");
+        assert_eq!(request.parent, None);
+        assert_eq!(request.outcome.as_deref(), Some("succeeded"));
+        assert_eq!(
+            request.fields,
+            serde_json::json!({
+                "page": "/hrv",
+                "range": "macrocycle",
+                "served": "kept",
+                "redraw": false,
+            })
+        );
     }
 }
