@@ -216,3 +216,29 @@ fn a_keyed_span_written_twice_is_one_row() {
     assert!(telemetry::is_written(&database, "ci/job/2").unwrap());
     assert!(!telemetry::is_written(&database, "ci/job/3").unwrap());
 }
+
+#[test]
+fn a_file_a_later_build_migrated_is_still_written() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("telemetry.db");
+    telemetry::write(&database, None, &[timed("gate", None, vec![])]).unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let options = SqliteConnectOptions::new().filename(&database);
+        let mut connection = SqliteConnection::connect_with(&options).await.unwrap();
+        sqlx::query(
+            "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)
+             VALUES (9999, 'from a later build', TRUE, x'00', 0)",
+        )
+        .execute(&mut connection)
+        .await
+        .unwrap();
+    });
+
+    telemetry::write(&database, None, &[timed("gate", None, vec![])]).unwrap();
+
+    assert_eq!(spans(&database).unwrap().len(), 2);
+}

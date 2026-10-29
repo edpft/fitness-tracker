@@ -399,7 +399,14 @@ async fn connect(database: &Path) -> Result<SqliteConnection, sqlx::Error> {
         .journal_mode(SqliteJournalMode::Wal)
         .busy_timeout(std::time::Duration::from_secs(1));
     let mut connection = SqliteConnection::connect_with(&options).await?;
-    sqlx::migrate!().run(&mut connection).await?;
+    // **A migration this build does not know is not an error.** The installed
+    // build and `cargo xtask` from a working tree share the file, and the tree
+    // is often a migration ahead: refusing it, the installed build recorded
+    // nothing until it was upgraded (#629). So a migration here only ever
+    // widens what a row may be, and an older build still writes its rows.
+    let mut migrator = sqlx::migrate!();
+    migrator.set_ignore_missing(true);
+    migrator.run(&mut connection).await?;
     Ok(connection)
 }
 

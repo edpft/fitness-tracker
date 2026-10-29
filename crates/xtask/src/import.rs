@@ -259,49 +259,48 @@ pub fn import(database: &Path) -> Result<Imported, String> {
         "--jq",
         ".workflow_runs[]",
     ])?)?;
+    let mut pending = Vec::new();
+    for run in &runs {
+        if !telemetry::is_written(database, &run.key()).map_err(|error| error.to_string())? {
+            pending.push(run);
+        }
+    }
     let mut imported = 0;
     let mut passed_over = 0;
-    for run in &runs {
-        if telemetry::is_written(database, &run.key()).map_err(|error| error.to_string())? {
-            continue;
-        }
-        // A run whose jobs cannot be read now is passed over, and the next
-        // import tries it again: GitHub answers 502 now and then.
-        let Ok(jobs) = gh(&[
-            "api",
-            "--paginate",
-            &format!(
-                "repos/{repository}/actions/runs/{}/attempts/{}/jobs?per_page=100",
-                run.id, run.attempt
-            ),
-            "--jq",
-            ".jobs[]",
-        ])
-        .and_then(|jobs| lines::<Job>(&jobs)) else {
-            passed_over += 1;
-            continue;
-        };
-        if let Some(first) = jobs.first()
-            && run.name != GATE
-            && telemetry::is_written(database, &format!("ci/job/{}", first.id))
-                .map_err(|error| error.to_string())?
-        {
-            continue;
-        }
-        let directory = downloaded(repository, run);
-        let spans = spans(run, &jobs, |check| {
-            directory
-                .as_deref()
-                .map(|directory| uploaded(directory, check))
-                .unwrap_or_default()
+    // `gh` is most of the time an import takes, so several runs are fetched at
+    // once, and written one at a time.
+    for batch in pending.chunks(AT_ONCE) {
+        let fetched: Vec<_> = std::thread::scope(|scope| {
+            // Every run is started before any is waited for.
+            let mut fetching = Vec::with_capacity(batch.len());
+            for run in batch {
+                fetching.push(scope.spawn(|| fetched(repository, run)));
+            }
+            fetching
+                .into_iter()
+                .map(|fetching| fetching.join().ok().flatten())
+                .collect()
         });
-        if let Some(directory) = &directory {
-            let _ = std::fs::remove_dir_all(directory);
-        }
-        telemetry::write(database, Some(&run.build()), &spans).map_err(|error| error.to_string())?;
-        imported += 1;
-        if imported % 100 == 0 {
-            eprintln!("xtask: imported {imported} runs");
+        for (run, fetched) in batch.iter().zip(fetched) {
+            // A run whose jobs cannot be read now is passed over, and the next
+            // import tries it again: GitHub answers 502 now and then.
+            let Some((first, spans)) = fetched else {
+                passed_over += 1;
+                continue;
+            };
+            if let Some(first) = first
+                && run.name != GATE
+                && telemetry::is_written(database, &format!("ci/job/{first}"))
+                    .map_err(|error| error.to_string())?
+            {
+                continue;
+            }
+            telemetry::write(database, Some(&run.build()), &spans)
+                .map_err(|error| error.to_string())?;
+            imported += 1;
+            if imported % 100 == 0 {
+                eprintln!("xtask: imported {imported} runs");
+            }
         }
     }
     Ok(Imported {
@@ -310,9 +309,43 @@ pub fn import(database: &Path) -> Result<Imported, String> {
     })
 }
 
+/// How many runs are fetched at once.
+const AT_ONCE: usize = 8;
+
+/// A run's spans, and its first job's id, or nothing if its jobs could not be
+/// read.
+fn fetched(repository: &str, run: &Run) -> Option<(Option<u64>, Vec<Timed>)> {
+    let jobs = gh(&[
+        "api",
+        "--paginate",
+        &format!(
+            "repos/{repository}/actions/runs/{}/attempts/{}/jobs?per_page=100",
+            run.id, run.attempt
+        ),
+        "--jq",
+        ".jobs[]",
+    ])
+    .and_then(|jobs| lines::<Job>(&jobs))
+    .ok()?;
+    let directory = downloaded(repository, run);
+    let spans = spans(run, &jobs, |check| {
+        directory
+            .as_deref()
+            .map(|directory| uploaded(directory, check))
+            .unwrap_or_default()
+    });
+    if let Some(directory) = &directory {
+        let _ = std::fs::remove_dir_all(directory);
+    }
+    Some((jobs.first().map(|job| job.id), spans))
+}
+
+/// Actions keeps an artifact this long, so an older run has none to ask for.
+const KEPT: jiff::SignedDuration = jiff::SignedDuration::from_hours(90 * 24);
+
 /// The run's artifacts, if it uploaded any still kept.
 fn downloaded(repository: &str, run: &Run) -> Option<PathBuf> {
-    if run.name != GATE {
+    if run.name != GATE || Timestamp::now().duration_since(run.started_at) > KEPT {
         return None;
     }
     let names = gh(&[
