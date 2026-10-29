@@ -242,8 +242,14 @@ pub fn uploaded(directory: &Path, check: &str) -> Results {
     Results { cache_status, tests }
 }
 
-/// Import every completed run not already in `database`, and say how many.
-pub fn import(database: &Path) -> Result<usize, String> {
+/// How many runs an import recorded, and how many it could not read.
+pub struct Imported {
+    pub runs: usize,
+    pub passed_over: usize,
+}
+
+/// Import every completed run not already in `database`.
+pub fn import(database: &Path) -> Result<Imported, String> {
     let repository = gh(&["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"])?;
     let repository = repository.trim();
     let runs: Vec<Run> = lines(&gh(&[
@@ -254,11 +260,14 @@ pub fn import(database: &Path) -> Result<usize, String> {
         ".workflow_runs[]",
     ])?)?;
     let mut imported = 0;
+    let mut passed_over = 0;
     for run in &runs {
         if telemetry::is_written(database, &run.key()).map_err(|error| error.to_string())? {
             continue;
         }
-        let jobs: Vec<Job> = lines(&gh(&[
+        // A run whose jobs cannot be read now is passed over, and the next
+        // import tries it again: GitHub answers 502 now and then.
+        let Ok(jobs) = gh(&[
             "api",
             "--paginate",
             &format!(
@@ -267,7 +276,11 @@ pub fn import(database: &Path) -> Result<usize, String> {
             ),
             "--jq",
             ".jobs[]",
-        ])?)?;
+        ])
+        .and_then(|jobs| lines::<Job>(&jobs)) else {
+            passed_over += 1;
+            continue;
+        };
         if let Some(first) = jobs.first()
             && run.name != GATE
             && telemetry::is_written(database, &format!("ci/job/{}", first.id))
@@ -291,7 +304,10 @@ pub fn import(database: &Path) -> Result<usize, String> {
             eprintln!("xtask: imported {imported} runs");
         }
     }
-    Ok(imported)
+    Ok(Imported {
+        runs: imported,
+        passed_over,
+    })
 }
 
 /// The run's artifacts, if it uploaded any still kept.

@@ -101,8 +101,11 @@ fn imported() -> bool {
         return false;
     };
     match import::import(&database) {
-        Ok(runs) => {
+        Ok(import::Imported { runs, passed_over }) => {
             eprintln!("xtask: imported {runs} CI runs");
+            if passed_over > 0 {
+                eprintln!("xtask: {passed_over} could not be read, and the next import tries them again");
+            }
             true
         }
         Err(error) => {
