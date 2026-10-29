@@ -62,13 +62,14 @@ use crate::{
     PrescriptionError, PrescriptionLifecycle, ProgressionStore, RideDestination, RidesPlaced,
     RunLockError, RunSummary, SourceError, StoreError, Taken, WorkoutExtractor,
     WorkoutPrescriber as _, WorkoutStore,
-    canonicalise::{Canonicalised, WeighInsCanonicalised},
+    canonicalise::{Canonicalised, Logged, WeighInsCanonicalised},
     commit::{CommitError, Due},
     cycling::{PrescribedRide, RideDeliveryError, RidingError},
     deliver::{Delivering, DeliveryPorts},
     microcycle::{Session, Standing},
     ports::{
-        Build, CanonicalLayer, DerivationLedger, DerivedFrom, NewestObservation, NormalisedLayers,
+        Build, CanonicalLayer, CanonicalisationRunLog, Clock, DerivationLedger, DerivedFrom,
+        NewestObservation, NormalisedLayers,
     },
     prescribe::{NextSession, Prescribing, PrescriptionPorts},
     reschedule::{Reschedule, Rescheduled, ReschedulingPlans},
@@ -773,17 +774,29 @@ pub trait Canonicalising {
     ) -> impl Future<Output = Result<DerivedFrom, StoreError>> + Send;
 }
 
-/// Each normalised layer, and the canonical layer built from it.
-pub struct CanonicalPorts<GR, GC, CR, CC, WR, WC> {
+/// Each normalised layer, the canonical layer built from it, and where each
+/// rebuild is logged.
+pub struct CanonicalPorts<GR, GC, CR, CC, WR, WC, L, K> {
     pub normalised_gym: GR,
     pub canonical_gym: GC,
     pub normalised_cycling: CR,
     pub canonical_cycling: CC,
     pub normalised_weigh_ins: WR,
     pub canonical_weigh_ins: WC,
+    pub runs: L,
+    pub clock: K,
 }
 
-impl<GR, GC, CR, CC, WR, WC> Canonicalising for CanonicalPorts<GR, GC, CR, CC, WR, WC>
+impl<GR, GC, CR, CC, WR, WC, L, K> CanonicalPorts<GR, GC, CR, CC, WR, WC, L, K> {
+    const fn logged(&self) -> Logged<'_, L, K> {
+        Logged {
+            runs: &self.runs,
+            clock: &self.clock,
+        }
+    }
+}
+
+impl<GR, GC, CR, CC, WR, WC, L, K> Canonicalising for CanonicalPorts<GR, GC, CR, CC, WR, WC, L, K>
 where
     GR: NormalisedGymSessionReader + Sync,
     GC: CanonicalGymSessionStore + Sync,
@@ -791,18 +804,30 @@ where
     CC: CanonicalCyclingSessionStore + Sync,
     WR: NormalisedWeighInReader + Sync,
     WC: CanonicalWeighInStore + Sync,
+    L: CanonicalisationRunLog + Sync,
+    K: Clock + Sync,
 {
     async fn gym(&self) -> Result<Canonicalised, StoreError> {
-        crate::canonicalise::gym_sessions(&self.normalised_gym, &self.canonical_gym).await
-    }
-
-    async fn cycling(&self) -> Result<Canonicalised, StoreError> {
-        crate::canonicalise::cycling_sessions(&self.normalised_cycling, &self.canonical_cycling)
+        crate::canonicalise::gym_sessions(&self.normalised_gym, &self.canonical_gym, &self.logged())
             .await
     }
 
+    async fn cycling(&self) -> Result<Canonicalised, StoreError> {
+        crate::canonicalise::cycling_sessions(
+            &self.normalised_cycling,
+            &self.canonical_cycling,
+            &self.logged(),
+        )
+        .await
+    }
+
     async fn weigh_ins(&self) -> Result<WeighInsCanonicalised, StoreError> {
-        crate::canonicalise::weigh_ins(&self.normalised_weigh_ins, &self.canonical_weigh_ins).await
+        crate::canonicalise::weigh_ins(
+            &self.normalised_weigh_ins,
+            &self.canonical_weigh_ins,
+            &self.logged(),
+        )
+        .await
     }
 
     async fn inputs(&self, layer: CanonicalLayer) -> Result<DerivedFrom, StoreError> {

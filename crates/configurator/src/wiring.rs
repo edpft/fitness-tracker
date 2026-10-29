@@ -172,7 +172,7 @@ impl WalkReporter for Unreported {
 
 /// The wall clock, which is the only thing a real run should take its timings
 /// from — and emphatically not where the resumption point comes from.
-struct SystemClock;
+pub(crate) struct SystemClock;
 
 impl application::Clock for SystemClock {
     fn now(&self) -> FetchedAt {

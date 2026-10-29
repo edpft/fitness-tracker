@@ -41,6 +41,10 @@ pub async fn canonicalise(pool: &SqlitePool) -> Fallible<()> {
     application::canonicalise::gym_sessions(
         &SqliteNormalisedGymSessionReader::new(pool.clone()),
         &SqliteCanonicalGymSessionStore::new(pool.clone()),
+        &application::canonicalise::Logged {
+            runs: &infrastructure::SqliteCanonicalisationRunLog::new(pool.clone()),
+            clock: &corpus::FixedClock,
+        },
     )
     .await?;
     Ok(())

@@ -7,12 +7,11 @@
 //! reads entities already in our terms, so there is no translation to fail and
 //! nothing to refuse (§ 9).
 //!
-//! **No run log, and no refusals.** Every derivation from raw carries a run
-//! because § 38 wants a broken one visible rather than merely absent, and a
-//! refusal store because a source can serve what the domain will not take.
-//! Neither arises here: the inputs are ours, the whole layer is replaced in one
-//! transaction, and a count of what was written is the whole of what there is
-//! to report.
+//! **A run log, and no refusals** (#609). A refusal store is there because a
+//! source can serve what the domain will not take, which cannot arise here:
+//! the inputs are ours, and the whole layer is replaced in one transaction. A
+//! run is still logged, with when it started and finished, because a rebuild's
+//! timing was otherwise printed and lost.
 
 use domain::{
     body::{self, LeftOut, WeighInCount},
@@ -23,10 +22,52 @@ use domain::{
 use crate::{
     error::StoreError,
     ports::{
-        CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalWeighInStore,
+        CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalLayer,
+        CanonicalWeighInStore, CanonicalisationOutcome, CanonicalisationRunLog, Clock,
         NormalisedCyclingSessionReader, NormalisedGymSessionReader, NormalisedWeighInReader,
     },
 };
+
+/// Where each rebuild is logged, and the clock it is timed by.
+pub struct Logged<'a, L, K> {
+    pub runs: &'a L,
+    pub clock: &'a K,
+}
+
+impl<L: CanonicalisationRunLog + Sync, K: Clock + Sync> Logged<'_, L, K> {
+    /// Rebuild one layer, logging when it started and how it ended.
+    ///
+    /// **A rebuild that failed is logged as failed**, and the failure handed
+    /// back is the rebuild's: if logging it fails too, the store being
+    /// unreachable is why we are here.
+    async fn run<T>(
+        &self,
+        layer: CanonicalLayer,
+        rebuild: impl Future<Output = Result<T, StoreError>>,
+        counts: impl Fn(&T) -> (usize, usize),
+    ) -> Result<T, StoreError> {
+        let run = self.runs.begin(layer, self.clock.now()).await?;
+        match rebuild.await {
+            Ok(done) => {
+                let (read, written) = counts(&done);
+                let outcome = CanonicalisationOutcome::Succeeded {
+                    finished_at: self.clock.now(),
+                    read,
+                    written,
+                };
+                self.runs.finish(run, outcome).await?;
+                Ok(done)
+            }
+            Err(error) => {
+                let outcome = CanonicalisationOutcome::Failed {
+                    finished_at: self.clock.now(),
+                };
+                let _ = self.runs.finish(run, outcome).await;
+                Err(error)
+            }
+        }
+    }
+}
 
 /// What one run of the canonicalising did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +83,12 @@ pub struct Canonicalised {
     pub written: SessionCount,
 }
 
+impl Canonicalised {
+    const fn counts(&self) -> (usize, usize) {
+        (self.read.as_usize(), self.written.as_usize())
+    }
+}
+
 /// Replace the canonical gym layer with what the normalised layer now gives.
 ///
 /// # Errors
@@ -51,15 +98,23 @@ pub struct Canonicalised {
 pub async fn gym_sessions<
     R: NormalisedGymSessionReader + Sync,
     C: CanonicalGymSessionStore + Sync,
+    L: CanonicalisationRunLog + Sync,
+    K: Clock + Sync,
 >(
     normalised: &R,
     canonical: &C,
+    logged: &Logged<'_, L, K>,
 ) -> Result<Canonicalised, StoreError> {
-    let accounts = normalised.all().await?;
-    let read = SessionCount::from(accounts.len());
-    let sessions = gym::canonical_sessions(accounts);
-    let written = canonical.replace(sessions).await?;
-    Ok(Canonicalised { read, written })
+    let rebuild = async {
+        let accounts = normalised.all().await?;
+        let read = SessionCount::from(accounts.len());
+        let sessions = gym::canonical_sessions(accounts);
+        let written = canonical.replace(sessions).await?;
+        Ok(Canonicalised { read, written })
+    };
+    logged
+        .run(CanonicalLayer::Gym, rebuild, Canonicalised::counts)
+        .await
 }
 
 /// Replace the canonical cycling layer with what the normalised layer now
@@ -72,15 +127,23 @@ pub async fn gym_sessions<
 pub async fn cycling_sessions<
     R: NormalisedCyclingSessionReader + Sync,
     C: CanonicalCyclingSessionStore + Sync,
+    L: CanonicalisationRunLog + Sync,
+    K: Clock + Sync,
 >(
     normalised: &R,
     canonical: &C,
+    logged: &Logged<'_, L, K>,
 ) -> Result<Canonicalised, StoreError> {
-    let accounts = normalised.all().await?;
-    let read = SessionCount::from(accounts.len());
-    let sessions = cycling::canonical_sessions(accounts);
-    let written = canonical.replace(sessions).await?;
-    Ok(Canonicalised { read, written })
+    let rebuild = async {
+        let accounts = normalised.all().await?;
+        let read = SessionCount::from(accounts.len());
+        let sessions = cycling::canonical_sessions(accounts);
+        let written = canonical.replace(sessions).await?;
+        Ok(Canonicalised { read, written })
+    };
+    logged
+        .run(CanonicalLayer::Cycling, rebuild, Canonicalised::counts)
+        .await
 }
 
 /// What one run of canonicalising the weigh-ins did.
@@ -102,17 +165,30 @@ pub struct WeighInsCanonicalised {
 ///
 /// [`StoreError`] if either store is unavailable, or if the normalised layer
 /// holds something unreadable.
-pub async fn weigh_ins<R: NormalisedWeighInReader + Sync, C: CanonicalWeighInStore + Sync>(
+pub async fn weigh_ins<
+    R: NormalisedWeighInReader + Sync,
+    C: CanonicalWeighInStore + Sync,
+    L: CanonicalisationRunLog + Sync,
+    K: Clock + Sync,
+>(
     normalised: &R,
     canonical: &C,
+    logged: &Logged<'_, L, K>,
 ) -> Result<WeighInsCanonicalised, StoreError> {
-    let accounts = normalised.all().await?;
-    let read = WeighInCount::from(accounts.len());
-    let merged = body::canonical_weigh_ins(accounts);
-    let written = canonical.replace(merged.weighed).await?;
-    Ok(WeighInsCanonicalised {
-        read,
-        written,
-        left_out: merged.left_out,
-    })
+    let rebuild = async {
+        let accounts = normalised.all().await?;
+        let read = WeighInCount::from(accounts.len());
+        let merged = body::canonical_weigh_ins(accounts);
+        let written = canonical.replace(merged.weighed).await?;
+        Ok(WeighInsCanonicalised {
+            read,
+            written,
+            left_out: merged.left_out,
+        })
+    };
+    logged
+        .run(CanonicalLayer::WeighIns, rebuild, |done| {
+            (done.read.as_usize(), done.written.as_usize())
+        })
+        .await
 }
