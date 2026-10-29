@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use jiff::civil::Date;
+use tracing::Instrument as _;
 
 use application::{
     Build, CanonicalLayer, DerivedFrom, NormalisationError, NormalisationSummary, NormalisedLayers,
@@ -49,6 +50,7 @@ use crate::{
     access, catalogue,
     config::{SourceAccess, source_access_for},
     holidays::Calendars,
+    telemetry::{self, Frontend, Spanned},
     wiring::{self, Command, Outcome, SystemClock, Unreported, WiringError},
 };
 
@@ -84,22 +86,25 @@ pub async fn run(
     credentials: &infrastructure::Credentials,
     now: DayPart,
     skip: Option<&str>,
-    if_going: IfGoing,
+    frontend: Frontend,
     progress: &(impl Progress + Sync),
 ) -> Result<Report, NextFailure> {
-    match over(
+    let spanned = Spanned::new(progress, telemetry::run(frontend, "everything"));
+    let answered = over(
         database,
         zone,
         credentials,
         Asked::Next {
             now,
             skip,
-            if_going,
+            if_going: frontend.if_going(),
         },
-        progress,
+        &spanned,
     )
-    .await?
-    {
+    .instrument(spanned.run.clone())
+    .await;
+    telemetry::run_ended(&spanned.run, &answered);
+    match answered? {
         Answered::Report(report) => Ok(*report),
         Answered::Collected(_) => unreachable_answer(),
     }
@@ -118,17 +123,22 @@ pub async fn collect(
     credentials: &infrastructure::Credentials,
     today: Date,
     scope: &Scope,
+    frontend: Frontend,
     progress: &(impl Progress + Sync),
 ) -> Result<Vec<Done>, NextFailure> {
-    match over(
+    let covered = telemetry::covered(scope.parts());
+    let spanned = Spanned::new(progress, telemetry::run(frontend, &covered));
+    let answered = over(
         database,
         zone,
         credentials,
         Asked::Collect { scope, today },
-        progress,
+        &spanned,
     )
-    .await?
-    {
+    .instrument(spanned.run.clone())
+    .await;
+    telemetry::run_ended(&spanned.run, &answered);
+    match answered? {
         Answered::Collected(run) => Ok(run),
         Answered::Report(_) => unreachable_answer(),
     }

@@ -455,6 +455,8 @@ dependencies = [
  "domain",
  "infrastructure",
  "jiff",
+ "serde_json",
+ "sqlx",
  "telemetry",
  "tempfile",
  "thiserror",

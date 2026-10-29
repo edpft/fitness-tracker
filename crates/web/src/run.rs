@@ -17,8 +17,8 @@ use std::{
 };
 
 use application::next::NextError;
-use application::next::{Done, IfGoing, Progress, Scope, Step};
-use configurator::next::NextFailure;
+use application::next::{Done, Progress, Scope, Step};
+use configurator::{next::NextFailure, telemetry::Frontend};
 use domain::{normalised::OperatorZone, schedule::DayPart};
 use maud::{Markup, PreEscaped, html};
 use tokio::sync::watch;
@@ -283,7 +283,7 @@ impl Runs {
                     &credentials,
                     DayPart::containing(here.datetime()),
                     None,
-                    IfGoing::Join,
+                    Frontend::Web,
                     &following,
                 )) {
                     Ok(answered) => report::report(&answered),
@@ -299,6 +299,7 @@ impl Runs {
                 &credentials,
                 here.date(),
                 scope,
+                Frontend::Web,
                 &following,
             )) {
                 Ok(_) => None,
