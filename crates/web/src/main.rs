@@ -38,8 +38,8 @@ use axum::{
 use clap::{Arg, ArgMatches, Command, value_parser};
 use configurator::telemetry::Served;
 use maud::{Markup, PreEscaped};
-use tracing::Instrument as _;
 use tokio_stream::{Stream, StreamExt as _, wrappers::WatchStream};
+use tracing::Instrument as _;
 
 use run::{Asked, Runs, Setting};
 
