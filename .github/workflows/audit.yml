@@ -1,7 +1,9 @@
 name: Security audit
 
-# The `audit-deps` flake check runs on every pull request via CI. This is the
-# nightly run, which refreshes the advisory database before checking.
+# The `audit-deps` flake check runs on every pull request via CI, but only
+# against the advisory database pinned in flake.lock. This is the nightly run,
+# which refreshes that input first, so an advisory published after the lock
+# file was written is still caught.
 on:
   schedule:
     - cron: '0 0 * * *'
@@ -9,4 +11,20 @@ on:
 
 jobs:
   audit:
-    uses: edpft/rust-workflows/.github/workflows/nix-audit.yml@main
+    name: Audit dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+
+      - name: Install nix
+        uses: nixbuild/nix-quick-install-action@v35
+        with:
+          nix_conf: |
+            access-tokens = github.com=${{ github.token }}
+
+      - name: Refresh advisory database
+        run: nix flake update advisory-db
+
+      - name: Run audit
+        run: nix build -L .#checks.x86_64-linux.audit-deps

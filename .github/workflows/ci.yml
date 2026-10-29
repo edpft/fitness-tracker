@@ -10,33 +10,203 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  SYSTEM: x86_64-linux
+
 jobs:
   # The flake owns what runs: add an entry to `checks` in flake.nix and it
-  # appears here as a new job, with no change to this workflow.
-  checks:
-    uses: edpft/rust-workflows/.github/workflows/nix-checks.yml@main
-    with:
-      prebuild: .#cargoArtifacts
+  # appears here as a new job, with no change to this workflow. Until
+  # 2026-10-29 these jobs came from `edpft/rust-workflows`, which nothing else
+  # used (the operator).
+  discover:
+    name: Discover checks
+    runs-on: ubuntu-latest
+    outputs:
+      checks: ${{ steps.list.outputs.checks }}
+      unchanged: ${{ steps.unchanged.outputs.unchanged }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+        with:
+          # The base commit has to be here to evaluate it.
+          fetch-depth: 0
+
+      - name: Install nix
+        uses: nixbuild/nix-quick-install-action@v35
+        with:
+          nix_conf: |
+            keep-env-derivations = true
+            keep-outputs = true
+            access-tokens = github.com=${{ github.token }}
+
+      - name: Restore cache
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/Cargo.lock', 'rust-toolchain.toml') }}-prebuilt
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false
+
+      - name: List checks
+        id: list
+        run: |
+          checks=$(nix eval --json ".#checks.${SYSTEM}" --apply 'builtins.attrNames')
+          echo "checks=$checks" >> "$GITHUB_OUTPUT"
+
+      # A check whose derivation is the base's has the base's result, so a pull
+      # request that leaves its inputs alone need not build it. The flake's
+      # filesets are the filter: no path list here to drift from them. It still
+      # reports, because a required check that never reports blocks the merge.
+      # Only pull requests skip: a push to `main` builds everything, which is
+      # what keeps it the green baseline this comparison leans on.
+      - name: Find unchanged checks
+        id: unchanged
+        run: |
+          unchanged='[]'
+          # A pull request's checkout is its merge commit; the first parent is
+          # the base it was merged onto.
+          if [ "$EVENT" = pull_request ] && git rev-parse --verify -q HEAD^2 >/dev/null; then
+            base=$(git rev-parse HEAD^1)
+            apply='cs: builtins.mapAttrs (_: c: c.drvPath) cs'
+            # Outside the checkout, which must stay clean while it is evaluated.
+            head_json="${RUNNER_TEMP}/head.json"
+            base_json="${RUNNER_TEMP}/base.json"
+            if nix eval --json ".#checks.${SYSTEM}" --apply "$apply" > "$head_json" \
+              && nix eval --json "git+file://${PWD}?rev=${base}#checks.${SYSTEM}" --apply "$apply" > "$base_json"; then
+              unchanged=$(jq -c -n --slurpfile h "$head_json" --slurpfile b "$base_json" \
+                '$h[0] | to_entries | map(select($b[0][.key] == .value) | .key)')
+            fi
+          fi
+          echo "Unchanged since the base: $unchanged"
+          echo "unchanged=$unchanged" >> "$GITHUB_OUTPUT"
+        env:
+          EVENT: ${{ github.event_name }}
+
+  # Built once and cached for every check, instead of every check building
+  # every dependency. Every job restores the one cache, and a key is written
+  # once, so this job, which holds the dependencies, is the one that saves it.
+  prebuild:
+    name: Build shared dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+
+      - name: Install nix
+        uses: nixbuild/nix-quick-install-action@v35
+        with:
+          nix_conf: |
+            keep-env-derivations = true
+            keep-outputs = true
+            access-tokens = github.com=${{ github.token }}
+
+      - name: Setup cache
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/Cargo.lock', 'rust-toolchain.toml') }}-prebuilt
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-last-accessed: P1DT12H
+          purge-primary-key: never
+
+      - name: Build the dependencies
+        run: nix build -L .#cargoArtifacts
+
+  check:
+    name: ${{ matrix.check }}
+    needs: [discover, prebuild]
+    # A failed prebuild must not skip these: GitHub counts a skipped required
+    # check as passing. Run, rebuild the dependencies, and fail on their own
+    # account.
+    if: ${{ !cancelled() && needs.discover.result == 'success' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        check: ${{ fromJson(needs.discover.outputs.checks) }}
+    env:
+      CHECK: ${{ matrix.check }}
+      UNCHANGED: ${{ contains(fromJson(needs.discover.outputs.unchanged), matrix.check) }}
+    steps:
+      # `cargo xtask import` reads this step's conclusion as the cache status
+      # `unchanged`.
+      - name: Skip, unchanged since the base
+        if: ${{ env.UNCHANGED == 'true' }}
+        run: echo "The derivation of ${CHECK} is the base's, so its result is too."
+
+      - name: Checkout repo
+        if: ${{ env.UNCHANGED != 'true' }}
+        uses: actions/checkout@v7
+
+      - name: Install nix
+        if: ${{ env.UNCHANGED != 'true' }}
+        uses: nixbuild/nix-quick-install-action@v35
+        with:
+          nix_conf: |
+            keep-env-derivations = true
+            keep-outputs = true
+            access-tokens = github.com=${{ github.token }}
+
+      - name: Restore cache
+        if: ${{ env.UNCHANGED != 'true' }}
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/Cargo.lock', 'rust-toolchain.toml') }}-prebuilt
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false
+
+      # As `cargo xtask check` runs it, so a run here and a run on the laptop
+      # are recorded alike (#629): nix-fast-build's result, with each check's
+      # cache status, and the `test` check's JUnit report beside it.
+      - name: Run check
+        if: ${{ env.UNCHANGED != 'true' }}
+        run: |
+          mkdir -p results
+          nix shell --inputs-from . nixpkgs#nix-fast-build --command \
+            nix-fast-build --no-nom --skip-cached \
+              --flake ".#checks.${SYSTEM}" \
+              --select "checks: { inherit (checks) ${CHECK}; }" \
+              --result-file results/result.json --result-format json
+
+      - name: Keep the test report
+        if: ${{ always() && env.UNCHANGED != 'true' }}
+        run: |
+          jq -r '.results[] | select(.type == "BUILD" and .success) | .outputs.out' results/result.json \
+            | while read -r out; do
+                if [ -f "$out/junit.xml" ]; then cp "$out/junit.xml" results/junit.xml; fi
+              done
+
+      - name: Upload the results
+        if: ${{ always() && env.UNCHANGED != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: check-${{ matrix.check }}
+          path: results/
+          if-no-files-found: ignore
 
   # The one status the `main` ruleset requires (#147). It passes only when
-  # every job under `checks` did, and the package built (#534), so a check added
-  # to flake.nix gates a merge by construction rather than by someone
-  # remembering to retype the ruleset's list. `always()` because GitHub counts a
-  # skipped required check as passing: this job must run, and fail, when a job
-  # it needs failed or was cancelled.
+  # every check passed, and the package built (#534), so a check added to
+  # flake.nix gates a merge by construction rather than by someone remembering
+  # to retype the ruleset's list. `always()` because GitHub counts a skipped
+  # required check as passing: this job must run, and fail, when a job it needs
+  # failed or was cancelled.
   gate:
     name: gate
-    needs: [checks, publish]
+    needs: [discover, check, publish]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
       - name: Every check passed and the package built
         run: |
-          echo "checks: ${CHECKS}, publish: ${PUBLISH}"
+          echo "discover: ${DISCOVER}, checks: ${CHECKS}, publish: ${PUBLISH}"
+          test "${DISCOVER}" = success
           test "${CHECKS}" = success
           test "${PUBLISH}" = success
         env:
-          CHECKS: ${{ needs.checks.result }}
+          DISCOVER: ${{ needs.discover.result }}
+          CHECKS: ${{ needs.check.result }}
           PUBLISH: ${{ needs.publish.result }}
 
   # The laptop installs what this pushes and builds nothing itself (#502): its
@@ -54,7 +224,7 @@ jobs:
   # still first tried on `main`.
   publish:
     name: publish
-    needs: [checks]
+    needs: [check]
     if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     # To move the `published` tag.
