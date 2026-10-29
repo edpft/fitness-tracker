@@ -48,6 +48,8 @@ pub struct Run {
     #[serde(rename = "run_started_at", deserialize_with = "timestamp")]
     started_at: Timestamp,
     #[serde(deserialize_with = "timestamp")]
+    created_at: Timestamp,
+    #[serde(deserialize_with = "timestamp")]
     updated_at: Timestamp,
 }
 
@@ -252,13 +254,7 @@ pub struct Imported {
 pub fn import(database: &Path) -> Result<Imported, String> {
     let repository = gh(&["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"])?;
     let repository = repository.trim();
-    let runs: Vec<Run> = lines(&gh(&[
-        "api",
-        "--paginate",
-        &format!("repos/{repository}/actions/runs?per_page=100&status=completed"),
-        "--jq",
-        ".workflow_runs[]",
-    ])?)?;
+    let runs = listed(repository)?;
     let mut pending = Vec::new();
     for run in &runs {
         if !telemetry::is_written(database, &run.key()).map_err(|error| error.to_string())? {
@@ -307,6 +303,30 @@ pub fn import(database: &Path) -> Result<Imported, String> {
         runs: imported,
         passed_over,
     })
+}
+
+/// Every completed run. GitHub lists at most 1,000 for one query, so each
+/// query after the first asks for the runs created before the oldest so far.
+fn listed(repository: &str) -> Result<Vec<Run>, String> {
+    let mut runs: Vec<Run> = Vec::new();
+    let mut before: Option<Timestamp> = None;
+    loop {
+        let created = before.map_or_else(String::new, |before| format!("&created=<{before}"));
+        let page: Vec<Run> = lines(&gh(&[
+            "api",
+            "--paginate",
+            &format!("repos/{repository}/actions/runs?per_page=100&status=completed{created}"),
+            "--jq",
+            ".workflow_runs[]",
+        ])?)?;
+        let oldest = page.iter().map(|run| run.created_at).min();
+        let fewer = oldest.is_none() || oldest == before;
+        runs.extend(page);
+        if fewer {
+            return Ok(runs);
+        }
+        before = oldest;
+    }
 }
 
 /// How many runs are fetched at once.
@@ -409,6 +429,7 @@ mod tests {
             "head_commit": {"timestamp": "2026-10-29T17:47:26Z"},
             "conclusion": "success",
             "run_started_at": "2026-10-29T17:47:29Z",
+            "created_at": "2026-10-29T17:47:28Z",
             "updated_at": "2026-10-29T18:15:44Z",
         }))
         .unwrap()
