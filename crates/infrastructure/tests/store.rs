@@ -653,6 +653,63 @@ fn the_latest_success_is_the_most_recent_one() {
     });
 }
 
+/// **When a stream last succeeded, and last landed anything** (#612): what a
+/// walk that follows it is judged by. A failure is neither.
+#[test]
+fn a_stream_was_fetched_when_it_last_succeeded_and_landed_when_it_last_landed() {
+    use application::next::FetchLog as _;
+    runtime().expect("a tokio runtime").block_on(async {
+        let (_dir, pool) = store().await.expect("store operation");
+        let log = SqliteExtractionRunLog::new(pool);
+        let stream = hevy_workouts().expect("valid test fixture");
+        let at = |at: &str| FetchedAt::try_from(at).expect("valid test fixture");
+
+        assert_eq!(
+            log.fetched(&stream).await.expect("store operation"),
+            application::next::Fetched::default(),
+            "never fetched",
+        );
+        for (finished, landed) in [("2026-08-09T00:00:00Z", 2), ("2026-08-10T00:00:00Z", 0)] {
+            let run = log
+                .begin(&stream, at(finished))
+                .await
+                .expect("store operation");
+            log.finish(
+                run,
+                RunOutcome::Succeeded {
+                    finished_at: at(finished),
+                    events_seen: domain::landing::EventCount::from(landed),
+                    records_landed: RecordCount::from(landed),
+                },
+            )
+            .await
+            .expect("store operation");
+        }
+        let failed = log
+            .begin(&stream, at("2026-08-11T00:00:00Z"))
+            .await
+            .expect("store operation");
+        log.finish(
+            failed,
+            RunOutcome::Failed {
+                finished_at: at("2026-08-11T00:00:00Z"),
+                reason: domain::landing::FailureReason::SourceUnavailable,
+                detail: "down".to_owned(),
+            },
+        )
+        .await
+        .expect("store operation");
+
+        assert_eq!(
+            log.fetched(&stream).await.expect("store operation"),
+            application::next::Fetched {
+                succeeded: Some(at("2026-08-10T00:00:00Z")),
+                landed: Some(at("2026-08-09T00:00:00Z")),
+            }
+        );
+    });
+}
+
 // --- The schema's own guarantees --------------------------------------------
 
 /// The CHECK constraints mirror the `RunOutcome` sum type. The type makes these

@@ -203,6 +203,52 @@ impl Runs {
             .push(asked);
     }
 
+    /// Start a run of what a page asks for, as [`Self::start`] does, unless
+    /// nothing it reads could hold anything new (#612).
+    ///
+    /// **Only a chart's page asks**: the front page delivers, and its report
+    /// is what it shows. A run going that covers the page is joined whatever
+    /// the store says, and a store that cannot say starts the run as before.
+    pub async fn open(self: &Arc<Self>, asked: &Asked) {
+        if let Asked::Only(scope) = asked
+            && !self.covered(asked)
+            && !self.wanted(scope).await
+        {
+            configurator::telemetry::not_due();
+            return;
+        }
+        self.start(asked);
+    }
+
+    /// Whether this server has a run going that covers `asked`.
+    fn covered(&self, asked: &Asked) -> bool {
+        self.going
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .any(|run| run.covers(asked))
+    }
+
+    /// Whether a run over `scope` would fetch or derive anything now.
+    async fn wanted(&self, scope: &Scope) -> bool {
+        let setting = &self.setting;
+        let Ok(credentials) = configurator::config::credentials_at(setting.credentials.as_deref())
+        else {
+            return true;
+        };
+        let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
+        configurator::next::wanted(
+            &setting.database,
+            &setting.zone,
+            &credentials,
+            DayPart::containing(here.datetime()),
+            scope,
+            Frontend::Web,
+        )
+        .await
+        .unwrap_or(true)
+    }
+
     /// Start a run of what a page asks for, unless this server has one going
     /// that covers it, in which case the page opening joins that.
     ///
@@ -307,7 +353,7 @@ impl Runs {
                 &setting.database,
                 &setting.zone,
                 &credentials,
-                here.date(),
+                DayPart::containing(here.datetime()),
                 scope,
                 run,
                 &following,

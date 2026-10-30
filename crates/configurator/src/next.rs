@@ -7,22 +7,21 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use jiff::civil::Date;
 use tracing::Instrument as _;
 
 use application::{
-    Build, CanonicalLayer, DerivedFrom, NormalisationError, NormalisationSummary, NormalisedLayers,
-    Part, Rederivation, RunLockError, StoreError,
+    Build, CanonicalLayer, Clock, DerivedFrom, NormalisationError, NormalisationSummary,
+    NormalisedLayers, Part, Rederivation, RunLockError, StoreError,
     commit::{CommitPorts, Committing},
     cycling::{Riding, RidingPorts},
     microcycle::{Microcycle, MicrocyclePorts},
     next::{
-        CanonicalPorts, CyclingPorts, Done, GymPorts, IfGoing, Next, NextError, NextPorts,
-        NoAccess, Progress, Report, Scope,
+        CanonicalPorts, CyclingPorts, Done, FetchLog, Fetched, GymPorts, IfGoing, Next, NextError,
+        NextPorts, NoAccess, Progress, Refetch, Report, Scope,
     },
 };
 use domain::{
-    landing::LandingStream,
+    landing::{FetchedAt, LandingStream},
     normalised::OperatorZone,
     prescription::{DestinationName, InvalidDelivery},
     schedule::{DayPart, Discipline},
@@ -35,11 +34,12 @@ use infrastructure::{
     PelotonRideLandingStore, PelotonRideSampleLandingStore, SpreadsheetFileLandingStore,
     SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
     SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
-    SqliteDerivationLedger, SqliteDiaryStore, SqliteExerciseHistory, SqliteFtpHistory,
-    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteNormalisedCyclingSessionReader,
-    SqliteNormalisedGymSessionReader, SqliteNormalisedWeighInReader, SqlitePelotonClassStore,
-    SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
-    WithingsMeasurementLandingStore, connect,
+    SqliteDerivationLedger, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
+    SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
+    SqliteNormalisedCyclingSessionReader, SqliteNormalisedGymSessionReader,
+    SqliteNormalisedWeighInReader, SqlitePelotonClassStore, SqlitePlanStore,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, WithingsMeasurementLandingStore,
+    connect,
     peloton::{
         PelotonClassSource, PelotonHoldingRides, PelotonProgrammes, PelotonRideDestination,
         catalogue::ClassCatalogue,
@@ -51,7 +51,7 @@ use crate::{
     config::{SourceAccess, source_access_for},
     holidays::Calendars,
     telemetry::{self, Run, Spanned},
-    wiring::{self, Command, Outcome, Unreported, WiringError},
+    wiring::{self, Command, Outcome, SystemClock, Unreported, WiringError},
 };
 
 /// Why `next` could not be started, or could not answer.
@@ -90,11 +90,13 @@ pub async fn run(
     progress: &(impl Progress + Sync),
 ) -> Result<Report, NextFailure> {
     let if_going = run.if_going();
+    let refetch = run.refetch();
     let spanned = Spanned::new(progress, run.span);
     let answered = over(
         database,
         zone,
         credentials,
+        refetch,
         Asked::Next {
             now,
             skip,
@@ -107,7 +109,7 @@ pub async fn run(
     telemetry::run_ended(&spanned.run, &answered);
     match answered? {
         Answered::Report(report) => Ok(*report),
-        Answered::Collected(_) => unreachable_answer(),
+        Answered::Collected(_) | Answered::Wanted(_) => unreachable_answer(),
     }
 }
 
@@ -122,17 +124,19 @@ pub async fn collect(
     database: &Path,
     zone: &OperatorZone,
     credentials: &infrastructure::Credentials,
-    today: Date,
+    now: DayPart,
     scope: &Scope,
     run: Run,
     progress: &(impl Progress + Sync),
 ) -> Result<Vec<Done>, NextFailure> {
+    let refetch = run.refetch();
     let spanned = Spanned::new(progress, run.span);
     let answered = over(
         database,
         zone,
         credentials,
-        Asked::Collect { scope, today },
+        refetch,
+        Asked::Collect { scope, now },
         &spanned,
     )
     .instrument(spanned.run.clone())
@@ -140,8 +144,53 @@ pub async fn collect(
     telemetry::run_ended(&spanned.run, &answered);
     match answered? {
         Answered::Collected(run) => Ok(run),
-        Answered::Report(_) => unreachable_answer(),
+        Answered::Wanted(_) | Answered::Report(_) => unreachable_answer(),
     }
+}
+
+/// Whether a page's run over `scope` would do anything (#612): fetch a
+/// stream that could hold something new, or bring a layer current. A page
+/// that would do nothing starts no run.
+///
+/// # Errors
+///
+/// [`NextFailure`] if the store is unavailable.
+pub async fn wanted(
+    database: &Path,
+    zone: &OperatorZone,
+    credentials: &infrastructure::Credentials,
+    now: DayPart,
+    scope: &Scope,
+    frontend: telemetry::Frontend,
+) -> Result<bool, NextFailure> {
+    match over(
+        database,
+        zone,
+        credentials,
+        frontend.refetch(),
+        Asked::Wanted { scope, now },
+        &Unheard,
+    )
+    .await?
+    {
+        Answered::Wanted(wanted) => Ok(wanted),
+        Answered::Collected(_) | Answered::Report(_) => unreachable_answer(),
+    }
+}
+
+/// Nothing to report to: asking whether a run is wanted runs nothing.
+struct Unheard;
+
+impl Progress for Unheard {
+    fn started(&self, _step: &application::next::Step) {}
+    fn estimated(
+        &self,
+        _step: &application::next::Step,
+        _outstanding: u64,
+        _takes: std::time::Duration,
+    ) {
+    }
+    fn finished(&self, _done: &Done) {}
 }
 
 /// Whether a run, started by either frontend, holds any part of `scope`
@@ -166,13 +215,18 @@ enum Asked<'a> {
     },
     Collect {
         scope: &'a Scope,
-        today: Date,
+        now: DayPart,
+    },
+    Wanted {
+        scope: &'a Scope,
+        now: DayPart,
     },
 }
 
 enum Answered {
     Report(Box<Report>),
     Collected(Vec<Done>),
+    Wanted(bool),
 }
 
 /// An act answered as the other, which `over` never does.
@@ -187,6 +241,7 @@ async fn over(
     database: &Path,
     zone: &OperatorZone,
     credentials: &infrastructure::Credentials,
+    refetch: Refetch,
     asked: Asked<'_>,
     progress: &(impl Progress + Sync),
 ) -> Result<Answered, NextFailure> {
@@ -245,18 +300,7 @@ async fn over(
         holidays: Calendars,
         diary: SqliteDiaryStore::new(pool.clone()),
         plans: plans.clone(),
-        microcycle: Microcycle::new(
-            MicrocyclePorts {
-                diary: SqliteDiaryStore::new(pool.clone()),
-                plans: plans.clone(),
-                gym_deliveries: deliveries.clone(),
-                cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
-                gym_performed: SqliteCanonicalGymSessionStore::new(pool.clone()),
-                cycling_performed: SqliteCanonicalCyclingSessionStore::new(pool.clone()),
-            },
-            destination(Discipline::Gym)?,
-            destination(Discipline::Cycling)?,
-        ),
+        microcycle: microcycle(&pool, &plans, &deliveries)?,
         committing: Committing::new(
             CommitPorts {
                 plans: plans.clone(),
@@ -284,6 +328,9 @@ async fn over(
         // Beside the store, as extraction's are: a copy of the store elsewhere
         // is a separate system with its own lock.
         lock: FileRunLock::beside(database),
+        fetches: Fetches(SqliteExtractionRunLog::new(pool.clone())),
+        zone: zone.clone(),
+        refetch,
     });
 
     // **Boxed, because it holds every source's fetch at once** (#468).
@@ -295,9 +342,10 @@ async fn over(
         } => Answered::Report(Box::new(
             Box::pin(next.run(now, skip, if_going, progress)).await?,
         )),
-        Asked::Collect { scope, today } => {
-            Answered::Collected(Box::pin(next.collect(scope, today, progress)).await?)
+        Asked::Collect { scope, now } => {
+            Answered::Collected(Box::pin(next.collect(scope, now, progress)).await?)
         }
+        Asked::Wanted { scope, now } => Answered::Wanted(next.wanted(scope, now).await?),
     })
 }
 
@@ -453,6 +501,52 @@ fn build(baked: Option<&str>) -> Option<Build> {
     (revision != "unknown" && !revision.ends_with("-dirty")).then(|| Build::from(baked.to_owned()))
 }
 
+/// Where the plan stands, over this build's stores.
+fn microcycle(
+    pool: &infrastructure::SqlitePool,
+    plans: &SqlitePlanStore,
+    deliveries: &SqlitePrescriptionDeliveryStore,
+) -> Result<
+    Microcycle<
+        SqliteDiaryStore,
+        SqlitePlanStore,
+        SqlitePrescriptionDeliveryStore,
+        SqliteCyclingDeliveryStore,
+        SqliteCanonicalGymSessionStore,
+        SqliteCanonicalCyclingSessionStore,
+    >,
+    NextFailure,
+> {
+    Ok(Microcycle::new(
+        MicrocyclePorts {
+            diary: SqliteDiaryStore::new(pool.clone()),
+            plans: plans.clone(),
+            gym_deliveries: deliveries.clone(),
+            cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
+            gym_performed: SqliteCanonicalGymSessionStore::new(pool.clone()),
+            cycling_performed: SqliteCanonicalCyclingSessionStore::new(pool.clone()),
+        },
+        destination(Discipline::Gym)?,
+        destination(Discipline::Cycling)?,
+    ))
+}
+
+/// The extraction run log, read for when each stream was last fetched, and
+/// the clock that says how long ago that was (#612).
+struct Fetches(SqliteExtractionRunLog);
+
+impl FetchLog for Fetches {
+    async fn fetched(&self, stream: &LandingStream) -> Result<Fetched, StoreError> {
+        self.0.fetched(stream).await
+    }
+}
+
+impl Clock for Fetches {
+    fn now(&self) -> FetchedAt {
+        SystemClock.now()
+    }
+}
+
 /// Every stream this build derives, each through its own arm of
 /// [`wiring::run`], which is also how one is derived from the command line.
 struct Layers {
@@ -551,8 +645,9 @@ fn stream_access(
 /// Where body weight comes from.
 pub const WEIGH_INS: &str = "withings.measurements";
 
-/// What the watch records is collected under (#432): its activities every run,
-/// and its days and nights until yesterday is whole.
+/// What the watch records is collected under (#432): its activities while a
+/// gym session could have been performed (#612), and its days and nights until
+/// yesterday is whole.
 pub const WATCH: &str = "garmin.activities";
 
 /// The cycling use case, over this build's stores and catalogue.

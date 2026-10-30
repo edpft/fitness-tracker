@@ -1,0 +1,28 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT MAX(finished_at)                                     AS \"succeeded: String\",\n                   MAX(CASE WHEN records_landed > 0 THEN finished_at END) AS \"landed: String\"\n              FROM extraction_run\n             WHERE stream = ? AND outcome = 'succeeded'\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "succeeded: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "name": "landed: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "c4c9ccb688e8a81b8ba84440b1fb0570529890005f1219873ee771d0f92b71db"
+}

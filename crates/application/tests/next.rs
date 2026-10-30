@@ -16,19 +16,19 @@ use std::{
 };
 
 use application::{
-    Build, CanonicalLayer, ClassSource, ClassesListed, ClassesRead, DerivationLedger, DerivedFrom,
-    DiaryAuthor, DiaryStore, ExtractionError, HolidayCalendar, NewestObservation, NextLock,
-    NormalisationError, NormalisationSummary, NormalisedLayers, Part, PlanStore, PrescriptionError,
-    RunLockError, RunSummary, SourceError, StoreError, Taken,
+    Build, CanonicalLayer, ClassSource, ClassesHeld, ClassesListed, ClassesRead, Clock,
+    DerivationLedger, DerivedFrom, DiaryAuthor, DiaryStore, ExtractionError, HolidayCalendar,
+    NewestObservation, NextLock, NormalisationError, NormalisationSummary, NormalisedLayers, Part,
+    PlanStore, PrescriptionError, RunLockError, RunSummary, SourceError, StoreError, Taken,
     canonicalise::{Canonicalised, WeighInsCanonicalised},
     commit::{CommitError, Due},
     cycling::RidingError,
     microcycle::{Session, Standing},
     next::{
-        Awaits, Canonicalising, CyclingPrescribed, CyclingSessions, Daily, Done, Found,
-        GymPrescribed, GymSessions, IfGoing, MesocycleCommitter, Next, NextError, NextPorts,
-        NoAccess, Prescribed, Progress, Records, Report, Scope, SkipRefused, StandingReader, Step,
-        StepFailure, Walks, WhatIsNext,
+        Awaits, Canonicalising, CyclingPrescribed, CyclingSessions, Daily, Done, Expects, FetchLog,
+        Fetched, Found, GymPrescribed, GymSessions, IfGoing, MesocycleCommitter, Next, NextError,
+        NextPorts, NoAccess, NotDue, Prescribed, Progress, Records, Refetch, Report, Scope,
+        SkipRefused, StandingReader, Step, StepFailure, Walks, WhatIsNext,
     },
     reschedule::Reschedule,
 };
@@ -36,7 +36,7 @@ use domain::{
     body::WeighInCount,
     canonical::SessionCount,
     cycling::CyclingMesocycle,
-    landing::{LandingStream, RecordCount, RunId},
+    landing::{FetchedAt, LandingStream, RecordCount, RunId},
     normalised::{NormalisationRunId, OperatorZone, RefusalCount, WorkoutCount},
     plan::{Plan, PlanId, PlanName, PlanWindow},
     planner::SessionState,
@@ -59,14 +59,31 @@ fn stream(name: &str) -> Result<LandingStream, Box<dyn std::error::Error>> {
 /// **A walk that is met waits for the others** behind the same meeting point,
 /// and fails if they never arrive: fetched one after another, the first would
 /// wait alone.
+///
+/// **Each walk expects what it was told to**, and anything at all where it was
+/// told nothing.
 struct Walking(
     Vec<(LandingStream, Result<RunSummary, ExtractionError>)>,
     Option<Arc<AtomicUsize>>,
+    Vec<Expects>,
 );
 
 impl Walking {
     fn landing(stream: LandingStream, records: usize) -> Self {
-        Self(vec![(stream, Ok(landed(records)))], None)
+        Self(vec![(stream, Ok(landed(records)))], None, Vec::new())
+    }
+
+    /// Each stream landing one record, expecting what it is paired with.
+    fn expecting(walks: Vec<(LandingStream, Expects)>) -> Self {
+        let (streams, expects): (Vec<_>, Vec<_>) = walks.into_iter().unzip();
+        Self(
+            streams
+                .into_iter()
+                .map(|stream| (stream, Ok(landed(1))))
+                .collect(),
+            None,
+            expects,
+        )
     }
 }
 
@@ -106,6 +123,10 @@ impl Walks for Walking {
             }
         }
         self.0.get(at).map(|(_, result)| result.clone())
+    }
+
+    fn expects(&self, at: usize) -> Expects {
+        self.2.get(at).cloned().unwrap_or(Expects::Anytime)
     }
 }
 
@@ -348,8 +369,8 @@ impl DerivationLedger for Ledger {
     }
 }
 
-/// A catalogue with nothing new to list or read.
-struct Converged;
+/// A catalogue with nothing new to list or read, held as given.
+struct Converged(ClassesHeld);
 
 impl ClassSource for Converged {
     async fn list(&self) -> Result<ClassesListed, SourceError> {
@@ -370,7 +391,52 @@ impl ClassSource for Converged {
             stopped: None,
         })
     }
+    async fn held(&self) -> Result<ClassesHeld, StoreError> {
+        Ok(self.0)
+    }
 }
+
+/// When each stream was last fetched, and a clock stopped at [`AT`].
+#[derive(Default)]
+struct Fetches(BTreeMap<LandingStream, Fetched>);
+
+impl Fetches {
+    /// Each stream last fetched so many minutes before [`AT`], and last
+    /// landing something so many minutes before it, where it ever did.
+    fn minutes(streams: &[(&str, i64, Option<i64>)]) -> Result<Self, Box<dyn std::error::Error>> {
+        let ago = |minutes: i64| -> Result<FetchedAt, jiff::Error> {
+            Ok(FetchedAt::from(
+                AT.checked_sub(jiff::SignedDuration::from_mins(minutes))?,
+            ))
+        };
+        let mut fetched = BTreeMap::new();
+        for (name, succeeded, landed) in streams {
+            fetched.insert(
+                stream(name)?,
+                Fetched {
+                    succeeded: Some(ago(*succeeded)?),
+                    landed: landed.map(ago).transpose()?,
+                },
+            );
+        }
+        Ok(Self(fetched))
+    }
+}
+
+impl FetchLog for Fetches {
+    async fn fetched(&self, stream: &LandingStream) -> Result<Fetched, StoreError> {
+        Ok(self.0.get(stream).copied().unwrap_or_default())
+    }
+}
+
+impl Clock for Fetches {
+    fn now(&self) -> FetchedAt {
+        FetchedAt::from(AT)
+    }
+}
+
+/// The moment the runs here are, inside [`now`]'s afternoon in London.
+const AT: jiff::Timestamp = jiff::Timestamp::constant(1_791_813_600, 0);
 
 /// A school calendar that will not answer.
 struct Unreachable;
@@ -627,6 +693,7 @@ type Ports<H = Unreachable> = NextPorts<
     Unplanned,
     Dayless,
     Lock,
+    Fetches,
 >;
 
 /// The parts other runs of `next` hold, each let go once waited on.
@@ -735,7 +802,7 @@ fn over<H>(
         canonical: Canonical(Arc::clone(&graph)),
         ledger: Ledger(graph),
         build: Some(Build::from("a1b2c3d".to_owned())),
-        classes: Ok(Converged),
+        classes: Ok(Converged(ClassesHeld::default())),
         holidays,
         diary,
         plans: NoPlans,
@@ -744,6 +811,9 @@ fn over<H>(
         gym: Unplanned,
         cycling: Dayless,
         lock: Lock::default(),
+        fetches: Fetches::default(),
+        zone: OperatorZone::try_from("Europe/London")?,
+        refetch: Refetch::WhenDue,
     })
 }
 
@@ -836,6 +906,7 @@ fn each_walk_behind_an_entry_reports_its_own_outcome() {
             ),
         ],
         None,
+        Vec::new(),
     ));
     let report = runtime()
         .expect("a current-thread runtime builds")
@@ -1144,7 +1215,7 @@ fn a_collection_fetches_and_derives_only_its_scope() {
     ]);
     let run = runtime()
         .expect("a current-thread runtime builds")
-        .block_on(Next::new(ports).collect(&scope, now().date, &Heard::default()))
+        .block_on(Next::new(ports).collect(&scope, now(), &Heard::default()))
         .expect("the run collects");
 
     let steps: Vec<String> = run.iter().map(|done| format!("{:?}", done.step)).collect();
@@ -1179,7 +1250,7 @@ fn a_part_another_run_holds_is_joined_and_the_rest_collected() {
     ]);
     let run = runtime()
         .expect("a current-thread runtime builds")
-        .block_on(Next::new(ports).collect(&scope, now().date, &Heard::default()))
+        .block_on(Next::new(ports).collect(&scope, now(), &Heard::default()))
         .expect("the run collects");
 
     let steps: Vec<&Step> = run.iter().map(|done| &done.step).collect();
@@ -1350,9 +1421,9 @@ fn a_layer_that_will_not_derive_is_a_failed_step_and_tried_again() {
 }
 
 /// The Withings step of a run whose newest weigh-in is on `newest`.
-type Fetched = Vec<(Step, Result<Found, StepFailure>)>;
+type Outcomes = Vec<(Step, Result<Found, StepFailure>)>;
 
-fn withings_on(newest: Option<Date>) -> Result<Fetched, Box<dyn std::error::Error>> {
+fn withings_on(newest: Option<Date>) -> Result<Outcomes, Box<dyn std::error::Error>> {
     let mut ports = ports(
         Recorded::week()?,
         Week(vec![
@@ -1387,7 +1458,7 @@ fn a_daily_stream_holding_today_is_not_fetched_until_tomorrow() {
 
     assert_eq!(
         withings_on(Some(now().date)).expect("the run answers"),
-        vec![(withings.clone(), Ok(Found::NotDue))]
+        vec![(withings.clone(), Ok(Found::NotDue(NotDue::UntilTomorrow)))]
     );
     assert_eq!(
         withings_on(now().date.yesterday().ok()).expect("the run answers"),
@@ -1413,6 +1484,7 @@ fn the_streams_are_fetched_at_once() {
         Walking(
             vec![(stream(name).expect("a stream"), Ok(landed(1)))],
             met.clone(),
+            Vec::new(),
         )
     };
     ports.gym_records.walks = Ok(walking("hevy.workouts"));
@@ -1440,7 +1512,7 @@ fn the_streams_are_fetched_at_once() {
 }
 
 /// The watch's steps of a run whose day walks are whole through `whole`.
-fn watch_on(whole: Option<Date>) -> Result<Fetched, Box<dyn std::error::Error>> {
+fn watch_on(whole: Option<Date>) -> Result<Outcomes, Box<dyn std::error::Error>> {
     let mut ports = ports(
         Recorded::week()?,
         Week(vec![
@@ -1490,7 +1562,7 @@ fn the_watch_s_days_wait_for_yesterday_and_its_activities_do_not() {
         watch_on(yesterday).expect("the run answers"),
         vec![
             (activities.clone(), Ok(Found::Landed(RecordCount::from(3)))),
-            (days.clone(), Ok(Found::NotDue)),
+            (days.clone(), Ok(Found::NotDue(NotDue::UntilTomorrow))),
         ]
     );
     assert_eq!(
@@ -1500,4 +1572,269 @@ fn the_watch_s_days_wait_for_yesterday_and_its_activities_do_not() {
             (days, Ok(Found::Landed(RecordCount::from(4)))),
         ]
     );
+}
+
+// --- Fetching only what could hold something new (#612) ---------------------
+
+/// Each fetching step of `run`, and how it ended.
+fn fetching(run: Vec<Done>) -> Outcomes {
+    run.into_iter()
+        .filter(|done| matches!(done.step, Step::Fetching(_)))
+        .map(|done| (done.step, done.outcome))
+        .collect()
+}
+
+/// What a page's run over Hevy fetches, with the gym's Monday session in
+/// `state` and Hevy last fetched `ago` minutes before [`AT`].
+fn hevy_fetched(
+    state: SessionState,
+    ago: i64,
+    refetch: Refetch,
+) -> Result<Outcomes, Box<dyn std::error::Error>> {
+    let mut ports = ports(
+        Recorded::week()?,
+        Week(vec![state, SessionState::ToBePrescribed]),
+        Committer(None),
+    )?;
+    let hevy = stream("hevy.workouts")?;
+    ports.gym_records.walks = Ok(Walking::expecting(vec![(
+        hevy.clone(),
+        Expects::Sessions(Discipline::Gym),
+    )]));
+    ports.fetches = Fetches::minutes(&[("hevy.workouts", ago, None)])?;
+    ports.refetch = refetch;
+    let scope = Scope::new([Part::Fetching(hevy)]);
+    Ok(fetching(runtime()?.block_on(Next::new(ports).collect(
+        &scope,
+        now(),
+        &Heard::default(),
+    ))?))
+}
+
+/// **Hevy is fetched only while a gym session could have been performed**
+/// (#612): prescribed and not yet performed or skipped, or its window closed
+/// since Hevy was last fetched, or before this microcycle began.
+/// The operator, 2026-10-30, on the issue.
+#[test]
+fn a_session_stream_is_fetched_only_while_a_session_could_have_been_performed() {
+    let hevy = Step::Fetching(stream("hevy.workouts").expect("a stream"));
+    let landed = Ok(Found::Landed(RecordCount::from(1)));
+    let no_session = Ok(Found::NotDue(NotDue::NoSession(Discipline::Gym)));
+    let two_hours = 120;
+    let last_week = 8 * 24 * 60;
+    let fetched =
+        |state, ago| hevy_fetched(state, ago, Refetch::WhenDue).expect("the run collects");
+
+    assert_eq!(
+        fetched(SessionState::Prescribed, two_hours),
+        vec![(hevy.clone(), landed.clone())],
+        "prescribed and not yet performed",
+    );
+    assert_eq!(
+        fetched(SessionState::NotPerformed { absence: None }, two_hours),
+        vec![(hevy.clone(), landed.clone())],
+        "its window closes after the last fetch",
+    );
+    assert_eq!(
+        fetched(SessionState::NotPrescribed, two_hours),
+        vec![(hevy.clone(), landed.clone())],
+        "its window closes after the last fetch with nothing prescribed",
+    );
+    assert_eq!(
+        fetched(SessionState::ToBePrescribed, last_week),
+        vec![(hevy.clone(), landed)],
+        "last fetched before the microcycle began",
+    );
+    assert_eq!(
+        fetched(SessionState::ToBePrescribed, two_hours),
+        vec![(hevy.clone(), no_session.clone())],
+        "nothing prescribed",
+    );
+    assert_eq!(
+        fetched(SessionState::Performed, two_hours),
+        vec![(hevy.clone(), no_session.clone())],
+        "already performed",
+    );
+    assert_eq!(
+        fetched(
+            SessionState::Skipped {
+                absence: domain::schedule::AbsenceKind::Illness,
+            },
+            two_hours,
+        ),
+        vec![(hevy, no_session)],
+        "skipped",
+    );
+}
+
+/// **A page does not fetch again what was fetched under 45 minutes ago**, the
+/// shortest visit there can be; the terminal does whenever it is run.
+#[test]
+fn a_page_fetches_nothing_fetched_within_the_shortest_visit() {
+    let hevy = Step::Fetching(stream("hevy.workouts").expect("a stream"));
+    let landed = Ok(Found::Landed(RecordCount::from(1)));
+    let fetched = |ago, refetch| {
+        hevy_fetched(SessionState::Prescribed, ago, refetch).expect("the run collects")
+    };
+
+    assert_eq!(
+        fetched(10, Refetch::SHORTEST_VISIT),
+        vec![(
+            hevy.clone(),
+            Ok(Found::NotDue(NotDue::Fetched {
+                within: std::time::Duration::from_mins(45),
+            })),
+        )]
+    );
+    assert_eq!(
+        fetched(50, Refetch::SHORTEST_VISIT),
+        vec![(hevy.clone(), landed.clone())]
+    );
+    assert_eq!(fetched(10, Refetch::WhenDue), vec![(hevy, landed)]);
+}
+
+/// **A ride's samples are fetched only once the ride list has landed
+/// something since they last were**, and Peloton's account once a day.
+#[test]
+fn a_stream_that_follows_another_waits_for_it_and_an_account_for_tomorrow() {
+    let fetched = |samples: i64, account: i64| -> Outcomes {
+        let mut ports = ports(
+            Recorded::week().expect("a week"),
+            Week(vec![SessionState::Prescribed, SessionState::Prescribed]),
+            Committer(None),
+        )
+        .expect("the ports build");
+        let rides = stream("peloton.rides").expect("a stream");
+        ports.cycling_records.walks = Ok(Walking::expecting(vec![
+            (rides.clone(), Expects::Sessions(Discipline::Cycling)),
+            (
+                stream("peloton.ride_samples").expect("a stream"),
+                Expects::After(rides),
+            ),
+            (
+                stream("peloton.account").expect("a stream"),
+                Expects::OnceADay,
+            ),
+        ]));
+        ports.fetches = Fetches::minutes(&[
+            ("peloton.rides", 120, Some(120)),
+            ("peloton.ride_samples", samples, None),
+            ("peloton.account", account, None),
+        ])
+        .expect("the fetches");
+        let scope = Scope::new(
+            ["peloton.rides", "peloton.ride_samples", "peloton.account"]
+                .map(|name| Part::Fetching(stream(name).expect("a stream"))),
+        );
+        fetching(
+            runtime()
+                .expect("a current-thread runtime builds")
+                .block_on(Next::new(ports).collect(&scope, now(), &Heard::default()))
+                .expect("the run collects"),
+        )
+    };
+    let outcomes = |run: Outcomes| {
+        run.into_iter()
+            .map(|(_, outcome)| outcome)
+            .collect::<Vec<_>>()
+    };
+    let landed = Ok(Found::Landed(RecordCount::from(1)));
+    let rides = stream("peloton.rides").expect("a stream");
+
+    // Samples fetched before the rides landed, the account yesterday.
+    assert_eq!(
+        outcomes(fetched(180, 20 * 60)),
+        vec![landed.clone(), landed.clone(), landed.clone()]
+    );
+    // Samples fetched since, the account this morning.
+    assert_eq!(
+        outcomes(fetched(60, 3 * 60)),
+        vec![
+            landed,
+            Ok(Found::NotDue(NotDue::Follows(rides))),
+            Ok(Found::NotDue(NotDue::UntilTomorrow)),
+        ]
+    );
+}
+
+/// **Peloton's classes are refreshed once a day**, unless details are still
+/// to be read.
+#[test]
+fn the_classes_are_refreshed_once_a_day_unless_some_are_unread() {
+    let refreshed = |listed_ago: i64, outstanding: u64| -> Result<Found, StepFailure> {
+        let mut ports = ports(
+            Recorded::week().expect("a week"),
+            Week(vec![
+                SessionState::ToBePrescribed,
+                SessionState::ToBePrescribed,
+            ]),
+            Committer(None),
+        )
+        .expect("the ports build");
+        let listed = AT
+            .checked_sub(jiff::SignedDuration::from_mins(listed_ago))
+            .expect("a moment");
+        ports.classes = Ok(Converged(ClassesHeld {
+            listed: Some(FetchedAt::from(listed)),
+            outstanding,
+        }));
+        let report = runtime()
+            .expect("a current-thread runtime builds")
+            .block_on(Next::new(ports).run(now(), None, IfGoing::Refuse, &Heard::default()))
+            .expect("the run answers");
+        report
+            .run
+            .into_iter()
+            .find(|done| done.step == Step::RefreshingClasses)
+            .map(|done| done.outcome)
+            .expect("a refresh step")
+    };
+
+    assert_eq!(refreshed(60, 0), Ok(Found::NotDue(NotDue::UntilTomorrow)));
+    assert!(
+        matches!(refreshed(60, 5), Ok(Found::Classes { .. })),
+        "unread"
+    );
+    assert!(
+        matches!(refreshed(20 * 60, 0), Ok(Found::Classes { .. })),
+        "yesterday"
+    );
+}
+
+/// **A chart page opened just after a run over its streams wants no run**
+/// (#612), so it starts none and joins none: nothing it reads could hold
+/// anything new, and every layer it reads is current. Later than the shortest
+/// visit, or under a build the store has not seen, it wants one.
+#[test]
+fn a_chart_page_opened_just_after_a_run_over_its_streams_wants_no_run() {
+    let graph = Arc::new(Graph::default());
+    run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+    let hevy = stream("hevy.workouts").expect("a stream");
+    let scope = Scope::new([
+        Part::Fetching(hevy.clone()),
+        Part::Normalising(hevy),
+        Part::Canonicalising(CanonicalLayer::Gym),
+    ]);
+    let wanted = |minutes: i64, build: &str| -> bool {
+        let mut ports = over(
+            Arc::clone(&graph),
+            Recorded::week().expect("a week"),
+            Week(vec![SessionState::Prescribed, SessionState::ToBePrescribed]),
+            Committer(None),
+            Unreachable,
+        )
+        .expect("the ports build");
+        ports.build = Some(Build::from(build.to_owned()));
+        ports.fetches =
+            Fetches::minutes(&[("hevy.workouts", minutes, Some(minutes))]).expect("the fetches");
+        ports.refetch = Refetch::SHORTEST_VISIT;
+        runtime()
+            .expect("a current-thread runtime builds")
+            .block_on(Next::new(ports).wanted(&scope, now()))
+            .expect("the store answers")
+    };
+
+    assert!(!wanted(1, "a1b2c3d"), "a minute after");
+    assert!(wanted(50, "a1b2c3d"), "after the shortest visit");
+    assert!(wanted(1, "e4f5a6b"), "under a new build");
 }

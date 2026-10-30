@@ -7,7 +7,7 @@ use std::path::Path;
 use application::{
     CanonicalLayer, DerivedFrom, StoreError,
     canonicalise::{Canonicalised, WeighInsCanonicalised},
-    next::{Canonicalising, Done, Found, IfGoing, Progress, Step, StepFailure},
+    next::{Canonicalising, Done, Found, IfGoing, NotDue, Progress, Refetch, Step, StepFailure},
 };
 use tracing::{Instrument as _, Span, field::Empty};
 use tracing_subscriber::layer::SubscriberExt as _;
@@ -105,6 +105,7 @@ pub fn request(page: &str, redraw: bool) -> Span {
         served = Empty,
         redraw,
         joined = Empty,
+        due = Empty,
         outcome = Empty,
     )
 }
@@ -147,6 +148,12 @@ pub fn joined() {
     Span::current().record("joined", true);
 }
 
+/// The page being loaded asked for nothing that could be new, so it started
+/// no run and joined none (#612).
+pub fn not_due() {
+    Span::current().record("due", false);
+}
+
 /// How a page load ended, on its span.
 pub fn request_ended(span: &Span, succeeded: bool) {
     let outcome = if succeeded {
@@ -178,6 +185,14 @@ impl Frontend {
         match self {
             Self::Cli => IfGoing::Refuse,
             Self::Web => IfGoing::Join,
+        }
+    }
+    /// How soon a stream fetched a moment ago is fetched again (#612): a page
+    /// waits out the shortest visit, and the terminal asks whenever it is run.
+    pub const fn refetch(self) -> Refetch {
+        match self {
+            Self::Cli => Refetch::WhenDue,
+            Self::Web => Refetch::SHORTEST_VISIT,
         }
     }
 }
@@ -221,6 +236,10 @@ impl Run {
 
     pub(crate) const fn if_going(&self) -> IfGoing {
         self.frontend.if_going()
+    }
+
+    pub(crate) const fn refetch(&self) -> Refetch {
+        self.frontend.refetch()
     }
 }
 
@@ -287,6 +306,7 @@ impl<'a, P> Spanned<'a, P> {
             layer = Empty,
             parts = Empty,
             found = Empty,
+            why = Empty,
             landed = Empty,
             written = Empty,
             left_out = Empty,
@@ -334,8 +354,17 @@ fn found(span: &Span, outcome: &Result<Found, StepFailure>) {
             span.record("failure", failure.to_string());
             Outcome::Failed
         }
-        Ok(Found::NotDue) => {
+        Ok(Found::NotDue(why)) => {
             span.record("found", "not due");
+            span.record(
+                "why",
+                match why {
+                    NotDue::UntilTomorrow => "until tomorrow",
+                    NotDue::Fetched { .. } => "fetched",
+                    NotDue::Follows(_) => "follows",
+                    NotDue::NoSession(_) => "no session",
+                },
+            );
             Outcome::Skipped
         }
         Ok(Found::Unchanged) => {
@@ -379,7 +408,7 @@ fn found(span: &Span, outcome: &Result<Found, StepFailure>) {
                 Found::Skipped { .. } => {
                     span.record("found", "skipped");
                 }
-                Found::NotDue | Found::Unchanged => {}
+                Found::NotDue(_) | Found::Unchanged => {}
             }
             Outcome::Succeeded
         }

@@ -18,13 +18,14 @@ use application::{
     RefusalReport, RefusalReporter, ResumptionPointResetter, ResumptionPointStore, RunSummary,
     StatusError, StreamStatus, Terms, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser,
     extract::{Extraction, ExtractionPorts},
-    next::{Awaits, Daily, NoAccess, Records},
+    next::{Awaits, Daily, Expects, NoAccess, Records},
     normalise::{DerivationStanding, Normalisation, NormalisationPorts, Refusals},
     status::ExtractionStatus,
 };
 use domain::{
     landing::{FetchedAt, LandingStream, RecordCount, Watermark},
     normalised::{OperatorZone, StatedZones},
+    schedule::Discipline,
 };
 use infrastructure::{
     BtwbExportAccountReader, BtwbExportLandingStore, BtwbTranslator, FileRunLock, FolderFiles,
@@ -843,6 +844,7 @@ fn peloton_walks(
     let credentials = PelotonCredentials::new(email, password);
     let rides = application::next::Walk {
         stream: landing.stream().clone(),
+        expects: expects(landing.stream()),
         extraction: Extraction::new(ExtractionPorts {
             source: PelotonWorkouts::new(
                 base_url.clone(),
@@ -857,6 +859,7 @@ fn peloton_walks(
     };
     let graphs = application::next::Walk {
         stream: samples_landing.stream().clone(),
+        expects: expects(samples_landing.stream()),
         extraction: Extraction::new(ExtractionPorts {
             source: PelotonWorkoutSamples::new(
                 base_url.clone(),
@@ -871,6 +874,7 @@ fn peloton_walks(
     };
     let details = application::next::Walk {
         stream: details_landing.stream().clone(),
+        expects: expects(details_landing.stream()),
         extraction: Extraction::new(ExtractionPorts {
             source: PelotonWorkoutDetails::new(
                 base_url.clone(),
@@ -885,6 +889,7 @@ fn peloton_walks(
     };
     let account = application::next::Walk {
         stream: account_landing.stream().clone(),
+        expects: expects(account_landing.stream()),
         extraction: Extraction::new(ExtractionPorts {
             source: PelotonAccount::new(base_url, peloton_auth(auth_base_url, credentials)),
             landing: account_landing,
@@ -1175,7 +1180,10 @@ async fn collect_activities(
     let listed = Garmin::signed_in(access, GarminActivityLandingStore::STREAM, pool, database)?
         .activities()?;
     let mut each = Vec::with_capacity(listed.len());
-    for application::next::Walk { stream, extraction } in listed {
+    for application::next::Walk {
+        stream, extraction, ..
+    } in listed
+    {
         each.push(walk(stream, extraction, walks).await);
     }
     Ok(Outcome::ExtractedEach(each))
@@ -1445,6 +1453,7 @@ impl<'a> Garmin<'a> {
     {
         application::next::Walk {
             stream: landing.stream().clone(),
+            expects: expects(landing.stream()),
             extraction: Erased::new(Extraction::new(ExtractionPorts {
                 source,
                 landing,
@@ -1460,9 +1469,9 @@ impl<'a> Garmin<'a> {
 /// What the watch records, as `next` collects it (#432): its activities, and
 /// its days and nights, on one sign-in.
 ///
-/// **The activities every run**, as Hevy and Peloton are: the activity list is
-/// where a ride or a gym session the watch recorded first appears, and one
-/// could have finished in the last hour.
+/// **The activities while a gym session could have been performed**, as
+/// Hevy's are, and their files and sets once the list has landed something
+/// ([`expects`]).
 ///
 /// **The days until yesterday is whole, then not until tomorrow.** The
 /// operator, 2026-10-22: *"we don't need to fetch daily data if we've already
@@ -1597,6 +1606,37 @@ impl WorkoutExtractor for Erased {
         &self,
     ) -> impl std::future::Future<Output = Result<RunSummary, ExtractionError>> + Send {
         self.0.run()
+    }
+}
+
+/// Why each stream `next` fetches could hold something new, and so when a run
+/// fetches it (#612). The operator, 2026-10-30, on the issue.
+///
+/// - **Peloton's account**, once a day: what it holds changes rarely.
+/// - **A ride's details and samples**, after `peloton.rides` has landed
+///   something: each is fetched per ride the list names.
+/// - **The watch's activity files and exercise sets**, likewise after
+///   `garmin.activities`.
+/// - **Hevy's workouts and the watch's activities**, while a gym session could
+///   have been performed; **Peloton's rides**, while a cycling one could.
+/// - **Anything else** (a weigh-in, the watch's days) at any moment, until it
+///   holds the day it waits for.
+pub(crate) fn expects(stream: &LandingStream) -> Expects {
+    let after =
+        |parent: &str| LandingStream::try_from(parent).map_or(Expects::Anytime, Expects::After);
+    match stream.to_string().as_str() {
+        PelotonAccountLandingStore::STREAM => Expects::OnceADay,
+        PelotonRideDetailLandingStore::STREAM | PelotonRideSampleLandingStore::STREAM => {
+            after(PelotonRideLandingStore::STREAM)
+        }
+        GarminActivityFileLandingStore::STREAM | GarminExerciseSetLandingStore::STREAM => {
+            after(GarminActivityLandingStore::STREAM)
+        }
+        HevyWorkoutLandingStore::STREAM | GarminActivityLandingStore::STREAM => {
+            Expects::Sessions(Discipline::Gym)
+        }
+        PelotonRideLandingStore::STREAM => Expects::Sessions(Discipline::Cycling),
+        _ => Expects::Anytime,
     }
 }
 
@@ -1787,6 +1827,7 @@ fn hevy_walk(
     };
     Ok(application::next::Walk {
         stream: landing.stream().clone(),
+        expects: expects(landing.stream()),
         extraction: Extraction::new(ExtractionPorts {
             source: HevyWorkoutEvents::new(base_url, api_key),
             landing,
@@ -1871,6 +1912,7 @@ fn withings_walk(
     let (base_url, auth) = withings_auth(access)?;
     Ok(application::next::Walk {
         stream: landing.stream().clone(),
+        expects: expects(landing.stream()),
         extraction: Extraction::new(ExtractionPorts {
             source: WithingsMeasurements::new(base_url, auth),
             landing,

@@ -1220,13 +1220,13 @@ fn ended(done: &application::next::Done) -> String {
     use application::next::Found;
     let found = match &done.outcome {
         Err(failure) => return format!("failed: {failure}"),
-        Ok(Found::NotDue) => return "not due until tomorrow".to_owned(),
+        Ok(Found::NotDue(why)) => return why.to_string(),
         Ok(Found::Unchanged) => return "unchanged".to_owned(),
         Ok(Found::Joined) => return "done".to_owned(),
         Ok(found) => found,
     };
     let what = match found {
-        Found::NotDue | Found::Unchanged | Found::Joined => String::new(),
+        Found::NotDue(_) | Found::Unchanged | Found::Joined => String::new(),
         Found::Landed(records) if records.as_usize() == 0 => "nothing new".to_owned(),
         Found::Landed(records) => format!("{records} new"),
         Found::Written(written) => format!("{written} written"),
