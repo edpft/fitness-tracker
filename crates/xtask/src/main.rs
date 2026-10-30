@@ -51,6 +51,7 @@ const FAST: &[&str] = &[
     "architecture",
     "use-case-isolation",
     "workspace-members",
+    "test-targets",
     "unused-deps",
     "audit-deps",
     "audit-licenses",
