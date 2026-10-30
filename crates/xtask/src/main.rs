@@ -1,14 +1,15 @@
 //! The front door to the gate (#629): each run is recorded as spans in the
 //! `telemetry.db` beside the store, stamped with the build it checked.
 //!
-//! - `cargo xtask gate`: every flake check, as a `gate` span with a `check`
-//!   span for each, and the `test` spans under `test`.
+//! - `cargo xtask gate`: every flake check, the fast ones first and stopping
+//!   at the first to fail, as a `gate` span with a `check` span for each, and
+//!   the `test` spans under `test`.
 //! - `cargo xtask check <name>`: one flake check, with no `gate` above it.
 //! - `cargo xtask test [<nextest arguments>…]`: `cargo nextest run`, its
 //!   `test` spans with no `check` above them.
-//! - `cargo xtask import`: CI's runs, recorded the same way. The gate imports
-//!   too, once its own run is recorded, so CI's are taken regularly and before
-//!   Actions deletes what they uploaded.
+//! - `cargo xtask import`: CI's runs, recorded the same way. `/start` runs it,
+//!   after a merge, so CI's are taken regularly and before Actions deletes what
+//!   they uploaded. The gate does not: a local check waits on nothing remote.
 //!
 //! Nix defines and builds the checks; nix-fast-build runs them and says how
 //! each went, and nextest's JUnit report says how each test went.
@@ -34,6 +35,58 @@ const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
 /// Where nextest writes its JUnit report, inside the target directory: see
 /// `.config/nextest.toml`.
 const REPORT: &str = "junit.xml";
+
+/// The checks that build nothing of the workspace, run before the rest so that
+/// a slip in one fails the gate in seconds rather than after the cargo builds
+/// (#644). A check missing from here only runs later; one named here that the
+/// flake no longer has fails the gate's evaluation, so this cannot go stale
+/// quietly.
+const FAST: &[&str] = &[
+    "format",
+    "toml-fmt",
+    "nix-format",
+    "typos",
+    "secrets",
+    "workflows",
+    "architecture",
+    "use-case-isolation",
+    "workspace-members",
+    "unused-deps",
+    "audit-deps",
+    "audit-licenses",
+];
+
+/// How many checks build at once. The laptop serves the operator's app while
+/// it builds, so the cargo builds go one at a time, each on every core; the
+/// fast checks are light enough for two.
+const FAST_JOBS: u8 = 2;
+const SLOW_JOBS: u8 = 1;
+
+/// Which of the flake's checks a run builds.
+enum Selection<'a> {
+    Only(&'a [&'a str]),
+    Except(&'a [&'a str]),
+}
+
+impl Selection<'_> {
+    /// The `--select` function for nix-fast-build.
+    fn function(&self) -> String {
+        let names = |names: &[&str]| names.join(" ");
+        let quoted = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| format!("\"{name}\""))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        match self {
+            Self::Only(only) => format!("checks: {{ inherit (checks) {}; }}", names(only)),
+            Self::Except(except) => {
+                format!("checks: builtins.removeAttrs checks [ {} ]", quoted(except))
+            }
+        }
+    }
+}
 
 const USAGE: &str = "usage: cargo xtask gate
        cargo xtask check <name>
@@ -79,7 +132,12 @@ fn is_check(name: &str) -> bool {
 
 fn gate() -> ExitCode {
     let started_at = Timestamp::now();
-    let (checks, status) = run_checks(None);
+    let (mut checks, mut status) = run_checks(&Selection::Only(FAST), FAST_JOBS);
+    if matches!(&status, Ok(passed) if passed.success()) {
+        let (slow, slow_status) = run_checks(&Selection::Except(FAST), SLOW_JOBS);
+        checks.extend(slow);
+        status = slow_status;
+    }
     let ended_at = Timestamp::now();
     let gate = Timed {
         name: "gate",
@@ -91,7 +149,6 @@ fn gate() -> ExitCode {
         children: checks,
     };
     recorded(&[gate]);
-    imported();
     code(status)
 }
 
@@ -118,7 +175,7 @@ fn imported() -> bool {
 }
 
 fn check(name: &str) -> ExitCode {
-    let (checks, status) = run_checks(Some(name));
+    let (checks, status) = run_checks(&Selection::Only(&[name]), SLOW_JOBS);
     recorded(&checks);
     code(status)
 }
@@ -142,8 +199,9 @@ fn test(arguments: &[OsString]) -> ExitCode {
     code(status)
 }
 
-/// Run the flake's checks, or the one named, and time each as it ends.
-fn run_checks(only: Option<&str>) -> (Vec<Timed>, std::io::Result<ExitStatus>) {
+/// Run the checks selected, `jobs` at a time, and time each as it ends. The
+/// first to fail stops the rest (#644), and is named.
+fn run_checks(selection: &Selection, jobs: u8) -> (Vec<Timed>, std::io::Result<ExitStatus>) {
     let system = match system() {
         Ok(system) => system,
         Err(error) => return (Vec::new(), Err(error)),
@@ -153,18 +211,17 @@ fn run_checks(only: Option<&str>) -> (Vec<Timed>, std::io::Result<ExitStatus>) {
         .args([
             "--no-nom",
             "--skip-cached",
+            "--fail-fast",
             "--stream-json-lines",
-            "--flake",
+            "--max-jobs",
         ])
+        .arg(jobs.to_string())
+        .arg("--flake")
         .arg(format!(".#checks.{system}"))
         .current_dir(ROOT)
         .stdin(Stdio::null())
         .stdout(Stdio::piped());
-    if let Some(name) = only {
-        command
-            .arg("--select")
-            .arg(format!("checks: {{ inherit (checks) {name}; }}"));
-    }
+    command.arg("--select").arg(selection.function());
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => return (Vec::new(), Err(error)),
@@ -172,7 +229,14 @@ fn run_checks(only: Option<&str>) -> (Vec<Timed>, std::io::Result<ExitStatus>) {
     let mut checks = Vec::new();
     if let Some(stdout) = child.stdout.take() {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            checks.extend(checks::ended(&line, Timestamp::now(), tests_in));
+            let Some(check) = checks::ended(&line, Timestamp::now(), tests_in) else {
+                continue;
+            };
+            if check.outcome == Some(Outcome::Failed) {
+                let name = check.fields.get("check").and_then(|name| name.as_str());
+                eprintln!("xtask: stopped: {} failed", name.unwrap_or("a check"));
+            }
+            checks.push(check);
         }
     }
     (checks, child.wait())
@@ -306,4 +370,25 @@ fn build() -> Option<String> {
     ])?;
     let suffix = if dirty { "-dirty" } else { "" };
     Some(format!("{revision}{suffix} ({date})"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_fast_pass_builds_only_the_fast_checks() {
+        assert_eq!(
+            Selection::Only(&["format", "typos"]).function(),
+            "checks: { inherit (checks) format typos; }"
+        );
+    }
+
+    #[test]
+    fn the_slow_pass_builds_every_check_but_those() {
+        assert_eq!(
+            Selection::Except(&["format", "typos"]).function(),
+            r#"checks: builtins.removeAttrs checks [ "format" "typos" ]"#
+        );
+    }
 }
