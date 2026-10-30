@@ -14,8 +14,6 @@
 //! happens at the call site, where it is allowed and where a bad fixture
 //! should fail loudly anyway.
 
-#![allow(dead_code)]
-
 use std::{
     error::Error,
     sync::{Arc, Mutex, PoisonError},
@@ -158,10 +156,6 @@ impl FakeSource {
         *guard(&self.swap_after) = Some((page, pages));
     }
 
-    pub fn requests(&self) -> Vec<Request> {
-        guard(&self.requests).clone()
-    }
-
     pub fn request_count(&self) -> usize {
         guard(&self.requests).len()
     }
@@ -249,7 +243,6 @@ impl WorkoutEventSource for FakeSource {
 pub struct InMemoryLanding {
     stream: LandingStream,
     records: Arc<Mutex<Vec<(RunId, LandingRecord)>>>,
-    failing: Arc<Mutex<bool>>,
 }
 
 impl InMemoryLanding {
@@ -257,7 +250,6 @@ impl InMemoryLanding {
         Self {
             stream,
             records: Arc::new(Mutex::new(Vec::new())),
-            failing: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -285,10 +277,6 @@ impl InMemoryLanding {
         ids.dedup();
         ids
     }
-
-    pub fn fail(&self) {
-        *guard(&self.failing) = true;
-    }
 }
 
 impl LandingStore for InMemoryLanding {
@@ -300,11 +288,6 @@ impl LandingStore for InMemoryLanding {
         &self,
         id: &SourceRecordId,
     ) -> Result<Option<PayloadDigest>, StoreError> {
-        if *guard(&self.failing) {
-            return Err(StoreError::Unavailable {
-                detail: "stub store".to_owned(),
-            });
-        }
         Ok(guard(&self.records)
             .iter()
             .rev()
@@ -317,11 +300,6 @@ impl LandingStore for InMemoryLanding {
         run: RunId,
         records: Vec<LandingRecord>,
     ) -> Result<RecordCount, StoreError> {
-        if *guard(&self.failing) {
-            return Err(StoreError::Unavailable {
-                detail: "stub store".to_owned(),
-            });
-        }
         let landed = records.len();
         guard(&self.records).extend(records.into_iter().map(|record| (run, record)));
         Ok(RecordCount::from(landed))
@@ -338,12 +316,6 @@ pub struct InMemoryResumption {
 }
 
 impl InMemoryResumption {
-    pub fn holding(mark: Watermark) -> Self {
-        Self {
-            point: Arc::new(Mutex::new(Some(mark))),
-        }
-    }
-
     pub fn get(&self) -> Option<Watermark> {
         *guard(&self.point)
     }

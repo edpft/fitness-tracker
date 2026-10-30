@@ -16,7 +16,7 @@
 //! - the store round-trips an assertion, and a retraction takes its terms
 //!   with it.
 
-mod support;
+use crate::support;
 
 use domain::{
     gym::{

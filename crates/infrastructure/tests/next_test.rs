@@ -3,7 +3,7 @@
 //! Here rather than in `domain` because the plan fixtures are here; the
 //! function is `domain`'s and touches no adapter.
 
-mod support;
+use crate::support;
 
 use domain::analytical::one_rep_max::{NextTest, next_test};
 use jiff::civil::date;

@@ -5,8 +5,7 @@
 //! Garmin serves for a night it measured nothing on, and the one night with a
 //! five-minute high and no average — are the ones his 634 landed nights hold.
 
-#[path = "support/layers.rs"]
-mod layers;
+use crate::support::layers;
 
 use application::{Translation, ports::SourceAccount, ports::Translator};
 use domain::normalised::StatedZones;

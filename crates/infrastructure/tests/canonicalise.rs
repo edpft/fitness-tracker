@@ -16,7 +16,7 @@
 //! the test to unwrap, since the `clippy.toml` exemptions cover a `#[test]`
 //! body and not a function beside one.
 
-mod support;
+use crate::support;
 
 use application::{
     CanonicalGymSessionStore as _, ExtractionRunLog as _, LandingStore as _,

@@ -31,8 +31,8 @@ use domain::{
         LandingRecordId, LandingStream, RawPayload, SourceRecordId,
     },
     normalised::{
-        NormalisationOutcome, NormalisationRun, NormalisationRunId, NormalisedEntity, OperatorZone,
-        Refusal, RefusalCount, WorkoutCount,
+        NormalisationOutcome, NormalisationRun, NormalisationRunId, OperatorZone, Refusal,
+        RefusalCount, WorkoutCount,
     },
 };
 

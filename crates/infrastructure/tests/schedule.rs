@@ -4,7 +4,7 @@
 //! the record, because the record shows when the operator *did* train and that
 //! is not the same as when they could have.
 
-mod support;
+use crate::support;
 
 use std::{collections::BTreeMap, num::NonZeroU8};
 

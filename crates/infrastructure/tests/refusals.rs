@@ -10,7 +10,7 @@
 //! not a grep — and a formatted sentence would satisfy a reader while defeating
 //! the assertion that matters.
 
-mod support;
+use crate::support;
 
 use std::collections::BTreeMap;
 

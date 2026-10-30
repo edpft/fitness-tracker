@@ -9,7 +9,7 @@
 //! points the adapter at a local stub. The composed URL is pinned by a unit test
 //! beside the adapter instead; see `hevy::destination`.
 
-mod support;
+use crate::support;
 
 use application::{Deliverable, DeliveryReference, PrescriptionDestination as _};
 use domain::{

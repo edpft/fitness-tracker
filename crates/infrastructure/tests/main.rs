@@ -1,0 +1,69 @@
+//! The crate's integration tests, as one binary (#648).
+//!
+//! Each file beside this one is a module of it, and the manifest turns off
+//! cargo's discovery of the rest, so a file not named here is not compiled.
+//! The `test-targets` check fails the gate on one.
+
+mod absence_migration;
+mod authored_data;
+mod btwb_exports;
+mod btwb_sessions;
+mod canonical_gym_session;
+mod canonicalise;
+mod comparison;
+mod cycling_mesocycle;
+mod cycling_session;
+mod delivery;
+mod derivation_ledger;
+mod devices;
+mod edit_overlay;
+mod exercise_history;
+mod failed_attempt;
+mod fill_change;
+mod garmin_activity_files_contract;
+mod garmin_auth_contract;
+mod garmin_days_contract;
+mod garmin_exercise_sets_contract;
+mod hevy_contract;
+mod hevy_routine_contract;
+mod incremental;
+mod lifecycle;
+mod manual_gym_session;
+mod manual_weigh_in;
+mod measured_gym_session;
+mod microcycle;
+mod migration_backup;
+mod myfitnesspal_exports;
+mod next_session;
+mod next_test;
+mod normalisation;
+mod normalised_store;
+mod overnight_hrv;
+mod peloton_account_contract;
+mod peloton_auth_contract;
+mod peloton_catalogue_contract;
+mod peloton_class_catalogue;
+mod peloton_cool_down_contract;
+mod peloton_holding_selection;
+mod peloton_stack_contract;
+mod peloton_token_cache;
+mod prescription;
+mod progression;
+mod refusals;
+mod resting_heart_rate;
+mod retraction;
+mod round_trip;
+mod run_lock;
+mod sbs_cycle;
+mod sbs_prescription;
+mod schedule;
+mod scheduled_mesocycle;
+mod sleep;
+mod spreadsheet_files;
+mod standalone_test;
+mod store;
+mod support;
+mod unexpected_responses;
+mod wahoo_files;
+mod weigh_in;
+mod withings_contract;

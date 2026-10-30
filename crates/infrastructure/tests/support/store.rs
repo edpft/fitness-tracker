@@ -13,9 +13,9 @@ use application::{
 use domain::normalised::StatedZones;
 use infrastructure::{
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
-    SqliteCanonicalGymSessionStore, SqliteExtractionRunLog, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqliteGymSessionStore, SqliteNormalisationRunLog,
-    SqliteNormalisedGymSessionReader, SqlitePlanStore, SqliteRefusalStore, connect,
+    SqliteCanonicalGymSessionStore, SqliteExtractionRunLog, SqliteGymSessionStore,
+    SqliteNormalisationRunLog, SqliteNormalisedGymSessionReader, SqlitePlanStore,
+    SqliteRefusalStore, connect,
 };
 use sqlx::SqlitePool;
 

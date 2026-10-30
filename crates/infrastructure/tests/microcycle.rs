@@ -14,7 +14,7 @@
 //! session or a Peloton ride *is* has its own suites; here the question is only
 //! which slot a date answers for.
 
-mod support;
+use crate::support;
 
 use std::num::NonZeroU8;
 

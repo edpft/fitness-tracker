@@ -13,7 +13,7 @@
 //! because clippy's test exemption does not reach a free function in a test
 //! file — see `support`.
 
-mod support;
+use crate::support;
 
 use application::{
     ExtractionError, ExtractionStatusReporter, ResumptionPointResetter, SourceEvent,

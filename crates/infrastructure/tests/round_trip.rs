@@ -24,7 +24,7 @@
 //! pairing rather than the invariant, for the reason above: the corpus is what
 //! there is to pair, and what it says about the model is history.
 
-mod support;
+use crate::support;
 
 use application::{
     PerformedGymSessions as _,

@@ -13,8 +13,7 @@ use domain::{
 };
 use infrastructure::{SpreadsheetSessionTranslator, Workbook};
 
-#[path = "support/layers.rs"]
-mod layers;
+use crate::support::layers;
 
 type Failure = Box<dyn std::error::Error>;
 

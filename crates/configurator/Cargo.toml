@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+# One test binary, `tests/main.rs`, rather than one per file (#648).
+autotests = false
 
 # The configurator, in Cockburn's sense: the one crate that knows every
 # adapter and connects them to the application's ports. `cli` and `web` are
@@ -28,3 +30,7 @@ tokio.workspace = true
 
 [lints]
 workspace = true
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"

@@ -12,7 +12,7 @@
 //!
 //! These tests fail loudly if that rule is ever relaxed.
 
-mod support;
+use crate::support;
 
 use application::{
     WorkoutExtractor,

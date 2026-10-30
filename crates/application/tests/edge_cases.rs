@@ -5,7 +5,7 @@
 //! never landed — turned out to be present in the real account on the very
 //! first run.
 
-mod support;
+use crate::support;
 
 use application::{
     WorkoutExtractor,

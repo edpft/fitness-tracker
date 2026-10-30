@@ -13,7 +13,7 @@
 //! exactly one of the 77 is a failed attempt. Keying on the type would misfile 76
 //! completed sets, every one of which currently contributes to a volume total.
 
-mod support;
+use crate::support;
 
 use std::collections::BTreeMap;
 

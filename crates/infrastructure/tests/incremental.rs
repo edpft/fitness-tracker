@@ -6,7 +6,7 @@
 //! sessions split across routines and workouts served more than once, so the
 //! second half reaches sessions the first half began.
 
-mod support;
+use crate::support;
 
 use application::{
     ExtractionRunLog as _, LandingStore as _, NormalisationSummary, Rederivation,

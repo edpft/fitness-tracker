@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+# One test binary, `tests/main.rs`, rather than one per file (#648).
+autotests = false
 
 # A driving adapter: the operator's entry point. Its use cases are composed by
 # `configurator`, which `web` shares.
@@ -35,3 +37,7 @@ wiremock.workspace = true
 
 [lints]
 workspace = true
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"

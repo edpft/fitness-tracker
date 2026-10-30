@@ -719,6 +719,56 @@
                 touch "$out"
               '';
 
+          # Not constitutional — build time. Cargo makes each file in `tests/`
+          # its own crate, optimised and linked against every dependency, and
+          # 111 of them were most of the `test` check's 26 minutes of
+          # compiling (#648). So a crate has one test target, `tests/main.rs`,
+          # and the files beside it are its modules. With cargo's discovery
+          # off, a file `main.rs` does not name is never compiled, and its
+          # tests pass by not running: that is what this catches, along with a
+          # second test target.
+          test-targets =
+            pkgs.runCommand "test-targets"
+              {
+                nativeBuildInputs = [
+                  rustToolchain
+                  pkgs.jq
+                ];
+              }
+              ''
+                export CARGO_HOME="$TMPDIR/cargo"
+
+                cargo metadata --no-deps --offline --format-version 1 \
+                  --manifest-path ${repoSrc}/Cargo.toml \
+                  | jq -r '.packages[] | select([.targets[] | select(.kind == ["test"])] | length > 1)
+                      | "  \(.name) has more than one test target"' > found
+
+                for tests in ${repoSrc}/crates/*/tests; do
+                  crate="$(basename "$(dirname "$tests")")"
+                  for entry in "$tests"/*.rs "$tests"/*/mod.rs; do
+                    [ -e "$entry" ] || continue
+                    case "$entry" in
+                      */mod.rs) name="$(basename "$(dirname "$entry")")" ;;
+                      *) name="$(basename "$entry" .rs)" ;;
+                    esac
+                    [ "$name" = main ] && continue
+                    grep -qx "mod $name;" "$tests/main.rs" 2>/dev/null \
+                      || echo "  $crate/tests/main.rs does not name $name" >> found
+                  done
+                done
+
+                if [ -s found ]; then
+                  cat found
+                  echo
+                  echo "A crate's integration tests are one binary, tests/main.rs,"
+                  echo "and each file beside it is a module it names (#648). Add"
+                  echo "the module to main.rs rather than another test target."
+                  exit 1
+                fi
+
+                touch "$out"
+              '';
+
           # Constitution § 35: credentials never enter version control. This
           # scans what is tracked; the structural defence is that credentials
           # come from the environment or an untracked local file, and the

@@ -13,7 +13,7 @@
 //! Driven through the real store against a real SQLite file, because what is
 //! being asserted is a query.
 
-mod support;
+use crate::support;
 
 use application::{
     ExerciseHistory as _, ExtractionRunLog as _, LandingStore as _, LastPerformance,
