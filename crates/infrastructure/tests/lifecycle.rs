@@ -8,7 +8,7 @@
 //! What each state permits is the point of having them. The first two are cheap
 //! and may be thrown away; the third is pinned by an observation and may not.
 
-mod support;
+use crate::support;
 
 use application::{
     Issuance, PlanAuthor as _, PrescriptionDeliveryStore as _, PrescriptionLifecycle as _,

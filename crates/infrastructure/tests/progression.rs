@@ -18,7 +18,7 @@
 //! the Monday after, the record has no missed gating set inside it, and US3-5
 //! stays where its arithmetic is: the domain suite.
 
-mod support;
+use crate::support;
 
 use application::{
     DeliveryReference, DestinationName, PrescriptionDeliveryStore as _, WorkoutPrescriber as _,

@@ -32,8 +32,7 @@ use infrastructure::{
 };
 use sqlx::SqlitePool;
 
-#[path = "support/layers.rs"]
-mod layers;
+use crate::support::layers;
 
 type Built<T> = Result<T, Box<dyn std::error::Error>>;
 

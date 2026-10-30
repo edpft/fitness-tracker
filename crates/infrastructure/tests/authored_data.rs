@@ -5,7 +5,7 @@
 //! nothing replaces it wholesale. It is written once, kept, and superseded by
 //! date.
 
-mod support;
+use crate::support;
 
 use application::{
     GenerationParameterStore as _, MesocycleStore as _, PlanStore as _, ProgressionStore as _,

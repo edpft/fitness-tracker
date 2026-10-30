@@ -3,7 +3,7 @@
 //! User story 1. The use case is driven through its real ports with the real
 //! translator and a real SQLite file, which is what § 29 asks for.
 
-mod support;
+use crate::support;
 
 use application::{
     ExtractionRunLog as _, Issuance, LandingStore as _, NormalisationSummary, PlanAuthor as _,

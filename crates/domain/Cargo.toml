@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+# One test binary, `tests/main.rs`, rather than one per file (#648).
+autotests = false
 
 # The core depends on no workspace crate, no framework, no transport and no
 # store. Keep it that way.
@@ -22,3 +24,7 @@ proptest.workspace = true
 
 [lints]
 workspace = true
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"

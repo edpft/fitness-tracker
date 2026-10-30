@@ -5,7 +5,7 @@
 //! plan was authored: the changes had been kept against the mesocycle they were
 //! made in, and nothing later read them.
 
-mod support;
+use crate::support;
 
 use application::{FillChangeStore, MesocycleStore, PlanAuthor, prescribe::Authoring};
 use domain::{

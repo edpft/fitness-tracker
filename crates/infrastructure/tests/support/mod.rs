@@ -1,11 +1,4 @@
 //! Shared fixtures for the adapter suites.
-//!
-//! Each file in `tests/` is its own crate, so every one that says `mod support`
-//! compiles the whole of this — and warns about the parts it does not use.
-//! `dead_code` is allowed here for that reason and no other; it is not a
-//! forbidden lint, and the alternative is a fixture split per suite with the
-//! corpus loaded four times.
-#![allow(dead_code, unused_macros, unused_imports)]
 
 pub mod corpus;
 pub mod layers;

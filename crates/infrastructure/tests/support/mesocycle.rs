@@ -32,7 +32,6 @@ use domain::{
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
     schedule::{Relative, SessionRole, TrainingWeek},
-    sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::{civil::Date, tz::TimeZone};
 

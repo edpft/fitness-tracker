@@ -5,7 +5,7 @@
 //! that what the derivation produced survives a round trip through the store,
 //! and that § 7's re-derivation holds at the file rather than only in memory.
 
-mod support;
+use crate::support;
 
 use application::{
     ExtractionRunLog as _, LandingStore as _, NormalisationSummary, RefusalReporter,

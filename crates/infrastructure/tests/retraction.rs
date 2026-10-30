@@ -12,7 +12,7 @@
 //! landing orders because that is what separates an absorbing retraction from
 //! latest-wins.
 
-mod support;
+use crate::support;
 
 use application::NormalisationError;
 use domain::normalised::RefusalReason;

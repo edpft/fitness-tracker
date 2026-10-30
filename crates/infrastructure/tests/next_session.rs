@@ -16,7 +16,7 @@
 //! store's `following`, and the store is what is under test as much as the use
 //! case.
 
-mod support;
+use crate::support;
 
 use application::{
     PlanStore as _,

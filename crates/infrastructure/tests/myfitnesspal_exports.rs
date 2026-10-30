@@ -28,8 +28,7 @@ use infrastructure::{
 };
 use jiff::civil::date;
 
-#[path = "support/layers.rs"]
-mod layers;
+use crate::support::layers;
 
 const FIRST: &[u8] = include_bytes!("fixtures/myfitnesspal/first-export.ods");
 const SECOND: &[u8] = include_bytes!("fixtures/myfitnesspal/second-export.ods");

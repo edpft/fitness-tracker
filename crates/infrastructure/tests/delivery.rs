@@ -6,7 +6,7 @@
 //! — and none of that is about HTTP. What goes on the wire is
 //! `hevy_routine_contract`.
 
-mod support;
+use crate::support;
 
 use domain::normalised::StatedZones;
 use std::sync::{

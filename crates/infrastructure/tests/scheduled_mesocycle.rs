@@ -10,7 +10,7 @@
 //! This mirrors the wiring in `cli::wizard::add`, which is the only authoring
 //! path there is.
 
-mod support;
+use crate::support;
 
 use std::{collections::BTreeMap, num::NonZeroU8};
 

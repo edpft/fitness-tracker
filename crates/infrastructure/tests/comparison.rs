@@ -11,7 +11,7 @@
 //! That is what makes the pair a test of the pairing rather than of two
 //! unrelated fixtures.
 
-mod support;
+use crate::support;
 
 use application::{
     DeliveryReference, DestinationName, PrescriptionDeliveryStore as _, WorkoutPrescriber as _,

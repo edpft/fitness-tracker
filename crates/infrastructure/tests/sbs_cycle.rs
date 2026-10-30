@@ -10,7 +10,7 @@
 //! What the *chart* prescribes is proved in `domain/tests/sbs.rs` against the
 //! workbook. This is about the programme built around it.
 
-mod support;
+use crate::support;
 
 use application::{MesocycleStore as _, PlanAuthor as _, prescribe::Authoring};
 use domain::{

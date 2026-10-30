@@ -8,7 +8,7 @@
 //! Tests return `()` and assert by panicking; the helpers return `Result` for
 //! the test to unwrap.
 
-mod support;
+use crate::support;
 
 use application::{
     Build, CanonicalLayer, DerivationLedger as _, DerivedFrom, NormalisationRunLog as _,

@@ -10,7 +10,7 @@
 //! over its ports, so the test that supplies real ones belongs where real ones
 //! live.
 
-mod support;
+use crate::support;
 
 use std::collections::BTreeMap;
 

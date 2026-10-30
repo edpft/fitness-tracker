@@ -15,8 +15,7 @@ use domain::{
 use infrastructure::withings::{WithingsWeighInTranslator, group};
 use serde_json::{Value, json};
 
-#[path = "support/layers.rs"]
-mod layers;
+use crate::support::layers;
 
 type Failure = Box<dyn std::error::Error>;
 

@@ -16,7 +16,7 @@
 //! Friday 4 September  the test
 //! ```
 
-mod support;
+use crate::support;
 
 use application::{
     ExtractionRunLog as _, LandingStore as _, NormalisationSummary, PlanAuthor as _,

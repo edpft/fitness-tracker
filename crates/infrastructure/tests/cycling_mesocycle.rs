@@ -6,7 +6,7 @@
 //! whatever this round trip preserves. So the assertion is equality of the whole
 //! programme rather than of a summary of it.
 
-mod support;
+use crate::support;
 
 use application::{CyclingMesocycleStore as _, PlanAuthor as _, PlanStore as _};
 use domain::{

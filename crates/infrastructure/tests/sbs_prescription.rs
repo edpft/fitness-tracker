@@ -13,7 +13,7 @@
 //!
 //! Tests return `()` and assert by panicking. See `store.rs` for why.
 
-mod support;
+use crate::support;
 
 use application::{
     CanonicalGymSessionStore as _, MesocycleStore as _, PlanAuthor as _, WorkoutPrescriber as _,
