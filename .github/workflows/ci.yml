@@ -91,6 +91,10 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v7
 
+      # Ubuntu's AppArmor refuses the user namespaces nix's sandbox needs.
+      - name: Allow the sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Install nix
         uses: nixbuild/nix-quick-install-action@v35
         with:
@@ -101,8 +105,10 @@ jobs:
             # As on the laptop. Unsandboxed, each build runs in a directory of
             # its own name, and cargo, which records some sources by absolute
             # path, compiled again every crate a reused build had already
-            # compiled (#645).
+            # compiled (#645). No fallback: without one, a runner that cannot
+            # sandbox builds without saying so.
             sandbox = true
+            sandbox-fallback = false
 
       - name: Setup cache
         uses: nix-community/cache-nix-action@v7
@@ -162,6 +168,11 @@ jobs:
         if: ${{ env.UNCHANGED != 'true' }}
         uses: actions/checkout@v7
 
+      # Ubuntu's AppArmor refuses the user namespaces nix's sandbox needs.
+      - name: Allow the sandbox
+        if: ${{ env.UNCHANGED != 'true' }}
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Install nix
         if: ${{ env.UNCHANGED != 'true' }}
         uses: nixbuild/nix-quick-install-action@v35
@@ -171,6 +182,7 @@ jobs:
             keep-outputs = true
             access-tokens = github.com=${{ github.token }}
             sandbox = true
+            sandbox-fallback = false
 
       - name: Restore cache
         if: ${{ env.UNCHANGED != 'true' }}
@@ -276,6 +288,10 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v7
 
+      # Ubuntu's AppArmor refuses the user namespaces nix's sandbox needs.
+      - name: Allow the sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       # 2.31 rather than the action's default for the import trace below.
       - name: Install nix
         uses: nixbuild/nix-quick-install-action@v35
@@ -284,6 +300,7 @@ jobs:
           nix_conf: |
             access-tokens = github.com=${{ github.token }}
             sandbox = true
+            sandbox-fallback = false
 
       # The checks' dependencies, so the package does not rebuild them. Never
       # saved: the checks own the cache.
