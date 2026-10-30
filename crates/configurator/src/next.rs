@@ -10,14 +10,14 @@ use std::sync::OnceLock;
 use tracing::Instrument as _;
 
 use application::{
-    Build, CanonicalLayer, Clock, DerivedFrom, NormalisationError, NormalisationSummary,
-    NormalisedLayers, Part, Rederivation, RunLockError, StoreError,
+    Build, CanonicalLayer, Clock, DerivedFrom, FetchLog, Fetched, NormalisationError,
+    NormalisationSummary, NormalisedLayers, Part, Rederivation, RunLockError, StoreError,
     commit::{CommitPorts, Committing},
     cycling::{Riding, RidingPorts},
     microcycle::{Microcycle, MicrocyclePorts},
     next::{
-        CanonicalPorts, CyclingPorts, Done, FetchLog, Fetched, GymPorts, IfGoing, Next, NextError,
-        NextPorts, NoAccess, Progress, Refetch, Report, Scope,
+        CanonicalPorts, CyclingPorts, Done, GymPorts, IfGoing, Next, NextError, NextPorts,
+        NoAccess, Progress, Refetch, Report, Scope,
     },
 };
 use domain::{

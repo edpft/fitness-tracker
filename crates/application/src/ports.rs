@@ -256,6 +256,25 @@ pub trait ExtractionRunLog {
     ) -> impl Future<Output = Result<Option<ExtractionRun>, StoreError>> + Send;
 }
 
+/// When each stream was last fetched, as the extraction run log records it
+/// (#612).
+pub trait FetchLog {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn fetched(
+        &self,
+        stream: &LandingStream,
+    ) -> impl Future<Output = Result<Fetched, StoreError>> + Send;
+}
+
+/// When a stream's walk last succeeded, and last landed anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Fetched {
+    pub succeeded: Option<FetchedAt>,
+    pub landed: Option<FetchedAt>,
+}
+
 /// Single-flight.
 ///
 /// The guard releases on drop, and the kernel drops it if the process dies, so

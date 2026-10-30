@@ -657,7 +657,7 @@ fn the_latest_success_is_the_most_recent_one() {
 /// walk that follows it is judged by. A failure is neither.
 #[test]
 fn a_stream_was_fetched_when_it_last_succeeded_and_landed_when_it_last_landed() {
-    use application::next::FetchLog as _;
+    use application::FetchLog as _;
     runtime().expect("a tokio runtime").block_on(async {
         let (_dir, pool) = store().await.expect("store operation");
         let log = SqliteExtractionRunLog::new(pool);
@@ -666,7 +666,7 @@ fn a_stream_was_fetched_when_it_last_succeeded_and_landed_when_it_last_landed() 
 
         assert_eq!(
             log.fetched(&stream).await.expect("store operation"),
-            application::next::Fetched::default(),
+            application::Fetched::default(),
             "never fetched",
         );
         for (finished, landed) in [("2026-08-09T00:00:00Z", 2), ("2026-08-10T00:00:00Z", 0)] {
@@ -702,7 +702,7 @@ fn a_stream_was_fetched_when_it_last_succeeded_and_landed_when_it_last_landed() 
 
         assert_eq!(
             log.fetched(&stream).await.expect("store operation"),
-            application::next::Fetched {
+            application::Fetched {
                 succeeded: Some(at("2026-08-10T00:00:00Z")),
                 landed: Some(at("2026-08-09T00:00:00Z")),
             }

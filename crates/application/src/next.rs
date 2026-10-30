@@ -57,10 +57,10 @@ use jiff::civil::Date;
 use crate::{
     CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalWeighInStore, ClassSource,
     Clock, CyclingMesocycleStore, Delivery, DeliveryError, DiaryAuthor, DiaryStore,
-    ExerciseHistory, ExtractionError, GenerationParameterStore, HolidayCalendar, MesocycleStore,
-    NextLock, NormalisationError, NormalisedCyclingSessionReader, NormalisedGymSessionReader,
-    NormalisedWeighInReader, Part, PlanStore, PrescribedWorkoutStore, Prescription,
-    PrescriptionDeliverer as _, PrescriptionDeliveryStore, PrescriptionDestination,
+    ExerciseHistory, ExtractionError, FetchLog, GenerationParameterStore, HolidayCalendar,
+    MesocycleStore, NextLock, NormalisationError, NormalisedCyclingSessionReader,
+    NormalisedGymSessionReader, NormalisedWeighInReader, Part, PlanStore, PrescribedWorkoutStore,
+    Prescription, PrescriptionDeliverer as _, PrescriptionDeliveryStore, PrescriptionDestination,
     PrescriptionError, PrescriptionLifecycle, ProgressionStore, RideDestination, RidesPlaced,
     RunLockError, RunSummary, SourceError, StoreError, Taken, WorkoutExtractor,
     WorkoutPrescriber as _, WorkoutStore,
@@ -163,24 +163,6 @@ impl Refetch {
     /// minute cool down ride, with, say, 5 minutes each way to get to the
     /// bike."*
     pub const SHORTEST_VISIT: Self = Self::After(Duration::from_mins(45));
-}
-
-/// When each stream was last fetched, as the extraction run log records it.
-pub trait FetchLog {
-    /// # Errors
-    ///
-    /// [`StoreError`] if the store is unavailable.
-    fn fetched(
-        &self,
-        stream: &LandingStream,
-    ) -> impl Future<Output = Result<Fetched, StoreError>> + Send;
-}
-
-/// When a stream's walk last succeeded, and last landed anything.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Fetched {
-    pub succeeded: Option<FetchedAt>,
-    pub landed: Option<FetchedAt>,
 }
 
 /// The walks behind one catalogue entry, run in order.

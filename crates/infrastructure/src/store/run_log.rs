@@ -4,10 +4,7 @@
 //! nothing new, a run that found nothing at all, and a run that failed are
 //! three different rows rather than three absences.
 
-use application::{
-    ExtractionRunLog, StoreError,
-    next::{FetchLog, Fetched},
-};
+use application::{ExtractionRunLog, FetchLog, Fetched, StoreError};
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandingStream, RecordCount, RunId, RunOutcome,
 };
