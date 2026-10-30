@@ -26,6 +26,11 @@ This skill is that prompt. `$ARGUMENTS` is the issue number or URL.
   ```
 
   It all regenerates. Say how much was freed in one line.
+- Import CI's runs into `telemetry.db`, in the background, while the rest
+  goes on: `nix develop --command cargo xtask import`. The local gate does not
+  fetch them, and this is the moment after a merge, so CI's runs are taken
+  regularly and before Actions deletes what they uploaded (90 days). If it
+  fails, say so in one line and carry on: nothing here depends on it.
 - Before saying anything about a PR, look it up on the remote
   (`gh pr list --state all --search "<issue>"`, `gh pr view`). The remote is
   the only source of truth for what has merged.

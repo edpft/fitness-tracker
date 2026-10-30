@@ -7,9 +7,9 @@
 //! - `cargo xtask check <name>`: one flake check, with no `gate` above it.
 //! - `cargo xtask test [<nextest arguments>…]`: `cargo nextest run`, its
 //!   `test` spans with no `check` above them.
-//! - `cargo xtask import`: CI's runs, recorded the same way. The gate imports
-//!   too, once its own run is recorded, so CI's are taken regularly and before
-//!   Actions deletes what they uploaded.
+//! - `cargo xtask import`: CI's runs, recorded the same way. `/start` runs it,
+//!   after a merge, so CI's are taken regularly and before Actions deletes what
+//!   they uploaded. The gate does not: a local check waits on nothing remote.
 //!
 //! Nix defines and builds the checks; nix-fast-build runs them and says how
 //! each went, and nextest's JUnit report says how each test went.
@@ -149,7 +149,6 @@ fn gate() -> ExitCode {
         children: checks,
     };
     recorded(&[gate]);
-    imported();
     code(status)
 }
 
