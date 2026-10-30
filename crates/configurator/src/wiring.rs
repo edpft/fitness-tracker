@@ -391,7 +391,7 @@ async fn terms(
 ) -> Result<Terms, WiringError> {
     Ok(Terms::from(format!(
         "build {}; corrections {}; zone {zones}",
-        crate::next::BUILD.unwrap_or("unknown"),
+        crate::next::named_build().unwrap_or("unknown"),
         corrections(pool, overlay).await?.join(","),
     )))
 }

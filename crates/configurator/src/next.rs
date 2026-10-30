@@ -5,6 +5,7 @@
 //! composes it for itself (#398).
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use jiff::civil::Date;
 use tracing::Instrument as _;
@@ -239,7 +240,7 @@ async fn over(
         },
         canonical: canonical(&pool),
         ledger: SqliteDerivationLedger::new(pool.clone()),
-        build: build(BUILD),
+        build: build(named_build()),
         classes: class_source,
         holidays: Calendars,
         diary: SqliteDiaryStore::new(pool.clone()),
@@ -416,12 +417,29 @@ pub(crate) fn canonical(
     }
 }
 
-/// The commit this build was made from, as the flake bakes it in.
+/// The commit this build was made from, as the flake bakes it into the binary
+/// running: see [`name_build`].
+static BUILD: OnceLock<&'static str> = OnceLock::new();
+
+/// Say which build this process is, once, before anything else is composed.
+///
+/// **The binary reads `FITNESS_BUILD`, not this crate.** It changes with every
+/// commit, and a crate that reads it compiles again for every commit along
+/// with everything above it, tests included (#645).
 ///
 /// **`None` outside nix**, where nothing says which commit is running: such a
 /// build derives every layer every run, since it cannot tell whether the code
 /// that derived them has changed (#468).
-pub const BUILD: Option<&str> = option_env!("FITNESS_BUILD");
+pub fn name_build(baked: Option<&'static str>) {
+    if let Some(baked) = baked {
+        let _ = BUILD.set(baked);
+    }
+}
+
+/// The build named by [`name_build`], if any.
+pub(crate) fn named_build() -> Option<&'static str> {
+    BUILD.get().copied()
+}
 
 /// The build, where it names one commit.
 ///

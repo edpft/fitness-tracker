@@ -843,6 +843,7 @@ impl From<WiringError> for Failure {
 }
 
 fn main() -> ExitCode {
+    configurator::next::name_build(option_env!("FITNESS_BUILD"));
     // `clippy::exit` is `forbid`, so returning `ExitCode` is not a style
     // preference: `std::process::exit` will not compile, and no attribute can
     // grant an exception (E0453).
