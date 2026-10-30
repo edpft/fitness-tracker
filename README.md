@@ -108,7 +108,7 @@ feature working.
 | Command | Does |
 | --- | --- |
 | `nix develop` | Enter a shell with the toolchain and every tool CI uses. `direnv allow` does this automatically. |
-| `nix flake check` | Run everything CI runs: per-crate builds, rustfmt, clippy, tests, doctests, `cargo deny` (advisories, licences, bans and sources), and a nix formatting check. |
+| `nix flake check` | Run everything CI runs: the workspace build and both binaries, rustfmt, clippy, tests, doctests, `cargo deny` (advisories, licences, bans and sources), and a nix formatting check. |
 | `nix build` | Build into `./result`. |
 | `nix run .#cli` | Build and run `fitness`. |
 | `nix fmt .` | Format the nix files. The path is required — a bare `nix fmt` passes no files and nixfmt then waits on stdin. |

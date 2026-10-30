@@ -44,6 +44,7 @@ use tracing::Instrument as _;
 use run::{Asked, Runs, Setting};
 
 fn main() -> std::process::ExitCode {
+    configurator::next::name_build(option_env!("FITNESS_BUILD"));
     // `clippy::exit` is `forbid`, so returning `ExitCode` is not a style
     // preference: `std::process::exit` will not compile.
     let matches = match command().try_get_matches() {

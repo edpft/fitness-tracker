@@ -91,6 +91,10 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v7
 
+      # Ubuntu's AppArmor refuses the user namespaces nix's sandbox needs.
+      - name: Allow the sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Install nix
         uses: nixbuild/nix-quick-install-action@v35
         with:
@@ -98,6 +102,13 @@ jobs:
             keep-env-derivations = true
             keep-outputs = true
             access-tokens = github.com=${{ github.token }}
+            # As on the laptop. Unsandboxed, each build runs in a directory of
+            # its own name, and cargo, which records some sources by absolute
+            # path, compiled again every crate a reused build had already
+            # compiled (#645). No fallback: without one, a runner that cannot
+            # sandbox builds without saying so.
+            sandbox = true
+            sandbox-fallback = false
 
       - name: Setup cache
         uses: nix-community/cache-nix-action@v7
@@ -113,6 +124,23 @@ jobs:
 
       - name: Build the dependencies
         run: nix build -L .#cargoArtifacts
+
+      # The workspace's crates, compiled once for every job (#645). Each job is
+      # its own runner, so without this `test`, `doctest`, `cli`, `web` and
+      # `publish` each compiled the workspace again. Only the build itself is
+      # exported: all it refers to is the dependencies, which every job
+      # restores from the cache.
+      - name: Build the workspace
+        run: |
+          out=$(nix build -L --no-link --print-out-paths .#workspaceArtifacts)
+          nix-store --export "$out" > "${RUNNER_TEMP}/workspace.nar"
+
+      - name: Keep the workspace build
+        uses: actions/upload-artifact@v7
+        with:
+          name: workspace-build
+          path: ${{ runner.temp }}/workspace.nar
+          retention-days: 1
 
   check:
     name: ${{ matrix.check }}
@@ -140,6 +168,11 @@ jobs:
         if: ${{ env.UNCHANGED != 'true' }}
         uses: actions/checkout@v7
 
+      # Ubuntu's AppArmor refuses the user namespaces nix's sandbox needs.
+      - name: Allow the sandbox
+        if: ${{ env.UNCHANGED != 'true' }}
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Install nix
         if: ${{ env.UNCHANGED != 'true' }}
         uses: nixbuild/nix-quick-install-action@v35
@@ -148,6 +181,8 @@ jobs:
             keep-env-derivations = true
             keep-outputs = true
             access-tokens = github.com=${{ github.token }}
+            sandbox = true
+            sandbox-fallback = false
 
       - name: Restore cache
         if: ${{ env.UNCHANGED != 'true' }}
@@ -156,6 +191,21 @@ jobs:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/Cargo.lock', 'rust-toolchain.toml') }}-prebuilt
           restore-prefixes-first-match: nix-${{ runner.os }}-
           save: false
+
+      # From `prebuild`. Without it, as when `prebuild` failed, the check
+      # builds the workspace itself.
+      - name: Fetch the workspace build
+        id: workspace
+        if: ${{ env.UNCHANGED != 'true' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: workspace-build
+          path: ${{ runner.temp }}/workspace
+
+      - name: Import the workspace build
+        if: ${{ env.UNCHANGED != 'true' && steps.workspace.outcome == 'success' }}
+        run: nix-store --import < "${RUNNER_TEMP}/workspace/workspace.nar"
 
       # As `cargo xtask check` runs it, so a run here and a run on the laptop
       # are recorded alike (#629): nix-fast-build's result, with each check's
@@ -238,6 +288,10 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v7
 
+      # Ubuntu's AppArmor refuses the user namespaces nix's sandbox needs.
+      - name: Allow the sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       # 2.31 rather than the action's default for the import trace below.
       - name: Install nix
         uses: nixbuild/nix-quick-install-action@v35
@@ -245,6 +299,8 @@ jobs:
           nix_version: 2.31.5
           nix_conf: |
             access-tokens = github.com=${{ github.token }}
+            sandbox = true
+            sandbox-fallback = false
 
       # The checks' dependencies, so the package does not rebuild them. Never
       # saved: the checks own the cache.
@@ -254,6 +310,19 @@ jobs:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/Cargo.lock', 'rust-toolchain.toml') }}-prebuilt
           restore-prefixes-first-match: nix-${{ runner.os }}-
           save: false
+
+      # As the checks do: the package is built on `prebuild`'s workspace build.
+      - name: Fetch the workspace build
+        id: workspace
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: workspace-build
+          path: ${{ runner.temp }}/workspace
+
+      - name: Import the workspace build
+        if: ${{ steps.workspace.outcome == 'success' }}
+        run: nix-store --import < "${RUNNER_TEMP}/workspace/workspace.nar"
 
       # Pushes only what is named below: by default it would push everything
       # the job built, toolchain and dependencies included.

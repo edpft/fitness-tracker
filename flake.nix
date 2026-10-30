@@ -50,12 +50,12 @@
 
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-        # Every crate builds from the same file set: cargo needs the whole
-        # workspace manifest graph even when building a single member, and sqlx
+        # Every build uses the same file set: cargo needs the whole workspace
+        # manifest graph, and sqlx
         # needs the migrations and the offline query metadata at *compile*
         # time. `cleanCargoSource` would drop both — it keeps only files cargo
         # itself recognises — so the fileset is spelled out here and used
-        # everywhere rather than only for the per-crate builds.
+        # everywhere.
         src = lib.fileset.toSource {
           root = ./.;
           fileset = lib.fileset.unions [
@@ -213,75 +213,66 @@
         toolingCrates = [ "xtask" ];
         toolingMayUse = [ "telemetry" ];
 
-        # Add one of these per workspace member you want to build.
-        domain = craneLib.buildPackage (
-          individualCrateArgs
+        # The workspace's own crates, compiled once for every check that needs
+        # them (#645). Until then each crate had a check of its own, and each of
+        # those, `test` and `doctest` compiled the workspace again from
+        # `cargoArtifacts`: `domain` was built nine times a gate. What `test`
+        # compiles is what this compiles, so `test`, `doctest` and the binaries
+        # start from it and compile nothing of the workspace's again.
+        #
+        # One derivation over one `src`, so any change recompiles every crate
+        # once. Rebuilding only what a change reaches is #654.
+        #
+        # `mkCargoDerivation` rather than `cargoBuild`, which always runs
+        # `cargo build` and so built no test target.
+        workspaceArtifacts = craneLib.mkCargoDerivation (
+          commonArgs
           // {
-            cargoExtraArgs = "-p domain";
+            inherit cargoArtifacts;
+            pname = "workspace-build";
+            # As nextest builds before it runs anything.
+            buildPhaseCargoCommand = "cargoWithProfile test --locked --workspace --no-run";
+            doCheck = false;
           }
         );
 
-        application = craneLib.buildPackage (
+        # Both binaries, from one build. `-p cli` and `-p web` resolved
+        # features for that crate alone, which rebuilt about twenty-five
+        # dependencies and every workspace crate beneath it, and `--bins`
+        # leaves the dev-dependencies' features out, which rebuilt the crates
+        # using sqlx. `--all-targets` resolves as the tests do, so the binaries
+        # are the ones the tests ran against and only what reads
+        # `FITNESS_BUILD` compiles again. Test executables are not installed.
+        binaries = craneLib.buildPackage (
           individualCrateArgs
           // {
-            cargoExtraArgs = "-p application";
-          }
-        );
-
-        configurator = craneLib.buildPackage (
-          individualCrateArgs
-          // {
-            cargoExtraArgs = "-p configurator";
-          }
-        );
-
-        infrastructure = craneLib.buildPackage (
-          individualCrateArgs
-          // {
-            cargoExtraArgs = "-p infrastructure";
-          }
-        );
-
-        telemetry = craneLib.buildPackage (
-          individualCrateArgs
-          // {
-            cargoExtraArgs = "-p telemetry";
-          }
-        );
-
-        web = craneLib.buildPackage (
-          individualCrateArgs
-          // {
-            cargoExtraArgs = "-p web";
-            # Lets `nix run` find the binary without a hand-written app.
-            meta.mainProgram = "web";
-
-            # Which build derived the store's layers, for the reason `cli`
-            # carries it (#468): a run the page starts is a build like any
-            # other, and one that cannot name its commit derives everything.
-            FITNESS_BUILD = "${revision} (${revisionDate})";
-          }
-        );
-
-        cli = craneLib.buildPackage (
-          individualCrateArgs
-          // {
-            cargoExtraArgs = "-p cli";
-            # The crate is `cli`; the binary operators type is `fitness`.
-            meta.mainProgram = "fitness";
+            cargoArtifacts = workspaceArtifacts;
+            pname = "binaries";
+            cargoExtraArgs = "--locked --workspace --all-targets";
 
             # What `fitness --version` prints, read by `option_env!` at compile
-            # time. Set here rather than in `commonArgs` on purpose: it changes
-            # with every commit, and there it would invalidate `cargoArtifacts`
-            # and rebuild every dependency each time.
+            # time, and for `web` which build derived the store's layers
+            # (#468): a run the page starts is a build like any other, and one
+            # that cannot name its commit derives everything. Set here rather
+            # than in `commonArgs` on purpose: it changes with every commit, and
+            # there it would invalidate `cargoArtifacts` and rebuild every
+            # dependency each time.
             FITNESS_BUILD = "${revision} (${revisionDate})";
-
-            # Safe here for the same reason — `cargoArtifacts` is built from
-            # `commonArgs` alone, so naming this derivation for the commit
-            # makes `nix profile list` say which build is installed.
-            version = revision;
           }
         );
+
+        # One binary from `binaries`, as a package of its own. Named for the
+        # commit, so `nix profile list` says which build is installed.
+        binary =
+          name: program:
+          pkgs.runCommand "${name}-${revision}" { meta.mainProgram = program; } ''
+            mkdir -p "$out/bin"
+            ln -s ${binaries}/bin/${program} "$out/bin/${program}"
+          '';
+
+        # The crate is `cli`; the binary operators type is `fitness`.
+        cli = binary "cli" "fitness";
+        web = binary "web" "web";
 
         # A user service, so the page is up whenever the laptop is without
         # anyone starting it from a terminal (#399). It names the store path
@@ -454,15 +445,7 @@
       in
       {
         checks = {
-          inherit
-            domain
-            application
-            infrastructure
-            telemetry
-            configurator
-            web
-            cli
-            ;
+          inherit web cli;
 
           format = craneLib.cargoFmt {
             inherit src version;
@@ -480,7 +463,7 @@
           test = craneLib.cargoNextest (
             commonArgs
             // {
-              inherit cargoArtifacts;
+              cargoArtifacts = workspaceArtifacts;
 
               # reqwest's TLS backend reads the platform trust store when a
               # client is *built*, and the sandbox has none — so constructing a
@@ -510,7 +493,7 @@
           doctest = craneLib.cargoDocTest (
             commonArgs
             // {
-              inherit cargoArtifacts;
+              cargoArtifacts = workspaceArtifacts;
             }
           );
 
@@ -689,8 +672,8 @@
 
           # Not constitutional — build hygiene. `src` lists its members
           # by hand, so a new crate can be perfectly valid to cargo while nix
-          # silently ignores its sources, and every per-crate build keeps
-          # passing without ever compiling it.
+          # silently ignores its sources, and every build keeps passing
+          # without ever compiling it.
           workspace-members =
             pkgs.runCommand "workspace-members"
               {
@@ -711,8 +694,7 @@
                 if ! diff -u <(members ${repoSrc}) <(members ${src}); then
                   echo
                   echo "A workspace member is missing from \`src\` in"
-                  echo "flake.nix, so nix is not building it. Add it there, and"
-                  echo "give it a \`buildPackage\` block if it should build alone."
+                  echo "flake.nix, so nix is not building it. Add it there."
                   exit 1
                 fi
 
@@ -861,9 +843,11 @@
           inherit cli web;
 
           # Named for CI rather than for anyone to install: each check runs on
-          # its own runner, and `prebuild` builds this once and caches it for
-          # all of them instead of every job building every dependency.
-          inherit cargoArtifacts;
+          # its own runner, and `prebuild` builds these once for all of them
+          # instead of every job building every dependency and every crate.
+          # The dependencies go in the cache, and the workspace build, which
+          # changes with every commit, is handed on as an artifact (#645).
+          inherit cargoArtifacts workspaceArtifacts;
         };
 
         # Takes the files to format: `nix fmt .`, not a bare `nix fmt`.
