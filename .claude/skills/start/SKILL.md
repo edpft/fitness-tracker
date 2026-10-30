@@ -22,8 +22,18 @@ This skill is that prompt. `$ARGUMENTS` is the issue number or URL.
   rm -rf target/debug/incremental
   find target/debug/deps target/debug/examples target/debug/build \
     -maxdepth 1 -mtime +0 -exec rm -rf {} +
+  for session in /tmp/nix-shell.*/claude-1000/-home-ed-Projects-fitness-tracker/*/; do
+    [ -z "$(find "$session" -mmin -1440 -print -quit)" ] \
+      && chmod -R u+w "$session" && rm -rf "$session"
+  done
   df -h /
   ```
+
+  The loop is the other sessions' scratchpads, mostly copies of the store at
+  about 0.4 GB each: 43 GB on 2026-10-29, 19 GB on 2026-10-30. A scratchpad
+  with nothing written in the last day belongs to a session that has ended, so
+  this one and any still running are kept. `chmod` because some hold a nix
+  store of their own, which is read-only.
 
   It all regenerates. Say how much was freed in one line.
 - Import CI's runs into `telemetry.db`, in the background, while the rest
