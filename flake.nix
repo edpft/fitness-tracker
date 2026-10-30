@@ -843,9 +843,11 @@
           inherit cli web;
 
           # Named for CI rather than for anyone to install: each check runs on
-          # its own runner, and `prebuild` builds this once and caches it for
-          # all of them instead of every job building every dependency.
-          inherit cargoArtifacts;
+          # its own runner, and `prebuild` builds these once for all of them
+          # instead of every job building every dependency and every crate.
+          # The dependencies go in the cache, and the workspace build, which
+          # changes with every commit, is handed on as an artifact (#645).
+          inherit cargoArtifacts workspaceArtifacts;
         };
 
         # Takes the files to format: `nix fmt .`, not a bare `nix fmt`.
