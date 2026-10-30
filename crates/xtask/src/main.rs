@@ -142,7 +142,8 @@ fn test(arguments: &[OsString]) -> ExitCode {
     code(status)
 }
 
-/// Run the flake's checks, or the one named, and time each as it ends.
+/// Run the flake's checks, or the one named, and time each as it ends. The
+/// first to fail stops the rest (#644), and is named.
 fn run_checks(only: Option<&str>) -> (Vec<Timed>, std::io::Result<ExitStatus>) {
     let system = match system() {
         Ok(system) => system,
@@ -153,6 +154,7 @@ fn run_checks(only: Option<&str>) -> (Vec<Timed>, std::io::Result<ExitStatus>) {
         .args([
             "--no-nom",
             "--skip-cached",
+            "--fail-fast",
             "--stream-json-lines",
             "--flake",
         ])
@@ -172,7 +174,14 @@ fn run_checks(only: Option<&str>) -> (Vec<Timed>, std::io::Result<ExitStatus>) {
     let mut checks = Vec::new();
     if let Some(stdout) = child.stdout.take() {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            checks.extend(checks::ended(&line, Timestamp::now(), tests_in));
+            let Some(check) = checks::ended(&line, Timestamp::now(), tests_in) else {
+                continue;
+            };
+            if check.outcome == Some(Outcome::Failed) {
+                let name = check.fields.get("check").and_then(|name| name.as_str());
+                eprintln!("xtask: stopped: {} failed", name.unwrap_or("a check"));
+            }
+            checks.push(check);
         }
     }
     (checks, child.wait())
