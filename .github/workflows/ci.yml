@@ -98,6 +98,11 @@ jobs:
             keep-env-derivations = true
             keep-outputs = true
             access-tokens = github.com=${{ github.token }}
+            # As on the laptop. Unsandboxed, each build runs in a directory of
+            # its own name, and cargo, which records some sources by absolute
+            # path, compiled again every crate a reused build had already
+            # compiled (#645).
+            sandbox = true
 
       - name: Setup cache
         uses: nix-community/cache-nix-action@v7
@@ -165,6 +170,7 @@ jobs:
             keep-env-derivations = true
             keep-outputs = true
             access-tokens = github.com=${{ github.token }}
+            sandbox = true
 
       - name: Restore cache
         if: ${{ env.UNCHANGED != 'true' }}
@@ -277,6 +283,7 @@ jobs:
           nix_version: 2.31.5
           nix_conf: |
             access-tokens = github.com=${{ github.token }}
+            sandbox = true
 
       # The checks' dependencies, so the package does not rebuild them. Never
       # saved: the checks own the cache.
