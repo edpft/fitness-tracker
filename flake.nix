@@ -480,6 +480,16 @@
               # crates. Only the tests run code that needs this.
               SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
 
+              # Every store a test opens is a fresh one, so each test applies
+              # all the migrations, one fsync'd commit apiece. On disk that was
+              # most of a test's ~6 s, four at a time (#634); on tmpfs a sync
+              # costs nothing. Durability is not what any test asserts.
+              preCheck = ''
+                if [ -w /dev/shm ]; then
+                  export TMPDIR="$(mktemp -d /dev/shm/test.XXXXXX)"
+                fi
+              '';
+
               # nextest's report, so `cargo xtask` can record each test (#629).
               # A run that fails keeps nothing: nix keeps no output of a failed
               # build, so only a passing suite's tests are recorded from here.
