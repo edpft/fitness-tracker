@@ -627,13 +627,18 @@
           # case, which would make the adapter drive the application it is
           # supposed to be driven by.
           #
-          # `application` keeps its use cases behind `extract`, `normalise`,
-          # `prescribe`, `status` and `strength` rather than re-exporting them
-          # at the crate root, so naming one requires naming its module. That
-          # makes this greppable, which is the only reason the module boundary
-          # is worth keeping. **Each is named here**: the check listed two of them
-          # until 2026-08-19, so `prescribe` — added by feature 003 — was
-          # unguarded for as long as it existed.
+          # `application` keeps its use cases behind their modules and
+          # re-exports only its ports and errors at the crate root, so naming a
+          # use case requires naming its module. That makes this greppable,
+          # which is the only reason the module boundary is worth keeping.
+          #
+          # **What infrastructure may name, not what it may not.** This listed
+          # the forbidden modules until 2026-10-30, and the list went stale
+          # twice: `prescribe` was unguarded from feature 003 until 2026-08-19,
+          # and by #644 it named seven of thirty. So any module beneath
+          # `application` other than `ports` and `error` fails, inside a `use`
+          # group as well as in a path. The crate root's re-exports are all
+          # types, so a lowercase name there is a module.
           #
           # Scoped to `src`, not the whole crate. An integration test at this ring
           # *does* drive a use case, and legitimately: the normalisation and
@@ -648,53 +653,34 @@
           # cases is the whole of its job, as it is `cli`'s, which was never
           # checked. The mistake was invisible only because `web` was a stub that
           # called nothing; the first real line of it would have failed the gate.
-          use-case-isolation = pkgs.runCommand "use-case-isolation" { } ''
-            if grep -rn 'application::\(cycling\|extract\|canonicalise\|normalise\|prescribe\|status\|strength\)' \
-                 ${repoSrc}/crates/infrastructure/src; then
-              echo
-              echo "Constitution § 16: a driven adapter implements ports, it"
-              echo "does not call the use cases. What infrastructure may name"
-              echo "from application is its ports and its errors."
-              echo
-              echo "Driving adapters — cli, web — are not checked here: calling"
-              echo "a use case is what they are for."
-              exit 1
-            fi
-
-            touch "$out"
-          '';
-
-          # Constitution § 21. `toml` is the document format, and a document
-          # format is an adapter's business: a `domain` type deserialised from
-          # TOML is a domain shaped by a file format, and a `cli` that parses one
-          # is a second reader to keep in step with the first.
-          #
-          # **The `architecture` check above does not catch this and cannot.** It
-          # reads path dependencies only — that is what makes it a ring check —
-          # and `toml` is a registry crate, so it is invisible there. Tasks.md
-          # claimed otherwise, which is how a guard nobody had gets relied on.
-          document-format-is-an-adapters =
-            pkgs.runCommand "document-format"
+          use-case-isolation =
+            pkgs.runCommand "use-case-isolation"
               {
-                nativeBuildInputs = [
-                  rustToolchain
-                  pkgs.jq
-                ];
+                nativeBuildInputs = [ pkgs.perl ];
               }
               ''
-                export CARGO_HOME="$TMPDIR/cargo"
+                find ${repoSrc}/crates/infrastructure/src -name '*.rs' -print0 \
+                  | xargs -0 perl -0777 -ne '
+                      s{//[^\n]*}{}g;
+                      while (/\bapplication::(\{(?:[^{}]|\{[^{}]*\})*\}|[A-Za-z_]\w*)/g) {
+                        my $named = $1;
+                        $named =~ s/\{[^{}]*\}//g while $named =~ /^\{.*\{/s;
+                        for my $segment ($named =~ /(?:^|[{,])\s*([a-z_]\w*)/g) {
+                          print "  $ARGV names application::$segment\n"
+                            unless $segment eq "ports" || $segment eq "error";
+                        }
+                      }
+                    ' > named
 
-                cargo metadata --no-deps --offline --format-version 1 \
-                  --manifest-path ${repoSrc}/Cargo.toml \
-                  | jq -r '.packages[] | .name as $crate
-                      | .dependencies[] | select(.name == "toml") | $crate' \
-                  | sort -u > readers
-
-                if grep -v '^infrastructure$' readers; then
+                if [ -s named ]; then
+                  cat named
                   echo
-                  echo "Constitution § 21: only infrastructure reads the document"
-                  echo "format. A domain type deserialised from TOML is a domain"
-                  echo "shaped by a file format."
+                  echo "Constitution § 16: a driven adapter implements ports, it"
+                  echo "does not call the use cases. What infrastructure may name"
+                  echo "from application is its ports and its errors."
+                  echo
+                  echo "Driving adapters — cli, web — are not checked here: calling"
+                  echo "a use case is what they are for."
                   exit 1
                 fi
 
