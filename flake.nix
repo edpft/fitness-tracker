@@ -864,7 +864,9 @@
           # instead of every job building every dependency and every crate.
           # The dependencies go in the cache, and the workspace build, which
           # changes with every commit, is handed on as an artifact (#645).
-          inherit cargoArtifacts workspaceArtifacts;
+          # So are the binaries, which the `web` check builds and `publish`
+          # installs (#658).
+          inherit cargoArtifacts workspaceArtifacts binaries;
         };
 
         # Takes the files to format: `nix fmt .`, not a bare `nix fmt`.

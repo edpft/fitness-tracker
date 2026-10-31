@@ -220,6 +220,23 @@ jobs:
               --select "checks: { inherit (checks) ${CHECK}; }" \
               --result-file results/result.json --result-format json
 
+      # The package's binaries, for `publish` to install rather than compile
+      # again (#658): the `web` check is the package, so it has just built
+      # them. They name no commit, which the package's wrapper sets.
+      - name: Export the binaries
+        if: ${{ env.UNCHANGED != 'true' && env.CHECK == 'web' }}
+        run: |
+          out=$(nix build --no-link --print-out-paths .#binaries)
+          nix-store --export "$out" > "${RUNNER_TEMP}/binaries.nar"
+
+      - name: Keep the binaries
+        if: ${{ env.UNCHANGED != 'true' && env.CHECK == 'web' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: binaries
+          path: ${{ runner.temp }}/binaries.nar
+          retention-days: 1
+
       - name: Keep the test report
         if: ${{ always() && env.UNCHANGED != 'true' }}
         run: |
@@ -323,6 +340,21 @@ jobs:
       - name: Import the workspace build
         if: ${{ steps.workspace.outcome == 'success' }}
         run: nix-store --import < "${RUNNER_TEMP}/workspace/workspace.nar"
+
+      # From the `web` check, so the package compiles nothing (#658). Without
+      # it, as when that check was unchanged since the base, the package
+      # compiles the binaries on the workspace build.
+      - name: Fetch the binaries
+        id: binaries
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: binaries
+          path: ${{ runner.temp }}/binaries
+
+      - name: Import the binaries
+        if: ${{ steps.binaries.outcome == 'success' }}
+        run: nix-store --import < "${RUNNER_TEMP}/binaries/binaries.nar"
 
       # Pushes only what is named below: by default it would push everything
       # the job built, toolchain and dependencies included.
