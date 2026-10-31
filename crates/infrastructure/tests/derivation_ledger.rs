@@ -11,7 +11,7 @@
 use crate::support;
 
 use application::{
-    Build, CanonicalLayer, DerivationLedger as _, DerivedFrom, NormalisationRunLog as _,
+    CanonicalLayer, DerivationLedger as _, DerivedFrom, NormalisationRunLog as _,
     NormalisedGymSessionReader as _, NormalisedWeighInReader as _, WorkoutNormaliser as _,
     normalise::{Normalisation, NormalisationPorts},
 };
@@ -110,15 +110,6 @@ fn the_ledger_hands_back_what_each_layer_was_derived_from() {
         };
         let from = DerivedFrom::from("records 164; corrections ; zone Europe/London".to_owned());
 
-        let no_build = ledger.build().await?;
-        ledger
-            .record_build(&Build::from("a1b2c3d".to_owned()))
-            .await?;
-        ledger
-            .record_build(&Build::from("e4f5a6b".to_owned()))
-            .await?;
-        let build = ledger.build().await?;
-
         let no_canonical = ledger.canonical(CanonicalLayer::Gym).await?;
         ledger.record_canonical(CanonicalLayer::Gym, &from).await?;
         let canonical = ledger.canonical(CanonicalLayer::Gym).await?;
@@ -133,8 +124,6 @@ fn the_ledger_hands_back_what_each_layer_was_derived_from() {
         let since = ledger.normalised(&stream).await?;
 
         Ok::<_, Box<dyn std::error::Error>>((
-            no_build,
-            build,
             no_canonical,
             canonical,
             cycling,
@@ -143,13 +132,10 @@ fn the_ledger_hands_back_what_each_layer_was_derived_from() {
             from,
         ))
     });
-    let Ok(Ok((no_build, build, no_canonical, canonical, cycling, normalised, since, from))) = read
-    else {
+    let Ok(Ok((no_canonical, canonical, cycling, normalised, since, from))) = read else {
         panic!("the store reads")
     };
 
-    assert_eq!(no_build, None);
-    assert_eq!(build, Some(Build::from("e4f5a6b".to_owned())));
     assert_eq!(no_canonical, None);
     assert_eq!(canonical, Some(from.clone()));
     assert_eq!(cycling, None);

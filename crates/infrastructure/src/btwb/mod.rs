@@ -103,6 +103,7 @@ pub struct BtwbTranslator;
 impl Translator for BtwbTranslator {
     type Account = Exports;
     type Entity = ManualGymSession;
+    const VERSION: u32 = 1;
 
     /// The zone is not consulted: a result is a day.
     fn translate(

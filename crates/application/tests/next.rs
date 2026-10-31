@@ -16,11 +16,10 @@ use std::{
 };
 
 use application::{
-    Build, CanonicalLayer, ClassSource, ClassesHeld, ClassesListed, ClassesRead, Clock,
-    DerivationLedger, DerivedFrom, DiaryAuthor, DiaryStore, ExtractionError, FetchLog, Fetched,
-    HolidayCalendar, NewestObservation, NextLock, NormalisationError, NormalisationSummary,
-    NormalisedLayers, Part, PlanStore, PrescriptionError, RunLockError, RunSummary, SourceError,
-    StoreError, Taken,
+    CanonicalLayer, ClassSource, ClassesHeld, ClassesListed, ClassesRead, Clock, DerivationLedger,
+    DerivedFrom, DiaryAuthor, DiaryStore, ExtractionError, FetchLog, Fetched, HolidayCalendar,
+    NewestObservation, NextLock, NormalisationError, NormalisationSummary, NormalisedLayers, Part,
+    PlanStore, PrescriptionError, RunLockError, RunSummary, SourceError, StoreError, Taken,
     canonicalise::{Canonicalised, WeighInsCanonicalised},
     commit::{CommitError, Due},
     cycling::RidingError,
@@ -172,7 +171,6 @@ struct Layered {
     canonicalised: Vec<CanonicalLayer>,
     derived_from: BTreeMap<u64, DerivedFrom>,
     canonical: Vec<(CanonicalLayer, DerivedFrom)>,
-    build: Option<Build>,
 }
 
 const STREAMS: [&str; 4] = [
@@ -320,14 +318,6 @@ impl Canonicalising for Canonical {
 struct Ledger(Arc<Graph>);
 
 impl DerivationLedger for Ledger {
-    async fn build(&self) -> Result<Option<Build>, StoreError> {
-        self.0.with(|layered| layered.build.clone())
-    }
-
-    async fn record_build(&self, build: &Build) -> Result<(), StoreError> {
-        self.0.with(|layered| layered.build = Some(build.clone()))
-    }
-
     async fn normalised(&self, stream: &LandingStream) -> Result<Option<DerivedFrom>, StoreError> {
         self.0.with(|layered| {
             layered
@@ -802,7 +792,6 @@ fn over<H>(
         normalised: Layers(Arc::clone(&graph)),
         canonical: Canonical(Arc::clone(&graph)),
         ledger: Ledger(graph),
-        build: Some(Build::from("a1b2c3d".to_owned())),
         classes: Ok(Converged(ClassesHeld::default())),
         holidays,
         diary,
@@ -1267,9 +1256,9 @@ fn a_part_another_run_holds_is_joined_and_the_rest_collected() {
 
 // --- Deriving only what something new reached (#468) ------------------------
 
-/// A run over the graph, on the build given.
-fn run_over(graph: &Arc<Graph>, build: Option<&str>) -> Result<Report, Box<dyn std::error::Error>> {
-    let mut ports = over(
+/// A run over the graph.
+fn run_over(graph: &Arc<Graph>) -> Result<Report, Box<dyn std::error::Error>> {
+    let ports = over(
         Arc::clone(graph),
         Recorded::week()?,
         Week(vec![
@@ -1279,7 +1268,6 @@ fn run_over(graph: &Arc<Graph>, build: Option<&str>) -> Result<Report, Box<dyn s
         Committer(None),
         Unreachable,
     )?;
-    ports.build = build.map(|build| Build::from(build.to_owned()));
     Ok(runtime()?.block_on(Next::new(ports).run(
         now(),
         None,
@@ -1327,10 +1315,10 @@ const LAYERS: [&str; 7] = [
 #[test]
 fn a_second_run_with_nothing_new_derives_nothing() {
     let graph = Arc::new(Graph::default());
-    run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+    run_over(&graph).expect("the run answers");
     let derived_before = (graph.normalised(), graph.canonicalised());
 
-    let second = run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+    let second = run_over(&graph).expect("the run answers");
 
     assert_eq!(derived(&second), unchanged(&LAYERS, &[]));
     assert_eq!((graph.normalised(), graph.canonicalised()), derived_before);
@@ -1342,10 +1330,10 @@ fn a_second_run_with_nothing_new_derives_nothing() {
 #[test]
 fn something_new_reaching_a_stream_derives_what_reads_from_it_and_nothing_else() {
     let graph = Arc::new(Graph::default());
-    run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+    run_over(&graph).expect("the run answers");
 
     graph.reach("hevy.workouts");
-    let report = run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+    let report = run_over(&graph).expect("the run answers");
 
     assert_eq!(
         derived(&report),
@@ -1359,10 +1347,10 @@ fn something_new_reaching_a_stream_derives_what_reads_from_it_and_nothing_else()
 #[test]
 fn a_correction_derives_again_what_reads_from_it() {
     let graph = Arc::new(Graph::default());
-    run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+    run_over(&graph).expect("the run answers");
 
     graph.reach("garmin.activities");
-    let report = run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+    let report = run_over(&graph).expect("the run answers");
 
     assert_eq!(
         derived(&report),
@@ -1370,43 +1358,18 @@ fn a_correction_derives_again_what_reads_from_it() {
     );
 }
 
-/// **A new build derives every layer once**, by its own mechanism: nothing
-/// upstream has moved, and the run after it derives nothing again.
-#[test]
-fn a_new_build_derives_every_layer_once() {
-    let graph = Arc::new(Graph::default());
-    run_over(&graph, Some("a1b2c3d")).expect("the run answers");
-
-    let upgraded = run_over(&graph, Some("e4f5a6b")).expect("the run answers");
-    let after = run_over(&graph, Some("e4f5a6b")).expect("the run answers");
-
-    assert_eq!(derived(&upgraded), unchanged(&LAYERS, &LAYERS));
-    assert_eq!(derived(&after), unchanged(&LAYERS, &[]));
-}
-
-/// **A build that cannot say which commit it is derives every layer every
-/// run**: it cannot tell whether the code that derived them has changed.
-#[test]
-fn a_build_that_cannot_name_its_commit_derives_every_run() {
-    let graph = Arc::new(Graph::default());
-    run_over(&graph, None).expect("the run answers");
-
-    let again = run_over(&graph, None).expect("the run answers");
-
-    assert_eq!(derived(&again), unchanged(&LAYERS, &LAYERS));
-}
-
 /// **A layer that will not derive is a failed step**, the run carries on, and
-/// under a new build it is derived again next run rather than passed over.
+/// it is derived again next run rather than passed over.
 #[test]
 fn a_layer_that_will_not_derive_is_a_failed_step_and_tried_again() {
     let graph = Arc::new(Graph::default());
-    run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+    run_over(&graph).expect("the run answers");
     graph
         .with(|layered| layered.failing.push("garmin.activities".to_owned()))
         .expect("the graph");
+    graph.reach("garmin.activities");
 
-    let failed = run_over(&graph, Some("e4f5a6b")).expect("the run answers");
+    let failed = run_over(&graph).expect("the run answers");
     let garmin = Step::Normalising(stream("garmin.activities").expect("a stream"));
     assert!(
         failed.run.iter().any(|done| done.step == garmin
@@ -1417,8 +1380,11 @@ fn a_layer_that_will_not_derive_is_a_failed_step_and_tried_again() {
     graph
         .with(|layered| layered.failing.clear())
         .expect("the graph");
-    let retried = run_over(&graph, Some("e4f5a6b")).expect("the run answers");
-    assert_eq!(derived(&retried), unchanged(&LAYERS, &LAYERS));
+    let retried = run_over(&graph).expect("the run answers");
+    assert_eq!(
+        derived(&retried),
+        unchanged(&LAYERS, &["garmin.activities", "gym"])
+    );
 }
 
 /// The Withings step of a run whose newest weigh-in is on `newest`.
@@ -1805,18 +1771,18 @@ fn the_classes_are_refreshed_once_a_day_unless_some_are_unread() {
 /// **A chart page opened just after a run over its streams wants no run**
 /// (#612), so it starts none and joins none: nothing it reads could hold
 /// anything new, and every layer it reads is current. Later than the shortest
-/// visit, or under a build the store has not seen, it wants one.
+/// visit, or with something new to derive, it wants one.
 #[test]
 fn a_chart_page_opened_just_after_a_run_over_its_streams_wants_no_run() {
     let graph = Arc::new(Graph::default());
-    run_over(&graph, Some("a1b2c3d")).expect("the run answers");
+    run_over(&graph).expect("the run answers");
     let hevy = stream("hevy.workouts").expect("a stream");
     let scope = Scope::new([
         Part::Fetching(hevy.clone()),
         Part::Normalising(hevy),
         Part::Canonicalising(CanonicalLayer::Gym),
     ]);
-    let wanted = |minutes: i64, build: &str| -> bool {
+    let wanted = |minutes: i64| -> bool {
         let mut ports = over(
             Arc::clone(&graph),
             Recorded::week().expect("a week"),
@@ -1825,7 +1791,6 @@ fn a_chart_page_opened_just_after_a_run_over_its_streams_wants_no_run() {
             Unreachable,
         )
         .expect("the ports build");
-        ports.build = Some(Build::from(build.to_owned()));
         ports.fetches =
             Fetches::minutes(&[("hevy.workouts", minutes, Some(minutes))]).expect("the fetches");
         ports.refetch = Refetch::SHORTEST_VISIT;
@@ -1835,7 +1800,8 @@ fn a_chart_page_opened_just_after_a_run_over_its_streams_wants_no_run() {
             .expect("the store answers")
     };
 
-    assert!(!wanted(1, "a1b2c3d"), "a minute after");
-    assert!(wanted(50, "a1b2c3d"), "after the shortest visit");
-    assert!(wanted(1, "e4f5a6b"), "under a new build");
+    assert!(!wanted(1), "a minute after");
+    assert!(wanted(50), "after the shortest visit");
+    graph.reach("hevy.workouts");
+    assert!(wanted(1), "with something new to derive");
 }

@@ -27,7 +27,8 @@
 //! raw, its corrections and the zone, and a canonical layer reads the
 //! normalised layers. Each records what it was derived from, and one whose
 //! inputs read the same is left as it stands. The build is not a node in that
-//! graph: a build the store has not seen derives every layer once.
+//! graph, but each layer's version is one of its inputs: a new build derives
+//! only the layers whose translation it changed (#606).
 //!
 //! **Then each session of the microcycle gets a state**, and the first one
 //! that can still be performed is the one delivered — again, if it already was
@@ -69,9 +70,7 @@ use crate::{
     cycling::{PrescribedRide, RideDeliveryError, RidingError},
     deliver::{Delivering, DeliveryPorts},
     microcycle::{Session, Standing},
-    ports::{
-        Build, CanonicalLayer, DerivationLedger, DerivedFrom, NewestObservation, NormalisedLayers,
-    },
+    ports::{CanonicalLayer, DerivationLedger, DerivedFrom, NewestObservation, NormalisedLayers},
     prescribe::{NextSession, Prescribing, PrescriptionPorts},
     reschedule::{Reschedule, Rescheduled, ReschedulingPlans},
 };
@@ -901,11 +900,16 @@ where
     }
 
     async fn inputs(&self, layer: CanonicalLayer) -> Result<DerivedFrom, StoreError> {
-        match layer {
+        let written_by = match layer {
             CanonicalLayer::Gym => self.normalised_gym.written_by().await,
             CanonicalLayer::Cycling => self.normalised_cycling.written_by().await,
             CanonicalLayer::WeighIns => self.normalised_weigh_ins.written_by().await,
-        }
+        }?;
+        Ok(DerivedFrom::from(format!(
+            "version {}; {}",
+            layer.version(),
+            written_by.as_str()
+        )))
     }
 }
 
@@ -927,9 +931,6 @@ pub struct NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, 
     pub canonical: CL,
     /// What each layer standing was derived from.
     pub ledger: DL,
-    /// This build of the derivation code. `None` for a build that cannot say
-    /// which commit it is, which therefore derives every layer every run.
-    pub build: Option<Build>,
     pub classes: Result<K, NoAccess>,
     pub holidays: HC,
     pub diary: D,
@@ -1141,18 +1142,10 @@ where
         Ok(false)
     }
 
-    /// Whether a layer in `scope` would be derived again: under a build the
-    /// store has not seen, or from inputs that moved since it last was.
+    /// Whether a layer in `scope` would be derived again: from inputs that
+    /// moved since it last was, its version among them.
     async fn stale(&self, scope: &Scope) -> Result<bool, NextError> {
         let ledger = &self.ports.ledger;
-        if let Some(build) = &self.ports.build
-            && ledger.build().await?.as_ref() != Some(build)
-        {
-            return Ok(true);
-        }
-        if self.ports.build.is_none() {
-            return Ok(true);
-        }
         for stream in self.ports.normalised.streams() {
             if scope.has(&Part::Normalising(stream.clone()))
                 && ledger.normalised(&stream).await?.as_ref()
@@ -1441,14 +1434,13 @@ where
     }
 
     /// Bring every derived layer current, deriving only what something new
-    /// reached (#468).
+    /// reached (#468) or a new version reads differently (#606).
     ///
     /// **Normalised layers first, then canonical**, because a canonical layer's
     /// inputs are the derivations that wrote the normalised layers it reads.
     ///
-    /// **The build is recorded only once every layer has derived under it**, so
-    /// a layer that failed is derived again by the next run rather than passed
-    /// over as current.
+    /// **A layer that failed records nothing**, so the next run derives it
+    /// again rather than passing it over as current.
     async fn derive(
         &self,
         scope: &Scope,
@@ -1456,28 +1448,13 @@ where
         run: &mut Vec<Done>,
     ) -> Result<(), NextError> {
         let ledger = &self.ports.ledger;
-        let every = match &self.ports.build {
-            None => true,
-            Some(build) => ledger.build().await?.as_ref() != Some(build),
-        };
-        let mut failed = false;
-        let streams = self.ports.normalised.streams();
-        // **A build is recorded only by a run that derived every layer under
-        // it**, which a run over part of the graph did not.
-        let whole = streams
-            .iter()
-            .all(|stream| scope.has(&Part::Normalising(stream.clone())))
-            && CANONICAL
-                .iter()
-                .all(|layer| scope.has(&Part::Canonicalising(*layer)));
-
-        for stream in streams {
+        for stream in self.ports.normalised.streams() {
             if !scope.has(&Part::Normalising(stream.clone())) {
                 continue;
             }
             let started = start(progress, Step::Normalising(stream.clone()));
             let inputs = self.ports.normalised.inputs(&stream).await?;
-            let outcome = if !every && ledger.normalised(&stream).await?.as_ref() == Some(&inputs) {
+            let outcome = if ledger.normalised(&stream).await?.as_ref() == Some(&inputs) {
                 Ok(Found::Unchanged)
             } else {
                 match self.ports.normalised.normalise(&stream).await {
@@ -1485,10 +1462,7 @@ where
                         ledger.record_normalised(summary.run_id, &inputs).await?;
                         Ok(Found::Written(summary.workouts_written))
                     }
-                    Err(error) => {
-                        failed = true;
-                        Err(StepFailure::Normalisation(error))
-                    }
+                    Err(error) => Err(StepFailure::Normalisation(error)),
                 }
             };
             finish(progress, run, started, outcome);
@@ -1505,7 +1479,7 @@ where
             };
             let started = start(progress, step);
             let inputs = self.ports.canonical.inputs(layer).await?;
-            let found = if !every && ledger.canonical(layer).await?.as_ref() == Some(&inputs) {
+            let found = if ledger.canonical(layer).await?.as_ref() == Some(&inputs) {
                 Found::Unchanged
             } else {
                 let found = match layer {
@@ -1529,13 +1503,6 @@ where
             finish(progress, run, started, Ok(found));
         }
 
-        if let Some(build) = &self.ports.build
-            && every
-            && whole
-            && !failed
-        {
-            ledger.record_build(build).await?;
-        }
         Ok(())
     }
 

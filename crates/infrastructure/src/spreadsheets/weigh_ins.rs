@@ -139,6 +139,7 @@ pub struct SpreadsheetWeighInTranslator;
 impl Translator for SpreadsheetWeighInTranslator {
     type Account = LandedRecord;
     type Entity = ManualWeighIn;
+    const VERSION: u32 = 1;
 
     /// The zone is not consulted: a manual weigh-in is a day, and a day needs
     /// no zone to be read.

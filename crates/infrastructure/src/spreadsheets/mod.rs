@@ -160,6 +160,7 @@ pub struct SpreadsheetTranslator;
 impl Translator for SpreadsheetTranslator {
     type Account = Workbook;
     type Entity = SpreadsheetEntity;
+    const VERSION: u32 = 1;
 
     /// The zone is not consulted: everything a sheet records is a day.
     fn translate(

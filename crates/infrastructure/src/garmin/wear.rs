@@ -96,6 +96,7 @@ pub struct GarminDailyHeartRateTranslator;
 impl Translator for GarminDailyHeartRateTranslator {
     type Account = DayAccount;
     type Entity = GarminDayEntity;
+    const VERSION: u32 = 1;
 
     fn translate(
         &self,

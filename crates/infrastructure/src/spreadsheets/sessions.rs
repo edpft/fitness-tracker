@@ -57,6 +57,7 @@ pub struct SpreadsheetSessionTranslator;
 impl Translator for SpreadsheetSessionTranslator {
     type Account = Workbook;
     type Entity = ManualGymSession;
+    const VERSION: u32 = 1;
 
     /// The zone is not consulted: a manual session is a day.
     fn translate(

@@ -156,6 +156,7 @@ impl GarminGymTranslator {
 impl Translator for GarminGymTranslator {
     type Account = ActivityAccount;
     type Entity = MeasuredGymSession;
+    const VERSION: u32 = 1;
 
     fn translate(
         &self,

@@ -75,6 +75,7 @@ impl HevySessionTranslator {
 impl Translator for HevySessionTranslator {
     type Account = SessionAccount;
     type Entity = PerformedGymSession;
+    const VERSION: u32 = 1;
 
     fn translate(
         &self,

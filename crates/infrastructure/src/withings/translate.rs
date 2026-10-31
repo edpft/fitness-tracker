@@ -480,6 +480,7 @@ pub struct WithingsWeighInTranslator;
 impl Translator for WithingsWeighInTranslator {
     type Account = WeighInAccount;
     type Entity = BodyScanWeighIn;
+    const VERSION: u32 = 1;
 
     fn translate(
         &self,

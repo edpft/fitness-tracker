@@ -13,6 +13,7 @@ use application::{
     canonicalise,
     extract::{Extraction, ExtractionPorts},
     normalise::{Normalisation, NormalisationPorts},
+    ports::Translator as _,
 };
 use domain::{
     analytical::Weighed,
@@ -28,7 +29,7 @@ use infrastructure::{
 };
 use jiff::civil::date;
 
-use crate::support::layers;
+use crate::support::{layers, versions};
 
 const FIRST: &[u8] = include_bytes!("fixtures/myfitnesspal/first-export.ods");
 const SECOND: &[u8] = include_bytes!("fixtures/myfitnesspal/second-export.ods");
@@ -282,4 +283,38 @@ fn an_incremental_derivation_writes_what_a_whole_one_would() {
             layers::dump(&whole).await.expect("a dump"),
         );
     });
+}
+
+/// **Its version names what it translates** (#606): both exports, landed as
+/// the operator lands them.
+#[test]
+fn its_version_names_what_it_translates() {
+    let translations = runtime().expect("a runtime").block_on(async {
+        let directory = tempfile::tempdir().expect("a directory");
+        let folder = folder_with(
+            directory.path(),
+            &[("first.ods", FIRST), ("second.ods", SECOND)],
+        )
+        .expect("the folder");
+        let database = directory.path().join("store.db");
+        let pool = connect(&database).await.expect("a store");
+        land(&folder, &pool, &database).await.expect("lands");
+
+        let reader = MyFitnessPalExportAccountReader::new(pool.clone()).expect("a reader");
+        let zones = StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("zone"));
+        versions::accounts(&reader)
+            .await
+            .expect("the accounts")
+            .iter()
+            .map(|account| {
+                MyFitnessPalWeighInTranslator
+                    .translate(account, &zones)
+                    .expect("translated")
+            })
+            .collect::<Vec<_>>()
+    });
+
+    if let Err(unpinned) = versions::pinned::<MyFitnessPalWeighInTranslator>(&translations) {
+        panic!("{unpinned}");
+    }
 }
