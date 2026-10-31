@@ -1,0 +1,154 @@
+/* One stylesheet for every page (#614): dark, cards, and one colour per
+   metric, which every page that draws the metric uses for it. Phone width
+   first: one column, nothing wider than the screen. */
+
+:root {
+  color-scheme: dark;
+  --bg: #121214; --card: #1e1e21; --raised: #2a2a2e;
+  --ink: #f4f4f6; --ink2: #b4b4bc; --muted: #7c7c86; --grid: #2e2e33;
+  --failed: #f87171; --good: #0ca30c;
+  /* The names the pages not yet on the template draw with. */
+  --surface: var(--card); --axis: var(--muted); --mark: #7aa2ff; --trend: var(--ink);
+  /* One colour per metric. */
+  --weight: #7aa2ff; --fat: #b99cff; --fat-free: #4fd8b8; --ftp: #ffc266;
+  --one-rep-max: #ffc266; --hrv: #8fd3ff; --resting-heart-rate: #ff8fb1;
+  --pulse-wave-velocity: #ff9f6b; --sleep: #9aa8ff; --sleep-regularity: #c6b4ff;
+  /* One colour per power zone. */
+  --z1: #7aa2ff; --z2: #4fd8b8; --z3: #ffc266; --z4: #ff7a6b; --z5: #6a5acd; --z6: #d95926; --z7: #e66767;
+}
+
+.weight { --c: var(--weight); } .fat { --c: var(--fat); } .fat-free { --c: var(--fat-free); }
+.ftp { --c: var(--ftp); } .one-rep-max { --c: var(--one-rep-max); } .hrv { --c: var(--hrv); }
+.resting-heart-rate { --c: var(--resting-heart-rate); }
+.pulse-wave-velocity { --c: var(--pulse-wave-velocity); }
+.sleep { --c: var(--sleep); } .sleep-regularity { --c: var(--sleep-regularity); }
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+main { max-width: 32.5rem; margin: 0 auto; padding: 0 16px 40px; }
+main.wide { max-width: 40rem; }
+a { color: var(--ink); overflow-wrap: anywhere; }
+h1 { font-size: 22px; font-weight: 600; margin: 0; }
+h2 { font-size: 19px; font-weight: 600; margin: 1.25rem 0 0.5rem; }
+button { width: 100%; padding: 14px; font: inherit; font-weight: 600; }
+ol, ul { padding-left: 1.2rem; }
+li { margin: 0.25rem 0; }
+section { margin-top: 1.5rem; }
+table { border-collapse: collapse; }
+td { padding: 0.15rem 0.75rem 0.15rem 0; vertical-align: top; }
+li.paired { border-left: 2px solid var(--muted); padding-left: 0.5rem; list-style: none; }
+.step { font-weight: 600; }
+.outcome, .estimate, .collecting, .method, p.legend { color: var(--muted); }
+.failed { color: var(--failed); }
+.following { padding: 0 16px; max-width: 32.5rem; margin: 0 auto; }
+.following p { margin: 16px 0 0; }
+
+/* Every page, in a row that scrolls on its own rather than the page. */
+nav.menu {
+  display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none;
+  margin: 0 -16px; padding: 12px 16px; border-bottom: 1px solid var(--grid);
+}
+nav.menu a {
+  flex: none; color: var(--ink2); text-decoration: none; font-size: 13px;
+  padding: 6px 12px; border-radius: 999px; background: var(--card);
+}
+nav.menu a[aria-current] { background: var(--ink); color: var(--bg); font-weight: 600; }
+main > h1 { padding: 18px 0 14px; }
+
+/* The range, as one segmented control. */
+p.choices {
+  display: flex; background: var(--card); border-radius: 999px; padding: 4px; margin: 0 0 16px;
+}
+p.choices > * {
+  display: block; flex: 1; text-align: center; padding: 9px 4px; border-radius: 999px;
+  font-size: 13px; white-space: nowrap; color: var(--ink2); text-decoration: none;
+}
+p.choices > *::first-letter { text-transform: uppercase; }
+p.choices strong { background: var(--ink); color: var(--bg); font-weight: 600; }
+
+/* The detail template. */
+header.detail { display: flex; align-items: center; gap: 12px; padding: 18px 0 14px; }
+header.detail a { font-size: 28px; line-height: 1; text-decoration: none; }
+.card { background: var(--card); border-radius: 22px; padding: 18px; margin: 0 0 14px; }
+.card > h2 { margin: 0 0 4px; }
+.summary { display: grid; }
+.summary > .cell + .cell { border-left: 1px solid var(--grid); padding-left: 16px; }
+.summary > .cell { padding-right: 12px; min-width: 0; }
+.summary .label {
+  display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink2);
+}
+.swatch { flex: none; width: 10px; height: 10px; border-radius: 3px; background: var(--c); }
+.figure { font-size: 38px; font-weight: 650; letter-spacing: -0.02em; margin-top: 6px; white-space: nowrap; }
+.figure small { font-size: 17px; font-weight: 500; color: var(--ink2); margin-left: 3px; }
+.margin { font-size: 15px; color: var(--ink2); }
+.summary .asof { grid-column: 1 / -1; margin-top: 14px; font-size: 13px; color: var(--muted); }
+.summary .none { margin-top: 12px; font-size: 13px; color: var(--muted); }
+.change { display: grid; grid-template-columns: 22px 1fr; gap: 6px 8px; align-items: center; margin-top: 12px; }
+.change b { font-size: 15px; font-weight: 600; }
+.change span { font-size: 13px; color: var(--ink2); margin-left: 6px; }
+.change svg.gauge, svg.reference { grid-column: 1 / -1; width: 100%; height: auto; display: block; }
+svg.reference { margin-top: 12px; }
+.badge circle { fill: var(--c); }
+.badge path { fill: none; stroke: var(--bg); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.badge.flat circle { fill: var(--raised); }
+.badge.flat path { stroke: var(--ink); }
+.track { stroke: var(--grid); stroke-width: 6; stroke-linecap: round; }
+.noise { fill: var(--ink); fill-opacity: 0.16; }
+.zero { stroke: var(--ink2); stroke-width: 1.5; }
+.fell { fill: var(--c); stroke: var(--card); stroke-width: 2; }
+.segment { fill: var(--raised); }
+.segment.lit { fill: var(--c); }
+.segment-name { fill: var(--muted); font-size: 10px; }
+.pointer { fill: var(--ink); }
+.sub { font-size: 14px; color: var(--ink2); margin: 0 0 4px; }
+
+/* A chart, as wide as its card. */
+.plotted { position: relative; margin: 0 -18px; }
+.plotted svg { display: block; width: 100%; height: auto; }
+.plotted .grid { stroke: var(--grid); stroke-width: 1; }
+.plotted .tick { fill: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.plotted .dot { fill: var(--c); fill-opacity: 0.45; }
+.plotted .line { fill: none; stroke: var(--c); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.plotted .band { fill: var(--c); fill-opacity: 0.22; stroke: none; }
+.plotted .reference { fill: var(--ink); fill-opacity: 0.08; stroke: none; }
+.plotted .days { position: absolute; left: 0; right: 0; }
+.plotted .day { position: absolute; top: 0; bottom: 0; cursor: pointer; }
+.plotted .day input { position: absolute; opacity: 0; pointer-events: none; }
+.plotted .cross { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink2); display: none; }
+.plotted .tip {
+  position: absolute; top: -16px; z-index: 2; display: none; white-space: nowrap; pointer-events: none;
+  background: var(--raised); border-radius: 10px; padding: 7px 10px; font-size: 13px; box-shadow: 0 4px 14px #0008;
+}
+.plotted .tip.left { left: 0; }
+.plotted .tip.right { right: 0; }
+.plotted .tip .on { color: var(--ink2); }
+.plotted .day:hover .tip, .plotted .day:hover .cross,
+.plotted .day input:checked ~ .tip, .plotted .day input:checked ~ .cross { display: block; }
+
+/* The latest entries. */
+.latest .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.latest .head h2 { margin: 0; }
+.latest .head span { font-size: 15px; color: var(--ink2); }
+.latest .row { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; font-size: 15px; }
+.latest .row + .row { border-top: 1px solid var(--grid); }
+.latest .row .on { color: var(--ink2); }
+.latest .row .value { font-variant-numeric: tabular-nums; text-align: right; }
+p.foot { font-size: 12px; color: var(--muted); margin: 2px 4px; }
+
+/* What the pages not yet on the template share. */
+div.plot { max-width: 100%; }
+svg.chart { width: 100%; height: auto; display: block; }
+svg .grid { stroke: var(--grid); stroke-width: 1; }
+svg .baseline { stroke: var(--muted); stroke-width: 1; }
+svg .axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+p.reading { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+p.legend { font-size: 0.9rem; }
+details { max-width: 100%; }
+table.figures { display: block; max-width: 100%; overflow-x: auto; font-variant-numeric: tabular-nums; font-size: 0.9rem; }
+table.figures th { text-align: left; padding-right: 0.75rem; }
+table.figures td { padding-right: 0.75rem; }

@@ -153,10 +153,7 @@ pub fn page(
         (DOCTYPE)
         html lang="en" {
             head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (TITLE) }
-                style { (crate::page::STYLE) (crate::chart::STYLE) (crate::daily::STYLE) (MATRIX) (UNITS) }
+                (crate::page::head(TITLE, &[crate::chart::STYLE, crate::daily::STYLE, MATRIX, UNITS]))
             }
             body {
                 (crate::page::following(run))
@@ -425,7 +422,6 @@ fn tick(value: f64, step: f64) -> String {
 /// status colour for good, never a series colour, each named in the chart so
 /// it is not colour alone.
 const MATRIX: &str = "
-:root { --good: #0ca30c; }
 div.matrix { max-width: 28rem; }
 svg.matrix { width: 100%; height: auto; display: block; }
 .goal { fill: var(--good); fill-opacity: 0.08; }
@@ -448,10 +444,7 @@ pub fn unreadable(error: &str) -> Markup {
         (DOCTYPE)
         html lang="en" {
             head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (TITLE) }
-                style { (crate::page::STYLE) }
+                (crate::page::head(TITLE, &[]))
             }
             body {
                 main {

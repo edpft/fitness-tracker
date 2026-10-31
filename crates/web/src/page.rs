@@ -14,10 +14,7 @@ pub fn index(view: &View) -> Markup {
         (DOCTYPE)
         html lang="en" {
             head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { "Home" }
-                style { (STYLE) }
+                (head("Home", &[]))
                 script src="/htmx.min.js" {}
                 script src="/sse.min.js" {}
             }
@@ -109,12 +106,7 @@ pub fn collecting(here: &str, run: &View) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
-            head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (title) }
-                style { (STYLE) }
-            }
+            head { (head(title, &[])) }
             body {
                 (following(run))
                 main {
@@ -151,29 +143,22 @@ fn redrawing() -> Markup {
     }
 }
 
-/// Phone width first: one column, nothing wider than the screen.
-pub const STYLE: &str = "
-:root { color-scheme: light dark; --muted: #6b7280; --failed: #b91c1c; }
-@media (prefers-color-scheme: dark) { :root { --muted: #9ca3af; --failed: #f87171; } }
-body { margin: 0; font: 16px/1.45 system-ui, sans-serif; }
-main { max-width: 40rem; margin: 0 auto; padding: 16px; }
-button { width: 100%; padding: 14px; font: inherit; font-weight: 600; }
-.following { padding: 0 16px; }
-.following p { margin: 16px 0 0; }
-ol, ul { padding-left: 1.2rem; }
-li { margin: 0.25rem 0; }
-.step { font-weight: 600; }
-.outcome, .estimate, .collecting { color: var(--muted); }
-.failed { color: var(--failed); }
-section { margin-top: 1.5rem; }
-table { border-collapse: collapse; }
-td { padding: 0.15rem 0.75rem 0.15rem 0; vertical-align: top; }
-li.paired { border-left: 2px solid var(--muted); padding-left: 0.5rem; list-style: none; }
-a { overflow-wrap: anywhere; }
-p.choices a, p.choices strong { margin-right: 0.75rem; }
-nav.menu { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin: 0 0 1.25rem; }
-nav.menu a[aria-current] { color: inherit; font-weight: 600; text-decoration: none; }
-";
+/// What every page's head holds: its title, and the one stylesheet (#614)
+/// with any rules of the page's own that are not yet in it.
+pub fn head(title: &str, own: &[&str]) -> Markup {
+    html! {
+        meta charset="utf-8";
+        meta name="viewport" content="width=device-width, initial-scale=1";
+        title { (title) }
+        link rel="stylesheet" href=(STYLESHEET);
+        @if !own.is_empty() {
+            style { @for rules in own { (PreEscaped(rules)) } }
+        }
+    }
+}
+
+/// Where the one stylesheet is served.
+pub const STYLESHEET: &str = "/style.css";
 
 #[cfg(test)]
 mod tests {
