@@ -4,6 +4,7 @@ pub mod corpus;
 pub mod layers;
 pub mod mesocycle;
 pub mod store;
+pub mod versions;
 
 /// Derive over the corpus, or fail the test saying which step broke.
 ///

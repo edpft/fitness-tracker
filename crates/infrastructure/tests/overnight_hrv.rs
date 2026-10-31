@@ -20,6 +20,8 @@ use domain::{
 use infrastructure::garmin::{GarminHrvTranslator, nights};
 use serde_json::{Value, json};
 
+use crate::support::versions;
+
 type Failure = Box<dyn std::error::Error>;
 
 fn record(id: i64, date: &str, payload: &Value) -> Result<LandedRecord, Failure> {
@@ -620,5 +622,104 @@ mod stored {
         })
         .expect("a runtime");
         outcome.expect("the store round trip");
+    }
+}
+
+/// **Its version names what it translates** (#606): each night above, once
+/// more.
+#[test]
+fn its_version_names_what_it_translates() {
+    let nights = [
+        (
+            "2026-09-17",
+            night(
+                "2026-09-17",
+                "2026-09-16T22:32:32.0",
+                "2026-09-17T05:55:54.0",
+                3,
+            ),
+        ),
+        (
+            "2025-01-28",
+            night(
+                "2025-01-28",
+                "2025-01-28T00:24:39.0",
+                "2025-01-28T06:27:48.0",
+                0,
+            ),
+        ),
+        (
+            "2025-01-29",
+            night(
+                "2025-01-29",
+                "2025-01-28T23:17:05.0",
+                "2025-01-29T06:27:48.0",
+                0,
+            ),
+        ),
+        (
+            "2024-12-22",
+            night_with(
+                "2024-12-22",
+                "2024-12-22T00:02:59.0",
+                "2024-12-22T06:59:21.0",
+                &[
+                    ("status", json!("NONE")),
+                    ("baseline", Value::Null),
+                    ("weeklyAvg", Value::Null),
+                    ("feedbackPhrase", json!("ONBOARDING_1")),
+                ],
+            ),
+        ),
+        (
+            "2025-03-31",
+            night_with(
+                "2025-03-31",
+                "2025-03-31T06:27:46.0",
+                "2025-03-31T06:27:48.0",
+                &[
+                    ("lastNightAvg", Value::Null),
+                    ("lastNight5MinHigh", Value::Null),
+                ],
+            ),
+        ),
+        (
+            "2026-03-12",
+            night_with(
+                "2026-03-12",
+                "2026-03-10T22:32:32.0",
+                "2026-03-11T05:55:54.0",
+                &[
+                    ("lastNightAvg", Value::Null),
+                    ("lastNight5MinHigh", json!(94)),
+                ],
+            ),
+        ),
+        (
+            "2026-09-17",
+            night_with(
+                "2026-09-17",
+                "2026-09-16T22:32:32.0",
+                "2026-09-17T05:55:54.0",
+                &[("status", json!("POOR"))],
+            ),
+        ),
+        (
+            "2026-09-17",
+            night(
+                "2026-09-17",
+                "2026-09-17T05:55:54.0",
+                "2026-09-16T22:32:32.0",
+                0,
+            ),
+        ),
+    ];
+    let translations: Vec<_> = nights
+        .iter()
+        .map(|(date, payload)| translate(date, payload).expect("translated"))
+        .collect();
+
+    if let Err(unpinned) = versions::pinned::<GarminHrvTranslator>(&translations) {
+        panic!("{unpinned}");
     }
 }

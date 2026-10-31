@@ -70,6 +70,7 @@ impl GarminActivityTranslator {
 impl Translator for GarminActivityTranslator {
     type Account = ActivityAccount;
     type Entity = GarminActivityEntity;
+    const VERSION: u32 = 1;
 
     /// **A refusal as a gym session stays a refusal**, beside the devices: the
     /// activity is still not a session this layer models.

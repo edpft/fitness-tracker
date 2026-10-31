@@ -89,6 +89,7 @@ pub struct PelotonSessionTranslator;
 impl Translator for PelotonSessionTranslator {
     type Account = SessionAccount;
     type Entity = PerformedSession;
+    const VERSION: u32 = 1;
 
     fn translate(
         &self,

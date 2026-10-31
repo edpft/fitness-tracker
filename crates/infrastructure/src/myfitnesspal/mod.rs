@@ -80,6 +80,7 @@ pub struct MyFitnessPalWeighInTranslator;
 impl Translator for MyFitnessPalWeighInTranslator {
     type Account = MyFitnessPalExports;
     type Entity = ManualWeighIn;
+    const VERSION: u32 = 1;
 
     /// The zone is not consulted: a weight is logged against a day, and when
     /// it was typed is an instant the export states in UTC.

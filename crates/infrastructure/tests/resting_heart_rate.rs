@@ -14,8 +14,12 @@ use domain::{
     },
     normalised::{OperatorZone, RefusalKind, RefusalReason},
 };
-use infrastructure::garmin::{GarminRestingHeartRateTranslator, days};
+use infrastructure::garmin::{
+    GarminDailyHeartRateTranslator, GarminRestingHeartRateTranslator, days,
+};
 use serde_json::{Value, json};
+
+use crate::support::versions;
 
 type Failure = Box<dyn std::error::Error>;
 
@@ -148,4 +152,63 @@ fn a_resting_heart_rate_of_zero_is_not_a_rate() {
         refusals.first().reason,
         RefusalReason::UnreadableValue { .. }
     ));
+}
+
+/// **Its version names what it translates** (#606): each day above, once more,
+/// and as the daily heart rate `garmin.daily_heart_rate` derives from it.
+#[test]
+fn its_version_names_what_it_translates() {
+    let days = [
+        vec![day("2019-03-02", Some(48), &[])],
+        vec![day(
+            "2026-10-10",
+            Some(54),
+            &[(1_791_586_800_000, 54), (1_791_586_920_000, 56)],
+        )],
+        vec![day("2024-01-15", None, &[])],
+        vec![
+            day("2026-10-14", Some(57), &[(1_792_000_000_000, 60)]),
+            day("2026-10-14", Some(52), &[(1_792_000_000_000, 60)]),
+        ],
+        vec![day("2020-06-01", Some(0), &[])],
+    ];
+    let accounts: Vec<_> = days
+        .iter()
+        .flat_map(|servings| {
+            infrastructure::garmin::days(
+                servings
+                    .iter()
+                    .zip(1..)
+                    .map(|(payload, id)| {
+                        let date = payload["calendarDate"].as_str().expect("a date");
+                        record(id, date, payload).expect("a record")
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    let zones = StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("zone"));
+    let resting: Vec<_> = accounts
+        .iter()
+        .map(|account| {
+            GarminRestingHeartRateTranslator
+                .translate(account, &zones)
+                .expect("translated")
+        })
+        .collect();
+    let worn: Vec<_> = accounts
+        .iter()
+        .map(|account| {
+            GarminDailyHeartRateTranslator
+                .translate(account, &zones)
+                .expect("translated")
+        })
+        .collect();
+
+    if let Err(unpinned) = versions::pinned::<GarminRestingHeartRateTranslator>(&resting) {
+        panic!("{unpinned}");
+    }
+    if let Err(unpinned) = versions::pinned::<GarminDailyHeartRateTranslator>(&worn) {
+        panic!("{unpinned}");
+    }
 }

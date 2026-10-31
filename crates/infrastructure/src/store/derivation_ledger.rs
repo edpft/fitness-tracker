@@ -1,18 +1,17 @@
-//! What each derived layer standing in the store was derived from, and the
-//! build that last derived every one of them (#468).
+//! What each derived layer standing in the store was derived from (#468).
 //!
 //! **Beside the layers, never part of them.** Losing any of it costs one
 //! derivation of every layer and nothing else, which is why a normalised
 //! layer's inputs sit on the run that wrote it: a derivation started by hand
 //! records none, and the layer it wrote reads as derived from nothing known.
 
-use application::{Build, CanonicalLayer, DerivationLedger, DerivedFrom, StoreError};
+use application::{CanonicalLayer, DerivationLedger, DerivedFrom, StoreError};
 use domain::{landing::LandingStream, normalised::NormalisationRunId};
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use super::{normalisation_run_for_storage, store_error};
 
-/// The ledger, over the run log and two tables of its own.
+/// The ledger, over the run log and a table of its own.
 #[derive(Debug, Clone)]
 pub struct SqliteDerivationLedger {
     pool: SqlitePool,
@@ -25,27 +24,6 @@ impl SqliteDerivationLedger {
 }
 
 impl DerivationLedger for SqliteDerivationLedger {
-    async fn build(&self) -> Result<Option<Build>, StoreError> {
-        let build = sqlx::query_scalar!("SELECT build FROM derivation_build WHERE id = 1")
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
-        Ok(build.map(Build::from))
-    }
-
-    async fn record_build(&self, build: &Build) -> Result<(), StoreError> {
-        let build = build.as_str();
-        sqlx::query!(
-            "INSERT INTO derivation_build (id, build) VALUES (1, ?)
-             ON CONFLICT (id) DO UPDATE SET build = excluded.build",
-            build
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(|error| store_error(&error))?;
-        Ok(())
-    }
-
     /// **The latest success, ordered as the run log orders it**, because that
     /// is the derivation whose rows the layer holds: a failed one writes
     /// nothing.
@@ -115,6 +93,27 @@ impl DerivationLedger for SqliteDerivationLedger {
         .map_err(|error| store_error(&error))?;
         Ok(())
     }
+}
+
+/// Forget what a canonical layer was derived from, in the transaction that
+/// empties it (#606).
+///
+/// **Whatever empties a layer forgets its derivation**, so the next run
+/// derives it again whatever its inputs read. A normalised writer clears the
+/// whole canonical layer before it removes rows the layer names, even where it
+/// then removes none of them: a spreadsheet revised for its weigh-ins alone
+/// empties the gym layer and leaves every gym session's run and count as they
+/// were. Judged by its inputs alone, the empty layer would read as current.
+pub(super) async fn forget(
+    tx: &mut Transaction<'_, Sqlite>,
+    layer: CanonicalLayer,
+) -> Result<(), StoreError> {
+    let layer = layer.as_str();
+    sqlx::query!("DELETE FROM canonical_derivation WHERE layer = ?", layer)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    Ok(())
 }
 
 /// The derivations that wrote a normalised layer's rows, as a canonical layer

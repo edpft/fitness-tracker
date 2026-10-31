@@ -645,3 +645,27 @@ fn a_sessions_duration_spans_its_parts_and_the_gaps_between_them() {
         .max();
     assert_eq!(four, Some(3_703), "2025-10-10, four routines in one visit");
 }
+
+/// **Its version names what it translates** (#606): the whole corpus, grouped
+/// into sessions as the store groups it.
+#[test]
+fn its_version_names_what_it_translates() {
+    use application::ports::Translator as _;
+    use domain::normalised::StatedZones;
+    use infrastructure::hevy::{HevySessionTranslator, group};
+
+    let records = corpus::records().expect("the corpus");
+    let zones = StatedZones::throughout(corpus::zone().expect("the zone"));
+    let translations: Vec<_> = group(records)
+        .iter()
+        .map(|account| {
+            HevySessionTranslator::default()
+                .translate(account, &zones)
+                .expect("translated")
+        })
+        .collect();
+
+    if let Err(unpinned) = support::versions::pinned::<HevySessionTranslator>(&translations) {
+        panic!("{unpinned}");
+    }
+}

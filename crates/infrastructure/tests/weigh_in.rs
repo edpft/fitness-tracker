@@ -15,7 +15,7 @@ use domain::{
 use infrastructure::withings::{WithingsWeighInTranslator, group};
 use serde_json::{Value, json};
 
-use crate::support::layers;
+use crate::support::{layers, versions};
 
 type Failure = Box<dyn std::error::Error>;
 
@@ -378,5 +378,33 @@ fn pulse_wave_velocity_reads_back_by_day_and_algorithm() {
     })();
     if let Err(error) = outcome {
         panic!("{error}");
+    }
+}
+
+/// **Its version names what it translates** (#606): each weigh-in above, once
+/// more.
+#[test]
+fn its_version_names_what_it_translates() {
+    let weigh_ins = [
+        vec![composition(), heart(9), nerves(), vascular()],
+        vec![composition()],
+        vec![nerves()],
+        vec![group_of(
+            1,
+            Some("Body Scan"),
+            &[measure(1, 86_600, -3, None)],
+        )],
+        vec![group_of(2, None, &[measure(1, 88_000, -3, None)])],
+        vec![composition(), heart(1)],
+        vec![composition(), heart(10)],
+        vec![composition(), heart(5)],
+    ];
+    let translations: Vec<_> = weigh_ins
+        .iter()
+        .map(|payloads| translate(payloads).expect("translated"))
+        .collect();
+
+    if let Err(unpinned) = versions::pinned::<WithingsWeighInTranslator>(&translations) {
+        panic!("{unpinned}");
     }
 }

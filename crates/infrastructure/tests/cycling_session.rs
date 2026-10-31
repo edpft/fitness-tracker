@@ -15,6 +15,7 @@ use application::{
     RiddenSessionLog as _, RiddenVenues as _, WorkoutNormaliser as _,
     canonicalise::{self, Canonicalised},
     normalise::{Normalisation, NormalisationPorts, Refusals},
+    ports::Translator as _,
 };
 use domain::normalised::StatedZones;
 use domain::{
@@ -32,7 +33,7 @@ use infrastructure::{
 };
 use sqlx::SqlitePool;
 
-use crate::support::layers;
+use crate::support::{layers, versions};
 
 type Built<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -1596,4 +1597,105 @@ fn a_new_account_answer_reaches_the_rides_before_it() {
             2
         );
     });
+}
+
+/// **Its version names what it translates** (#606): a ride of each kind the
+/// suite lands, with its graph or without one, in miles and in a unit nobody
+/// rides in, and a session ridden on something other than the bike.
+#[test]
+fn its_version_names_what_it_translates() {
+    let runtime = runtime().expect("a runtime");
+    let translations = runtime.block_on(async {
+        let hour = 3_600;
+        let (pool, _directory) = landed(
+            vec![
+                ("main", workout("main", Kind::Main, 100, 400)),
+                ("cool", workout("cool", Kind::CoolDown, 400, 700)),
+                ("low", workout("low", Kind::LowImpact, hour, hour + 300)),
+                (
+                    "warm",
+                    workout("warm", Kind::WarmUp, 2 * hour, 2 * hour + 300),
+                ),
+                (
+                    "test",
+                    workout("test", Kind::Test, 2 * hour + 300, 2 * hour + 1_500),
+                ),
+                (
+                    "free",
+                    workout("free", Kind::Freestyle, 3 * hour, 3 * hour + 300),
+                ),
+                (
+                    "bare",
+                    workout("bare", Kind::Main, 4 * hour, 4 * hour + 300),
+                ),
+                (
+                    "miles",
+                    workout("miles", Kind::Main, 5 * hour, 5 * hour + 300),
+                ),
+                ("odd", workout("odd", Kind::Main, 6 * hour, 6 * hour + 300)),
+                (
+                    "yoga",
+                    ridden(
+                        "yoga",
+                        Kind::Main,
+                        "yoga",
+                        "home_bike_plus",
+                        7 * hour,
+                        7 * hour + 300,
+                    ),
+                ),
+                (
+                    "garmin",
+                    ridden(
+                        "garmin",
+                        Kind::Main,
+                        "cycling",
+                        "garmin",
+                        8 * hour,
+                        8 * hour + 300,
+                    ),
+                ),
+            ],
+            vec![
+                (
+                    "main",
+                    graph(
+                        &[4, 5, 6, 8],
+                        &[93, 132, 120, 110],
+                        Some((&[132, 131, 0, 130], "7")),
+                        "2.12642",
+                        "km",
+                    ),
+                ),
+                (
+                    "cool",
+                    graph(&[1, 2], &[93, 132], Some((&[132, 131], "3")), "2.0", "km"),
+                ),
+                ("low", graph(&[1, 2], &[93, 132], None, "2.0", "km")),
+                ("warm", graph(&[1, 2], &[93, 132], None, "2.0", "km")),
+                ("test", graph(&[1, 2], &[93, 132], None, "2.0", "km")),
+                ("free", graph(&[1, 2], &[93, 132], None, "2.0", "km")),
+                ("miles", graph(&[1], &[93], None, "1.3213", "mi")),
+                ("odd", graph(&[1], &[93], None, "2.0", "furlongs")),
+            ],
+        )
+        .await
+        .expect("a landed corpus");
+        let reader = PelotonSessionAccountReader::new(pool.clone()).expect("a reader");
+        let zones = StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("zone"));
+        versions::accounts(&reader)
+            .await
+            .expect("the accounts")
+            .iter()
+            .map(|account| {
+                PelotonSessionTranslator
+                    .translate(account, &zones)
+                    .expect("translated")
+            })
+            .collect::<Vec<_>>()
+    });
+
+    if let Err(unpinned) = versions::pinned::<PelotonSessionTranslator>(&translations) {
+        panic!("{unpinned}");
+    }
 }

@@ -17,7 +17,7 @@ use domain::{
 };
 use infrastructure::{BtwbTranslator, Exports};
 
-use crate::support::layers;
+use crate::support::{layers, versions};
 
 type Failure = Box<dyn std::error::Error>;
 
@@ -303,5 +303,49 @@ fn an_incremental_derivation_writes_what_a_whole_one_would() {
     })();
     if let Err(error) = outcome {
         panic!("{error}");
+    }
+}
+
+/// **Its version names what it translates** (#606): each export above that
+/// translates, once more.
+#[test]
+fn its_version_names_what_it_translates() {
+    let exports = [
+        vec![(
+            "2026-09-28-workout_sessions.csv",
+            format!("{HEADER}{SQUAT_AND_AMRAP}"),
+        )],
+        vec![(
+            "2026-09-28-workout_sessions.csv",
+            format!("{HEADER}{LIFT_AND_AMREPS}"),
+        )],
+        vec![
+            (
+                "20260804workout_sessions.csv",
+                format!("{HEADER}{LIFT_AND_AMREPS}{SQUAT_AND_AMRAP}"),
+            ),
+            (
+                "2026-09-28-workout_sessions.csv",
+                format!("{HEADER}{SQUAT_AND_AMRAP}"),
+            ),
+        ],
+        vec![("notes.csv", "a,b\n1,2\n".to_owned())],
+    ];
+    let translations: Vec<_> = exports
+        .iter()
+        .map(|files| {
+            let records = files
+                .iter()
+                .zip(1..)
+                .map(|((path, csv), id)| landed(id, path, csv).expect("an export"))
+                .collect();
+            translate(records)
+                .expect("the exports gather")
+                .expect("translated")
+        })
+        .collect();
+
+    if let Err(unpinned) = versions::pinned::<BtwbTranslator>(&translations) {
+        panic!("{unpinned}");
     }
 }

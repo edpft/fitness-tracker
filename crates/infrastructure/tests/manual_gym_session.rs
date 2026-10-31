@@ -13,7 +13,7 @@ use domain::{
 };
 use infrastructure::{SpreadsheetSessionTranslator, Workbook};
 
-use crate::support::layers;
+use crate::support::{layers, versions};
 
 type Failure = Box<dyn std::error::Error>;
 
@@ -437,5 +437,85 @@ mod store {
         if let Err(error) = outcome {
             panic!("{error}");
         }
+    }
+}
+
+/// **Its version names what it translates** (#606): each workbook above, once
+/// more, the copies of CT 2017 as the one workbook they are.
+#[test]
+fn its_version_names_what_it_translates() {
+    let zones = StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("zone"));
+    let copies = Workbook::gather(vec![
+        landed(1, "Dropbox/Random/CT 2017.xlsx", FINAL_2017).expect("final"),
+        landed(
+            2,
+            "Dropbox/Random/CT 2017 (Netbook's conflicted copy 2017-03-29).xlsx",
+            EARLY_2017,
+        )
+        .expect("March copy"),
+    ]);
+    let mut translations: Vec<_> = [SESSIONS, CONDITIONING, BEGINNER]
+        .iter()
+        .map(|bytes| translate(bytes).expect("translated"))
+        .collect();
+    translations.extend(copies.iter().map(|workbook| {
+        SpreadsheetSessionTranslator
+            .translate(workbook, &zones)
+            .expect("translated")
+    }));
+
+    if let Err(unpinned) = versions::pinned::<SpreadsheetSessionTranslator>(&translations) {
+        panic!("{unpinned}");
+    }
+}
+
+/// **The translation `spreadsheets.files` derives under names what it
+/// translates too** (#606): every workbook in the fixtures, weigh-ins and
+/// sessions, read in one pass as the store reads them.
+#[test]
+fn the_spreadsheet_version_names_what_it_translates() {
+    use infrastructure::SpreadsheetTranslator;
+
+    let zones = StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("zone"));
+    let files: [(&str, &[u8]); 8] = [
+        ("Dropbox/Random/1RM.xlsx", SESSIONS),
+        ("Dropbox/Random/Conditioning 2017.xlsx", CONDITIONING),
+        ("Dropbox/Random/Beginner 2020.xlsx", BEGINNER),
+        ("Dropbox/Random/CT 2017.xlsx", FINAL_2017),
+        (
+            "Dropbox/Random/CT 2017 (Netbook's conflicted copy 2017-03-29).xlsx",
+            EARLY_2017,
+        ),
+        (
+            "Dropbox/Random/Body Weight.xlsx",
+            include_bytes!("fixtures/spreadsheets/weigh-ins.xlsx"),
+        ),
+        (
+            "Dropbox/Random/Body Weight 2018.xlsx",
+            include_bytes!("fixtures/spreadsheets/composition.xlsx"),
+        ),
+        (
+            "Dropbox/Random/Training Log.xlsx",
+            include_bytes!("fixtures/spreadsheets/training-log.xlsx"),
+        ),
+    ];
+    let workbooks = Workbook::gather(
+        files
+            .iter()
+            .zip(1..)
+            .map(|((path, bytes), id)| landed(id, path, bytes).expect("a record"))
+            .collect(),
+    );
+    let translations: Vec<_> = workbooks
+        .iter()
+        .map(|workbook| {
+            SpreadsheetTranslator
+                .translate(workbook, &zones)
+                .expect("translated")
+        })
+        .collect();
+
+    if let Err(unpinned) = versions::pinned::<SpreadsheetTranslator>(&translations) {
+        panic!("{unpinned}");
     }
 }

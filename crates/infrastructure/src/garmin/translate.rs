@@ -271,6 +271,7 @@ pub struct GarminHrvTranslator;
 impl Translator for GarminHrvTranslator {
     type Account = NightAccount;
     type Entity = OvernightHrv;
+    const VERSION: u32 = 1;
 
     fn translate(
         &self,

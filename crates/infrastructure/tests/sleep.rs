@@ -16,6 +16,8 @@ use domain::{
 use infrastructure::garmin::{GarminSleepTranslator, sleeps};
 use serde_json::{Value, json};
 
+use crate::support::versions;
+
 type Failure = Box<dyn std::error::Error>;
 
 fn record(id: i64, date: &str, payload: &Value) -> Result<LandedRecord, Failure> {
@@ -143,4 +145,39 @@ fn the_last_serving_of_a_night_stands() {
         entity(records).expect("a night").asleep().as_seconds(),
         29_088
     );
+}
+
+/// **Its version names what it translates** (#606): each night above, once
+/// more.
+#[test]
+fn its_version_names_what_it_translates() {
+    let nights = [
+        vec![night("2026-10-20", Some(29_088), Some(OCTOBER), 1)],
+        vec![night("2026-10-26", None, None, 0)],
+        vec![night("2026-10-20", Some(40_000), Some(OCTOBER), 1)],
+        vec![
+            night("2026-10-20", Some(20_000), Some(OCTOBER), 1),
+            night("2026-10-20", Some(29_088), Some(OCTOBER), 1),
+        ],
+    ];
+    let translations: Vec<_> = nights
+        .iter()
+        .map(|servings| {
+            let records = servings
+                .iter()
+                .zip(1..)
+                .map(|(payload, id)| {
+                    let date = payload["dailySleepDTO"]["calendarDate"]
+                        .as_str()
+                        .expect("a date");
+                    record(id, date, payload).expect("a record")
+                })
+                .collect();
+            translate(records).expect("translated")
+        })
+        .collect();
+
+    if let Err(unpinned) = versions::pinned::<GarminSleepTranslator>(&translations) {
+        panic!("{unpinned}");
+    }
 }

@@ -13,6 +13,8 @@ use domain::{
 };
 use infrastructure::SpreadsheetWeighInTranslator;
 
+use crate::support::versions;
+
 type Failure = Box<dyn std::error::Error>;
 
 const WEIGH_INS: &[u8] = include_bytes!("fixtures/spreadsheets/weigh-ins.xlsx");
@@ -453,5 +455,32 @@ mod store {
         })
         .and_then(|result| result);
         outcome.expect("the derivation round-trips");
+    }
+}
+
+/// **Its version names what it translates** (#606): each file above, once
+/// more.
+#[test]
+fn its_version_names_what_it_translates() {
+    let files: [(&str, &[u8]); 5] = [
+        ("Dropbox/Random/Body Weight.xlsx", WEIGH_INS),
+        ("Dropbox/Random/Body Weight 2018.xlsx", COMPOSITION),
+        ("Dropbox/Random/1RM.xlsx", TRAINING_LOG),
+        (
+            "Dropbox/Random/2018 bodyweight only.csv",
+            b"date,body_weight\nMon 01 Jan 18,73.9 \nTue 02 Jan 18,\nWed 03 Jan 18,73.5 \n",
+        ),
+        (
+            "OneDrive/Documents/2015-16 Training.docx",
+            b"PK not a workbook",
+        ),
+    ];
+    let translations: Vec<_> = files
+        .iter()
+        .map(|(path, bytes)| translate(path, bytes).expect("translated"))
+        .collect();
+
+    if let Err(unpinned) = versions::pinned::<SpreadsheetWeighInTranslator>(&translations) {
+        panic!("{unpinned}");
     }
 }

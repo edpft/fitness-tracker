@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 use tracing::Instrument as _;
 
 use application::{
-    Build, CanonicalLayer, Clock, DerivedFrom, FetchLog, Fetched, NormalisationError,
+    CanonicalLayer, Clock, DerivedFrom, FetchLog, Fetched, NormalisationError,
     NormalisationSummary, NormalisedLayers, Part, Rederivation, RunLockError, StoreError,
     commit::{CommitPorts, Committing},
     cycling::{Riding, RidingPorts},
@@ -295,7 +295,6 @@ async fn over(
         },
         canonical: canonical(&pool),
         ledger: SqliteDerivationLedger::new(pool.clone()),
-        build: build(named_build()),
         classes: class_source,
         holidays: Calendars,
         diary: SqliteDiaryStore::new(pool.clone()),
@@ -475,9 +474,7 @@ static BUILD: OnceLock<&'static str> = OnceLock::new();
 /// commit, and a crate that reads it compiles again for every commit along
 /// with everything above it, tests included (#645).
 ///
-/// **`None` outside nix**, where nothing says which commit is running: such a
-/// build derives every layer every run, since it cannot tell whether the code
-/// that derived them has changed (#468).
+/// **`None` outside nix**, where nothing says which commit is running.
 pub fn name_build(baked: Option<&'static str>) {
     if let Some(baked) = baked {
         let _ = BUILD.set(baked);
@@ -487,18 +484,6 @@ pub fn name_build(baked: Option<&'static str>) {
 /// The build named by [`name_build`], if any.
 pub(crate) fn named_build() -> Option<&'static str> {
     BUILD.get().copied()
-}
-
-/// The build, where it names one commit.
-///
-/// **A dirty tree or one with no git names none**: the flake says
-/// `abc1234-dirty` for every uncommitted change on top of `abc1234`, and
-/// `unknown` for every build from outside git, so each stands for many
-/// versions of the code and would pass one off as another.
-fn build(baked: Option<&str>) -> Option<Build> {
-    let baked = baked?;
-    let revision = baked.split_whitespace().next()?;
-    (revision != "unknown" && !revision.ends_with("-dirty")).then(|| Build::from(baked.to_owned()))
 }
 
 /// Where the plan stands, over this build's stores.
@@ -701,10 +686,10 @@ fn known(discipline: Discipline) -> Result<&'static catalogue::KnownDiscipline, 
 
 #[cfg(test)]
 mod tests {
-    use application::{Build, CanonicalLayer, Part, next::Scope};
+    use application::{CanonicalLayer, Part, next::Scope};
     use domain::landing::LandingStream;
 
-    use super::{build, landed_from};
+    use super::landed_from;
     use crate::{body_weight, catalogue, composition, heart_rate, one_rep_max, per_device, wiring};
 
     fn named(scope: &Scope) -> Vec<String> {
@@ -838,18 +823,5 @@ mod tests {
                 known.name()
             );
         }
-    }
-
-    /// **Only a clean commit is a build**, since `-dirty` and `unknown` each
-    /// name many versions of the code.
-    #[test]
-    fn only_a_clean_commit_names_a_build() {
-        assert_eq!(
-            build(Some("5734906 (2026-10-18)")),
-            Some(Build::from("5734906 (2026-10-18)".to_owned()))
-        );
-        assert_eq!(build(Some("5734906-dirty (2026-10-18)")), None);
-        assert_eq!(build(Some("unknown (0000-00-00)")), None);
-        assert_eq!(build(None), None);
     }
 }

@@ -30,10 +30,15 @@ use infrastructure::{
     GarminActivityFileLandingStore, GarminActivityLandingStore, GarminExerciseSetLandingStore,
     GarminGymAccountReader, SqliteExtractionRunLog, SqliteMeasuredGymSessionStore,
     SqliteNormalisationRunLog, SqliteRefusalStore, connect,
-    garmin::{GarminGymTranslator, account::activities},
+    garmin::{
+        ActivityAccount, GarminGymTranslator, account::activities,
+        activity::GarminActivityTranslator,
+    },
 };
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
+
+use crate::support::versions;
 
 type Failure = Box<dyn std::error::Error>;
 
@@ -137,6 +142,18 @@ fn translate_with(
     recording: Option<&[u8]>,
     overlay: &EditOverlay,
 ) -> Result<Translation<MeasuredGymSession>, Failure> {
+    Ok(GarminGymTranslator::correcting(overlay.clone()).translate(
+        &account(activity, sets, recording)?,
+        &StatedZones::throughout(OperatorZone::try_from("Europe/London")?),
+    )?)
+}
+
+/// The one account an activity, its sets and its recording land as.
+fn account(
+    activity: &Value,
+    sets: Option<&Value>,
+    recording: Option<&[u8]>,
+) -> Result<ActivityAccount, Failure> {
     let id = activity
         .get("activityId")
         .and_then(Value::as_i64)
@@ -165,14 +182,11 @@ fn translate_with(
         None => Vec::new(),
     };
 
-    let accounts = activities(landed, landed_sets, landed_files);
-    let [account] = accounts.as_slice() else {
-        return Err(format!("{} accounts, not one", accounts.len()).into());
-    };
-    Ok(GarminGymTranslator::correcting(overlay.clone()).translate(
-        account,
-        &StatedZones::throughout(OperatorZone::try_from("Europe/London")?),
-    )?)
+    let mut accounts = activities(landed, landed_sets, landed_files);
+    match (accounts.pop(), accounts.is_empty()) {
+        (Some(account), true) => Ok(account),
+        _ => Err(format!("{} accounts, not one", accounts.len() + 1).into()),
+    }
 }
 
 fn session_for(activity: &Value, sets: Option<&Value>) -> Result<MeasuredGymSession, Failure> {
@@ -1505,4 +1519,176 @@ fn a_corrected_load_places_the_movement_the_mapping_reads_off_it() {
         dumbbell, barbell,
         "the lookup sees the corrected load, so the implement it reads off it changes"
     );
+}
+
+/// Sets named, a set carried from its run, and a run naming two movements.
+fn runs(id: &str) -> [Value; 3] {
+    let named = exercise_sets(
+        id,
+        &[
+            set(
+                "2019-03-14T07:43:22.0",
+                5,
+                Some(48_000.0),
+                ("BENCH_PRESS", None),
+            ),
+            rest("2019-03-14T07:43:51.0"),
+            set(
+                "2019-03-14T07:50:58.0",
+                1,
+                Some(70_000.0),
+                ("BENCH_PRESS", None),
+            ),
+            set(
+                "2019-03-14T08:12:21.0",
+                10,
+                Some(32_000.0),
+                ("ROW", Some("FACE_PULL")),
+            ),
+        ],
+    );
+    let carried = exercise_sets(
+        id,
+        &[
+            set(
+                "2019-03-14T08:19:43.0",
+                10,
+                Some(45_000.0),
+                ("SQUAT", Some("BARBELL_FRONT_SQUAT")),
+            ),
+            set(
+                "2019-03-14T08:22:55.0",
+                10,
+                Some(45_000.0),
+                ("UNKNOWN", None),
+            ),
+        ],
+    );
+    let ambiguous = exercise_sets(
+        id,
+        &[
+            set(
+                "2019-03-14T08:00:00.0",
+                10,
+                Some(70_000.0),
+                ("DEADLIFT", Some("BARBELL_DEADLIFT")),
+            ),
+            set(
+                "2019-03-14T08:03:00.0",
+                10,
+                Some(70_000.0),
+                ("UNKNOWN", None),
+            ),
+            set(
+                "2019-03-14T08:06:00.0",
+                10,
+                Some(70_000.0),
+                ("BENCH_PRESS", Some("BARBELL_BENCH_PRESS")),
+            ),
+        ],
+    );
+    [named, carried, ambiguous]
+}
+
+/// Each shape of activity above, once more: sets named, carried, ambiguous and
+/// absent, a heart rate absent and zero, the watch's lone set, and a recording.
+fn suite() -> Result<Vec<ActivityAccount>, Failure> {
+    let id = "3461073244";
+    let session = activity(id, "strength_training", "2019-03-14 07:43:22", &[]);
+    let [named, carried, ambiguous] = runs(id);
+    let unloaded = "20604812731";
+    let recording = archive(&recording(
+        920_000_000,
+        &[
+            (920_000_000, Some(96)),
+            (920_000_001, Some(98)),
+            (920_000_003, None),
+            (920_000_004, Some(0)),
+            (920_000_010, Some(133)),
+        ],
+    ))?;
+    Ok(vec![
+        account(&session, Some(&named), None)?,
+        account(&session, Some(&carried), None)?,
+        account(&session, Some(&ambiguous), None)?,
+        account(
+            &activity(
+                "1051901298",
+                "strength_training",
+                "2015-02-23 18:02:11",
+                &[],
+            ),
+            None,
+            None,
+        )?,
+        account(
+            &activity(
+                id,
+                "strength_training",
+                "2019-03-14 07:43:22",
+                &[("averageHR", Value::Null), ("maxHR", Value::Null)],
+            ),
+            Some(&named),
+            None,
+        )?,
+        account(
+            &activity(
+                id,
+                "strength_training",
+                "2019-03-14 07:43:22",
+                &[("averageHR", json!(0.0)), ("maxHR", json!(0.0))],
+            ),
+            Some(&named),
+            None,
+        )?,
+        account(
+            &activity(unloaded, "strength_training", "2025-06-30 18:12:43", &[]),
+            Some(&exercise_sets(
+                unloaded,
+                &[set("2025-06-30T18:31:04.0", 4, None, ("UNKNOWN", None))],
+            )),
+            None,
+        )?,
+        account(&session, None, Some(&recording))?,
+    ])
+}
+
+/// **Its version names what it translates** (#606).
+#[test]
+fn its_version_names_what_it_translates() {
+    let zones = StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("zone"));
+    let translations: Vec<_> = suite()
+        .expect("the accounts")
+        .iter()
+        .map(|account| {
+            GarminGymTranslator::default()
+                .translate(account, &zones)
+                .expect("translated")
+        })
+        .collect();
+
+    if let Err(unpinned) = versions::pinned::<GarminGymTranslator>(&translations) {
+        panic!("{unpinned}");
+    }
+}
+
+/// **The translation `garmin.activities` derives under names what it
+/// translates too** (#606): the same accounts, read for their sessions and the
+/// devices their recordings name.
+#[test]
+fn the_activity_version_names_what_it_translates() {
+    let zones = StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("zone"));
+    let translations: Vec<_> = suite()
+        .expect("the accounts")
+        .iter()
+        .map(|account| {
+            GarminActivityTranslator::default()
+                .translate(account, &zones)
+                .expect("translated")
+        })
+        .collect();
+
+    if let Err(unpinned) = versions::pinned::<GarminActivityTranslator>(&translations) {
+        panic!("{unpinned}");
+    }
 }

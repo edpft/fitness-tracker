@@ -141,6 +141,7 @@ pub struct GarminSleepTranslator;
 impl Translator for GarminSleepTranslator {
     type Account = SleepAccount;
     type Entity = Sleep;
+    const VERSION: u32 = 1;
 
     fn translate(
         &self,

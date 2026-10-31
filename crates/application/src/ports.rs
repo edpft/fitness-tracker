@@ -555,11 +555,11 @@ impl ReadUpTo {
     }
 }
 
-/// What a derivation interprets raw under, besides raw: the build, the
-/// declared zone and the corrections in force (#571).
+/// What a derivation interprets raw under, besides raw: the translation's
+/// version, the declared zone and the corrections in force (#571, #606).
 ///
 /// **A derivation can pick up where the last one stopped only under the same
-/// terms.** A new build may translate a past record differently, a zone places
+/// terms.** A new translation reads a past record differently, a zone places
 /// every session's times on a different date, and a correction rewrites a past
 /// session; each reinterprets what was already derived, so a change in any of
 /// them derives the whole layer again.
@@ -688,6 +688,16 @@ pub trait Translator {
     type Account;
     /// The normalised entity it produces.
     type Entity;
+
+    /// Which translation this is, raised whenever what it produces from the
+    /// same account changes (#606).
+    ///
+    /// **A layer is derived again when this changes, and not when the build
+    /// does.** A new build that leaves every translation alone, which is most
+    /// of them, re-derives nothing. The version is stated rather than worked
+    /// out from the code, and `translation_versions` fails where a translator's
+    /// output moved and its version did not.
+    const VERSION: u32;
 
     /// # Errors
     ///
@@ -3325,26 +3335,6 @@ impl DerivedFrom {
     }
 }
 
-/// A build of the derivation code: the commit it was built from.
-///
-/// **Not a node of the graph.** The operator, 2026-10-16: *"The build is not a
-/// node in it."* A new build derives every layer once, and the store records
-/// which build last did.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Build(String);
-
-impl From<String> for Build {
-    fn from(text: String) -> Self {
-        Self(text)
-    }
-}
-
-impl Build {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
 /// One of the canonical layers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CanonicalLayer {
@@ -3361,22 +3351,19 @@ impl CanonicalLayer {
             Self::WeighIns => "weigh-ins",
         }
     }
+
+    /// Which canonicalisation this is, raised whenever what it produces from
+    /// the same normalised layer changes (#606), as [`Translator::VERSION`] is
+    /// for a stream.
+    pub const fn version(self) -> u32 {
+        match self {
+            Self::Gym | Self::Cycling | Self::WeighIns => 1,
+        }
+    }
 }
 
-/// What each layer standing in the store was derived from, and by which build.
+/// What each layer standing in the store was derived from.
 pub trait DerivationLedger {
-    /// The build that last derived every layer.
-    ///
-    /// # Errors
-    ///
-    /// [`StoreError`] if the store is unavailable.
-    fn build(&self) -> impl Future<Output = Result<Option<Build>, StoreError>> + Send;
-
-    /// # Errors
-    ///
-    /// [`StoreError`] if the store is unavailable.
-    fn record_build(&self, build: &Build) -> impl Future<Output = Result<(), StoreError>> + Send;
-
     /// What the stream's normalised layer was derived from: the inputs of the
     /// derivation that wrote it, which is its latest success. `None` where that
     /// derivation recorded none, as one started by hand does.

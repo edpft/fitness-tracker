@@ -20,6 +20,7 @@ use application::{
     extract::{Extraction, ExtractionPorts},
     next::{Awaits, Daily, Expects, NoAccess, Records},
     normalise::{DerivationStanding, Normalisation, NormalisationPorts, Refusals},
+    ports::Translator,
     status::ExtractionStatus,
 };
 use domain::{
@@ -256,9 +257,9 @@ pub fn derives(known: &KnownStream) -> bool {
     known.name() != WahooFileLandingStore::STREAM
 }
 
-/// What `known`'s normalised layer would be derived from now (#468): how many
-/// landing records its derivation reads, the corrections it applies, and the
-/// zone.
+/// What `known`'s normalised layer would be derived from now (#468): the
+/// version of its translation (#606), how many landing records its derivation
+/// reads, the corrections it applies, and the zone.
 ///
 /// **A count is the whole of raw's extent**, because raw is append-only
 /// (§ II.1): a record is never removed or rewritten, so the same count is the
@@ -278,19 +279,25 @@ pub async fn inputs(
     use application::RawExtent as _;
 
     let pool = connect(database).await?;
-    let (records, overlay) = match known.name().as_str() {
+    let (records, overlay, version) = match known.name().as_str() {
         HevyWorkoutLandingStore::STREAM => (
             HevyWorkoutLandingStore::new(pool.clone())?
                 .records()
                 .await?,
             Some(HevyWorkoutLandingStore::STREAM),
+            HevySessionTranslator::VERSION,
         ),
-        PelotonRideLandingStore::STREAM => (peloton_rides_read(&pool).await?, None),
+        PelotonRideLandingStore::STREAM => (
+            peloton_rides_read(&pool).await?,
+            None,
+            PelotonSessionTranslator::VERSION,
+        ),
         WithingsMeasurementLandingStore::STREAM => (
             WithingsMeasurementLandingStore::new(pool.clone())?
                 .records()
                 .await?,
             None,
+            WithingsWeighInTranslator::VERSION,
         ),
         // The sleep record as well, which names each night's watch (#569).
         GarminHrvLandingStore::STREAM => (
@@ -300,6 +307,7 @@ pub async fn inputs(
             )
             .await?,
             None,
+            GarminHrvTranslator::VERSION,
         ),
         GarminActivityLandingStore::STREAM => (
             GarminGymRawExtent::new(
@@ -310,6 +318,7 @@ pub async fn inputs(
             .records()
             .await?,
             Some(GarminExerciseSetLandingStore::STREAM),
+            GarminActivityTranslator::VERSION,
         ),
         GarminDailyHeartRateLandingStore::STREAM => (
             with_sleep(
@@ -320,28 +329,33 @@ pub async fn inputs(
             )
             .await?,
             None,
+            GarminDailyHeartRateTranslator::VERSION,
         ),
         GarminSleepLandingStore::STREAM => (
             GarminSleepLandingStore::new(pool.clone())?
                 .records()
                 .await?,
             None,
+            GarminSleepTranslator::VERSION,
         ),
         SpreadsheetFileLandingStore::STREAM => (
             SpreadsheetFileLandingStore::new(pool.clone())?
                 .records()
                 .await?,
             None,
+            SpreadsheetTranslator::VERSION,
         ),
         BtwbExportLandingStore::STREAM => (
             BtwbExportLandingStore::new(pool.clone())?.records().await?,
             None,
+            BtwbTranslator::VERSION,
         ),
         MyFitnessPalExportLandingStore::STREAM => (
             MyFitnessPalExportLandingStore::new(pool.clone())?
                 .records()
                 .await?,
             None,
+            MyFitnessPalWeighInTranslator::VERSION,
         ),
         WahooFileLandingStore::STREAM => {
             return Err(WiringError::NothingDerives {
@@ -357,7 +371,7 @@ pub async fn inputs(
     let corrections = corrections(&pool, overlay).await?;
     let zones = stated_zones(&pool, zone).await?;
     Ok(DerivedFrom::from(format!(
-        "records {records}; corrections {}; zone {zones}",
+        "version {version}; records {records}; corrections {}; zone {zones}",
         corrections.join(","),
     )))
 }
@@ -378,21 +392,17 @@ async fn corrections(
     })
 }
 
-/// What a derivation interprets raw under (#571): the build, the corrections in
-/// force on its overlay, and the zone. A derivation picks up where the last
-/// one stopped only where these read the same.
-///
-/// **A build outside nix names none**, and so reads the same from one build to
-/// the next: a derivation by such a build picks up where the last stopped even
-/// where the code changed. `--whole` is the way round it.
+/// What a derivation interprets raw under (#571): the translation's version
+/// (#606), the corrections in force on its overlay, and the zone. A derivation
+/// picks up where the last one stopped only where these read the same.
 async fn terms(
     pool: &SqlitePool,
     zones: &StatedZones,
     overlay: Option<&'static str>,
+    version: u32,
 ) -> Result<Terms, WiringError> {
     Ok(Terms::from(format!(
-        "build {}; corrections {}; zone {zones}",
-        crate::next::named_build().unwrap_or("unknown"),
+        "version {version}; corrections {}; zone {zones}",
         corrections(pool, overlay).await?.join(","),
     )))
 }
@@ -474,7 +484,7 @@ async fn garmin_daily_heart_rate(
         }
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
-            let terms = terms(&pool, &zones, None).await?;
+            let terms = terms(&pool, &zones, None, GarminDailyHeartRateTranslator::VERSION).await?;
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: GarminDailyHeartRateAccountReader::new(pool.clone())?,
@@ -545,7 +555,7 @@ async fn garmin_sleep(command: Command, database: &Path) -> Result<Outcome, Wiri
         }
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
-            let terms = terms(&pool, &zones, None).await?;
+            let terms = terms(&pool, &zones, None, GarminSleepTranslator::VERSION).await?;
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: GarminSleepAccountReader::new(pool.clone())?,
@@ -645,7 +655,7 @@ async fn peloton_rides(
         }
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
-            let terms = terms(&pool, &zones, None).await?;
+            let terms = terms(&pool, &zones, None, PelotonSessionTranslator::VERSION).await?;
             let summary = peloton_normalisation(pool, zones, terms)?
                 .normalise(rederivation)
                 .await?;
@@ -993,7 +1003,7 @@ async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, Wiring
         }
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
-            let terms = terms(&pool, &zones, None).await?;
+            let terms = terms(&pool, &zones, None, GarminHrvTranslator::VERSION).await?;
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: GarminHrvAccountReader::new(pool.clone())?,
@@ -1083,7 +1093,13 @@ async fn garmin_activities(
         Command::Extract(access) => collect_activities(access, (&pool, database), walks).await,
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
-            let terms = terms(&pool, &zones, Some(GarminExerciseSetLandingStore::STREAM)).await?;
+            let terms = terms(
+                &pool,
+                &zones,
+                Some(GarminExerciseSetLandingStore::STREAM),
+                GarminActivityTranslator::VERSION,
+            )
+            .await?;
             // The overlay is read here, as it is for Hevy and for the same
             // reason: § II.2 applies a correction while the layer is rebuilt,
             // and this is that moment. It is keyed on `garmin.exercise_sets`
@@ -1688,7 +1704,7 @@ async fn withings_measurements(
         }
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
-            let terms = terms(&pool, &zones, None).await?;
+            let terms = terms(&pool, &zones, None, WithingsWeighInTranslator::VERSION).await?;
             let summary = withings_normalisation(pool, zones, terms)?
                 .normalise(rederivation)
                 .await?;
@@ -2043,7 +2059,13 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
         }
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
-            let terms = terms(&pool, &zones, Some(HevyWorkoutLandingStore::STREAM)).await?;
+            let terms = terms(
+                &pool,
+                &zones,
+                Some(HevyWorkoutLandingStore::STREAM),
+                HevySessionTranslator::VERSION,
+            )
+            .await?;
             let summary = hevy_normalisation(pool, zones, terms)
                 .await?
                 .normalise(rederivation)
@@ -2115,7 +2137,7 @@ async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome,
         }),
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
-            let terms = terms(&pool, &zones, None).await?;
+            let terms = terms(&pool, &zones, None, SpreadsheetTranslator::VERSION).await?;
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: SpreadsheetFileAccountReader::new(pool.clone())?,
@@ -2195,7 +2217,7 @@ async fn btwb_exports(command: Command, database: &Path) -> Result<Outcome, Wiri
         }),
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
-            let terms = terms(&pool, &zones, None).await?;
+            let terms = terms(&pool, &zones, None, BtwbTranslator::VERSION).await?;
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: BtwbExportAccountReader::new(pool.clone())?,
@@ -2275,7 +2297,7 @@ async fn myfitnesspal_exports(command: Command, database: &Path) -> Result<Outco
         }),
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
-            let terms = terms(&pool, &zones, None).await?;
+            let terms = terms(&pool, &zones, None, MyFitnessPalWeighInTranslator::VERSION).await?;
             let normalisation = Normalisation::new(
                 NormalisationPorts {
                     raw: MyFitnessPalExportAccountReader::new(pool.clone())?,
