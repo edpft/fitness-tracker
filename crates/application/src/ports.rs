@@ -28,7 +28,8 @@ use domain::cycling::{
     Ftp, PublishedProgramme, RideVenue,
 };
 use domain::gym::{
-    CanonicalGymSession, Load, NormalisedGymSession, Performed, SetKind, exercise::RepsExercise,
+    CanonicalGymSession, Load, NormalisedGymSession, Performed, Reach, SetKind,
+    exercise::RepsExercise,
 };
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
@@ -800,6 +801,17 @@ pub trait NormalisedGymSessionReader {
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
     fn all(&self) -> impl Future<Output = Result<Vec<NormalisedGymSession>, StoreError>> + Send;
 
+    /// Every normalised gym session on one of these days, oldest first and
+    /// ordered as [`Self::all`] orders them (#610).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn on(
+        &self,
+        days: &BTreeSet<Date>,
+    ) -> impl Future<Output = Result<Vec<NormalisedGymSession>, StoreError>> + Send;
+
     /// Which derivations wrote what this reads: what a canonical layer built
     /// from it is derived from (#468). Every row a derivation writes names its
     /// run, and a derivation replaces its stream's rows whole, so the runs
@@ -837,6 +849,33 @@ pub trait CanonicalGymSessionStore {
     /// normalised session the store does not hold.
     fn replace(
         &self,
+        sessions: Vec<CanonicalGymSession>,
+    ) -> impl Future<Output = Result<SessionCount, StoreError>> + Send;
+
+    /// What the normalised layer's changes since this layer was last derived
+    /// reach (#610): the days a writer recorded, and what they reach.
+    ///
+    /// **Only meaningful over a layer that was derived whole once**, since a
+    /// writer records the days it changed and nothing about a layer that was
+    /// never built. Re-deriving a normalised stream whole empties this layer
+    /// and forgets its derivation, so the next one is whole again.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn reach(&self) -> impl Future<Output = Result<Reach, StoreError>> + Send;
+
+    /// Replace the sessions on the days `reach` rebuilds with these, in one
+    /// transaction, and forget the days it was reached from. Returns how many
+    /// sessions the whole layer then holds.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable, or if a session names a
+    /// normalised session the store does not hold.
+    fn replace_within(
+        &self,
+        reach: &Reach,
         sessions: Vec<CanonicalGymSession>,
     ) -> impl Future<Output = Result<SessionCount, StoreError>> + Send;
 

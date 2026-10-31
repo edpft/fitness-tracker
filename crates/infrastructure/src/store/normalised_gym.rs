@@ -12,6 +12,8 @@
 //! A fifth source therefore needs nothing here, which is what naming the four
 //! streams would have cost.
 
+use std::collections::BTreeSet;
+
 use application::{NormalisedGymSessionReader, StoreError};
 use domain::{
     canonical::{Attributed, NormalisedSessionId},
@@ -23,7 +25,7 @@ use domain::{
     normalised::{OperatorZone, StartedAt},
     sequence::{AtLeastTwo, NonEmpty},
 };
-use jiff::Timestamp;
+use jiff::{Timestamp, civil::Date};
 use sqlx::{SqliteConnection, SqlitePool};
 
 use super::{
@@ -60,6 +62,29 @@ impl NormalisedGymSessionReader for SqliteNormalisedGymSessionReader {
         let mut sessions = Vec::with_capacity(spine.len());
         for row in spine {
             sessions.push(Self::read_one(&mut snapshot, &row).await?);
+        }
+        Ok(sessions)
+    }
+
+    async fn on(&self, days: &BTreeSet<Date>) -> Result<Vec<NormalisedGymSession>, StoreError> {
+        // The spine whole and the parts only for the days asked for: a day is
+        // where its zone puts it, which SQLite cannot work out (#610).
+        let mut snapshot = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error(&error))?;
+        let spine = Self::spine(&mut snapshot).await?;
+        let mut sessions = Vec::new();
+        for row in spine {
+            let when = occurred(
+                row.started_at_utc.as_deref(),
+                row.zone.as_deref(),
+                row.on_day.as_deref(),
+            )?;
+            if days.contains(&when.day()) {
+                sessions.push(Self::read_one(&mut snapshot, &row).await?);
+            }
         }
         Ok(sessions)
     }

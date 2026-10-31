@@ -400,3 +400,101 @@ fn a_cleared_layer_answers_the_performed_log_with_nothing() {
         );
     });
 }
+
+/// Land the Hevy records given and normalise what they reach, as a run does.
+#[expect(
+    clippy::future_not_send,
+    reason = "driven on a current-thread runtime inside one test"
+)]
+async fn land_hevy(
+    pool: &SqlitePool,
+    records: &[domain::landing::LandedRecord],
+) -> Result<(), Failure> {
+    let hevy = HevyWorkoutLandingStore::new(pool.clone())?;
+    let run = SqliteExtractionRunLog::new(pool.clone())
+        .begin(hevy.stream(), FetchedAt::EPOCH)
+        .await?;
+    hevy.append(
+        run,
+        records
+            .iter()
+            .map(|landed| landed.record().clone())
+            .collect(),
+    )
+    .await?;
+    Normalisation::new(
+        NormalisationPorts {
+            raw: HevySessionAccountReader::new(pool.clone())?,
+            translator: HevySessionTranslator::default(),
+            workouts: SqliteGymSessionStore::new(pool.clone())?,
+            refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
+            runs: SqliteNormalisationRunLog::new(pool.clone()),
+            clock: corpus::FixedClock,
+        },
+        StatedZones::throughout(zone()?),
+    )
+    .normalise(application::Rederivation::Incremental)
+    .await?;
+    Ok(())
+}
+
+/// **Rebuilding what a revision reached gives the layer a whole rebuild
+/// gives** (#610), and leaves the rest of it standing.
+///
+/// The corpus lands in two halves, as it did over the summer, and the second
+/// revises sessions the first began, so a revision both removes and writes.
+#[test]
+fn rebuilding_what_a_revision_reached_is_rebuilding_the_whole() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let directory = tempfile::tempdir().expect("a directory");
+        let pool = connect(&directory.path().join("test.db"))
+            .await
+            .expect("a store");
+        let records = corpus::records().expect("the corpus");
+        let (first, second) = records.split_at(records.len() / 2);
+        let reader = SqliteNormalisedGymSessionReader::new(pool.clone());
+        let canonical = SqliteCanonicalGymSessionStore::new(pool.clone());
+
+        land_hevy(&pool, first).await.expect("the first half");
+        canonicalise::gym_sessions(&reader, &canonical)
+            .await
+            .expect("a whole derivation");
+        let before = canonical.all().await.expect("the layer");
+
+        land_hevy(&pool, second).await.expect("the second half");
+        assert!(
+            !canonical.reach().await.expect("the reach").is_empty(),
+            "the revision recorded the days it changed"
+        );
+        let reached = canonicalise::gym_sessions_reached(&reader, &canonical)
+            .await
+            .expect("a derivation of what was reached");
+        let within = canonical.all().await.expect("the layer");
+        assert!(
+            canonical.reach().await.expect("the reach").is_empty(),
+            "and the derivation forgot them"
+        );
+
+        let whole = canonicalise::gym_sessions(&reader, &canonical)
+            .await
+            .expect("a whole derivation");
+        assert_eq!(
+            within,
+            canonical.all().await.expect("the layer"),
+            "field for field"
+        );
+        assert_eq!(reached.written, whole.written, "it holds what it reports");
+        assert!(
+            reached.read.as_usize() < whole.read.as_usize(),
+            "it read {} of {} accounts",
+            reached.read,
+            whole.read
+        );
+        let kept = before
+            .iter()
+            .filter(|session| within.contains(session))
+            .count();
+        assert!(kept > 0, "the first half's sessions stood");
+    });
+}

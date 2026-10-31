@@ -107,6 +107,7 @@ impl NormalisedEntityStore for SqliteGarminActivityStore {
         for session in &sessions {
             write_session(&mut tx, run_id, &stream, session).await?;
         }
+        super::normalised::written(&mut tx, &stream, run_id).await?;
         let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
         sqlx::query!(
             "DELETE FROM device_sighting \

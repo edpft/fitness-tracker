@@ -845,6 +845,14 @@ pub trait Canonicalising {
     /// [`StoreError`] if either layer cannot be read or written.
     fn gym(&self) -> impl Future<Output = Result<Canonicalised, StoreError>> + Send;
 
+    /// Rebuild only the gym sessions the normalised layer's changes reach
+    /// (#610), over a layer that was derived whole.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if either layer cannot be read or written.
+    fn gym_reached(&self) -> impl Future<Output = Result<Canonicalised, StoreError>> + Send;
+
     /// # Errors
     ///
     /// [`StoreError`] if either layer cannot be read or written.
@@ -888,6 +896,10 @@ where
 {
     async fn gym(&self) -> Result<Canonicalised, StoreError> {
         crate::canonicalise::gym_sessions(&self.normalised_gym, &self.canonical_gym).await
+    }
+
+    async fn gym_reached(&self) -> Result<Canonicalised, StoreError> {
+        crate::canonicalise::gym_sessions_reached(&self.normalised_gym, &self.canonical_gym).await
     }
 
     async fn cycling(&self) -> Result<Canonicalised, StoreError> {
@@ -1479,10 +1491,17 @@ where
             };
             let started = start(progress, step);
             let inputs = self.ports.canonical.inputs(layer).await?;
-            let found = if ledger.canonical(layer).await?.as_ref() == Some(&inputs) {
+            let derived = ledger.canonical(layer).await?;
+            let found = if derived.as_ref() == Some(&inputs) {
                 Found::Unchanged
             } else {
                 let found = match layer {
+                    // A layer derived whole once rebuilds only what changed
+                    // since (#610); one never derived, or emptied by a stream
+                    // re-derived whole, is built whole.
+                    CanonicalLayer::Gym if derived.is_some() => {
+                        Found::Canonical(self.ports.canonical.gym_reached().await?.written)
+                    }
                     CanonicalLayer::Gym => {
                         Found::Canonical(self.ports.canonical.gym().await?.written)
                     }

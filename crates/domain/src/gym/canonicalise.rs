@@ -146,9 +146,8 @@ fn around(these: &BTreeSet<Date>, days: i64) -> BTreeSet<Date> {
     these
         .iter()
         .flat_map(|day| {
-            (-days..=days).filter_map(move |offset| {
-                day.checked_add(jiff::Span::new().days(offset)).ok()
-            })
+            (-days..=days)
+                .filter_map(move |offset| day.checked_add(jiff::Span::new().days(offset)).ok())
         })
         .collect()
 }

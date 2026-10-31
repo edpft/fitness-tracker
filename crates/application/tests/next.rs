@@ -169,6 +169,8 @@ struct Layered {
     failing: Vec<String>,
     normalised: Vec<String>,
     canonicalised: Vec<CanonicalLayer>,
+    /// The canonical layers rebuilt only where something changed (#610).
+    reached: Vec<CanonicalLayer>,
     derived_from: BTreeMap<u64, DerivedFrom>,
     canonical: Vec<(CanonicalLayer, DerivedFrom)>,
 }
@@ -200,6 +202,11 @@ impl Graph {
 
     fn canonicalised(&self) -> Vec<CanonicalLayer> {
         self.with(|layered| layered.canonicalised.clone())
+            .unwrap_or_default()
+    }
+
+    fn reached(&self) -> Vec<CanonicalLayer> {
+        self.with(|layered| layered.reached.clone())
             .unwrap_or_default()
     }
 
@@ -284,6 +291,12 @@ impl Canonicalising for Canonical {
             read: SessionCount::from(0),
             written: SessionCount::from(0),
         })
+    }
+
+    async fn gym_reached(&self) -> Result<Canonicalised, StoreError> {
+        self.0
+            .with(|layered| layered.reached.push(CanonicalLayer::Gym))?;
+        self.gym().await
     }
 
     async fn cycling(&self) -> Result<Canonicalised, StoreError> {
@@ -1339,6 +1352,20 @@ fn something_new_reaching_a_stream_derives_what_reads_from_it_and_nothing_else()
         derived(&report),
         unchanged(&LAYERS, &["hevy.workouts", "gym"])
     );
+}
+
+/// **The gym layer is built whole once and rebuilt only where something
+/// reached it after** (#610): the first run has no derivation to rebuild part
+/// of, and the second has one.
+#[test]
+fn the_gym_layer_is_built_whole_once_and_then_only_where_reached() {
+    let graph = Arc::new(Graph::default());
+    run_over(&graph).expect("the run answers");
+    assert_eq!(graph.reached(), Vec::new(), "built whole");
+
+    graph.reach("hevy.workouts");
+    run_over(&graph).expect("the run answers");
+    assert_eq!(graph.reached(), vec![CanonicalLayer::Gym]);
 }
 
 /// **A correction derives again what reads from it**: the overlay is one of a

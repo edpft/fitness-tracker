@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM canonical_gym_changed_day WHERE day = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "3171dd4e8dacf63e83b46f739b91b4592b720c183288edde59bbf325f84a3232"
+}

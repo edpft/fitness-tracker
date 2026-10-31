@@ -71,6 +71,13 @@ impl<C: Canonicalising + Sync> Canonicalising for Traced<C> {
         done
     }
 
+    async fn gym_reached(&self) -> Result<Canonicalised, StoreError> {
+        let span = canonicalising(CanonicalLayer::Gym);
+        let done = self.0.gym_reached().instrument(span.clone()).await;
+        ended(&span, &done, counts);
+        done
+    }
+
     async fn cycling(&self) -> Result<Canonicalised, StoreError> {
         let span = canonicalising(CanonicalLayer::Cycling);
         let done = self.0.cycling().instrument(span.clone()).await;
@@ -529,6 +536,10 @@ mod tests {
                 read: SessionCount::from(3),
                 written: SessionCount::from(2),
             })
+        }
+
+        async fn gym_reached(&self) -> Result<Canonicalised, StoreError> {
+            self.gym().await
         }
 
         async fn cycling(&self) -> Result<Canonicalised, StoreError> {
