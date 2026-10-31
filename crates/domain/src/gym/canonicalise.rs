@@ -36,7 +36,7 @@
 //! normalised sessions with no canonical one rather than canonical sessions
 //! with a hole in them (§ 37).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use jiff::civil::Date;
 
@@ -63,6 +63,93 @@ pub fn canonical_sessions(accounts: Vec<NormalisedGymSession>) -> Vec<CanonicalG
     visits
         .into_values()
         .filter_map(|accounts| merge(&accounts))
+        .collect()
+}
+
+/// The canonical gym sessions on the days `reach` rebuilds, from whichever of
+/// `accounts` fall on the days it reads (#610).
+///
+/// **The same derivation as [`canonical_sessions`], over less of the record.**
+/// Every visit on a rebuilt day is decided by the accounts within two days of
+/// it, all of which `reach` reads, so what this gives for those days is what
+/// the whole layer gives for them. Accounts outside the days read are ignored,
+/// so the reader may hand over more than it was asked for.
+pub fn canonical_sessions_within(
+    accounts: Vec<NormalisedGymSession>,
+    reach: &Reach,
+) -> Vec<CanonicalGymSession> {
+    let read = accounts
+        .into_iter()
+        .filter(|account| reach.read.contains(&account.occurred().day()))
+        .collect();
+    canonical_sessions(read)
+        .into_iter()
+        .filter(|session| reach.rebuilt.contains(&session.occurred().day()))
+        .collect()
+}
+
+/// The days of the canonical layer a change to the normalised one reaches
+/// (#610), and the days of the normalised layer it takes to rebuild them.
+///
+/// **Two days either side of a changed day, because that is how far one day's
+/// accounts reach.** A visit on a day is that day's accounts and any day-only
+/// group migrating in from the day either side, and whether one migrates
+/// depends on whether the day beyond it holds a clock. So an account added to
+/// or removed from one day can change the visits on the two days either side of
+/// it, and rebuilding those takes the two days either side of *them*.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Reach {
+    changed: BTreeSet<Date>,
+    rebuilt: BTreeSet<Date>,
+    read: BTreeSet<Date>,
+}
+
+/// How many days either side of a day its accounts can change a visit on.
+const REACHES: i64 = 2;
+
+impl Reach {
+    /// What changing the accounts on these days reaches.
+    pub fn of(changed: impl IntoIterator<Item = Date>) -> Self {
+        let changed: BTreeSet<Date> = changed.into_iter().collect();
+        let rebuilt = around(&changed, REACHES);
+        let read = around(&rebuilt, REACHES);
+        Self {
+            changed,
+            rebuilt,
+            read,
+        }
+    }
+
+    /// The days whose accounts changed.
+    pub const fn changed(&self) -> &BTreeSet<Date> {
+        &self.changed
+    }
+
+    /// The days whose visits may have changed with them.
+    pub const fn rebuilt(&self) -> &BTreeSet<Date> {
+        &self.rebuilt
+    }
+
+    /// The days whose accounts decide the visits on the days rebuilt.
+    pub const fn read(&self) -> &BTreeSet<Date> {
+        &self.read
+    }
+
+    /// Whether nothing changed, so nothing is rebuilt.
+    pub fn is_empty(&self) -> bool {
+        self.changed.is_empty()
+    }
+}
+
+/// Every day within `days` of one of these.
+fn around(these: &BTreeSet<Date>, days: i64) -> BTreeSet<Date> {
+    these
+        .iter()
+        .flat_map(|day| {
+            (-days..=days).filter_map(move |offset| {
+                day.checked_add(jiff::Span::new().days(offset)).ok()
+            })
+        })
         .collect()
 }
 
