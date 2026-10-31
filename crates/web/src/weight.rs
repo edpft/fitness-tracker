@@ -84,7 +84,7 @@ fn body(series: &Series, ranges: &Ranges, over: Over) -> Markup {
                 .iter()
                 .rev()
                 .take(7)
-                .map(|weighed| (when(&weighed.at, today), weighed.mass.to_string()))
+                .map(|weighed| (when(&weighed.at, today), tenths(weighed.mass)))
                 .collect::<Vec<_>>(),
         ))
         (detail::foot(&format!("Dots: each weigh-in. Line: the trend, the {METHOD}.")))
@@ -131,7 +131,7 @@ fn days(series: &Series, today: Date) -> Vec<(Date, Markup)> {
         weighed
             .entry(one.at.day())
             .or_default()
-            .push(format!("{} kg", one.mass));
+            .push(format!("{} kg", tenths(one.mass)));
     }
     let trend: BTreeMap<Date, Trend> = series
         .trend
@@ -199,7 +199,7 @@ fn signed(grams: i64) -> String {
     format!("{sign}{}.{:02}", hundredths / 100, hundredths % 100)
 }
 
-/// A trend to the nearest 0.1 kg: it is a mean, and its grams are arithmetic.
+/// A mass to the nearest 0.1 kg (operator, 2026-10-31, on the weigh-ins).
 fn tenths(mass: Kg) -> String {
     let tenths = (mass.as_grams() + 50) / 100;
     format!("{}.{}", tenths / 10, tenths % 10)
@@ -287,7 +287,7 @@ mod tests {
         assert_eq!(page.matches(r#"class="dot""#).count(), 2, "{page}");
         assert!(!page.contains("<polyline"), "{page}");
         assert!(
-            page.contains(r#"<span class="on">10 Sep</span> · <b>79 kg</b>"#),
+            page.contains(r#"<span class="on">10 Sep</span> · <b>79.0 kg</b>"#),
             "{page}"
         );
         assert!(
