@@ -9,6 +9,7 @@
 mod chart;
 mod composition;
 mod daily;
+mod detail;
 mod equipment;
 mod fills;
 mod ftp;
@@ -150,6 +151,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/run/step", get(step))
         .route("/htmx.min.js", get(htmx))
         .route("/sse.min.js", get(sse))
+        .route(page::STYLESHEET, get(stylesheet))
         .with_state(runs);
 
     let Some(address) = matches.get_one::<SocketAddr>("listen") else {
@@ -769,6 +771,14 @@ async fn htmx() -> impl IntoResponse {
 
 async fn sse() -> impl IntoResponse {
     script(include_str!("../assets/sse.min.js"))
+}
+
+/// The one stylesheet every page links (#614).
+async fn stylesheet() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        include_str!("../assets/style.css"),
+    )
 }
 
 fn script(body: &'static str) -> impl IntoResponse {

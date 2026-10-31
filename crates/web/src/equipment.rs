@@ -67,10 +67,7 @@ pub fn page(facts: &EquipmentFacts, today: Date, said: Option<&str>) -> Markup {
         (DOCTYPE)
         html lang="en" {
             head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (TITLE) }
-                style { (crate::page::STYLE) (maud::PreEscaped(STYLE)) }
+                (crate::page::head(TITLE, &[STYLE]))
                 script { (maud::PreEscaped(SCRIPT)) }
             }
             body {
@@ -124,10 +121,7 @@ pub fn unreadable(error: &str) -> Markup {
         (DOCTYPE)
         html lang="en" {
             head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (TITLE) }
-                style { (crate::page::STYLE) }
+                (crate::page::head(TITLE, &[]))
             }
             body {
                 main {

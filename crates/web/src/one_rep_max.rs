@@ -36,10 +36,7 @@ pub fn page(view: &View, run: &crate::run::View) -> Markup {
         (DOCTYPE)
         html lang="en" {
             head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (TITLE) }
-                style { (crate::page::STYLE) (STYLE) }
+                (crate::page::head(TITLE, &[STYLE]))
             }
             body {
                 (crate::page::following(run))
@@ -68,10 +65,7 @@ pub fn unreadable(error: &str) -> Markup {
         (DOCTYPE)
         html lang="en" {
             head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (TITLE) }
-                style { (crate::page::STYLE) }
+                (crate::page::head(TITLE, &[]))
             }
             body {
                 main {
@@ -564,19 +558,6 @@ fn from(point: &Point) -> String {
 }
 
 const STYLE: &str = "
-main.wide { max-width: 60rem; }
-:root { --surface: #fcfcfb; --ink: #0b0b0b; --muted: #898781; --grid: #e1e0d9; --axis: #c3c2b7; --mark: #2a78d6; }
-@media (prefers-color-scheme: dark) { :root {
-  --surface: #1a1a19; --ink: #ffffff; --grid: #2c2c2a; --axis: #383835; --mark: #3987e5;
-} }
-body { background: var(--surface); color: var(--ink); }
-h1 { font-size: 1.25rem; }
-h2 { font-size: 1.1rem; }
-div.plot { overflow-x: auto; }
-svg.chart { width: 100%; min-width: 600px; height: auto; display: block; }
-.grid { stroke: var(--grid); stroke-width: 1; }
-.baseline { stroke: var(--axis); stroke-width: 1; }
-.axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .current { --series: var(--mark); }
 .earlier { --series: var(--muted); }
 .point { fill: var(--series); }
@@ -587,14 +568,10 @@ svg.chart { width: 100%; min-width: 600px; height: auto; display: block; }
 .band { fill: var(--series); fill-opacity: 0.15; stroke: none; }
 p.reading { font-size: 1.1rem; font-variant-numeric: tabular-nums; margin: 0.25rem 0; }
 div.earlier p.reading { color: var(--muted); }
-p.legend { color: var(--muted); font-size: 0.9rem; }
 div.axes label { margin: 0 0.75rem 0 0.25rem; }
 div.axes input.kg:checked ~ div.axis:not(.kg),
 div.axes input.body-weight:checked ~ div.axis:not(.body-weight),
 div.axes input.fat-free-mass:checked ~ div.axis:not(.fat-free-mass) { display: none; }
-table.figures { font-variant-numeric: tabular-nums; font-size: 0.9rem; }
-table.figures th { text-align: left; padding-right: 0.75rem; }
-table.figures td { padding-right: 0.75rem; }
 ";
 
 #[cfg(test)]

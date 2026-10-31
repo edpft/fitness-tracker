@@ -293,10 +293,7 @@ fn page<T: Figure>(
         (DOCTYPE)
         html lang="en" {
             head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (shown.title) }
-                style { (crate::page::STYLE) (crate::chart::STYLE) (STYLE) }
+                (crate::page::head(shown.title, &[crate::chart::STYLE, STYLE]))
             }
             body {
                 (crate::page::following(run))
@@ -337,10 +334,7 @@ pub fn unreadable(shown: Shown, error: &str) -> Markup {
         (DOCTYPE)
         html lang="en" {
             head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (shown.title) }
-                style { (crate::page::STYLE) }
+                (crate::page::head(shown.title, &[]))
             }
             body {
                 main {

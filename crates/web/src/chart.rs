@@ -76,10 +76,7 @@ pub fn page(rides: &[RideHeartRate], ranges: &Ranges, over: Over, run: &View) ->
         (DOCTYPE)
         html lang="en" {
             head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { "Heart rate per power zone" }
-                style { (crate::page::STYLE) (STYLE) }
+                (crate::page::head("Heart rate per power zone", &[STYLE]))
             }
             body {
                 (crate::page::following(run))
@@ -100,10 +97,7 @@ pub fn unreadable(error: &str) -> Markup {
         (DOCTYPE)
         html lang="en" {
             head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { "Heart rate per power zone" }
-                style { (crate::page::STYLE) }
+                (crate::page::head("Heart rate per power zone", &[]))
             }
             body {
                 main {
@@ -676,23 +670,6 @@ pub fn along(part: i64, whole: i64) -> f64 {
 /// sits close in the dark is zone one and zone five, which are never near one
 /// another in heart rate.
 pub const STYLE: &str = "
-main.wide { max-width: 60rem; }
-:root {
-  --surface: #fcfcfb; --ink: #0b0b0b; --muted: #898781; --grid: #e1e0d9; --axis: #c3c2b7;
-  --z1: #2a78d6; --z2: #008300; --z3: #eda100; --z4: #e87ba4; --z5: #4a3aa7; --z6: #eb6834; --z7: #e34948;
-}
-@media (prefers-color-scheme: dark) { :root {
-  --surface: #1a1a19; --ink: #ffffff; --grid: #2c2c2a; --axis: #383835;
-  --z1: #3987e5; --z2: #008300; --z3: #c98500; --z4: #d55181; --z5: #6a5acd; --z6: #d95926; --z7: #e66767;
-} }
-body { background: var(--surface); color: var(--ink); }
-h1 { font-size: 1.25rem; }
-.method { color: var(--muted); }
-div.plot { overflow-x: auto; }
-svg.chart { width: 100%; min-width: 600px; height: auto; display: block; }
-.grid { stroke: var(--grid); stroke-width: 1; }
-.baseline { stroke: var(--axis); stroke-width: 1; }
-.axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .point { stroke: var(--surface); stroke-width: 1.5; }
 svg .ring { fill: none; stroke-width: 2; }
 .missing { stroke: var(--muted); stroke-width: 2; }
@@ -710,8 +687,6 @@ line.trend.z7 { stroke: var(--z7); }
 .ink { fill: var(--ink); } svg .ring.ink { stroke: var(--ink); }
 ul.legend { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; padding: 0; list-style: none; margin: 0.5rem 0; }
 svg.key { width: 12px; height: 12px; margin-right: 0.35rem; vertical-align: -1px; }
-table.figures { font-variant-numeric: tabular-nums; font-size: 0.9rem; }
-table.figures th { text-align: left; padding-right: 0.75rem; }
 ";
 
 #[cfg(test)]

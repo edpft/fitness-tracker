@@ -1,26 +1,22 @@
-//! Body weight as one time series, as a chart (#250).
+//! Body weight as one time series (#250), on the detail template (#614).
 //!
-//! **Date across, mass up, one point per weigh-in.** Nothing joins two points:
-//! a line between two weigh-ins would claim something about the days between
+//! **Date across, mass up, one dot per weigh-in.** Nothing joins two dots: a
+//! line between two weigh-ins would claim something about the days between
 //! them, and a gap in the record is drawn as the empty stretch it is (§ 37).
 //!
 //! **The trend is the line** (#252): an estimate of a continuous mass, drawn
 //! as one line per unbroken run `domain` gives, so where it has no trend the
 //! line breaks.
 //!
-//! **The range is the one choice** (#252, #497): `?over=` the current
-//! mesocycle or macrocycle from its start to today, or everything, as on every
-//! chart. It only
-//! chooses which days are shown: the trend, and each day's reading of it as
-//! rising, falling or maintaining, are `domain`'s and the same over any range.
-//!
-//! **Server-rendered SVG** (§ 20), so the tooltip is each point's `title`, and
-//! the table beneath is the same figures.
+//! **The summary is the latest trend and its change over 7 days**, against the
+//! 0.125 kg within which `domain` reads it as maintaining. It is the latest
+//! whatever the range: the range only chooses which days the chart shows.
+
+use std::collections::BTreeMap;
 
 use domain::{
     analytical::{
-        Weighed,
-        body_weight::{Change, Direction, METHOD, Series, Trend},
+        body_weight::{Change, MAINTAINING_GRAMS, METHOD, Series, Trend},
         range::{Over, Range, Ranges},
     },
     canonical::Occurred,
@@ -29,37 +25,14 @@ use domain::{
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
+use crate::detail::{self, Cell, Chart, Layer, Metric, Reading, Traced};
+
 const TITLE: &str = "Body weight";
-const WIDTH: f64 = 720.0;
-const HEIGHT: f64 = 360.0;
-const LEFT: f64 = 48.0;
-const RIGHT: f64 = 12.0;
-const TOP: f64 = 12.0;
-const FLOOR: f64 = 336.0;
-const RADIUS: f64 = 2.5;
+const HERE: &str = "/body-weight";
 
 /// The whole page.
 pub fn page(series: &Series, ranges: &Ranges, over: Over, run: &crate::run::View) -> Markup {
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (TITLE) }
-                style { (crate::page::STYLE) (STYLE) }
-            }
-            body {
-                (crate::page::following(run))
-                main.wide {
-                    (crate::page::menu("/body-weight"))
-                    h1 { (TITLE) }
-                    (crate::range::choices("/body-weight", over))
-                    (body(series, ranges, over))
-                }
-            }
-        }
-    }
+    detail::page(HERE, TITLE, over, run, &body(series, ranges, over))
 }
 
 /// The page when the store could not be read.
@@ -67,15 +40,10 @@ pub fn unreadable(error: &str) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
-            head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (TITLE) }
-                style { (crate::page::STYLE) }
-            }
+            head { (crate::page::head(TITLE, &[])) }
             body {
                 main {
-                    (crate::page::menu("/body-weight"))
+                    (crate::page::menu(HERE))
                     p.failed { "the store could not be read: " (error) }
                 }
             }
@@ -83,7 +51,8 @@ pub fn unreadable(error: &str) -> Markup {
     }
 }
 
-/// The range chosen, or why there is none.
+/// The summary, the chart over the range chosen, and the latest weigh-ins, or
+/// why there is no range.
 fn body(series: &Series, ranges: &Ranges, over: Over) -> Markup {
     let recorded = Range::spanning(series.weigh_ins.iter().map(|weighed| weighed.at.day()));
     let range = match crate::range::chosen(ranges, over, recorded, "No weigh-in has been recorded.")
@@ -91,118 +60,133 @@ fn body(series: &Series, ranges: &Ranges, over: Over) -> Markup {
         Ok(range) => range,
         Err(said) => return said,
     };
-    let series = series.within(range);
+    let today = range.to;
+    let within = series.within(range);
     html! {
-        p.reading {
-            (range.from) " to " (range.to)
-            @if let Some(summary) = series.summary() {
-                " · average " (to_tenth(summary.average)) "kg"
-                @if let Some(difference) = summary.difference {
-                    " · trend " (signed(difference)) " kg"
-                }
-            }
-        }
-        @if let Some(change) = series.changes.last() {
-            p.reading { "7 days to " (change.on) ": " (reading(*change)) }
-        }
-        (chart(&series, range))
+        (summary(series, today))
+        (detail::chart(&Chart {
+            id: "weight",
+            metric: Metric::BodyWeight,
+            title: TITLE,
+            sub: weigh_ins(within.weigh_ins.len()),
+            range,
+            layers: vec![
+                Layer::Trend(within.trend.iter().map(|run| run.iter().map(traced).collect()).collect()),
+                Layer::Dots(within.weigh_ins.iter().map(|weighed| (weighed.at.day(), kilograms(weighed.mass))).collect()),
+            ],
+            days: days(&within, today),
+        }))
+        (detail::latest(
+            "Weigh-ins",
+            "kg",
+            &series
+                .weigh_ins
+                .iter()
+                .rev()
+                .take(7)
+                .map(|weighed| (when(&weighed.at, today), weighed.mass.to_string()))
+                .collect::<Vec<_>>(),
+        ))
+        (detail::foot(&format!("Dots: each weigh-in. Line: the trend, the {METHOD}.")))
     }
 }
 
-/// Where a day and a mass fall on the chart.
-struct Frame {
-    range: Range,
-    days: i32,
-    low: u32,
-    high: u32,
-    step: u32,
-}
-
-impl Frame {
-    fn x(&self, on: Date) -> f64 {
-        let along = if self.days <= 0 {
-            0.5
-        } else {
-            f64::from(days_between(self.range.from, on)) / f64::from(self.days)
-        };
-        (WIDTH - LEFT - RIGHT).mul_add(along, LEFT)
-    }
-
-    fn y(&self, grams: u32) -> f64 {
-        let share = f64::from(grams.saturating_sub(self.low)) / f64::from(self.high - self.low);
-        (FLOOR - TOP).mul_add(-share, FLOOR)
-    }
-}
-
-fn chart(series: &Series, range: Range) -> Markup {
-    let weigh_ins = series.weigh_ins.as_slice();
-    if weigh_ins.is_empty() {
-        return html! { p { "No weigh-in in this range." } };
-    }
-    let (low, high, step) = mass_range(weigh_ins);
-    let frame = Frame {
-        range,
-        days: days_between(range.from, range.to),
-        low,
-        high,
-        step,
+/// The latest trend, and its change over the 7 days to it.
+fn summary(series: &Series, today: Date) -> Markup {
+    let Some(latest) = series.trend.iter().flatten().next_back() else {
+        return html! {};
     };
-    html! {
-        p.legend { "points: each weigh-in · line: trend, the " (METHOD) " · against 7 days before: rising or falling beyond 0.125 kg, maintaining within it" }
-        div.plot { (plot(&frame, &daily(series, &frame))) }
-        (table(weigh_ins))
-    }
+    let reading = series
+        .changes
+        .last()
+        .filter(|change| change.on == latest.on)
+        .map_or_else(
+            || Reading::NoRule("No trend 7 days before to read it against.".to_owned()),
+            |change| Reading::Change {
+                by: grams_as_kilograms(change.grams),
+                noise: grams_as_kilograms(MAINTAINING_GRAMS),
+                direction: change.direction,
+                said: format!("{} kg", signed(change.grams)),
+                over: "in 7 days".to_owned(),
+            },
+        );
+    detail::summary(
+        &[Cell {
+            metric: Metric::BodyWeight,
+            label: "Trend",
+            figure: tenths(latest.mass),
+            unit: "kg",
+            margin: None,
+            reading,
+        }],
+        &detail::day(latest.on, today),
+    )
 }
 
-/// Each weigh-in as a point, and the trend as a line.
-fn daily(series: &Series, frame: &Frame) -> Markup {
-    let changes: std::collections::BTreeMap<Date, Change> = series
+/// What a tap on each day shows: its weigh-ins, its trend, and the trend's
+/// change over the 7 days to it.
+fn days(series: &Series, today: Date) -> Vec<(Date, Markup)> {
+    let mut weighed: BTreeMap<Date, Vec<String>> = BTreeMap::new();
+    for one in &series.weigh_ins {
+        weighed
+            .entry(one.at.day())
+            .or_default()
+            .push(format!("{} kg", one.mass));
+    }
+    let trend: BTreeMap<Date, Trend> = series
+        .trend
+        .iter()
+        .flatten()
+        .map(|day| (day.on, *day))
+        .collect();
+    let changes: BTreeMap<Date, Change> = series
         .changes
         .iter()
         .map(|change| (change.on, *change))
         .collect();
-    html! {
-        @for run in &series.trend {
-            polyline.trend points=(points(run, frame)) {}
-            @for day in run {
-                circle.hover cx=(frame.x(day.on)) cy=(frame.y(grams(day.mass))) r=(RADIUS) {
-                    title {
-                        (day.on) " · trend " (to_tenth(day.mass)) "kg"
-                        @if let Some(change) = changes.get(&day.on) {
-                            " · " (reading(*change)) " over 7 days"
-                        }
-                    }
+    let mut every: Vec<Date> = weighed.keys().chain(trend.keys()).copied().collect();
+    every.sort_unstable();
+    every.dedup();
+    every
+        .into_iter()
+        .map(|on| {
+            let said = html! {
+                span.on { (detail::day(on, today)) }
+                @if let Some(masses) = weighed.get(&on) {
+                    " · " b { (masses.join(", ")) }
                 }
-            }
-        }
-        @for weighed in &series.weigh_ins {
-            circle.point cx=(frame.x(weighed.at.day())) cy=(frame.y(grams(weighed.mass)))
-                r=(RADIUS) { title { (when(&weighed.at)) " · " (weighed.mass) "kg" } }
-        }
+                @if let Some(day) = trend.get(&on) {
+                    " · trend " (tenths(day.mass)) " kg"
+                }
+                @if let Some(change) = changes.get(&on) {
+                    " · " (signed(change.grams)) " kg in 7 days"
+                }
+            };
+            (on, said)
+        })
+        .collect()
+}
+
+fn traced(day: &Trend) -> Traced {
+    Traced {
+        on: day.on,
+        value: kilograms(day.mass),
+        margin: None,
     }
 }
 
-fn plot(frame: &Frame, marks: &Markup) -> Markup {
-    html! {
-        svg.chart viewBox=(format!("0 0 {WIDTH} {HEIGHT}")) role="img"
-            aria-label="Body weight by date" {
-            @for grams in (frame.low..=frame.high).step_by(frame.step as usize) {
-                line.grid x1=(LEFT) x2=(WIDTH - RIGHT) y1=(frame.y(grams)) y2=(frame.y(grams)) {}
-                text.axis x=(LEFT - 6.0) y=(frame.y(grams) + 4.0) text-anchor="end" {
-                    (Kg::from_grams(u64::from(grams))) "kg"
-                }
-            }
-            @for (tick, label) in crate::range::ticks(frame.range) {
-                line.grid x1=(frame.x(tick)) x2=(frame.x(tick)) y1=(TOP) y2=(FLOOR) {}
-                text.axis x=(frame.x(tick) + 3.0) y=(FLOOR + 14.0) { (label) }
-            }
-            line.baseline x1=(LEFT) x2=(WIDTH - RIGHT) y1=(FLOOR) y2=(FLOOR) {}
-            (marks)
-        }
+fn weigh_ins(count: usize) -> String {
+    if count == 1 {
+        "1 weigh-in".to_owned()
+    } else {
+        format!("{count} weigh-ins")
     }
 }
 
 /// A change in grams to the nearest 0.01 kg, with its sign.
+///
+/// **Hundredths, not the trend's tenths**: the line between maintaining and
+/// not is 0.125 kg, and −0.14 kg shown as −0.1 would read as maintaining.
 fn signed(grams: i64) -> String {
     let hundredths = (grams.abs() + 5) / 10;
     let sign = if grams < 0 && hundredths > 0 {
@@ -215,100 +199,29 @@ fn signed(grams: i64) -> String {
     format!("{sign}{}.{:02}", hundredths / 100, hundredths % 100)
 }
 
-/// A run of the trend as SVG polyline points.
-fn points(run: &[Trend], frame: &Frame) -> String {
-    run.iter()
-        .map(|day| format!("{:.1},{:.1}", frame.x(day.on), frame.y(grams(day.mass))))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// A change to the nearest 0.01 kg, and which way it went.
-///
-/// **Hundredths, not the trend's tenths**: the line between maintaining and
-/// not is 0.125 kg, and −0.14 kg shown as −0.1 would read as maintaining.
-fn reading(change: Change) -> String {
-    let direction = match change.direction {
-        Direction::Rising => "rising",
-        Direction::Maintaining => "maintaining",
-        Direction::Falling => "falling",
-    };
-    format!("{} kg, {direction}", signed(change.grams))
-}
-
 /// A trend to the nearest 0.1 kg: it is a mean, and its grams are arithmetic.
-const fn to_tenth(mass: Kg) -> Kg {
-    Kg::from_grams((mass.as_grams() + 50) / 100 * 100)
+fn tenths(mass: Kg) -> String {
+    let tenths = (mass.as_grams() + 50) / 100;
+    format!("{}.{}", tenths / 10, tenths % 10)
 }
 
-/// The same figures as a table.
-fn table(series: &[Weighed]) -> Markup {
-    html! {
-        details {
-            summary { "Every weigh-in as a table" }
-            table.figures {
-                thead { tr { th { "date" } th { "kg" } } }
-                tbody {
-                    @for weighed in series {
-                        tr { td { (when(&weighed.at)) } td { (weighed.mass) } }
-                    }
-                }
-            }
-        }
-    }
+/// A mass in kilograms, to the gram.
+fn kilograms(mass: Kg) -> f64 {
+    f64::from(u32::try_from(mass.as_grams()).unwrap_or(u32::MAX)) / 1000.0
+}
+
+fn grams_as_kilograms(grams: i64) -> f64 {
+    f64::from(i32::try_from(grams).unwrap_or(0)) / 1000.0
 }
 
 /// The day, and the time where a clock was read.
-fn when(at: &Occurred) -> String {
+fn when(at: &Occurred, today: Date) -> String {
+    let day = detail::day(at.day(), today);
     at.instant().map_or_else(
-        || at.day().to_string(),
-        |started| started.wall_clock().strftime("%Y-%m-%d %H:%M").to_string(),
+        || day.clone(),
+        |started| format!("{day} {}", started.wall_clock().strftime("%H:%M")),
     )
 }
-
-/// The masses the axis runs between, and how often it is marked: every 5 kg
-/// across a wide spread, every 1 kg across a narrow one.
-fn mass_range(series: &[Weighed]) -> (u32, u32, u32) {
-    let grams = series.iter().map(|weighed| grams(weighed.mass));
-    let (min, max) = (grams.clone().min().unwrap_or(0), grams.max().unwrap_or(0));
-    let step = if max.saturating_sub(min) > 8_000 {
-        5_000
-    } else {
-        1_000
-    };
-    (min / step * step, (max / step + 1) * step, step)
-}
-
-/// A body's mass in grams, which a `u32` holds with room to spare.
-fn grams(mass: Kg) -> u32 {
-    u32::try_from(mass.as_grams()).unwrap_or(u32::MAX)
-}
-
-fn days_between(from: Date, to: Date) -> i32 {
-    from.until(to).map_or(0, |span| span.get_days())
-}
-
-const STYLE: &str = "
-main.wide { max-width: 60rem; }
-:root { --surface: #fcfcfb; --ink: #0b0b0b; --muted: #898781; --grid: #e1e0d9; --axis: #c3c2b7; --mark: #2a78d6; --trend: #0b0b0b; }
-@media (prefers-color-scheme: dark) { :root {
-  --surface: #1a1a19; --ink: #ffffff; --grid: #2c2c2a; --axis: #383835; --mark: #3987e5; --trend: #ffffff;
-} }
-body { background: var(--surface); color: var(--ink); }
-h1 { font-size: 1.25rem; }
-div.plot { overflow-x: auto; }
-svg.chart { width: 100%; min-width: 600px; height: auto; display: block; }
-.grid { stroke: var(--grid); stroke-width: 1; }
-.baseline { stroke: var(--axis); stroke-width: 1; }
-.axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.point { fill: var(--mark); }
-.trend { fill: none; stroke: var(--trend); stroke-width: 2; stroke-linejoin: round; }
-.hover { fill: transparent; }
-p.reading { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
-p.legend { color: var(--muted); font-size: 0.9rem; }
-table.figures { font-variant-numeric: tabular-nums; font-size: 0.9rem; }
-table.figures th { text-align: left; padding-right: 0.75rem; }
-";
 
 #[cfg(test)]
 mod tests {
@@ -344,8 +257,18 @@ mod tests {
         }
     }
 
+    fn shown(weigh_ins: Vec<Weighed>, ranges: &Ranges, over: Over) -> String {
+        page(
+            &Series::of(weigh_ins),
+            ranges,
+            over,
+            &crate::run::View::default(),
+        )
+        .into_string()
+    }
+
     #[test]
-    fn a_weigh_in_is_a_point_and_nothing_joins_two() {
+    fn a_weigh_in_is_a_dot_and_nothing_joins_two() {
         let zone = OperatorZone::try_from("Europe/London".to_owned()).expect("a zone");
         let at = date(2026, 10, 1)
             .at(7, 12, 0, 0)
@@ -360,101 +283,82 @@ mod tests {
                 fat_free: None,
             },
         ];
-        let page = page(
-            &Series::of(weigh_ins),
-            &ranges(date(2026, 10, 1)),
-            Over::All,
-            &crate::run::View::default(),
-        )
-        .into_string();
-        assert_eq!(page.matches(r#"class="point""#).count(), 2);
-        assert!(!page.contains("<polyline") && !page.contains("<path"));
-        assert!(page.contains("2026-09-10 · 79kg"));
-        assert!(page.contains("2026-10-01 07:12 · 84.1kg"));
+        let page = shown(weigh_ins, &ranges(date(2026, 10, 1)), Over::All);
+        assert_eq!(page.matches(r#"class="dot""#).count(), 2, "{page}");
+        assert!(!page.contains("<polyline"), "{page}");
+        assert!(
+            page.contains(r#"<span class="on">10 Sep</span> · <b>79 kg</b>"#),
+            "{page}"
+        );
+        assert!(
+            page.contains(r#"<span class="on">1 Oct 07:12</span><span class="value">84.1</span>"#),
+            "{page}"
+        );
     }
 
     #[test]
     fn no_weigh_ins_is_said_rather_than_drawn() {
-        let page = page(
-            &Series::of(Vec::new()),
-            &ranges(date(2026, 9, 23)),
-            Over::All,
-            &crate::run::View::default(),
-        )
-        .into_string();
-        assert!(page.contains("No weigh-in has been recorded."));
-        assert!(!page.contains("<svg class=\"chart\""));
+        let page = shown(Vec::new(), &ranges(date(2026, 9, 23)), Over::All);
+        assert!(page.contains("No weigh-in has been recorded."), "{page}");
+        assert!(!page.contains(r#"class="plotted""#), "{page}");
     }
 
     #[test]
     fn the_trend_is_one_line_per_unbroken_run() {
         // Weigh-ins on the 1st to 7th and the 22nd to 28th, none between.
         let weigh_ins = (1..=7).chain(22..=28).map(|d| day(d, 84_043)).collect();
-        let page = page(
-            &Series::of(weigh_ins),
-            &ranges(date(2026, 9, 28)),
-            Over::All,
-            &crate::run::View::default(),
-        )
-        .into_string();
-        assert_eq!(page.matches(r#"class="trend""#).count(), 2);
-        assert_eq!(page.matches(r#"class="point""#).count(), 14);
+        let page = shown(weigh_ins, &ranges(date(2026, 9, 28)), Over::All);
+        assert_eq!(page.matches(r#"class="line""#).count(), 2, "{page}");
+        assert_eq!(page.matches(r#"class="dot""#).count(), 14, "{page}");
         assert!(
-            page.contains("2026-09-07 · trend 84kg"),
-            "to the nearest 0.1 kg"
+            page.contains("· trend 84.0 kg"),
+            "to the nearest 0.1 kg: {page}"
         );
     }
 
     #[test]
-    fn the_range_shows_the_latest_seven_days_reading() {
+    fn the_summary_is_the_latest_trend_and_its_change_against_the_noise() {
         // A week at 84 kg from Monday 2026-09-07, then a week at 83.75 kg.
         let weigh_ins = (7..=13)
             .map(|d| day(d, 84_000))
             .chain((14..=20).map(|d| day(d, 83_750)))
             .collect();
-        let page = page(
-            &Series::of(weigh_ins),
-            &ranges(date(2026, 9, 20)),
-            Over::Macrocycle,
-            &crate::run::View::default(),
-        )
-        .into_string();
+        let page = shown(weigh_ins, &ranges(date(2026, 9, 20)), Over::Macrocycle);
         assert!(
-            page.contains("7 days to 2026-09-20: −0.25 kg, falling"),
+            page.contains(r#"<div class="figure">83.8<small>kg</small></div>"#),
             "{page}"
         );
-        assert!(page.contains("2026-09-20 · trend 83.8kg · −0.25 kg, falling over 7 days"));
+        assert!(
+            page.contains("<b>−0.25 kg</b><span>in 7 days</span>"),
+            "{page}"
+        );
+        assert!(
+            page.contains(r#"class="badge""#),
+            "falling is an arrow: {page}"
+        );
+        assert!(page.contains(r#"class="noise""#), "{page}");
+        assert!(
+            page.contains("· trend 83.8 kg · −0.25 kg in 7 days"),
+            "{page}"
+        );
+        assert!(!page.contains("falling"), "no verdict words: {page}");
     }
 
     #[test]
     fn a_range_runs_from_the_start_of_its_cycle_to_today() {
         // Daily from 2026-09-01; this mesocycle began on Monday the 14th.
         let weigh_ins = (1..=23).map(|d| day(d, 84_000)).collect();
-        let page = page(
-            &Series::of(weigh_ins),
-            &ranges(date(2026, 9, 23)),
-            Over::Mesocycle,
-            &crate::run::View::default(),
-        )
-        .into_string();
-        assert!(
-            page.contains("2026-09-14 to 2026-09-23 · average 84kg · trend 0.00 kg"),
-            "{page}"
-        );
-        assert_eq!(page.matches(r#"class="point""#).count(), 10);
+        let page = shown(weigh_ins, &ranges(date(2026, 9, 23)), Over::Mesocycle);
+        assert_eq!(page.matches(r#"class="dot""#).count(), 10, "{page}");
+        assert!(page.contains("10 weigh-ins"), "{page}");
+        assert!(page.contains("<strong>this mesocycle</strong>"), "{page}");
     }
 
     #[test]
     fn a_day_with_no_plan_has_no_macrocycle() {
         let mut ranges = ranges(date(2026, 9, 23));
         ranges.macrocycle = None;
-        let page = page(
-            &Series::of(vec![day(1, 84_000)]),
-            &ranges,
-            Over::Macrocycle,
-            &crate::run::View::default(),
-        )
-        .into_string();
+        let page = shown(vec![day(1, 84_000)], &ranges, Over::Macrocycle);
         assert!(
             page.contains("No macrocycle is planned for today."),
             "{page}"

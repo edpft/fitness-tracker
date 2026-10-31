@@ -40,10 +40,7 @@ pub fn page(tests: &[Test], ranges: &Ranges, over: Over, run: &crate::run::View)
         (DOCTYPE)
         html lang="en" {
             head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (TITLE) }
-                style { (crate::page::STYLE) (STYLE) }
+                (crate::page::head(TITLE, &[STYLE]))
             }
             body {
                 (crate::page::following(run))
@@ -64,10 +61,7 @@ pub fn unreadable(error: &str) -> Markup {
         (DOCTYPE)
         html lang="en" {
             head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { (TITLE) }
-                style { (crate::page::STYLE) }
+                (crate::page::head(TITLE, &[]))
             }
             body {
                 main {
@@ -300,24 +294,7 @@ fn days_between(from: Date, to: Date) -> i32 {
 }
 
 const STYLE: &str = "
-main.wide { max-width: 60rem; }
-:root { --surface: #fcfcfb; --ink: #0b0b0b; --muted: #898781; --grid: #e1e0d9; --axis: #c3c2b7; --mark: #2a78d6; }
-@media (prefers-color-scheme: dark) { :root {
-  --surface: #1a1a19; --ink: #ffffff; --grid: #2c2c2a; --axis: #383835; --mark: #3987e5;
-} }
-body { background: var(--surface); color: var(--ink); }
-h1 { font-size: 1.25rem; }
-div.plot { overflow-x: auto; }
-svg.chart { width: 100%; min-width: 600px; height: auto; display: block; }
-.grid { stroke: var(--grid); stroke-width: 1; }
-.baseline { stroke: var(--axis); stroke-width: 1; }
-.axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .point { fill: var(--mark); }
-p.reading { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
-p.legend { color: var(--muted); font-size: 0.9rem; }
-table.figures { font-variant-numeric: tabular-nums; font-size: 0.9rem; }
-table.figures th { text-align: left; padding-right: 0.75rem; }
-table.figures td { padding-right: 0.75rem; }
 div.units label { margin: 0 0.75rem 0 0.25rem; }
 div.units input.watts:checked ~ div.unit:not(.watts),
 div.units input.per-kilo:checked ~ div.unit:not(.per-kilo) { display: none; }

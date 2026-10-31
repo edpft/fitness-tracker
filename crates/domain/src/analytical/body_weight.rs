@@ -45,7 +45,7 @@ const WEIGHED_DAYS: usize = 4;
 
 /// The most the trend may move in 7 days and still be maintaining: half the
 /// operator's aim of losing 0.25 kg a microcycle (2026-10-14, #252).
-const MAINTAINING_GRAMS: i64 = 125;
+pub const MAINTAINING_GRAMS: i64 = 125;
 
 /// Which way the trend went over the 7 days ending on a day.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
