@@ -390,6 +390,29 @@ fn an_unfilled_catalogue_answers_nothing_and_says_so() {
         let held = store.held().await.expect("the counts read");
         assert_eq!(held.listed, 0);
         assert_eq!(held.outstanding(), 0);
+        assert_eq!(held.last_listed, None, "never refreshed");
+    });
+}
+
+/// **A listing says when the catalogue was last refreshed** (#612), which is
+/// what keeps the refresh to once a day.
+#[test]
+fn a_listing_says_when_the_catalogue_was_refreshed() {
+    let Ok(rt) = runtime() else {
+        panic!("a current-thread runtime builds")
+    };
+    rt.block_on(async {
+        let (_directory, store) = catalogue().await.expect("a catalogue opens");
+        let before = jiff::Timestamp::now();
+        store
+            .record_listed(&[listed("a", ENDURANCE, 2_700, 100)])
+            .await
+            .expect("the listing records");
+        let held = store.held().await.expect("the counts read");
+        assert!(
+            held.last_listed.is_some_and(|listed| listed >= before),
+            "{held:?}"
+        );
     });
 }
 

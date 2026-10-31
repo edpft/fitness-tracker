@@ -485,6 +485,14 @@ impl application::ClassSource for PelotonClassSource<'_> {
             stopped: read.stopped,
         })
     }
+
+    async fn held(&self) -> Result<application::ClassesHeld, application::StoreError> {
+        let held = self.store.held().await?;
+        Ok(application::ClassesHeld {
+            listed: held.last_listed.map(domain::landing::FetchedAt::from),
+            outstanding: held.outstanding(),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -513,6 +521,7 @@ mod tests {
             listed: 7,
             read: 0,
             not_served: 0,
+            last_listed: None,
         };
         assert_eq!(held.outstanding(), 7);
     }
@@ -527,6 +536,7 @@ mod tests {
             listed: 7,
             read: 6,
             not_served: 1,
+            last_listed: None,
         };
         assert_eq!(held.outstanding(), 0);
     }
@@ -542,6 +552,7 @@ mod tests {
                 listed: 1_052,
                 read: 0,
                 not_served: 0,
+                last_listed: None,
             },
         };
         let takes = walked.reading_takes();
@@ -562,6 +573,7 @@ mod tests {
                 listed: 1_052,
                 read: 1_051,
                 not_served: 1,
+                last_listed: None,
             },
         };
         assert_eq!(walked.reading_takes(), Duration::ZERO);

@@ -14,11 +14,13 @@
 //! nothing was outstanding because nothing had been prescribed. So whether to
 //! fetch is a question for each stream alone (#468) — the operator,
 //! 2026-10-16: *"Once a daily Withings weigh in has been collected, we don't
-//! need to collect another one until the next day."* Hevy, Peloton and the
-//! watch's activities are always fetched, because a session could have been
-//! completed in the last hour; the watch's days wait until yesterday is whole
-//! (#432). A source that cannot be reached is a failed step, and the run
-//! carries on with what is already landed (§ 36).
+//! need to collect another one until the next day."* Each stream says what
+//! it [`Expects`] (#612): Hevy, Peloton's rides and the watch's activities are
+//! fetched while a session could have been performed, what is enumerated from
+//! another stream once that one has landed something, and the watch's days
+//! once yesterday is whole (#432). A page leaves alone anything fetched within
+//! the shortest visit. A source that cannot be reached is a failed step, and
+//! the run carries on with what is already landed (§ 36).
 //!
 //! **Then every derived layer is brought current, and only what moved is
 //! derived.** The layers are a graph: a normalised layer reads its stream's
@@ -42,11 +44,11 @@ use std::{
 use domain::{
     body::{LeftOut, WeighInCount},
     canonical::SessionCount,
-    landing::{LandingStream, RecordCount},
+    landing::{FetchedAt, LandingStream, RecordCount},
     macrocycle::{Concurrent, Macrocycle},
-    normalised::WorkoutCount,
+    normalised::{OperatorZone, WorkoutCount},
     plan::{MesocycleOrdinal, Plan, PlanName, Span},
-    planner::{self, RerunOrdinal},
+    planner::{self, RerunOrdinal, SessionState},
     prescription::{GymMesocycle, schedule::WeekKind},
     schedule::{DayPart, Diary, Discipline, Holidays, ScheduledSlot, Skip},
 };
@@ -54,11 +56,11 @@ use jiff::civil::Date;
 
 use crate::{
     CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalWeighInStore, ClassSource,
-    CyclingMesocycleStore, Delivery, DeliveryError, DiaryAuthor, DiaryStore, ExerciseHistory,
-    ExtractionError, GenerationParameterStore, HolidayCalendar, MesocycleStore, NextLock,
-    NormalisationError, NormalisedCyclingSessionReader, NormalisedGymSessionReader,
-    NormalisedWeighInReader, Part, PlanStore, PrescribedWorkoutStore, Prescription,
-    PrescriptionDeliverer as _, PrescriptionDeliveryStore, PrescriptionDestination,
+    Clock, CyclingMesocycleStore, Delivery, DeliveryError, DiaryAuthor, DiaryStore,
+    ExerciseHistory, ExtractionError, FetchLog, GenerationParameterStore, HolidayCalendar,
+    MesocycleStore, NextLock, NormalisationError, NormalisedCyclingSessionReader,
+    NormalisedGymSessionReader, NormalisedWeighInReader, Part, PlanStore, PrescribedWorkoutStore,
+    Prescription, PrescriptionDeliverer as _, PrescriptionDeliveryStore, PrescriptionDestination,
     PrescriptionError, PrescriptionLifecycle, ProgressionStore, RideDestination, RidesPlaced,
     RunLockError, RunSummary, SourceError, StoreError, Taken, WorkoutExtractor,
     WorkoutPrescriber as _, WorkoutStore,
@@ -85,11 +87,82 @@ pub struct NoAccess {
     pub detail: String,
 }
 
-/// One walk of a source: the stream it lands in, and the extraction that
-/// walks it.
+/// One walk of a source: the stream it lands in, the extraction that walks
+/// it, and why it could hold something new.
 pub struct Walk<E> {
     pub stream: LandingStream,
     pub extraction: E,
+    pub expects: Expects,
+}
+
+/// Why a stream could hold something new, and so when a run fetches it
+/// (#612).
+///
+/// The operator, 2026-10-29: *"a run is needed only where there is reason to
+/// think a source has something new."* Of 185 fetches in the day before this,
+/// 18 landed anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Expects {
+    /// Something new can arrive at any moment: a weigh-in, or the watch
+    /// syncing a day. What waits for a whole day is a [`Daily`] around it.
+    Anytime,
+    /// What changes rarely, so is asked once a day: the account a source
+    /// keeps.
+    OnceADay,
+    /// A session of the discipline performed: only while one is prescribed
+    /// and not yet performed or skipped, or one could have been performed
+    /// since the stream was last fetched.
+    Sessions(Discipline),
+    /// What is enumerated from another stream's records, so only once that
+    /// stream has landed something since this one was last fetched.
+    After(LandingStream),
+}
+
+/// Why a stream was not fetched this run (#612).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotDue {
+    /// It holds the day it waits for, or was fetched today and is asked once
+    /// a day.
+    UntilTomorrow,
+    /// Fetched less than [`Refetch::After`] ago, sooner than anything new can
+    /// have been performed.
+    Fetched { within: Duration },
+    /// The stream it is enumerated from has landed nothing since.
+    Follows(LandingStream),
+    /// No session of the discipline could have been performed since it was
+    /// last fetched.
+    NoSession(Discipline),
+}
+
+impl std::fmt::Display for NotDue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UntilTomorrow => f.write_str("not due until tomorrow"),
+            Self::Fetched { within } => {
+                write!(f, "fetched in the last {} minutes", within.as_secs() / 60)
+            }
+            Self::Follows(stream) => write!(f, "nothing new from {stream}"),
+            Self::NoSession(discipline) => write!(f, "no {discipline} session prescribed"),
+        }
+    }
+}
+
+/// How soon a run fetches again a stream that was fetched a moment ago.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refetch {
+    /// Whenever it is due, as `fitness next` in the terminal does: running it
+    /// is asking.
+    WhenDue,
+    /// Not within this long of the last fetch, as a page does.
+    After(Duration),
+}
+
+impl Refetch {
+    /// The shortest visit there can be: the operator, 2026-10-30, *"The
+    /// shortest session I could do is a 30 Peloton class, followed by a 5
+    /// minute cool down ride, with, say, 5 minutes each way to get to the
+    /// bike."*
+    pub const SHORTEST_VISIT: Self = Self::After(Duration::from_mins(45));
 }
 
 /// The walks behind one catalogue entry, run in order.
@@ -108,6 +181,12 @@ pub trait Walks {
         &self,
         at: usize,
     ) -> impl Future<Output = Option<Result<RunSummary, ExtractionError>>> + Send;
+
+    /// Why walk `at` could hold something new.
+    fn expects(&self, at: usize) -> Expects {
+        let _ = at;
+        Expects::Anytime
+    }
 
     /// Whether to fetch at all on `today`. Always, unless the stream says
     /// otherwise, as [`Daily`] does.
@@ -156,6 +235,10 @@ impl<W: Walks + Sync, N: NewestObservation + Sync> Walks for Daily<W, N> {
         self.walks.walk(at).await
     }
 
+    fn expects(&self, at: usize) -> Expects {
+        self.walks.expects(at)
+    }
+
     async fn due(&self, today: Date) -> Result<bool, StoreError> {
         let awaited = match self.awaits {
             Awaits::Today => Some(today),
@@ -188,6 +271,10 @@ impl<E: WorkoutExtractor + Sync> Walks for Walk<E> {
         }
         Some(self.extraction.extract().await)
     }
+
+    fn expects(&self, _at: usize) -> Expects {
+        self.expects.clone()
+    }
 }
 
 impl<A: Walks + Sync, B: Walks + Sync> Walks for (A, B) {
@@ -210,6 +297,15 @@ impl<A: Walks + Sync, B: Walks + Sync> Walks for (A, B) {
             self.0.walk(at).await
         } else {
             self.1.walk(at - first).await
+        }
+    }
+
+    fn expects(&self, at: usize) -> Expects {
+        let first = self.0.count();
+        if at < first {
+            self.0.expects(at)
+        } else {
+            self.1.expects(at - first)
         }
     }
 }
@@ -319,9 +415,8 @@ pub enum Found {
     Joined,
     /// Records landed by a walk.
     Landed(RecordCount),
-    /// A stream that holds today's observation, so is not fetched until
-    /// tomorrow.
-    NotDue,
+    /// A stream not fetched, and why.
+    NotDue(NotDue),
     /// Entities a normalised layer's derivation wrote.
     Written(WorkoutCount),
     /// A layer nothing new reached, left as it stands.
@@ -815,13 +910,13 @@ where
 }
 
 /// Everything `next` reads, writes and drives.
-pub struct NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L> {
+pub struct NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F> {
     pub gym_records: Records<GW>,
     pub cycling_records: Records<CW>,
     /// Body weight, which no discipline collects (#409, #357).
     pub weigh_in_records: Records<BW>,
     /// The activities the watch records, which no discipline collects either
-    /// (#432), fetched every run as the disciplines' are.
+    /// (#432), fetched while a gym session could have been performed (#612).
     pub watch_records: Records<WW>,
     /// The watch's days and nights, fetched until yesterday is whole (#432),
     /// after its activities and on the same sign-in.
@@ -846,6 +941,12 @@ pub struct NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, 
     pub cycling: CY,
     /// One run at a time, whichever frontend starts it.
     pub lock: L,
+    /// When each stream was last fetched, and the time now.
+    pub fetches: F,
+    /// Where a fetch's moment falls in the operator's day.
+    pub zone: OperatorZone,
+    /// How soon a stream fetched a moment ago is fetched again.
+    pub refetch: Refetch,
 }
 
 /// The use case.
@@ -853,12 +954,12 @@ pub struct NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, 
     clippy::type_complexity,
     reason = "one parameter per port the run drives; each stage is already behind a trait"
 )]
-pub struct Next<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L> {
-    ports: NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L>,
+pub struct Next<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F> {
+    ports: NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F>,
 }
 
-impl<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L>
-    Next<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L>
+impl<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F>
+    Next<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F>
 where
     GW: Walks + Sync,
     CW: Walks + Sync,
@@ -877,13 +978,14 @@ where
     GY: GymSessions + Sync,
     CY: CyclingSessions + Sync,
     L: NextLock + Sync,
+    F: FetchLog + Clock + Sync,
 {
     #[expect(
         clippy::type_complexity,
         reason = "one parameter per port the run drives; each stage is already behind a trait"
     )]
     pub const fn new(
-        ports: NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L>,
+        ports: NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F>,
     ) -> Self {
         Self { ports }
     }
@@ -919,7 +1021,8 @@ where
 
         // 1. Every source at once, before anything is judged, and every layer
         // brought current.
-        self.gather(&everything.without(&joined), now.date, progress, &mut run)
+        let judge = self.judge(now).await?;
+        self.gather(&everything.without(&joined), &judge, progress, &mut run)
             .await?;
 
         // 2. The next concurrent mesocycle, if the one before it has ended.
@@ -967,14 +1070,175 @@ where
     pub async fn collect(
         &self,
         scope: &Scope,
-        today: Date,
+        now: DayPart,
         progress: &(impl Progress + Sync),
     ) -> Result<Vec<Done>, NextError> {
         let mut run = Vec::new();
         let (_guard, joined) = self.take(scope, IfGoing::Join, progress, &mut run).await?;
-        self.gather(&scope.without(&joined), today, progress, &mut run)
+        let judge = self.judge(now).await?;
+        self.gather(&scope.without(&joined), &judge, progress, &mut run)
             .await?;
         Ok(run)
+    }
+
+    /// Whether a run over `scope` would do anything: fetch a stream that
+    /// could hold something new, or bring a layer current (#612).
+    ///
+    /// **A page asks before it starts a run**, so one opened just after
+    /// another run collected what it reads starts nothing and joins nothing.
+    /// A stream enumerated from another is judged on what that one has
+    /// landed so far, since nothing is fetched in asking.
+    ///
+    /// # Errors
+    ///
+    /// [`NextError`] if the store fails.
+    pub async fn wanted(&self, scope: &Scope, now: DayPart) -> Result<bool, NextError> {
+        let judge = self.judge(now).await?;
+        for wanted in [
+            self.due_in(&self.ports.gym_records, scope, &judge).await?,
+            self.due_in(&self.ports.cycling_records, scope, &judge)
+                .await?,
+            self.due_in(&self.ports.weigh_in_records, scope, &judge)
+                .await?,
+            self.due_in(&self.ports.watch_records, scope, &judge)
+                .await?,
+            self.due_in(&self.ports.watch_days, scope, &judge).await?,
+        ] {
+            if wanted {
+                return Ok(true);
+            }
+        }
+        if scope.has(&Part::Delivering) {
+            return Ok(true);
+        }
+        self.stale(scope).await
+    }
+
+    /// Whether any walk of one entry in `scope` is due.
+    ///
+    /// **An entry with no access is not**: asking would only say again that
+    /// it cannot be fetched.
+    async fn due_in<W: Walks + Sync>(
+        &self,
+        records: &Records<W>,
+        scope: &Scope,
+        judge: &Judge,
+    ) -> Result<bool, NextError> {
+        let Ok(walks) = &records.walks else {
+            return Ok(false);
+        };
+        let wanted = wanted(walks, scope);
+        if wanted.is_empty() || !walks.due(judge.now.date).await? {
+            return Ok(false);
+        }
+        for at in wanted {
+            if let Some(stream) = walks.stream(at)
+                && self.not_due(walks, at, stream, judge).await?.is_none()
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Whether a layer in `scope` would be derived again: under a build the
+    /// store has not seen, or from inputs that moved since it last was.
+    async fn stale(&self, scope: &Scope) -> Result<bool, NextError> {
+        let ledger = &self.ports.ledger;
+        if let Some(build) = &self.ports.build
+            && ledger.build().await?.as_ref() != Some(build)
+        {
+            return Ok(true);
+        }
+        if self.ports.build.is_none() {
+            return Ok(true);
+        }
+        for stream in self.ports.normalised.streams() {
+            if scope.has(&Part::Normalising(stream.clone()))
+                && ledger.normalised(&stream).await?.as_ref()
+                    != Some(&self.ports.normalised.inputs(&stream).await?)
+            {
+                return Ok(true);
+            }
+        }
+        for layer in CANONICAL {
+            if scope.has(&Part::Canonicalising(layer))
+                && ledger.canonical(layer).await?.as_ref()
+                    != Some(&self.ports.canonical.inputs(layer).await?)
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// What every stream is judged against this run: where the plan stands
+    /// before anything is fetched, and the time now.
+    async fn judge(&self, now: DayPart) -> Result<Judge, NextError> {
+        Ok(Judge {
+            standing: self.ports.microcycle.standing(now).await?,
+            now,
+            at: self.ports.fetches.now(),
+        })
+    }
+
+    /// Why walk `at` of `walks`, landing in `stream`, is not fetched this run,
+    /// or `None` where it is (#612).
+    async fn not_due<W: Walks + Sync>(
+        &self,
+        walks: &W,
+        at: usize,
+        stream: &LandingStream,
+        judge: &Judge,
+    ) -> Result<Option<NotDue>, StoreError> {
+        let log = &self.ports.fetches;
+        let fetched = log.fetched(stream).await?;
+        let expects = walks.expects(at);
+        // **What follows another is fetched whenever that one has landed
+        // something since**, however recently it was fetched itself: a new
+        // ride's samples are not worth waiting for.
+        if let Expects::After(parent) = &expects {
+            let landed = log.fetched(parent).await?.landed;
+            return Ok(match (landed, fetched.succeeded) {
+                (Some(landed), Some(succeeded)) if landed <= succeeded => {
+                    Some(NotDue::Follows(parent.clone()))
+                }
+                (None, Some(_)) => Some(NotDue::Follows(parent.clone())),
+                _ => None,
+            });
+        }
+        if let (Refetch::After(within), Some(succeeded)) = (self.ports.refetch, fetched.succeeded)
+            && judge
+                .at
+                .as_timestamp()
+                .duration_since(succeeded.as_timestamp())
+                .unsigned_abs()
+                < within
+        {
+            return Ok(Some(NotDue::Fetched { within }));
+        }
+        Ok(match expects {
+            Expects::Anytime | Expects::After(_) => None,
+            Expects::OnceADay => fetched
+                .succeeded
+                .filter(|succeeded| self.part(*succeeded).date >= judge.now.date)
+                .map(|_| NotDue::UntilTomorrow),
+            Expects::Sessions(discipline) => (!could_have_performed(
+                &judge.standing,
+                discipline,
+                fetched.succeeded.map(|succeeded| self.part(succeeded)),
+            ))
+            .then_some(NotDue::NoSession(discipline)),
+        })
+    }
+
+    /// The part of the operator's day a fetch fell in.
+    fn part(&self, at: FetchedAt) -> DayPart {
+        DayPart::containing(
+            at.as_timestamp()
+                .to_zoned(self.ports.zone.as_time_zone())
+                .datetime(),
+        )
     }
 
     /// Every part this build collects: each walk, each normalised and
@@ -1069,7 +1333,7 @@ where
     async fn gather(
         &self,
         scope: &Scope,
-        today: Date,
+        judge: &Judge,
         progress: &(impl Progress + Sync),
         run: &mut Vec<Done>,
     ) -> Result<(), NextError> {
@@ -1077,26 +1341,26 @@ where
         // if we can."* Peloton's catalogue is refreshed after its rides, on
         // the same login, and only by a run that delivers.
         let (gym, cycling, weigh_ins, watch) = all(
-            self.fetch(&self.ports.gym_records, scope, today, progress),
+            self.fetch(&self.ports.gym_records, scope, judge, progress),
             async {
                 let mut done = self
-                    .fetch(&self.ports.cycling_records, scope, today, progress)
+                    .fetch(&self.ports.cycling_records, scope, judge, progress)
                     .await?;
                 if scope.has(&Part::Delivering) {
-                    let (started, outcome) = self.refresh(progress).await;
+                    let (started, outcome) = self.refresh(judge, progress).await;
                     finish(progress, &mut done, started, outcome);
                 }
                 Ok::<_, NextError>(done)
             },
-            self.fetch(&self.ports.weigh_in_records, scope, today, progress),
+            self.fetch(&self.ports.weigh_in_records, scope, judge, progress),
             // **The watch's days after its activities**, on the one sign-in:
             // Garmin is asked one request at a time.
             async {
                 let mut done = self
-                    .fetch(&self.ports.watch_records, scope, today, progress)
+                    .fetch(&self.ports.watch_records, scope, judge, progress)
                     .await?;
                 done.extend(
-                    self.fetch(&self.ports.watch_days, scope, today, progress)
+                    self.fetch(&self.ports.watch_days, scope, judge, progress)
                         .await?,
                 );
                 Ok::<_, NextError>(done)
@@ -1124,7 +1388,7 @@ where
         &self,
         records: &Records<W>,
         scope: &Scope,
-        today: Date,
+        judge: &Judge,
         progress: &(impl Progress + Sync),
     ) -> Result<Vec<Done>, NextError> {
         let mut run = Vec::new();
@@ -1143,19 +1407,18 @@ where
             }
             Ok(walks) => walks,
         };
-        let wanted: Vec<usize> = (0..walks.count())
-            .filter(|&at| {
-                walks
-                    .stream(at)
-                    .is_some_and(|stream| scope.has(&Part::Fetching(stream.clone())))
-            })
-            .collect();
+        let wanted = wanted(walks, scope);
         if wanted.is_empty() {
             return Ok(run);
         }
-        if !walks.due(today).await? {
+        if !walks.due(judge.now.date).await? {
             let started = start(progress, step);
-            finish(progress, &mut run, started, Ok(Found::NotDue));
+            finish(
+                progress,
+                &mut run,
+                started,
+                Ok(Found::NotDue(NotDue::UntilTomorrow)),
+            );
             return Ok(run);
         }
         for at in wanted {
@@ -1163,6 +1426,10 @@ where
                 continue;
             };
             let started = start(progress, Step::Fetching(stream.clone()));
+            if let Some(why) = self.not_due(walks, at, stream, judge).await? {
+                finish(progress, &mut run, started, Ok(Found::NotDue(why)));
+                continue;
+            }
             let outcome = match walks.walk(at).await {
                 Some(Ok(summary)) => Ok(Found::Landed(summary.records_landed)),
                 Some(Err(error)) => Err(StepFailure::Extraction(error)),
@@ -1277,8 +1544,13 @@ where
     /// **Stepped past, never fatal.** A catalogue one run out of date still
     /// answers every question asked of it, so a source that will not talk costs
     /// this week's new classes and nothing else.
+    ///
+    /// **Once a day** (#612), unless details are still to be read: the
+    /// operator, 2026-10-30, lists Peloton's classes among what *"should only
+    /// be fetched once a day"*.
     async fn refresh(
         &self,
+        judge: &Judge,
         progress: &(impl Progress + Sync),
     ) -> (Started, Result<Found, StepFailure>) {
         let started = start(progress, Step::RefreshingClasses);
@@ -1286,6 +1558,25 @@ where
             Err(why) => return (started, Err(StepFailure::NoAccess(why.clone()))),
             Ok(source) => source,
         };
+        match source.held().await {
+            Ok(held)
+                if held.outstanding == 0
+                    && held
+                        .listed
+                        .is_some_and(|listed| self.part(listed).date >= judge.now.date) =>
+            {
+                return (started, Ok(Found::NotDue(NotDue::UntilTomorrow)));
+            }
+            Ok(_) => {}
+            Err(error) => {
+                return (
+                    started,
+                    Err(StepFailure::Source(SourceError::Malformed {
+                        detail: format!("the class catalogue could not be read: {error}"),
+                    })),
+                );
+            }
+        }
         let listed = match source.list().await {
             Ok(listed) => listed,
             Err(error) => return (started, Err(StepFailure::Source(error))),
@@ -1471,6 +1762,64 @@ where
 }
 
 /// Every canonical layer, in the order they are derived.
+/// What every stream is judged against in one run (#612).
+struct Judge {
+    /// Where the plan stood before anything was fetched.
+    standing: Standing,
+    now: DayPart,
+    at: FetchedAt,
+}
+
+/// The walks of `walks` that land in a stream `scope` fetches.
+fn wanted<W: Walks>(walks: &W, scope: &Scope) -> Vec<usize> {
+    (0..walks.count())
+        .filter(|&at| {
+            walks
+                .stream(at)
+                .is_some_and(|stream| scope.has(&Part::Fetching(stream.clone())))
+        })
+        .collect()
+}
+
+/// Whether a session of `discipline` could have been performed since a
+/// stream was last fetched, in the part of the day `since` (#612).
+///
+/// The operator, 2026-10-30: *"hevy.workouts and garmin.activities only need
+/// to be fetched if we've prescribed a gym session that hasn't been performed
+/// or skipped yet."* **Also a session whose window closed after the last
+/// fetch**, since one performed late in its window is read as not performed
+/// until it is fetched, and the next session would be prescribed without it.
+/// That includes a window that closed with nothing prescribed: collecting only
+/// what had been prescribed is how a ride went unasked in September (#195).
+/// **And anything before this microcycle began**, for the last session of the
+/// week before, which the standing no longer shows.
+///
+/// Where there is no microcycle to read, or the stream was never fetched,
+/// nothing says it could not have been.
+fn could_have_performed(
+    standing: &Standing,
+    discipline: Discipline,
+    since: Option<DayPart>,
+) -> bool {
+    let (Some(commencing), Some(since)) = (standing.commencing, since) else {
+        return true;
+    };
+    since.date < commencing
+        || standing
+            .sessions
+            .iter()
+            .filter(|session| session.slot.discipline == discipline)
+            .any(|session| match session.state {
+                SessionState::Prescribed => true,
+                SessionState::NotPerformed { .. } | SessionState::NotPrescribed => {
+                    session.closes.is_none_or(|closes| since < closes)
+                }
+                SessionState::ToBePrescribed
+                | SessionState::Performed
+                | SessionState::Skipped { .. } => false,
+            })
+}
+
 const CANONICAL: [CanonicalLayer; 3] = [
     CanonicalLayer::Gym,
     CanonicalLayer::Cycling,

@@ -78,6 +78,9 @@ pub struct Held {
     pub read: u64,
     /// How many Peloton has no detail to serve for.
     pub not_served: u64,
+    /// When the browse walk last listed any, which is when the catalogue was
+    /// last refreshed (#612).
+    pub last_listed: Option<Timestamp>,
 }
 
 impl Held {
@@ -359,17 +362,29 @@ impl SqlitePelotonClassStore {
             SELECT COUNT(*)                                             AS "listed!: i64",
                    COALESCE(SUM(detail IS NOT NULL), 0)                 AS "read!: i64",
                    COALESCE(SUM(detail IS NULL AND not_served_at IS NOT NULL), 0)
-                                                                        AS "not_served!: i64"
+                                                                        AS "not_served!: i64",
+                   MAX(listed_at)                                       AS "last_listed: String"
               FROM peloton_class
             "#,
         )
         .fetch_one(&self.pool)
         .await
         .map_err(|error| store_error(&error))?;
+        let last_listed = row
+            .last_listed
+            .map(|listed| {
+                listed
+                    .parse::<Timestamp>()
+                    .map_err(|error| StoreError::Corrupt {
+                        detail: format!("a class listed at {listed:?}: {error}"),
+                    })
+            })
+            .transpose()?;
         Ok(Held {
             listed: u64::try_from(row.listed).unwrap_or_default(),
             read: u64::try_from(row.read).unwrap_or_default(),
             not_served: u64::try_from(row.not_served).unwrap_or_default(),
+            last_listed,
         })
     }
 

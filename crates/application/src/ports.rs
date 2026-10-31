@@ -256,6 +256,25 @@ pub trait ExtractionRunLog {
     ) -> impl Future<Output = Result<Option<ExtractionRun>, StoreError>> + Send;
 }
 
+/// When each stream was last fetched, as the extraction run log records it
+/// (#612).
+pub trait FetchLog {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn fetched(
+        &self,
+        stream: &LandingStream,
+    ) -> impl Future<Output = Result<Fetched, StoreError>> + Send;
+}
+
+/// When a stream's walk last succeeded, and last landed anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Fetched {
+    pub succeeded: Option<FetchedAt>,
+    pub landed: Option<FetchedAt>,
+}
+
 /// Single-flight.
 ///
 /// The guard releases on drop, and the kernel drops it if the process dies, so
@@ -2166,6 +2185,16 @@ pub struct ClassesListed {
     pub reading_takes: std::time::Duration,
 }
 
+/// Where the class catalogue stands, as the store holds it: what says whether
+/// it is due a refresh (#612).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ClassesHeld {
+    /// When the source last listed its classes into it.
+    pub listed: Option<FetchedAt>,
+    /// Classes it lists and has not read the detail of.
+    pub outstanding: u64,
+}
+
 /// What reading the outstanding class details did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassesRead {
@@ -2203,6 +2232,13 @@ pub trait ClassSource {
     /// [`SourceError::Malformed`] if the catalogue will not take what was
     /// served. The source stopping part-way is [`ClassesRead::stopped`].
     fn read(&self) -> impl Future<Output = Result<ClassesRead, SourceError>> + Send;
+
+    /// Where the catalogue stands, without asking the source.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the catalogue cannot be read.
+    fn held(&self) -> impl Future<Output = Result<ClassesHeld, StoreError>> + Send;
 }
 
 /// What a ride destination did with a session.

@@ -177,7 +177,7 @@ async fn recorded(request: Request, next: Next) -> Response {
 }
 
 async fn index(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
-    page::index(&opened(&runs, &headers, Ok(Asked::Everything)))
+    page::index(&opened(&runs, &headers, Ok(Asked::Everything)).await)
 }
 
 /// Start a run of what a page asks for as it is opened, or join one going
@@ -186,10 +186,10 @@ async fn index(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
 /// **Not when htmx asks**, which is a page redrawing itself because a run
 /// ended: starting another would redraw it again when that one ended, for
 /// ever.
-fn opened(runs: &Arc<Runs>, headers: &HeaderMap, asked: Result<Asked, String>) -> run::View {
+async fn opened(runs: &Arc<Runs>, headers: &HeaderMap, asked: Result<Asked, String>) -> run::View {
     if !headers.contains_key("hx-request") {
         match asked {
-            Ok(asked) => runs.start(&asked),
+            Ok(asked) => runs.open(&asked).await,
             Err(error) => runs.refuse(&format!("the run could not be asked for: {error}")),
         }
     }
@@ -304,7 +304,7 @@ async fn heart_rate(
     headers: HeaderMap,
 ) -> Markup {
     let collects = configurator::heart_rate::collects();
-    let run = opened(&runs, &headers, only(&collects));
+    let run = opened(&runs, &headers, only(&collects)).await;
     drawn(
         &runs,
         &collects,
@@ -337,7 +337,7 @@ async fn ftp_tests(
     headers: HeaderMap,
 ) -> Markup {
     let collects = configurator::ftp_tests::collects();
-    let run = opened(&runs, &headers, only(&collects));
+    let run = opened(&runs, &headers, only(&collects)).await;
     drawn(
         &runs,
         &collects,
@@ -369,7 +369,7 @@ async fn body_weight(
     headers: HeaderMap,
 ) -> Markup {
     let collects = configurator::body_weight::collects();
-    let run = opened(&runs, &headers, only(&collects));
+    let run = opened(&runs, &headers, only(&collects)).await;
     drawn(
         &runs,
         &collects,
@@ -402,7 +402,7 @@ async fn body_composition(
     headers: HeaderMap,
 ) -> Markup {
     let collects = configurator::composition::collects();
-    let run = opened(&runs, &headers, only(&collects));
+    let run = opened(&runs, &headers, only(&collects)).await;
     drawn(
         &runs,
         &collects,
@@ -438,7 +438,7 @@ async fn overnight_hrv(
     headers: HeaderMap,
 ) -> Markup {
     let collects = configurator::per_device::overnight_hrv_collects();
-    let run = opened(&runs, &headers, only(&collects));
+    let run = opened(&runs, &headers, only(&collects)).await;
     drawn(&runs, &collects, "/hrv", Some(over(&query)), &run, async {
         let shown = daily::OVERNIGHT_HRV;
         let setting = runs.setting();
@@ -465,7 +465,7 @@ async fn pulse_wave_velocity_page(
     headers: HeaderMap,
 ) -> Markup {
     let collects = configurator::pulse_wave_velocity::collects();
-    let run = opened(&runs, &headers, only(&collects));
+    let run = opened(&runs, &headers, only(&collects)).await;
     drawn(
         &runs,
         &collects,
@@ -500,7 +500,7 @@ async fn resting_heart_rate(
     headers: HeaderMap,
 ) -> Markup {
     let collects = configurator::per_device::resting_heart_rate_collects();
-    let run = opened(&runs, &headers, only(&collects));
+    let run = opened(&runs, &headers, only(&collects)).await;
     drawn(
         &runs,
         &collects,
@@ -536,7 +536,7 @@ async fn sleep_page(
     headers: HeaderMap,
 ) -> Markup {
     let collects = configurator::sleep::collects();
-    let run = opened(&runs, &headers, only(&collects));
+    let run = opened(&runs, &headers, only(&collects)).await;
     drawn(
         &runs,
         &collects,
@@ -564,7 +564,7 @@ async fn sleep_page(
 /// Estimated 1RM in each planned macrocycle, read afresh from the store.
 async fn estimated_one_rep_max(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
     let collects = configurator::one_rep_max::collects();
-    let run = opened(&runs, &headers, only(&collects));
+    let run = opened(&runs, &headers, only(&collects)).await;
     drawn(&runs, &collects, "/estimated-1rm", None, &run, async {
         let store = match configurator::store::Store::open(&runs.setting().database).await {
             Ok(store) => store,

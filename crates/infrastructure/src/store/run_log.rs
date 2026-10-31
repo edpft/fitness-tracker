@@ -4,7 +4,7 @@
 //! nothing new, a run that found nothing at all, and a run that failed are
 //! three different rows rather than three absences.
 
-use application::{ExtractionRunLog, StoreError};
+use application::{ExtractionRunLog, FetchLog, Fetched, StoreError};
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandingStream, RecordCount, RunId, RunOutcome,
 };
@@ -148,5 +148,36 @@ impl ExtractionRunLog for SqliteExtractionRunLog {
                 ))?),
             },
         )))
+    }
+}
+
+impl FetchLog for SqliteExtractionRunLog {
+    /// **When each run finished**, so a walk that follows another and ran
+    /// after it in the same run is seen to have done so.
+    async fn fetched(&self, stream: &LandingStream) -> Result<Fetched, StoreError> {
+        let key = stream.to_string();
+        let row = sqlx::query!(
+            r#"
+            SELECT MAX(finished_at)                                     AS "succeeded: String",
+                   MAX(CASE WHEN records_landed > 0 THEN finished_at END) AS "landed: String"
+              FROM extraction_run
+             WHERE stream = ? AND outcome = 'succeeded'
+            "#,
+            key
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+        let at = |stored: Option<String>| {
+            stored
+                .map(|stored| {
+                    FetchedAt::try_from(stored.as_str()).map_err(|error| corrupt(error.to_string()))
+                })
+                .transpose()
+        };
+        Ok(Fetched {
+            succeeded: at(row.succeeded)?,
+            landed: at(row.landed)?,
+        })
     }
 }
