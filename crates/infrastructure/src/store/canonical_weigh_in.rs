@@ -260,7 +260,7 @@ pub(super) async fn clear(tx: &mut Transaction<'_, Sqlite>) -> Result<(), StoreE
             .await
             .map_err(|error| store_error(&error))?;
     }
-    Ok(())
+    super::derivation_ledger::forget(tx, application::CanonicalLayer::WeighIns).await
 }
 
 /// When a weigh-in happened: at an instant in a zone, or on a day.

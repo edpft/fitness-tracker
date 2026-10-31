@@ -156,3 +156,47 @@ fn the_ledger_hands_back_what_each_layer_was_derived_from() {
     assert_eq!(normalised, Some(from));
     assert_eq!(since, None);
 }
+
+/// **Whatever empties a canonical layer forgets what it was derived from**
+/// (#606). A spreadsheet revised for nothing gym-shaped still empties the gym
+/// layer, and leaves every gym session's run and count as they were, so the
+/// layer's inputs alone would read as current and it would stay empty.
+#[test]
+fn emptying_a_canonical_layer_forgets_its_derivation() {
+    use application::ports::NormalisedEntityStore as _;
+    use infrastructure::{SpreadsheetFileLandingStore, SqliteSpreadsheetStore};
+
+    let read = corpus::block_on(async {
+        let directory = tempfile::tempdir()?;
+        let pool = connect(&directory.path().join("test.db")).await?;
+        let ledger = SqliteDerivationLedger::new(pool.clone());
+        let from = DerivedFrom::from("version 1; hevy.workouts 1 (151)".to_owned());
+        ledger.record_canonical(CanonicalLayer::Gym, &from).await?;
+        ledger
+            .record_canonical(CanonicalLayer::Cycling, &from)
+            .await?;
+        let before = ledger.canonical(CanonicalLayer::Gym).await?;
+
+        let stream = LandingStream::try_from(SpreadsheetFileLandingStore::STREAM)?;
+        let run = SqliteNormalisationRunLog::new(pool.clone())
+            .begin(&stream, FetchedAt::EPOCH)
+            .await?;
+        SqliteSpreadsheetStore::new(pool.clone())?
+            .revise(run, Vec::new(), Vec::new())
+            .await?;
+
+        let gym = ledger.canonical(CanonicalLayer::Gym).await?;
+        let cycling = ledger.canonical(CanonicalLayer::Cycling).await?;
+        Ok::<_, Box<dyn std::error::Error>>((before, gym, cycling, from))
+    });
+    let Ok(Ok((before, gym, cycling, from))) = read else {
+        panic!("the store reads")
+    };
+
+    assert_eq!(before, Some(from.clone()));
+    assert_eq!(
+        gym, None,
+        "the gym layer was emptied, so it is derived again"
+    );
+    assert_eq!(cycling, Some(from), "the cycling layer was not touched");
+}

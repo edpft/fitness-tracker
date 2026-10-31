@@ -8,7 +8,7 @@
 
 use application::{Build, CanonicalLayer, DerivationLedger, DerivedFrom, StoreError};
 use domain::{landing::LandingStream, normalised::NormalisationRunId};
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use super::{normalisation_run_for_storage, store_error};
 
@@ -115,6 +115,27 @@ impl DerivationLedger for SqliteDerivationLedger {
         .map_err(|error| store_error(&error))?;
         Ok(())
     }
+}
+
+/// Forget what a canonical layer was derived from, in the transaction that
+/// empties it (#606).
+///
+/// **Whatever empties a layer forgets its derivation**, so the next run
+/// derives it again whatever its inputs read. A normalised writer clears the
+/// whole canonical layer before it removes rows the layer names, even where it
+/// then removes none of them: a spreadsheet revised for its weigh-ins alone
+/// empties the gym layer and leaves every gym session's run and count as they
+/// were. Judged by its inputs alone, the empty layer would read as current.
+pub(super) async fn forget(
+    tx: &mut Transaction<'_, Sqlite>,
+    layer: CanonicalLayer,
+) -> Result<(), StoreError> {
+    let layer = layer.as_str();
+    sqlx::query!("DELETE FROM canonical_derivation WHERE layer = ?", layer)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    Ok(())
 }
 
 /// The derivations that wrote a normalised layer's rows, as a canonical layer

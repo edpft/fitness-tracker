@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM canonical_derivation WHERE layer = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1679d99e4a818150064bb0bb1c5c9f186dbe0e626ccc070adc31a289b6922829"
+}

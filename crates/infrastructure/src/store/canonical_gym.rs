@@ -467,7 +467,7 @@ pub(super) async fn clear(tx: &mut Transaction<'_, Sqlite>) -> Result<(), StoreE
             .await
             .map_err(|e| store_error(&e))?;
     }
-    Ok(())
+    super::derivation_ledger::forget(tx, application::CanonicalLayer::Gym).await
 }
 
 async fn write_session(
