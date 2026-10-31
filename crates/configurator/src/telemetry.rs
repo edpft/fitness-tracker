@@ -26,7 +26,7 @@ const FILE: &str = "telemetry.db";
 /// whichever store was named first is where the spans go.
 pub fn record(store: &Path) -> Recording {
     let (recorder, recording) =
-        ::telemetry::record(&store.with_file_name(FILE), crate::next::named_build());
+        ::telemetry::record(&store.with_file_name(FILE), crate::next::build());
     let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry().with(recorder));
     recording
 }
