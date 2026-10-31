@@ -10,11 +10,11 @@
 //! that let a test panic do not reach a free function.
 
 use domain::{
-    canonical::{Attributed, NormalisedSessionId, Occurred},
+    canonical::{Attributed, NormalisedSessionId, Occurred, Reach},
     gym::{
         CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Guess,
         GuessedExercise, Identified, Load, MeasuredHeartRate, NormalisedGymSession, Performed,
-        Reach, Recorder, canonical_sessions, canonical_sessions_within, exercise::RepsExercise,
+        REACHES, Recorder, canonical_sessions, canonical_sessions_within, exercise::RepsExercise,
     },
     measure::{
         BeatsPerMinute, Duration, HeartRateSample, HeartRateSeries, HeartRateSummary, Kg,
@@ -799,7 +799,7 @@ fn rebuilding_what_a_change_reaches_is_rebuilding_the_whole() {
             .map(|(_, account)| account.clone())
             .collect();
         let day = record.get(changed).expect("in range").occurred().day();
-        let reach = Reach::of([day]);
+        let reach = Reach::of([day], REACHES);
 
         assert_eq!(
             rebuilt_within(without.clone(), record.clone(), &reach),
@@ -841,7 +841,7 @@ fn a_change_reaches_two_days_either_side() {
         "03-03's sheet no longer joins 03-04"
     );
 
-    let reach = Reach::of(["2019-03-02".parse::<Date>().unwrap()]);
+    let reach = Reach::of(["2019-03-02".parse::<Date>().unwrap()], REACHES);
     assert_eq!(
         rebuilt_within(before, after.clone(), &reach),
         canonical_sessions(after)

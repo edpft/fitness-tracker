@@ -140,7 +140,6 @@ pub(super) async fn revise_manual_weigh_ins(
     removed: &[LandingRecordId],
     weigh_ins: &[ManualWeighIn],
 ) -> Result<(), StoreError> {
-    super::canonical_weigh_in::clear(tx).await?;
     let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
     let doomed = sqlx::query_scalar!(
         r#"
@@ -153,6 +152,8 @@ pub(super) async fn revise_manual_weigh_ins(
     .await
     .map_err(|error| store_error(&error))?;
     let doomed = super::ids_json(doomed);
+    // The canonical layer first, but only the days these are on (#610).
+    super::canonical_weigh_in::changed_weigh_ins(tx, &doomed).await?;
     for statement in [
         "DELETE FROM manual_composition WHERE weigh_in IN (SELECT value FROM json_each(?))",
         "DELETE FROM segment_composition WHERE weigh_in IN (SELECT value FROM json_each(?))",
@@ -166,7 +167,8 @@ pub(super) async fn revise_manual_weigh_ins(
             .await
             .map_err(|error| store_error(&error))?;
     }
-    write_manual_weigh_ins(tx, run_id, stream, weigh_ins).await
+    write_manual_weigh_ins(tx, run_id, stream, weigh_ins).await?;
+    super::canonical_weigh_in::changed_by_run(tx, stream, run_id).await
 }
 
 async fn write_manual_weigh_ins(

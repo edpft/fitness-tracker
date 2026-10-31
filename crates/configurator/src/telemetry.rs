@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use application::{
-    CanonicalLayer, DerivedFrom, StoreError,
+    CanonicalLayer, DerivedFrom, Rederivation, StoreError,
     canonicalise::{Canonicalised, WeighInsCanonicalised},
     next::{Canonicalising, Done, Found, IfGoing, NotDue, Progress, Refetch, Step, StepFailure},
 };
@@ -64,30 +64,30 @@ const fn counts(done: &Canonicalised) -> (usize, usize) {
 }
 
 impl<C: Canonicalising + Sync> Canonicalising for Traced<C> {
-    async fn gym(&self) -> Result<Canonicalised, StoreError> {
+    async fn gym(&self, rederivation: Rederivation) -> Result<Canonicalised, StoreError> {
         let span = canonicalising(CanonicalLayer::Gym);
-        let done = self.0.gym().instrument(span.clone()).await;
+        let done = self.0.gym(rederivation).instrument(span.clone()).await;
         ended(&span, &done, counts);
         done
     }
 
-    async fn gym_reached(&self) -> Result<Canonicalised, StoreError> {
-        let span = canonicalising(CanonicalLayer::Gym);
-        let done = self.0.gym_reached().instrument(span.clone()).await;
-        ended(&span, &done, counts);
-        done
-    }
-
-    async fn cycling(&self) -> Result<Canonicalised, StoreError> {
+    async fn cycling(&self, rederivation: Rederivation) -> Result<Canonicalised, StoreError> {
         let span = canonicalising(CanonicalLayer::Cycling);
-        let done = self.0.cycling().instrument(span.clone()).await;
+        let done = self.0.cycling(rederivation).instrument(span.clone()).await;
         ended(&span, &done, counts);
         done
     }
 
-    async fn weigh_ins(&self) -> Result<WeighInsCanonicalised, StoreError> {
+    async fn weigh_ins(
+        &self,
+        rederivation: Rederivation,
+    ) -> Result<WeighInsCanonicalised, StoreError> {
         let span = canonicalising(CanonicalLayer::WeighIns);
-        let done = self.0.weigh_ins().instrument(span.clone()).await;
+        let done = self
+            .0
+            .weigh_ins(rederivation)
+            .instrument(span.clone())
+            .await;
         ended(&span, &done, |done| {
             (done.read.as_usize(), done.written.as_usize())
         });
@@ -457,7 +457,7 @@ mod tests {
     use std::{path::Path, time::Duration};
 
     use application::{
-        CanonicalLayer, DerivedFrom, Part, StoreError,
+        CanonicalLayer, DerivedFrom, Part, Rederivation, StoreError,
         canonicalise::{Canonicalised, WeighInsCanonicalised},
         next::{Canonicalising, Done, Found, NoAccess, Progress, Step, StepFailure},
     };
@@ -531,24 +531,20 @@ mod tests {
     struct Rebuilt;
 
     impl Canonicalising for Rebuilt {
-        async fn gym(&self) -> Result<Canonicalised, StoreError> {
+        async fn gym(&self, _: Rederivation) -> Result<Canonicalised, StoreError> {
             Ok(Canonicalised {
                 read: SessionCount::from(3),
                 written: SessionCount::from(2),
             })
         }
 
-        async fn gym_reached(&self) -> Result<Canonicalised, StoreError> {
-            self.gym().await
-        }
-
-        async fn cycling(&self) -> Result<Canonicalised, StoreError> {
+        async fn cycling(&self, _: Rederivation) -> Result<Canonicalised, StoreError> {
             Err(StoreError::Unavailable {
                 detail: "gone".to_owned(),
             })
         }
 
-        async fn weigh_ins(&self) -> Result<WeighInsCanonicalised, StoreError> {
+        async fn weigh_ins(&self, _: Rederivation) -> Result<WeighInsCanonicalised, StoreError> {
             Err(StoreError::Unavailable {
                 detail: "gone".to_owned(),
             })
@@ -575,8 +571,8 @@ mod tests {
                 .expect("a runtime");
             runtime.block_on(async {
                 let traced = Traced(Rebuilt);
-                traced.gym().await.expect("a rebuild");
-                let _ = traced.cycling().await;
+                traced.gym(Rederivation::Whole).await.expect("a rebuild");
+                let _ = traced.cycling(Rederivation::Whole).await;
             });
         });
         drop(recording);

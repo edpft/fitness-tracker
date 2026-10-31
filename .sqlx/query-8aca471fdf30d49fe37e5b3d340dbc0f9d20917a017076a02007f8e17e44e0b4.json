@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n                INSERT INTO canonical_weigh_in (\n                    on_day, measured_at_utc, zone, occurred_weigh_in, mass_grams, mass_weigh_in\n                )\n                VALUES (?, ?, ?, ?, ?, ?)\n                RETURNING id AS \"id!: i64\"\n                ",
+  "query": "\n            INSERT INTO canonical_weigh_in (\n                on_day, measured_at_utc, zone, occurred_weigh_in, mass_grams, mass_weigh_in\n            )\n            VALUES (?, ?, ?, ?, ?, ?)\n            RETURNING id AS \"id!: i64\"\n            ",
   "describe": {
     "columns": [
       {
@@ -22,5 +22,5 @@
       null
     ]
   },
-  "hash": "3e268773ea6cacd348ccbc684861a786634829745a8a18928754c36f29901f64"
+  "hash": "8aca471fdf30d49fe37e5b3d340dbc0f9d20917a017076a02007f8e17e44e0b4"
 }

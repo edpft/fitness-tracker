@@ -35,14 +35,14 @@
 use std::collections::BTreeSet;
 
 use application::{
-    CanonicalGymSessionStore, DeliveryReference, PerformedGymSessions, PerformedSessionLog,
-    PrescribedWorkoutId, StoreError,
+    CanonicalGymSessionStore, CanonicalLayer, DeliveryReference, PerformedGymSessions,
+    PerformedSessionLog, PrescribedWorkoutId, StoreError,
 };
 use domain::{
-    canonical::{Attributed, NormalisedSessionId, Occurred, SessionCount},
+    canonical::{Attributed, NormalisedSessionId, Occurred, Reach, SessionCount},
     gym::{
-        CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Guess,
-        GuessedExercise, Identified, Load, MeasuredHeartRate, Performed, Reach, SetKind,
+        self, CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Guess,
+        GuessedExercise, Identified, Load, MeasuredHeartRate, Performed, SetKind,
         exercise::{
             Description, DistanceExercise, DurationExercise, Implement, Movement, RepsExercise,
         },
@@ -91,17 +91,8 @@ impl CanonicalGymSessionStore for SqliteCanonicalGymSessionStore {
     }
 
     async fn reach(&self) -> Result<Reach, StoreError> {
-        let days = sqlx::query_scalar!(
-            r#"SELECT day AS "day!: String" FROM canonical_gym_changed_day ORDER BY day"#
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| store_error(&e))?;
-        let days = days
-            .iter()
-            .map(|day| day.parse::<Date>().map_err(|e| corrupt(&e)))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Reach::of(days))
+        let days = super::canonical_changes::days(&self.pool, CanonicalLayer::Gym).await?;
+        Ok(Reach::of(days, gym::REACHES))
     }
 
     async fn replace_within(
@@ -118,14 +109,7 @@ impl CanonicalGymSessionStore for SqliteCanonicalGymSessionStore {
                 write_item(&mut tx, id, count_for_storage(position)?, item).await?;
             }
         }
-        // Only the days this rebuilt: a writer may have recorded more since.
-        for day in reach.changed() {
-            let day = day.to_string();
-            sqlx::query!("DELETE FROM canonical_gym_changed_day WHERE day = ?", day)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| store_error(&e))?;
-        }
+        super::canonical_changes::forget(&mut tx, CanonicalLayer::Gym, reach.changed()).await?;
         tx.commit().await.map_err(|e| store_error(&e))?;
         self.count().await
     }
@@ -512,15 +496,15 @@ pub(super) async fn clear(tx: &mut Transaction<'_, Sqlite>) -> Result<(), StoreE
         "DELETE FROM canonical_gym_item",
         "DELETE FROM canonical_gym_session_heart_rate",
         "DELETE FROM canonical_gym_session",
-        // A whole derivation follows, so no day is left to rebuild alone.
-        "DELETE FROM canonical_gym_changed_day",
     ] {
         sqlx::query(statement)
             .execute(&mut **tx)
             .await
             .map_err(|e| store_error(&e))?;
     }
-    super::derivation_ledger::forget(tx, application::CanonicalLayer::Gym).await
+    // A whole derivation follows, so no day is left to rebuild alone.
+    super::canonical_changes::forget_all(tx, CanonicalLayer::Gym).await?;
+    super::derivation_ledger::forget(tx, CanonicalLayer::Gym).await
 }
 
 /// Record that the normalised accounts on these days changed, and empty the
@@ -536,17 +520,8 @@ pub(super) async fn changed(
     if days.is_empty() {
         return Ok(());
     }
-    for day in &days {
-        let day = day.to_string();
-        sqlx::query!(
-            "INSERT INTO canonical_gym_changed_day (day) VALUES (?) ON CONFLICT DO NOTHING",
-            day
-        )
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| store_error(&e))?;
-    }
-    remove_on(tx, Reach::of(days).rebuilt()).await
+    super::canonical_changes::record(tx, CanonicalLayer::Gym, &days).await?;
+    remove_on(tx, Reach::of(days, gym::REACHES).rebuilt()).await
 }
 
 /// Every canonical session on one of these days, in foreign-key order.

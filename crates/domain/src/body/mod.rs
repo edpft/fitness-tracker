@@ -18,8 +18,9 @@ pub mod sleep;
 pub mod weigh_in;
 
 pub use canonical::{
-    CanonicalWeighIn, LeftOut, NegativeNormalisedWeighInId, NormalisedWeighInId, Stated, Unsettled,
-    WeighInAccount, WeighInCount, WeighIns, canonical_weigh_ins,
+    CanonicalWeighIn, LeftOut, NegativeNormalisedWeighInId, NormalisedWeighInId, REACHES, Stated,
+    Unsettled, WeighInAccount, WeighInCount, WeighIns, canonical_weigh_ins,
+    canonical_weigh_ins_within,
 };
 pub use composition::Component;
 pub use hrv::{

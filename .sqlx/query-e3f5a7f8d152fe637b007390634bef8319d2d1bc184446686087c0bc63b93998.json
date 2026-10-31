@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT s.landing_record_id AS \"session!: i64\",\n                   s.kind AS \"kind!: String\",\n                   r.landing_record_id AS \"key!: i64\",\n                   r.started_at_utc AS \"started_at_utc!: String\",\n                   r.zone AS \"zone!: String\",\n                   r.venue_reference, r.venue_called,\n                   r.duration_seconds, r.distance_millimetres, r.average_power_watts,\n                   r.heart_rate_declared_missing_seconds,\n                   r.heart_rate_device, r.heart_rate_device_name\n              FROM cycling_session AS s\n              JOIN bike_plus_ride AS r ON r.session = s.landing_record_id\n             ORDER BY s.landing_record_id, r.started_at_utc, r.landing_record_id\n            ",
+  "query": "\n            SELECT s.landing_record_id AS \"session!: i64\",\n                   s.kind AS \"kind!: String\",\n                   r.landing_record_id AS \"key!: i64\",\n                   r.started_at_utc AS \"started_at_utc!: String\",\n                   r.zone AS \"zone!: String\",\n                   r.venue_reference, r.venue_called,\n                   r.duration_seconds, r.distance_millimetres, r.average_power_watts,\n                   r.heart_rate_declared_missing_seconds,\n                   r.heart_rate_device, r.heart_rate_device_name\n              FROM cycling_session AS s\n              JOIN bike_plus_ride AS r ON r.session = s.landing_record_id\n             WHERE ?1 IS NULL OR s.landing_record_id IN (SELECT value FROM json_each(?1))\n             ORDER BY s.landing_record_id, r.started_at_utc, r.landing_record_id\n            ",
   "describe": {
     "columns": [
       {
@@ -148,7 +148,7 @@
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 1
     },
     "nullable": [
       false,
@@ -166,5 +166,5 @@
       true
     ]
   },
-  "hash": "490a42166cb76abad6ffc9bcba29eb8bd9fdb9c687773f69e7054431a85c8617"
+  "hash": "e3f5a7f8d152fe637b007390634bef8319d2d1bc184446686087c0bc63b93998"
 }

@@ -13,14 +13,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use application::{
-    CanonicalCyclingSessionStore, NormalisedCyclingSessionReader, PerformedCyclingSessions,
-    RiddenSession, RiddenSessionLog, RiddenVenues, StoreError,
+    CanonicalCyclingSessionStore, CanonicalLayer, NormalisedCyclingSessionReader,
+    PerformedCyclingSessions, RiddenSession, RiddenSessionLog, RiddenVenues, StoreError,
 };
 use domain::{
-    canonical::{Attributed, NormalisedSessionId, SessionCount},
+    canonical::{Attributed, NormalisedSessionId, Reach, SessionCount},
     cycling::{
-        Cadence, CanonicalBikePlusRide, CanonicalCyclingSession, CanonicalRideRecord, Resistance,
-        RideSample, RideVenue, Speed, Watts,
+        self, Cadence, CanonicalBikePlusRide, CanonicalCyclingSession, CanonicalRideRecord,
+        Resistance, RideSample, RideVenue, Speed, Watts,
     },
     device::{DeviceName, Sighting},
     measure::{BeatsPerMinute, Duration, HeartRateSample, HeartRateSeries, Metres},
@@ -92,6 +92,47 @@ impl NormalisedCyclingSessionReader for SqliteNormalisedCyclingSessionReader {
     }
 
     async fn all(&self) -> Result<Vec<CanonicalCyclingSession>, StoreError> {
+        self.read(None).await
+    }
+
+    async fn on(&self, days: &BTreeSet<Date>) -> Result<Vec<CanonicalCyclingSession>, StoreError> {
+        // The sessions' days worked out here, as their zones put them (#610).
+        let spine = sqlx::query!(
+            r#"
+            SELECT session AS "session!: i64",
+                   MIN(started_at_utc) AS "started_at_utc!: String",
+                   MIN(zone) AS "zone!: String"
+              FROM bike_plus_ride
+             WHERE session IS NOT NULL
+             GROUP BY session
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| store_error(&e))?;
+        let mut sessions = Vec::new();
+        for row in spine {
+            if days.contains(&day_of(&row.started_at_utc, &row.zone)?) {
+                sessions.push(row.session);
+            }
+        }
+        if sessions.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.read(Some(super::ids_json(sessions))).await
+    }
+}
+
+/// The day a ride started on, where its zone puts it.
+pub(super) fn day_of(started_at_utc: &str, zone: &str) -> Result<Date, StoreError> {
+    let instant: Timestamp = started_at_utc.parse().map_err(|e| corrupt(&e))?;
+    let zone = OperatorZone::try_from(zone.to_owned()).map_err(|e| corrupt(&e))?;
+    Ok(StartedAt::new(instant, zone).wall_clock().date())
+}
+
+impl SqliteNormalisedCyclingSessionReader {
+    /// Every session, or only the ones named, as a JSON array of their ids.
+    async fn read(&self, only: Option<String>) -> Result<Vec<CanonicalCyclingSession>, StoreError> {
         // **Three queries, one snapshot** (#467): a ride and its series read
         // either side of a re-derivation's commit would not be one ride.
         let mut snapshot = self.pool.begin().await.map_err(|e| store_error(&e))?;
@@ -112,8 +153,10 @@ impl NormalisedCyclingSessionReader for SqliteNormalisedCyclingSessionReader {
                    r.heart_rate_device, r.heart_rate_device_name
               FROM cycling_session AS s
               JOIN bike_plus_ride AS r ON r.session = s.landing_record_id
+             WHERE ?1 IS NULL OR s.landing_record_id IN (SELECT value FROM json_each(?1))
              ORDER BY s.landing_record_id, r.started_at_utc, r.landing_record_id
-            "#
+            "#,
+            only
         )
         .fetch_all(&mut *snapshot)
         .await
@@ -131,8 +174,11 @@ impl NormalisedCyclingSessionReader for SqliteNormalisedCyclingSessionReader {
                        resistance_percentage, speed_millimetres_per_hour
                    )) AS "rows!: String"
               FROM bike_plus_ride_sample
+             WHERE ?1 IS NULL OR ride IN (SELECT landing_record_id FROM bike_plus_ride
+                                           WHERE session IN (SELECT value FROM json_each(?1)))
              GROUP BY ride
-            "#
+            "#,
+            only
         )
         .fetch_all(&mut *snapshot)
         .await
@@ -158,8 +204,11 @@ impl NormalisedCyclingSessionReader for SqliteNormalisedCyclingSessionReader {
             SELECT ride AS "key!: i64",
                    json_group_array(json_array(at_seconds, beats_per_minute)) AS "rows!: String"
               FROM bike_plus_ride_heart_rate
+             WHERE ?1 IS NULL OR ride IN (SELECT landing_record_id FROM bike_plus_ride
+                                           WHERE session IN (SELECT value FROM json_each(?1)))
              GROUP BY ride
-            "#
+            "#,
+            only
         )
         .fetch_all(&mut *snapshot)
         .await
@@ -205,6 +254,26 @@ impl CanonicalCyclingSessionStore for SqliteCanonicalCyclingSessionStore {
         }
         tx.commit().await.map_err(|e| store_error(&e))?;
         Ok(SessionCount::from(written))
+    }
+
+    async fn reach(&self) -> Result<Reach, StoreError> {
+        let days = super::canonical_changes::days(&self.pool, CanonicalLayer::Cycling).await?;
+        Ok(Reach::of(days, cycling::REACHES))
+    }
+
+    async fn replace_within(
+        &self,
+        reach: &Reach,
+        sessions: Vec<CanonicalCyclingSession>,
+    ) -> Result<SessionCount, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(|e| store_error(&e))?;
+        remove_on(&mut tx, reach.rebuilt()).await?;
+        for session in &sessions {
+            write_session(&mut tx, session).await?;
+        }
+        super::canonical_changes::forget(&mut tx, CanonicalLayer::Cycling, reach.changed()).await?;
+        tx.commit().await.map_err(|e| store_error(&e))?;
+        self.count().await
     }
 
     async fn count(&self) -> Result<SessionCount, StoreError> {
@@ -538,7 +607,68 @@ pub(super) async fn clear(tx: &mut Transaction<'_, Sqlite>) -> Result<(), StoreE
         .execute(&mut **tx)
         .await
         .map_err(|e| store_error(&e))?;
-    super::derivation_ledger::forget(tx, application::CanonicalLayer::Cycling).await
+    // A whole derivation follows, so no day is left to rebuild alone.
+    super::canonical_changes::forget_all(tx, CanonicalLayer::Cycling).await?;
+    super::derivation_ledger::forget(tx, CanonicalLayer::Cycling).await
+}
+
+/// Record that the normalised sessions on these days changed, and empty the
+/// days that reaches (#610), in the transaction that changes them: a canonical
+/// session there may name a normalised one the caller is about to delete.
+pub(super) async fn changed(
+    tx: &mut Transaction<'_, Sqlite>,
+    days: BTreeSet<Date>,
+) -> Result<(), StoreError> {
+    if days.is_empty() {
+        return Ok(());
+    }
+    super::canonical_changes::record(tx, CanonicalLayer::Cycling, &days).await?;
+    remove_on(tx, Reach::of(days, cycling::REACHES).rebuilt()).await
+}
+
+/// Every canonical session on one of these days, children first. A session is
+/// on the day its first ride started, where its zone puts it.
+async fn remove_on(
+    tx: &mut Transaction<'_, Sqlite>,
+    days: &BTreeSet<Date>,
+) -> Result<(), StoreError> {
+    let spine = sqlx::query!(
+        r#"
+        SELECT session AS "session!: i64",
+               MIN(started_at_utc) AS "started_at_utc!: String",
+               MIN(zone) AS "zone!: String"
+          FROM canonical_bike_plus_ride
+         GROUP BY session
+        "#
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|e| store_error(&e))?;
+    let mut sessions = Vec::new();
+    for row in spine {
+        if days.contains(&day_of(&row.started_at_utc, &row.zone)?) {
+            sessions.push(row.session);
+        }
+    }
+    if sessions.is_empty() {
+        return Ok(());
+    }
+    let sessions = super::ids_json(sessions);
+    for statement in [
+        "DELETE FROM canonical_bike_plus_ride_heart_rate \
+         WHERE session IN (SELECT value FROM json_each(?))",
+        "DELETE FROM canonical_bike_plus_ride_sample \
+         WHERE session IN (SELECT value FROM json_each(?))",
+        "DELETE FROM canonical_bike_plus_ride WHERE session IN (SELECT value FROM json_each(?))",
+        "DELETE FROM canonical_cycling_session WHERE id IN (SELECT value FROM json_each(?))",
+    ] {
+        sqlx::query(statement)
+            .bind(&sessions)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| store_error(&e))?;
+    }
+    Ok(())
 }
 
 async fn write_session(

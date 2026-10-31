@@ -201,9 +201,10 @@ fn a_visit_two_sources_recorded_is_one_canonical_session() {
         let reader = SqliteNormalisedGymSessionReader::new(pool.clone());
         let canonical = SqliteCanonicalGymSessionStore::new(pool.clone());
 
-        let done = canonicalise::gym_sessions(&reader, &canonical)
-            .await
-            .expect("a canonicalising run");
+        let done =
+            canonicalise::gym_sessions(&reader, &canonical, application::Rederivation::Whole)
+                .await
+                .expect("a canonicalising run");
         assert!(
             done.written.as_usize() < done.read.as_usize(),
             "accounts merged and the sessionless recording wrote nothing: \
@@ -255,12 +256,14 @@ fn the_layer_is_replaced_not_appended() {
         let reader = SqliteNormalisedGymSessionReader::new(pool.clone());
         let canonical = SqliteCanonicalGymSessionStore::new(pool.clone());
 
-        let first = canonicalise::gym_sessions(&reader, &canonical)
-            .await
-            .expect("a first run");
-        let again = canonicalise::gym_sessions(&reader, &canonical)
-            .await
-            .expect("a second run");
+        let first =
+            canonicalise::gym_sessions(&reader, &canonical, application::Rederivation::Whole)
+                .await
+                .expect("a first run");
+        let again =
+            canonicalise::gym_sessions(&reader, &canonical, application::Rederivation::Whole)
+                .await
+                .expect("a second run");
         assert_eq!(first, again, "the same inputs give the same layer");
         assert_eq!(
             canonical.count().await.expect("a count"),
@@ -289,9 +292,10 @@ fn re_deriving_a_stream_leaves_the_layer_rebuildable() {
         let reader = SqliteNormalisedGymSessionReader::new(pool.clone());
         let canonical = SqliteCanonicalGymSessionStore::new(pool.clone());
 
-        let first = canonicalise::gym_sessions(&reader, &canonical)
-            .await
-            .expect("a first run");
+        let first =
+            canonicalise::gym_sessions(&reader, &canonical, application::Rederivation::Whole)
+                .await
+                .expect("a first run");
         assert!(first.written.as_usize() > 0, "the layer was built");
 
         // The same derivation again, over the same raw: the normalised rows are
@@ -318,9 +322,10 @@ fn re_deriving_a_stream_leaves_the_layer_rebuildable() {
             "the stale layer is gone rather than left pointing at deleted rows"
         );
 
-        let again = canonicalise::gym_sessions(&reader, &canonical)
-            .await
-            .expect("a second canonicalising");
+        let again =
+            canonicalise::gym_sessions(&reader, &canonical, application::Rederivation::Whole)
+                .await
+                .expect("a second canonicalising");
         assert_eq!(again, first, "and it rebuilds to the same layer");
     });
 }
@@ -347,7 +352,7 @@ fn a_cleared_layer_answers_the_performed_log_with_nothing() {
             jiff::civil::Date::constant(2030, 1, 1),
         );
 
-        canonicalise::gym_sessions(&reader, &canonical)
+        canonicalise::gym_sessions(&reader, &canonical, application::Rederivation::Whole)
             .await
             .expect("a first run");
         let performed = canonical
@@ -386,7 +391,7 @@ fn a_cleared_layer_answers_the_performed_log_with_nothing() {
              invisible — not reported as stale, but as never having happened",
         );
 
-        canonicalise::gym_sessions(&reader, &canonical)
+        canonicalise::gym_sessions(&reader, &canonical, application::Rederivation::Whole)
             .await
             .expect("a rebuild");
         assert_eq!(
@@ -457,7 +462,7 @@ fn rebuilding_what_a_revision_reached_is_rebuilding_the_whole() {
         let canonical = SqliteCanonicalGymSessionStore::new(pool.clone());
 
         land_hevy(&pool, first).await.expect("the first half");
-        canonicalise::gym_sessions(&reader, &canonical)
+        canonicalise::gym_sessions(&reader, &canonical, application::Rederivation::Whole)
             .await
             .expect("a whole derivation");
         let before = canonical.all().await.expect("the layer");
@@ -467,18 +472,20 @@ fn rebuilding_what_a_revision_reached_is_rebuilding_the_whole() {
             !canonical.reach().await.expect("the reach").is_empty(),
             "the revision recorded the days it changed"
         );
-        let reached = canonicalise::gym_sessions_reached(&reader, &canonical)
-            .await
-            .expect("a derivation of what was reached");
+        let reached =
+            canonicalise::gym_sessions(&reader, &canonical, application::Rederivation::Incremental)
+                .await
+                .expect("a derivation of what was reached");
         let within = canonical.all().await.expect("the layer");
         assert!(
             canonical.reach().await.expect("the reach").is_empty(),
             "and the derivation forgot them"
         );
 
-        let whole = canonicalise::gym_sessions(&reader, &canonical)
-            .await
-            .expect("a whole derivation");
+        let whole =
+            canonicalise::gym_sessions(&reader, &canonical, application::Rederivation::Whole)
+                .await
+                .expect("a whole derivation");
         assert_eq!(
             within,
             canonical.all().await.expect("the layer"),

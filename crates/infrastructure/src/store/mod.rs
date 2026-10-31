@@ -8,6 +8,7 @@
 
 pub mod btwb_export_landing;
 pub mod btwb_normalised;
+pub mod canonical_changes;
 pub mod canonical_cycling;
 pub mod canonical_gym;
 pub mod canonical_weigh_in;

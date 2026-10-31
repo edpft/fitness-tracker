@@ -19,7 +19,8 @@ use application::{
     CanonicalLayer, ClassSource, ClassesHeld, ClassesListed, ClassesRead, Clock, DerivationLedger,
     DerivedFrom, DiaryAuthor, DiaryStore, ExtractionError, FetchLog, Fetched, HolidayCalendar,
     NewestObservation, NextLock, NormalisationError, NormalisationSummary, NormalisedLayers, Part,
-    PlanStore, PrescriptionError, RunLockError, RunSummary, SourceError, StoreError, Taken,
+    PlanStore, PrescriptionError, Rederivation, RunLockError, RunSummary, SourceError, StoreError,
+    Taken,
     canonicalise::{Canonicalised, WeighInsCanonicalised},
     commit::{CommitError, Due},
     cycling::RidingError,
@@ -279,36 +280,38 @@ impl NormalisedLayers for Layers {
 struct Canonical(Arc<Graph>);
 
 impl Canonical {
-    fn derive(&self, layer: CanonicalLayer) -> Result<(), StoreError> {
-        self.0.with(|layered| layered.canonicalised.push(layer))
+    fn derive(&self, layer: CanonicalLayer, rederivation: Rederivation) -> Result<(), StoreError> {
+        self.0.with(|layered| {
+            layered.canonicalised.push(layer);
+            if rederivation == Rederivation::Incremental {
+                layered.reached.push(layer);
+            }
+        })
     }
 }
 
 impl Canonicalising for Canonical {
-    async fn gym(&self) -> Result<Canonicalised, StoreError> {
-        self.derive(CanonicalLayer::Gym)?;
+    async fn gym(&self, rederivation: Rederivation) -> Result<Canonicalised, StoreError> {
+        self.derive(CanonicalLayer::Gym, rederivation)?;
         Ok(Canonicalised {
             read: SessionCount::from(0),
             written: SessionCount::from(0),
         })
     }
 
-    async fn gym_reached(&self) -> Result<Canonicalised, StoreError> {
-        self.0
-            .with(|layered| layered.reached.push(CanonicalLayer::Gym))?;
-        self.gym().await
-    }
-
-    async fn cycling(&self) -> Result<Canonicalised, StoreError> {
-        self.derive(CanonicalLayer::Cycling)?;
+    async fn cycling(&self, rederivation: Rederivation) -> Result<Canonicalised, StoreError> {
+        self.derive(CanonicalLayer::Cycling, rederivation)?;
         Ok(Canonicalised {
             read: SessionCount::from(0),
             written: SessionCount::from(0),
         })
     }
 
-    async fn weigh_ins(&self) -> Result<WeighInsCanonicalised, StoreError> {
-        self.derive(CanonicalLayer::WeighIns)?;
+    async fn weigh_ins(
+        &self,
+        rederivation: Rederivation,
+    ) -> Result<WeighInsCanonicalised, StoreError> {
+        self.derive(CanonicalLayer::WeighIns, rederivation)?;
         Ok(WeighInsCanonicalised {
             read: WeighInCount::from(0),
             written: WeighInCount::from(0),
@@ -1354,18 +1357,27 @@ fn something_new_reaching_a_stream_derives_what_reads_from_it_and_nothing_else()
     );
 }
 
-/// **The gym layer is built whole once and rebuilt only where something
+/// **A canonical layer is built whole once and rebuilt only where something
 /// reached it after** (#610): the first run has no derivation to rebuild part
-/// of, and the second has one.
+/// of, and the second has one, for the layers that read what changed.
 #[test]
-fn the_gym_layer_is_built_whole_once_and_then_only_where_reached() {
+fn a_canonical_layer_is_built_whole_once_and_then_only_where_reached() {
     let graph = Arc::new(Graph::default());
     run_over(&graph).expect("the run answers");
     assert_eq!(graph.reached(), Vec::new(), "built whole");
 
     graph.reach("hevy.workouts");
+    graph.reach("peloton.rides");
+    graph.reach("withings.measurements");
     run_over(&graph).expect("the run answers");
-    assert_eq!(graph.reached(), vec![CanonicalLayer::Gym]);
+    assert_eq!(
+        graph.reached(),
+        vec![
+            CanonicalLayer::Gym,
+            CanonicalLayer::Cycling,
+            CanonicalLayer::WeighIns
+        ]
+    );
 }
 
 /// **A correction derives again what reads from it**: the overlay is one of a

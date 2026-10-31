@@ -1,0 +1,28 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT MIN(started_at_utc) AS \"started_at_utc!: String\", MIN(zone) AS \"zone!: String\"\n          FROM bike_plus_ride\n         WHERE session IN (SELECT value FROM json_each(?))\n         GROUP BY session\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "started_at_utc!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "5fd1633b6907bb178f7a582d760a130c0800a876c370cca6f832747d0ac62303"
+}

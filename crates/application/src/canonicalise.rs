@@ -3,8 +3,8 @@
 //!
 //! § II.4's second derivation, and the shortest use case in the crate: read
 //! every normalised gym session, match and merge them, replace the canonical
-//! layer with the result. Or, for the gym once its layer stands, only the days
-//! the normalised layer's changes reach (#610). It contacts nothing and refuses nothing — matching
+//! layer with the result. Or, once a layer stands, only the days the normalised
+//! layer's changes reach (#610). It contacts nothing and refuses nothing — matching
 //! reads entities already in our terms, so there is no translation to fail and
 //! nothing to refuse (§ 9).
 //!
@@ -25,6 +25,7 @@ use crate::{
     ports::{
         CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalWeighInStore,
         NormalisedCyclingSessionReader, NormalisedGymSessionReader, NormalisedWeighInReader,
+        Rederivation,
     },
 };
 
@@ -43,7 +44,13 @@ pub struct Canonicalised {
     pub written: SessionCount,
 }
 
-/// Replace the canonical gym layer with what the normalised layer now gives.
+/// Bring the canonical gym layer current: whole, or only the days the
+/// normalised layer's changes reach (#610).
+///
+/// **[`Rederivation::Incremental`] only over a layer that was derived whole**,
+/// which is the caller's to know: the changes are recorded against one, and a
+/// layer never built has none. Either way `written` is how many sessions the
+/// layer then holds.
 ///
 /// # Errors
 ///
@@ -55,33 +62,14 @@ pub async fn gym_sessions<
 >(
     normalised: &R,
     canonical: &C,
+    rederivation: Rederivation,
 ) -> Result<Canonicalised, StoreError> {
-    let accounts = normalised.all().await?;
-    let read = SessionCount::from(accounts.len());
-    let sessions = gym::canonical_sessions(accounts);
-    let written = canonical.replace(sessions).await?;
-    Ok(Canonicalised { read, written })
-}
-
-/// Rebuild the canonical gym sessions on the days the normalised layer's
-/// changes reach, and leave the rest of the layer standing (#610).
-///
-/// **Over a layer that was derived whole**, which is the caller's to know: the
-/// changes are recorded against one, and a layer never built has none.
-/// `written` is how many sessions the layer then holds, as it is for a whole
-/// rebuild.
-///
-/// # Errors
-///
-/// [`StoreError`] if either store is unavailable, or if the normalised layer
-/// holds something unreadable.
-pub async fn gym_sessions_reached<
-    R: NormalisedGymSessionReader + Sync,
-    C: CanonicalGymSessionStore + Sync,
->(
-    normalised: &R,
-    canonical: &C,
-) -> Result<Canonicalised, StoreError> {
+    if rederivation == Rederivation::Whole {
+        let accounts = normalised.all().await?;
+        let read = SessionCount::from(accounts.len());
+        let written = canonical.replace(gym::canonical_sessions(accounts)).await?;
+        return Ok(Canonicalised { read, written });
+    }
     let reach = canonical.reach().await?;
     if reach.is_empty() {
         return Ok(Canonicalised {
@@ -96,8 +84,8 @@ pub async fn gym_sessions_reached<
     Ok(Canonicalised { read, written })
 }
 
-/// Replace the canonical cycling layer with what the normalised layer now
-/// gives.
+/// Bring the canonical cycling layer current, as [`gym_sessions`] does the
+/// gym's.
 ///
 /// # Errors
 ///
@@ -109,11 +97,27 @@ pub async fn cycling_sessions<
 >(
     normalised: &R,
     canonical: &C,
+    rederivation: Rederivation,
 ) -> Result<Canonicalised, StoreError> {
-    let accounts = normalised.all().await?;
+    if rederivation == Rederivation::Whole {
+        let accounts = normalised.all().await?;
+        let read = SessionCount::from(accounts.len());
+        let written = canonical
+            .replace(cycling::canonical_sessions(accounts))
+            .await?;
+        return Ok(Canonicalised { read, written });
+    }
+    let reach = canonical.reach().await?;
+    if reach.is_empty() {
+        return Ok(Canonicalised {
+            read: SessionCount::from(0),
+            written: canonical.count().await?,
+        });
+    }
+    let accounts = normalised.on(reach.read()).await?;
     let read = SessionCount::from(accounts.len());
-    let sessions = cycling::canonical_sessions(accounts);
-    let written = canonical.replace(sessions).await?;
+    let sessions = cycling::canonical_sessions_within(accounts, &reach);
+    let written = canonical.replace_within(&reach, sessions).await?;
     Ok(Canonicalised { read, written })
 }
 
@@ -122,15 +126,16 @@ pub async fn cycling_sessions<
 pub struct WeighInsCanonicalised {
     /// How many normalised weigh-ins were read.
     pub read: WeighInCount,
-    /// How many weighings they made. Fewer than were read wherever one day is
-    /// in several copies.
+    /// How many weighings the layer holds once they are written. Fewer than
+    /// were read wherever one day is in several copies.
     pub written: WeighInCount,
-    /// Every weighing the merge could not settle, named (§ 10).
+    /// Every weighing the merge could not settle on the days it derived,
+    /// named (§ 10).
     pub left_out: Vec<LeftOut>,
 }
 
-/// Replace the canonical weigh-in layer with what the normalised layer now
-/// gives.
+/// Bring the canonical weigh-in layer current, as [`gym_sessions`] does the
+/// gym's.
 ///
 /// # Errors
 ///
@@ -139,11 +144,31 @@ pub struct WeighInsCanonicalised {
 pub async fn weigh_ins<R: NormalisedWeighInReader + Sync, C: CanonicalWeighInStore + Sync>(
     normalised: &R,
     canonical: &C,
+    rederivation: Rederivation,
 ) -> Result<WeighInsCanonicalised, StoreError> {
-    let accounts = normalised.all().await?;
+    if rederivation == Rederivation::Whole {
+        let accounts = normalised.all().await?;
+        let read = WeighInCount::from(accounts.len());
+        let merged = body::canonical_weigh_ins(accounts);
+        let written = canonical.replace(merged.weighed).await?;
+        return Ok(WeighInsCanonicalised {
+            read,
+            written,
+            left_out: merged.left_out,
+        });
+    }
+    let reach = canonical.reach().await?;
+    if reach.is_empty() {
+        return Ok(WeighInsCanonicalised {
+            read: WeighInCount::from(0),
+            written: canonical.count().await?,
+            left_out: Vec::new(),
+        });
+    }
+    let accounts = normalised.on(reach.read()).await?;
     let read = WeighInCount::from(accounts.len());
-    let merged = body::canonical_weigh_ins(accounts);
-    let written = canonical.replace(merged.weighed).await?;
+    let merged = body::canonical_weigh_ins_within(accounts, &reach);
+    let written = canonical.replace_within(&reach, merged.weighed).await?;
     Ok(WeighInsCanonicalised {
         read,
         written,

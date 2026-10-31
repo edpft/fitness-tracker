@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT id AS \"id!: i64\", measured_at_utc AS \"measured_at_utc: String\",\n               zone AS \"zone: String\", on_day AS \"on_day: String\"\n          FROM canonical_weigh_in\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_weigh_in",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "measured_at_utc: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_weigh_in",
+            "name": "measured_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_weigh_in",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "on_day: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_weigh_in",
+            "name": "on_day"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "deccdac16168f45c18bbc10a054a30ee4f214e7d99e967f23c63f8ce1e145c0f"
+}

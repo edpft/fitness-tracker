@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT day AS \"day!: String\" FROM canonical_gym_changed_day ORDER BY day",
+  "query": "SELECT day AS \"day!: String\" FROM canonical_changed_day WHERE layer = ? ORDER BY day",
   "describe": {
     "columns": [
       {
@@ -9,18 +9,18 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "canonical_gym_changed_day",
+            "table": "canonical_changed_day",
             "name": "day"
           }
         }
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 1
     },
     "nullable": [
       false
     ]
   },
-  "hash": "c9b290aaf03f841af9a12f25ea757d172b0c3b605fa1e6bbc55d6b9b4cd2d8d6"
+  "hash": "c8c10d6231a4542f89887a88c4f0b89ee321e5fe7c944a4f3a5423ea6114e4ae"
 }

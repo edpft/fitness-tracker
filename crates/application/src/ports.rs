@@ -22,14 +22,13 @@ use jiff::{
 
 use domain::analytical::Weighed;
 use domain::body::{CanonicalWeighIn, WeighInAccount, WeighInCount};
-use domain::canonical::{Occurred, SessionCount};
+use domain::canonical::{Occurred, Reach, SessionCount};
 use domain::cycling::{
     CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide,
     Ftp, PublishedProgramme, RideVenue,
 };
 use domain::gym::{
-    CanonicalGymSession, Load, NormalisedGymSession, Performed, Reach, SetKind,
-    exercise::RepsExercise,
+    CanonicalGymSession, Load, NormalisedGymSession, Performed, SetKind, exercise::RepsExercise,
 };
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
@@ -907,6 +906,17 @@ pub trait NormalisedCyclingSessionReader {
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
     fn all(&self) -> impl Future<Output = Result<Vec<CanonicalCyclingSession>, StoreError>> + Send;
 
+    /// Every normalised cycling session on one of these days, ordered as [`Self::all`]
+    /// orders them (#610).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn on(
+        &self,
+        days: &BTreeSet<Date>,
+    ) -> impl Future<Output = Result<Vec<CanonicalCyclingSession>, StoreError>> + Send;
+
     /// Which derivations wrote what this reads: what a canonical layer built
     /// from it is derived from (#468). Every row a derivation writes names its
     /// run, and a derivation replaces its stream's rows whole, so the runs
@@ -932,6 +942,28 @@ pub trait CanonicalCyclingSessionStore {
     fn replace(
         &self,
         sessions: Vec<CanonicalCyclingSession>,
+    ) -> impl Future<Output = Result<SessionCount, StoreError>> + Send;
+
+    /// What the normalised layer's changes since this layer was last derived
+    /// reach (#610), as [`CanonicalGymSessionStore::reach`] says for the gym.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn reach(&self) -> impl Future<Output = Result<Reach, StoreError>> + Send;
+
+    /// Replace the entries on the days `reach` rebuilds with these, in one
+    /// transaction, and forget the days it was reached from. Returns how many
+    /// the whole layer then holds.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable, or if an entry names a
+    /// normalised one the store does not hold.
+    fn replace_within(
+        &self,
+        reach: &Reach,
+        entries: Vec<CanonicalCyclingSession>,
     ) -> impl Future<Output = Result<SessionCount, StoreError>> + Send;
 
     /// # Errors
@@ -1705,6 +1737,17 @@ pub trait NormalisedWeighInReader {
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
     fn all(&self) -> impl Future<Output = Result<Vec<WeighInAccount>, StoreError>> + Send;
 
+    /// Every normalised weigh-in on one of these days, ordered as [`Self::all`]
+    /// orders them (#610).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn on(
+        &self,
+        days: &BTreeSet<Date>,
+    ) -> impl Future<Output = Result<Vec<WeighInAccount>, StoreError>> + Send;
+
     /// Which derivations wrote what this reads: what a canonical layer built
     /// from it is derived from (#468). Every row a derivation writes names its
     /// run, and a derivation replaces its stream's rows whole, so the runs
@@ -1727,6 +1770,28 @@ pub trait CanonicalWeighInStore {
     fn replace(
         &self,
         weigh_ins: Vec<CanonicalWeighIn>,
+    ) -> impl Future<Output = Result<WeighInCount, StoreError>> + Send;
+
+    /// What the normalised layer's changes since this layer was last derived
+    /// reach (#610), as [`CanonicalGymSessionStore::reach`] says for the gym.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn reach(&self) -> impl Future<Output = Result<Reach, StoreError>> + Send;
+
+    /// Replace the entries on the days `reach` rebuilds with these, in one
+    /// transaction, and forget the days it was reached from. Returns how many
+    /// the whole layer then holds.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable, or if an entry names a
+    /// normalised one the store does not hold.
+    fn replace_within(
+        &self,
+        reach: &Reach,
+        entries: Vec<CanonicalWeighIn>,
     ) -> impl Future<Output = Result<WeighInCount, StoreError>> + Send;
 
     /// # Errors

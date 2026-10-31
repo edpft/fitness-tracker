@@ -37,7 +37,10 @@ use domain::{
 };
 use jiff::civil::Date;
 use sqlx::{Sqlite, SqlitePool, Transaction};
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use crate::peloton::{LandedRide, SessionAccount, group};
 
@@ -372,11 +375,9 @@ impl NormalisedEntityStore for SqliteCyclingSessionStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        // The canonical layer first, for `replace`'s reason. A session is
-        // stored under its first ride and each ride under its own, so a record
-        // naming any ride of a session removes the whole of it, and the FTP it
-        // measured with it.
-        super::canonical_cycling::clear(&mut tx).await?;
+        // A session is stored under its first ride and each ride under its
+        // own, so a record naming any ride of a session removes the whole of
+        // it, and the FTP it measured with it.
         let doomed = sqlx::query_scalar!(
             r#"
             SELECT landing_record_id AS "id!: i64" FROM cycling_session
@@ -391,6 +392,10 @@ impl NormalisedEntityStore for SqliteCyclingSessionStore {
         .await
         .map_err(|error| store_error(&error))?;
         let doomed = super::ids_json(doomed);
+        // The canonical layer first, for `replace`'s reason, but only the days
+        // these sessions are on (#610).
+        let days = session_days(&mut tx, &doomed).await?;
+        super::canonical_cycling::changed(&mut tx, days).await?;
         for statement in [
             "DELETE FROM bike_plus_ride_heart_rate WHERE ride IN \
              (SELECT landing_record_id FROM bike_plus_ride \
@@ -413,6 +418,15 @@ impl NormalisedEntityStore for SqliteCyclingSessionStore {
         for session in sessions {
             write_session(&mut tx, run_id, &session).await?;
         }
+        let wrote = sqlx::query_scalar!(
+            r#"SELECT landing_record_id AS "id!: i64" FROM cycling_session WHERE run_id = ?"#,
+            run_id
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+        let days = session_days(&mut tx, &super::ids_json(wrote)).await?;
+        super::canonical_cycling::changed(&mut tx, days).await?;
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(written))
     }
@@ -424,6 +438,29 @@ impl NormalisedEntityStore for SqliteCyclingSessionStore {
             .map_err(|error| store_error(&error))?;
         count_from_storage(Some(row.total)).map(WorkoutCount::from)
     }
+}
+
+/// The day each of these sessions is on: its first ride's, as its zone puts
+/// it.
+async fn session_days(
+    tx: &mut Transaction<'_, Sqlite>,
+    sessions: &str,
+) -> Result<BTreeSet<Date>, StoreError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT MIN(started_at_utc) AS "started_at_utc!: String", MIN(zone) AS "zone!: String"
+          FROM bike_plus_ride
+         WHERE session IN (SELECT value FROM json_each(?))
+         GROUP BY session
+        "#,
+        sessions
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    rows.iter()
+        .map(|row| super::canonical_cycling::day_of(&row.started_at_utc, &row.zone))
+        .collect()
 }
 
 /// One session and its rides, inside the caller's transaction.

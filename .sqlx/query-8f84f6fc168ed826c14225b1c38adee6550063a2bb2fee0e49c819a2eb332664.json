@@ -1,0 +1,40 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT session AS \"session!: i64\",\n               MIN(started_at_utc) AS \"started_at_utc!: String\",\n               MIN(zone) AS \"zone!: String\"\n          FROM canonical_bike_plus_ride\n         GROUP BY session\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "session!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_bike_plus_ride",
+            "name": "session"
+          }
+        }
+      },
+      {
+        "name": "started_at_utc!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "8f84f6fc168ed826c14225b1c38adee6550063a2bb2fee0e49c819a2eb332664"
+}

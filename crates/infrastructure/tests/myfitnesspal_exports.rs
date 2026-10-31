@@ -216,11 +216,11 @@ fn the_history_reads_a_weight_dated_to_a_day() {
         normalise(&pool).await.expect("derives");
         let canonical = SqliteCanonicalWeighInStore::new(pool.clone());
         let normalised = SqliteNormalisedWeighInReader::new(pool.clone());
-        canonicalise::weigh_ins(&normalised, &canonical)
+        canonicalise::weigh_ins(&normalised, &canonical, application::Rederivation::Whole)
             .await
             .expect("canonicalises");
         normalise(&pool).await.expect("derives again");
-        canonicalise::weigh_ins(&normalised, &canonical)
+        canonicalise::weigh_ins(&normalised, &canonical, application::Rederivation::Whole)
             .await
             .expect("canonicalises again");
 
@@ -317,4 +317,52 @@ fn its_version_names_what_it_translates() {
     if let Err(unpinned) = versions::pinned::<MyFitnessPalWeighInTranslator>(&translations) {
         panic!("{unpinned}");
     }
+}
+
+/// **Rebuilding the days a second export reached gives the layer a whole
+/// rebuild gives** (#610).
+#[test]
+fn rebuilding_what_an_export_reached_is_rebuilding_the_whole() {
+    use application::CanonicalWeighInStore as _;
+
+    runtime().expect("a runtime").block_on(async {
+        let directory = tempfile::tempdir().expect("a directory");
+        let folder = folder_with(directory.path(), &[("a.ods", FIRST)]).expect("the folder");
+        let database = directory.path().join("store.db");
+        let pool = connect(&database).await.expect("a store");
+        let canonical = SqliteCanonicalWeighInStore::new(pool.clone());
+        let normalised = SqliteNormalisedWeighInReader::new(pool.clone());
+
+        land(&folder, &pool, &database).await.expect("the first");
+        normalise_as(&pool, application::Rederivation::Incremental)
+            .await
+            .expect("a first derivation");
+        canonicalise::weigh_ins(&normalised, &canonical, application::Rederivation::Whole)
+            .await
+            .expect("a whole canonicalising");
+
+        fs::write(folder.join("b.ods"), SECOND).expect("the second");
+        land(&folder, &pool, &database).await.expect("the second");
+        normalise_as(&pool, application::Rederivation::Incremental)
+            .await
+            .expect("an incremental derivation");
+        assert!(!canonical.reach().await.expect("the reach").is_empty());
+        let reached = canonicalise::weigh_ins(
+            &normalised,
+            &canonical,
+            application::Rederivation::Incremental,
+        )
+        .await
+        .expect("a derivation of what was reached");
+        let within = canonical.weigh_ins().await.expect("the layer");
+        assert!(canonical.reach().await.expect("the reach").is_empty());
+
+        let whole =
+            canonicalise::weigh_ins(&normalised, &canonical, application::Rederivation::Whole)
+                .await
+                .expect("a whole canonicalising");
+        assert_eq!(within, canonical.weigh_ins().await.expect("the layer"));
+        assert_eq!(reached.written, whole.written);
+        assert_eq!(reached.left_out, whole.left_out);
+    });
 }
