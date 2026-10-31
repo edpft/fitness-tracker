@@ -70,7 +70,10 @@ use crate::{
     cycling::{PrescribedRide, RideDeliveryError, RidingError},
     deliver::{Delivering, DeliveryPorts},
     microcycle::{Session, Standing},
-    ports::{CanonicalLayer, DerivationLedger, DerivedFrom, NewestObservation, NormalisedLayers},
+    ports::{
+        CanonicalLayer, DerivationLedger, DerivedFrom, NewestObservation, NormalisedLayers,
+        Rederivation,
+    },
     prescribe::{NextSession, Prescribing, PrescriptionPorts},
     reschedule::{Reschedule, Rescheduled, ReschedulingPlans},
 };
@@ -843,17 +846,26 @@ pub trait Canonicalising {
     /// # Errors
     ///
     /// [`StoreError`] if either layer cannot be read or written.
-    fn gym(&self) -> impl Future<Output = Result<Canonicalised, StoreError>> + Send;
+    fn gym(
+        &self,
+        rederivation: Rederivation,
+    ) -> impl Future<Output = Result<Canonicalised, StoreError>> + Send;
 
     /// # Errors
     ///
     /// [`StoreError`] if either layer cannot be read or written.
-    fn cycling(&self) -> impl Future<Output = Result<Canonicalised, StoreError>> + Send;
+    fn cycling(
+        &self,
+        rederivation: Rederivation,
+    ) -> impl Future<Output = Result<Canonicalised, StoreError>> + Send;
 
     /// # Errors
     ///
     /// [`StoreError`] if either layer cannot be read or written.
-    fn weigh_ins(&self) -> impl Future<Output = Result<WeighInsCanonicalised, StoreError>> + Send;
+    fn weigh_ins(
+        &self,
+        rederivation: Rederivation,
+    ) -> impl Future<Output = Result<WeighInsCanonicalised, StoreError>> + Send;
 
     /// What the layer would be derived from now: the derivations that wrote
     /// the normalised layers it reads.
@@ -886,17 +898,30 @@ where
     WR: NormalisedWeighInReader + Sync,
     WC: CanonicalWeighInStore + Sync,
 {
-    async fn gym(&self) -> Result<Canonicalised, StoreError> {
-        crate::canonicalise::gym_sessions(&self.normalised_gym, &self.canonical_gym).await
-    }
-
-    async fn cycling(&self) -> Result<Canonicalised, StoreError> {
-        crate::canonicalise::cycling_sessions(&self.normalised_cycling, &self.canonical_cycling)
+    async fn gym(&self, rederivation: Rederivation) -> Result<Canonicalised, StoreError> {
+        crate::canonicalise::gym_sessions(&self.normalised_gym, &self.canonical_gym, rederivation)
             .await
     }
 
-    async fn weigh_ins(&self) -> Result<WeighInsCanonicalised, StoreError> {
-        crate::canonicalise::weigh_ins(&self.normalised_weigh_ins, &self.canonical_weigh_ins).await
+    async fn cycling(&self, rederivation: Rederivation) -> Result<Canonicalised, StoreError> {
+        crate::canonicalise::cycling_sessions(
+            &self.normalised_cycling,
+            &self.canonical_cycling,
+            rederivation,
+        )
+        .await
+    }
+
+    async fn weigh_ins(
+        &self,
+        rederivation: Rederivation,
+    ) -> Result<WeighInsCanonicalised, StoreError> {
+        crate::canonicalise::weigh_ins(
+            &self.normalised_weigh_ins,
+            &self.canonical_weigh_ins,
+            rederivation,
+        )
+        .await
     }
 
     async fn inputs(&self, layer: CanonicalLayer) -> Result<DerivedFrom, StoreError> {
@@ -1479,18 +1504,28 @@ where
             };
             let started = start(progress, step);
             let inputs = self.ports.canonical.inputs(layer).await?;
-            let found = if ledger.canonical(layer).await?.as_ref() == Some(&inputs) {
+            let derived = ledger.canonical(layer).await?;
+            let found = if derived.as_ref() == Some(&inputs) {
                 Found::Unchanged
             } else {
+                // A layer derived whole once rebuilds only what changed since
+                // (#610); one never derived, or emptied by a stream re-derived
+                // whole, is built whole.
+                let rederivation = if derived.is_some() {
+                    Rederivation::Incremental
+                } else {
+                    Rederivation::Whole
+                };
+                let canonical = &self.ports.canonical;
                 let found = match layer {
                     CanonicalLayer::Gym => {
-                        Found::Canonical(self.ports.canonical.gym().await?.written)
+                        Found::Canonical(canonical.gym(rederivation).await?.written)
                     }
                     CanonicalLayer::Cycling => {
-                        Found::Canonical(self.ports.canonical.cycling().await?.written)
+                        Found::Canonical(canonical.cycling(rederivation).await?.written)
                     }
                     CanonicalLayer::WeighIns => {
-                        let canonicalised = self.ports.canonical.weigh_ins().await?;
+                        let canonicalised = canonical.weigh_ins(rederivation).await?;
                         Found::CanonicalWeighIns {
                             written: canonicalised.written,
                             left_out: canonicalised.left_out,

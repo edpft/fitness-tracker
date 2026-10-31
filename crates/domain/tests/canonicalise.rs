@@ -10,11 +10,11 @@
 //! that let a test panic do not reach a free function.
 
 use domain::{
-    canonical::{Attributed, NormalisedSessionId, Occurred},
+    canonical::{Attributed, NormalisedSessionId, Occurred, Reach},
     gym::{
         CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Guess,
         GuessedExercise, Identified, Load, MeasuredHeartRate, NormalisedGymSession, Performed,
-        Recorder, canonical_sessions, exercise::RepsExercise,
+        REACHES, Recorder, canonical_sessions, canonical_sessions_within, exercise::RepsExercise,
     },
     measure::{
         BeatsPerMinute, Duration, HeartRateSample, HeartRateSeries, HeartRateSummary, Kg,
@@ -747,5 +747,103 @@ fn one_account_states_the_length_alone() {
             .map(|stated| stated.copied().as_seconds()),
         Some(52 * 60),
         "the operator's own record where no watch recorded the visit"
+    );
+}
+
+/// A run of days where the sheets' day-only accounts migrate, stay put because
+/// both neighbours hold a clock, and stand alone: the cases whose reach is
+/// longer than the day they are on.
+fn a_fortnight() -> Result<Vec<NormalisedGymSession>, Failure> {
+    let lift = |number: i64| recorded("bench-press-barbell", &[(5, 60_000)], id(number)?);
+    Ok(vec![
+        watch(1, at("2019-03-01T07:40:00Z")?, vec![lift(1)?])?,
+        log(2, on("2019-03-02")?, vec![lift(2)?])?,
+        log(3, on("2019-03-03")?, vec![lift(3)?])?,
+        watch(4, at("2019-03-04T07:40:00Z")?, vec![lift(4)?])?,
+        log(5, on("2019-03-06")?, vec![lift(5)?])?,
+        watch(6, at("2019-03-07T07:40:00Z")?, vec![lift(6)?])?,
+        log(7, on("2019-03-08")?, vec![lift(7)?])?,
+        watch(8, at("2019-03-09T07:40:00Z")?, vec![lift(8)?])?,
+        log(9, on("2019-03-12")?, vec![lift(9)?])?,
+        watch(10, at("2019-03-13T07:40:00Z")?, vec![])?,
+    ])
+}
+
+/// The layer as it stood, with the days `reach` rebuilds taken out and what
+/// the windowed derivation gives for them put in.
+fn rebuilt_within(
+    before: Vec<NormalisedGymSession>,
+    after: Vec<NormalisedGymSession>,
+    reach: &Reach,
+) -> Vec<CanonicalGymSession> {
+    let mut layer: Vec<CanonicalGymSession> = canonical_sessions(before)
+        .into_iter()
+        .filter(|session| !reach.rebuilt().contains(&session.occurred().day()))
+        .chain(canonical_sessions_within(after, reach))
+        .collect();
+    layer.sort_by_key(|session| session.occurred().day());
+    layer
+}
+
+/// #610: adding or removing any one account and rebuilding only what its day
+/// reaches gives the layer a whole rebuild gives, every session field for
+/// field.
+#[test]
+fn rebuilding_what_a_change_reaches_is_rebuilding_the_whole() {
+    let record = a_fortnight().unwrap();
+    for changed in 0..record.len() {
+        let without: Vec<NormalisedGymSession> = record
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index != changed)
+            .map(|(_, account)| account.clone())
+            .collect();
+        let day = record.get(changed).expect("in range").occurred().day();
+        let reach = Reach::of([day], REACHES);
+
+        assert_eq!(
+            rebuilt_within(without.clone(), record.clone(), &reach),
+            canonical_sessions(record.clone()),
+            "adding the account on {day}"
+        );
+        assert_eq!(
+            rebuilt_within(record.clone(), without.clone(), &reach),
+            canonical_sessions(without),
+            "removing the account on {day}"
+        );
+    }
+}
+
+/// A watch recording arriving on 03-02 changes the visit on 03-04: 03-03's
+/// sheet joined 03-04 while 03-02 held no clock, and with a clock on either
+/// side it joins neither. So a change reaches two days either side.
+#[test]
+fn a_change_reaches_two_days_either_side() {
+    let before = a_fortnight().unwrap();
+    let mut after = before.clone();
+    after.push(
+        watch(
+            11,
+            at("2019-03-02T07:40:00Z").unwrap(),
+            vec![recorded("bench-press-barbell", &[(5, 60_000)], id(11).unwrap()).unwrap()],
+        )
+        .unwrap(),
+    );
+    let fourth = |layer: &[CanonicalGymSession]| {
+        layer
+            .iter()
+            .find(|session| session.occurred().day() == "2019-03-04".parse::<Date>().unwrap())
+            .cloned()
+    };
+    assert_ne!(
+        fourth(&canonical_sessions(before.clone())),
+        fourth(&canonical_sessions(after.clone())),
+        "03-03's sheet no longer joins 03-04"
+    );
+
+    let reach = Reach::of(["2019-03-02".parse::<Date>().unwrap()], REACHES);
+    assert_eq!(
+        rebuilt_within(before, after.clone(), &reach),
+        canonical_sessions(after)
     );
 }

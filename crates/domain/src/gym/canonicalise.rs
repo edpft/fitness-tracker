@@ -40,7 +40,7 @@ use std::collections::BTreeMap;
 
 use jiff::civil::Date;
 
-use crate::canonical::{Attributed, NormalisedSessionId, Occurred};
+use crate::canonical::{Attributed, NormalisedSessionId, Occurred, Reach};
 use crate::measure::PositiveDuration;
 use crate::sequence::{AtLeastTwo, NonEmpty};
 
@@ -65,6 +65,38 @@ pub fn canonical_sessions(accounts: Vec<NormalisedGymSession>) -> Vec<CanonicalG
         .filter_map(|accounts| merge(&accounts))
         .collect()
 }
+
+/// The canonical gym sessions on the days `reach` rebuilds, from whichever of
+/// `accounts` fall on the days it reads (#610).
+///
+/// **The same derivation as [`canonical_sessions`], over less of the record.**
+/// Every visit on a rebuilt day is decided by the accounts within two days of
+/// it, all of which `reach` reads, so what this gives for those days is what
+/// the whole layer gives for them. Accounts outside the days read are ignored,
+/// so the reader may hand over more than it was asked for.
+pub fn canonical_sessions_within(
+    accounts: Vec<NormalisedGymSession>,
+    reach: &Reach,
+) -> Vec<CanonicalGymSession> {
+    let read = accounts
+        .into_iter()
+        .filter(|account| reach.read().contains(&account.occurred().day()))
+        .collect();
+    canonical_sessions(read)
+        .into_iter()
+        .filter(|session| reach.rebuilt().contains(&session.occurred().day()))
+        .collect()
+}
+
+/// How many days either side of its own day an account can change a visit
+/// on (#610).
+///
+/// **Two, because that is how far one day's accounts reach.** A visit on a day
+/// is that day's accounts and any day-only group migrating in from the day
+/// either side, and whether one migrates depends on whether the day beyond it
+/// holds a clock. So an account added to or removed from one day can change
+/// the visits on the two days either side of it.
+pub const REACHES: i64 = 2;
 
 /// The accounts of each day, oldest day first.
 fn group_by_day(accounts: Vec<NormalisedGymSession>) -> BTreeMap<Date, Vec<NormalisedGymSession>> {

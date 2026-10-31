@@ -254,6 +254,7 @@ async fn canonicalise(pool: &SqlitePool) -> Built<Canonicalised> {
     Ok(canonicalise::cycling_sessions(
         &SqliteNormalisedCyclingSessionReader::new(pool.clone()),
         &SqliteCanonicalCyclingSessionStore::new(pool.clone()),
+        application::Rederivation::Whole,
     )
     .await?)
 }
@@ -1698,4 +1699,65 @@ fn its_version_names_what_it_translates() {
     if let Err(unpinned) = versions::pinned::<PelotonSessionTranslator>(&translations) {
         panic!("{unpinned}");
     }
+}
+
+/// **Rebuilding the days a new ride reached gives the layer a whole rebuild
+/// gives** (#610), and leaves the ride before it standing.
+#[test]
+fn rebuilding_what_a_new_ride_reached_is_rebuilding_the_whole() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let ride = |id: &'static str, start: i64| {
+            (
+                (id, workout(id, Kind::Main, start, start + 300)),
+                (
+                    id,
+                    graph(&[1, 2], &[93, 132], Some((&[132, 131], "3")), "2.0", "km"),
+                ),
+            )
+        };
+        let ((first_workout, first_graph), (second_workout, second_graph)) =
+            (ride("ride-1", 100), ride("ride-2", 3 * 86_400 + 100));
+        let (pool, _directory) = landed(vec![first_workout], vec![first_graph])
+            .await
+            .expect("a landed corpus");
+        derive(&pool).await.expect("a first derivation");
+        canonicalise(&pool).await.expect("a whole canonicalising");
+
+        let rides = PelotonRideLandingStore::new(pool.clone()).expect("a store");
+        let samples = PelotonRideSampleLandingStore::new(pool.clone()).expect("a store");
+        let runs = SqliteExtractionRunLog::new(pool.clone());
+        append(&rides, &runs, "/api/user/u/workouts", vec![second_workout])
+            .await
+            .expect("the second ride lands");
+        append(
+            &samples,
+            &runs,
+            "/api/workout/w/performance_graph",
+            vec![second_graph],
+        )
+        .await
+        .expect("and its graph");
+        derive_as(&pool, application::Rederivation::Incremental)
+            .await
+            .expect("an incremental derivation");
+
+        let reader = SqliteNormalisedCyclingSessionReader::new(pool.clone());
+        let canonical = SqliteCanonicalCyclingSessionStore::new(pool.clone());
+        assert!(!canonical.reach().await.expect("the reach").is_empty());
+        let reached = canonicalise::cycling_sessions(
+            &reader,
+            &canonical,
+            application::Rederivation::Incremental,
+        )
+        .await
+        .expect("a derivation of what was reached");
+        let within = canonical.all().await.expect("the layer");
+        let whole = canonicalise(&pool).await.expect("a whole canonicalising");
+
+        assert_eq!(within, canonical.all().await.expect("the layer"));
+        assert_eq!(within.len(), 2, "both rides");
+        assert_eq!(reached.written, whole.written);
+        assert_eq!(reached.read.as_usize(), 1, "only the new ride was read");
+    });
 }

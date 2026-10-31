@@ -28,7 +28,7 @@ use std::fmt;
 use jiff::civil::Date;
 
 use crate::{
-    canonical::{Attributed, Occurred},
+    canonical::{Attributed, Occurred, Reach},
     measure::Kg,
     sequence::NonEmpty,
 };
@@ -245,6 +245,28 @@ pub fn canonical_weigh_ins(mut accounts: Vec<WeighInAccount>) -> WeighIns {
         )
     });
     out
+}
+
+/// How many days either side of its own day a weigh-in's account can change
+/// a weighing on (#610): none, since every account of a weighing is on its day.
+pub const REACHES: i64 = 0;
+
+/// The canonical weigh-ins on the days `reach` rebuilds, and the weighings
+/// left out of them, from whichever of `accounts` fall on the days it reads
+/// (#610). Accounts outside those days are ignored.
+pub fn canonical_weigh_ins_within(accounts: Vec<WeighInAccount>, reach: &Reach) -> WeighIns {
+    let read = accounts
+        .into_iter()
+        .filter(|account| reach.read().contains(&account.occurred.day()))
+        .collect();
+    let mut merged = canonical_weigh_ins(read);
+    merged
+        .weighed
+        .retain(|weighed| reach.rebuilt().contains(&weighed.occurred.value().day()));
+    merged
+        .left_out
+        .retain(|left_out| reach.rebuilt().contains(&left_out.on));
+    merged
 }
 
 /// One day's accounts, sorted, into its weighings.

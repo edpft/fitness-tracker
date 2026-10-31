@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT measured_at_utc AS \"measured_at_utc: String\", zone AS \"zone: String\",\n               on_day AS \"on_day: String\"\n          FROM weigh_in WHERE id IN (SELECT value FROM json_each(?))\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "measured_at_utc: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "measured_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "on_day: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "weigh_in",
+            "name": "on_day"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "76ab0f127a2fd441e6d980887f5b81f9f99feac11987bf65dcc03ea9d06dd61a"
+}

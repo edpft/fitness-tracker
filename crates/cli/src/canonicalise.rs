@@ -12,7 +12,7 @@
 
 use std::path::Path;
 
-use application::next::Canonicalising;
+use application::{Rederivation, next::Canonicalising};
 use configurator::store::Store;
 use domain::schedule::Discipline;
 
@@ -22,7 +22,7 @@ use crate::{Failure, output};
 pub async fn gym(database: &Path) -> Result<(), Failure> {
     let store = Store::open(database).await?;
     output::canonicalising_started(Discipline::Gym);
-    let done = store.canonicalising().gym().await?;
+    let done = store.canonicalising().gym(Rederivation::Whole).await?;
     output::canonicalised(done.read, done.written);
     Ok(())
 }
@@ -32,7 +32,10 @@ pub async fn gym(database: &Path) -> Result<(), Failure> {
 pub async fn body_weight(database: &Path) -> Result<(), Failure> {
     let store = Store::open(database).await?;
     output::canonicalising_weigh_ins_started();
-    let done = store.canonicalising().weigh_ins().await?;
+    let done = store
+        .canonicalising()
+        .weigh_ins(Rederivation::Whole)
+        .await?;
     output::weigh_ins_canonicalised(&done);
     Ok(())
 }
@@ -41,7 +44,7 @@ pub async fn body_weight(database: &Path) -> Result<(), Failure> {
 pub async fn cycling(database: &Path) -> Result<(), Failure> {
     let store = Store::open(database).await?;
     output::canonicalising_started(Discipline::Cycling);
-    let done = store.canonicalising().cycling().await?;
+    let done = store.canonicalising().cycling(Rederivation::Whole).await?;
     output::canonicalised(done.read, done.written);
     Ok(())
 }

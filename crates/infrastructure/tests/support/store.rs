@@ -41,6 +41,7 @@ pub async fn canonicalise(pool: &SqlitePool) -> Fallible<()> {
     application::canonicalise::gym_sessions(
         &SqliteNormalisedGymSessionReader::new(pool.clone()),
         &SqliteCanonicalGymSessionStore::new(pool.clone()),
+        application::Rederivation::Whole,
     )
     .await?;
     Ok(())

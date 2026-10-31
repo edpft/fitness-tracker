@@ -175,7 +175,6 @@ impl NormalisedEntityStore for SqliteMyFitnessPalStore {
             .begin()
             .await
             .map_err(|error| store_error(&error))?;
-        super::canonical_weigh_in::clear(&mut tx).await?;
         let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
         let doomed = sqlx::query_scalar!(
             r#"
@@ -188,6 +187,8 @@ impl NormalisedEntityStore for SqliteMyFitnessPalStore {
         .await
         .map_err(|error| store_error(&error))?;
         let doomed = super::ids_json(doomed);
+        // The canonical layer first, but only the days these are on (#610).
+        super::canonical_weigh_in::changed_weigh_ins(&mut tx, &doomed).await?;
         for statement in [
             "DELETE FROM myfitnesspal_weigh_in WHERE weigh_in IN (SELECT value FROM json_each(?))",
             "DELETE FROM weigh_in WHERE id IN (SELECT value FROM json_each(?))",
@@ -199,6 +200,7 @@ impl NormalisedEntityStore for SqliteMyFitnessPalStore {
                 .map_err(|error| store_error(&error))?;
         }
         write_weigh_ins(&mut tx, run_id, &stream, &weigh_ins).await?;
+        super::canonical_weigh_in::changed_by_run(&mut tx, &stream, run_id).await?;
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(weigh_ins.len()))
     }

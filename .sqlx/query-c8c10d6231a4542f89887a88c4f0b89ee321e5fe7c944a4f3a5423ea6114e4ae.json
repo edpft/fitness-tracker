@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT day AS \"day!: String\" FROM canonical_changed_day WHERE layer = ? ORDER BY day",
+  "describe": {
+    "columns": [
+      {
+        "name": "day!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_changed_day",
+            "name": "day"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c8c10d6231a4542f89887a88c4f0b89ee321e5fe7c944a4f3a5423ea6114e4ae"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM canonical_changed_day WHERE layer = ? AND day = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "23e3e6b89a3bf3896f9b329d105c8aceca05ff2cba220a6a295e823cbb11b275"
+}

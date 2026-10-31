@@ -15,7 +15,7 @@
 
 use std::fmt;
 
-use crate::canonical::{Attributed, NormalisedSessionId};
+use crate::canonical::{Attributed, NormalisedSessionId, Reach};
 use crate::device::Sighting;
 use crate::measure::{Duration, HeartRateSeries, Metres};
 use crate::normalised::StartedAt;
@@ -253,4 +253,26 @@ pub fn canonical_sessions(
         )
     });
     accounts
+}
+
+/// How many days either side of its own day a ride's account can change an
+/// entry on (#610): none, since each account is its own session.
+pub const REACHES: i64 = 0;
+
+/// The canonical cycling sessions on the days `reach` rebuilds, from whichever
+/// of `accounts` fall on the days it reads (#610). Accounts outside those days
+/// are ignored.
+pub fn canonical_sessions_within(
+    accounts: Vec<CanonicalCyclingSession>,
+    reach: &Reach,
+) -> Vec<CanonicalCyclingSession> {
+    let on = |session: &CanonicalCyclingSession| session.started_at().wall_clock().date();
+    let read = accounts
+        .into_iter()
+        .filter(|account| reach.read().contains(&on(account)))
+        .collect();
+    canonical_sessions(read)
+        .into_iter()
+        .filter(|session| reach.rebuilt().contains(&on(session)))
+        .collect()
 }

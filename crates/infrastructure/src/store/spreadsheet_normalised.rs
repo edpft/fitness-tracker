@@ -120,6 +120,7 @@ impl NormalisedEntityStore for SqliteSpreadsheetStore {
         for session in &sessions {
             write_session(&mut tx, run_id, &stream, session).await?;
         }
+        super::normalised::written(&mut tx, &stream, run_id).await?;
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(written))
     }

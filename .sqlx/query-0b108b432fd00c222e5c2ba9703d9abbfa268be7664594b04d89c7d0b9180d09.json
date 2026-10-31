@@ -1,0 +1,33 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT ride AS \"key!: i64\",\n                   json_group_array(json_array(at_seconds, beats_per_minute)) AS \"rows!: String\"\n              FROM bike_plus_ride_heart_rate\n             WHERE ?1 IS NULL OR ride IN (SELECT landing_record_id FROM bike_plus_ride\n                                           WHERE session IN (SELECT value FROM json_each(?1)))\n             GROUP BY ride\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "key!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "bike_plus_ride_heart_rate",
+            "name": "ride"
+          }
+        }
+      },
+      {
+        "name": "rows!: String",
+        "ordinal": 1,
+        "type_info": "Null",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "0b108b432fd00c222e5c2ba9703d9abbfa268be7664594b04d89c7d0b9180d09"
+}

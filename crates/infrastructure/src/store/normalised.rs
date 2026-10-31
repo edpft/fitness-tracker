@@ -17,6 +17,8 @@
 //! them over. What it keeps is the half only it can do: reaching a store, so
 //! that what the translator receives is whole and cannot go back for more.
 
+use std::collections::BTreeSet;
+
 use application::{AccountReader, NormalisedEntityStore, Reached, Reading, StoreError};
 use domain::{
     gym::{
@@ -29,6 +31,7 @@ use domain::{
     },
     normalised::{NormalisationRunId, WorkoutCount},
 };
+use jiff::civil::Date;
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::hevy::{SessionAccount, group};
@@ -200,6 +203,7 @@ impl NormalisedEntityStore for SqliteGymSessionStore {
         for session in &sessions {
             write_session(&mut tx, run_id, &stream, session).await?;
         }
+        super::normalised::written(&mut tx, &stream, run_id).await?;
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(sessions.len()))
     }
@@ -281,13 +285,17 @@ pub(super) async fn clear_stream(
 ///
 /// **A session is stored under its first workout and its workouts under their
 /// own**, so a record naming any workout of a session removes the whole of it.
-/// The canonical layer goes first, all of it, for [`clear_stream`]'s reason.
+///
+/// **The canonical layer goes first, but only what the removed sessions' days
+/// reach** (#610), for [`clear_stream`]'s reason: those are the canonical
+/// sessions that can name them. A revision that removes no gym session leaves
+/// the layer standing. The caller records the days of what it then writes
+/// through [`written`].
 pub(super) async fn clear_sessions(
     tx: &mut Transaction<'_, Sqlite>,
     stream: &str,
     removed: &[LandingRecordId],
 ) -> Result<(), StoreError> {
-    super::canonical_gym::clear(tx).await?;
     let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
     let sessions = sqlx::query_scalar!(
         r#"
@@ -307,6 +315,8 @@ pub(super) async fn clear_sessions(
     .await
     .map_err(|error| store_error(&error))?;
     let sessions = super::ids_json(sessions);
+    let days = days_of_sessions(tx, &sessions).await?;
+    super::canonical_gym::changed(tx, days).await?;
 
     sqlx::query!(
         "DELETE FROM measured_set WHERE workout IN \
@@ -371,6 +381,80 @@ pub(super) async fn clear_sessions(
     .await
     .map_err(|error| store_error(&error))?;
     Ok(())
+}
+
+/// Record the days of every session one stream's run just wrote, so the
+/// canonical layer rebuilds what they reach (#610).
+///
+/// **Read back from the rows rather than from what was written**, because the
+/// four writers hand over four shapes and the rows are one: a session is on
+/// the day its earliest workout is, as the canonical layer reads it.
+pub(super) async fn written(
+    tx: &mut Transaction<'_, Sqlite>,
+    stream: &str,
+    run_id: i64,
+) -> Result<(), StoreError> {
+    let days = days_of(
+        sqlx::query!(
+            r#"
+            SELECT MIN(w.started_at_utc) AS "started_at_utc?: String",
+                   MIN(w.zone) AS "zone?: String",
+                   MIN(w.on_day) AS "on_day?: String"
+            FROM gym_session AS s
+            JOIN gym_workout AS w ON w.session = s.id
+            WHERE s.stream = ? AND s.run_id = ?
+            GROUP BY s.id
+            "#,
+            stream,
+            run_id
+        )
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?
+        .into_iter()
+        .map(|row| (row.started_at_utc, row.zone, row.on_day)),
+    )?;
+    super::canonical_gym::changed(tx, days).await
+}
+
+/// The day each of these sessions is on, before they are deleted.
+async fn days_of_sessions(
+    tx: &mut Transaction<'_, Sqlite>,
+    sessions: &str,
+) -> Result<BTreeSet<Date>, StoreError> {
+    days_of(
+        sqlx::query!(
+            r#"
+            SELECT MIN(started_at_utc) AS "started_at_utc?: String",
+                   MIN(zone) AS "zone?: String",
+                   MIN(on_day) AS "on_day?: String"
+            FROM gym_workout
+            WHERE session IN (SELECT value FROM json_each(?))
+            GROUP BY session
+            "#,
+            sessions
+        )
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?
+        .into_iter()
+        .map(|row| (row.started_at_utc, row.zone, row.on_day)),
+    )
+}
+
+/// The day each session is on, from its earliest workout's dating.
+fn days_of(
+    rows: impl Iterator<Item = (Option<String>, Option<String>, Option<String>)>,
+) -> Result<BTreeSet<Date>, StoreError> {
+    rows.map(|(started_at_utc, zone, on_day)| {
+        super::canonical_gym::occurred(
+            started_at_utc.as_deref(),
+            zone.as_deref(),
+            on_day.as_deref(),
+        )
+        .map(|when| when.day())
+    })
+    .collect()
 }
 
 /// One session and every workout it was performed as.

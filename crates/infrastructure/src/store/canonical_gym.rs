@@ -15,8 +15,15 @@
 //! layer that answers on its own.
 //!
 //! **Replacement rather than update**, as every derivation is: § II says a
-//! derivation is never mutated in place, and the whole layer goes in one
-//! transaction.
+//! derivation is never mutated in place. A visit is replaced whole, and what is
+//! replaced is either the whole layer or the visits on the days a change to the
+//! normalised layer reaches (#610), each in one transaction.
+//!
+//! **A normalised writer records the days it changed, and empties what they
+//! reach**, in its own transaction: a canonical session names the normalised
+//! rows it came from, and a revision deletes those rows. So the layer always
+//! holds what a whole derivation would give, except on the days a recorded
+//! change reaches, where it holds nothing until the next derivation fills them.
 //!
 //! **And this is where everything downstream reads the gym record** (#350).
 //! Three ports are served from these tables rather than from one source's:
@@ -25,14 +32,16 @@
 //! projects the same tables and lives in `history.rs` because what it returns is
 //! a projection rather than the entity.
 
+use std::collections::BTreeSet;
+
 use application::{
-    CanonicalGymSessionStore, DeliveryReference, PerformedGymSessions, PerformedSessionLog,
-    PrescribedWorkoutId, StoreError,
+    CanonicalGymSessionStore, CanonicalLayer, DeliveryReference, PerformedGymSessions,
+    PerformedSessionLog, PrescribedWorkoutId, StoreError,
 };
 use domain::{
-    canonical::{Attributed, NormalisedSessionId, Occurred, SessionCount},
+    canonical::{Attributed, NormalisedSessionId, Occurred, Reach, SessionCount},
     gym::{
-        CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Guess,
+        self, CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Guess,
         GuessedExercise, Identified, Load, MeasuredHeartRate, Performed, SetKind,
         exercise::{
             Description, DistanceExercise, DurationExercise, Implement, Movement, RepsExercise,
@@ -79,6 +88,30 @@ impl CanonicalGymSessionStore for SqliteCanonicalGymSessionStore {
         }
         tx.commit().await.map_err(|e| store_error(&e))?;
         Ok(SessionCount::from(written))
+    }
+
+    async fn reach(&self) -> Result<Reach, StoreError> {
+        let days = super::canonical_changes::days(&self.pool, CanonicalLayer::Gym).await?;
+        Ok(Reach::of(days, gym::REACHES))
+    }
+
+    async fn replace_within(
+        &self,
+        reach: &Reach,
+        sessions: Vec<CanonicalGymSession>,
+    ) -> Result<SessionCount, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(|e| store_error(&e))?;
+        remove_on(&mut tx, reach.rebuilt()).await?;
+        for session in &sessions {
+            let id = write_session(&mut tx, session).await?;
+            write_heart_rate(&mut tx, id, session).await?;
+            for (position, item) in session.items().iter().enumerate() {
+                write_item(&mut tx, id, count_for_storage(position)?, item).await?;
+            }
+        }
+        super::canonical_changes::forget(&mut tx, CanonicalLayer::Gym, reach.changed()).await?;
+        tx.commit().await.map_err(|e| store_error(&e))?;
+        self.count().await
     }
 
     async fn all(&self) -> Result<Vec<CanonicalGymSession>, StoreError> {
@@ -451,9 +484,11 @@ impl PerformedSessionLog for SqliteCanonicalGymSessionStore {
 /// Everything the layer holds, in foreign-key order.
 ///
 /// **Called from two places**, and the second is the reason it is `pub(super)`:
-/// re-deriving any normalised gym stream invalidates this whole layer, because
-/// every field of it names a `gym_session` row that the re-derivation deletes and
-/// rewrites under a new id. See [`super::normalised::clear_stream`].
+/// re-deriving a normalised gym stream whole invalidates this whole layer,
+/// because every field of it names a `gym_session` row that the re-derivation
+/// deletes and rewrites under a new id. See [`super::normalised::clear_stream`].
+/// A revision of some of a stream's sessions empties only what their days
+/// reach, through [`changed`].
 pub(super) async fn clear(tx: &mut Transaction<'_, Sqlite>) -> Result<(), StoreError> {
     for statement in [
         "DELETE FROM canonical_gym_set",
@@ -467,7 +502,73 @@ pub(super) async fn clear(tx: &mut Transaction<'_, Sqlite>) -> Result<(), StoreE
             .await
             .map_err(|e| store_error(&e))?;
     }
-    super::derivation_ledger::forget(tx, application::CanonicalLayer::Gym).await
+    // A whole derivation follows, so no day is left to rebuild alone.
+    super::canonical_changes::forget_all(tx, CanonicalLayer::Gym).await?;
+    super::derivation_ledger::forget(tx, CanonicalLayer::Gym).await
+}
+
+/// Record that the normalised accounts on these days changed, and empty the
+/// days that reaches (#610), in the transaction that changes them.
+///
+/// **Emptied now rather than at the next derivation**, because a canonical
+/// session on one of those days may name a normalised row the caller is about
+/// to delete, and the foreign key would refuse it.
+pub(super) async fn changed(
+    tx: &mut Transaction<'_, Sqlite>,
+    days: BTreeSet<Date>,
+) -> Result<(), StoreError> {
+    if days.is_empty() {
+        return Ok(());
+    }
+    super::canonical_changes::record(tx, CanonicalLayer::Gym, &days).await?;
+    remove_on(tx, Reach::of(days, gym::REACHES).rebuilt()).await
+}
+
+/// Every canonical session on one of these days, in foreign-key order.
+///
+/// **The day is worked out here rather than in SQL**, because a session with
+/// an instant is on the day its zone puts it on, which SQLite cannot resolve.
+/// The spine is a few hundred rows.
+async fn remove_on(
+    tx: &mut Transaction<'_, Sqlite>,
+    days: &BTreeSet<Date>,
+) -> Result<(), StoreError> {
+    let rows = sqlx::query!(
+        r#"SELECT id AS "id!", started_at_utc, zone, on_day FROM canonical_gym_session"#
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|e| store_error(&e))?;
+    let mut sessions = Vec::new();
+    for row in rows {
+        let when = occurred(
+            row.started_at_utc.as_deref(),
+            row.zone.as_deref(),
+            row.on_day.as_deref(),
+        )?;
+        if days.contains(&when.day()) {
+            sessions.push(row.id);
+        }
+    }
+    if sessions.is_empty() {
+        return Ok(());
+    }
+    let sessions = super::ids_json(sessions);
+    for statement in [
+        "DELETE FROM canonical_gym_set WHERE session IN (SELECT value FROM json_each(?))",
+        "DELETE FROM canonical_gym_exercise WHERE session IN (SELECT value FROM json_each(?))",
+        "DELETE FROM canonical_gym_item WHERE session IN (SELECT value FROM json_each(?))",
+        "DELETE FROM canonical_gym_session_heart_rate \
+         WHERE session IN (SELECT value FROM json_each(?))",
+        "DELETE FROM canonical_gym_session WHERE id IN (SELECT value FROM json_each(?))",
+    ] {
+        sqlx::query(statement)
+            .bind(&sessions)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| store_error(&e))?;
+    }
+    Ok(())
 }
 
 async fn write_session(

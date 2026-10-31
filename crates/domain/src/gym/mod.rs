@@ -26,7 +26,7 @@ pub mod workout;
 pub use canonical::{
     CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Identified,
 };
-pub use canonicalise::canonical_sessions;
+pub use canonicalise::{REACHES, canonical_sessions, canonical_sessions_within};
 pub use exercise::{
     DistanceExercise, DurationExercise, Exercise, RepsExercise, Sides, UnknownExercise,
 };

@@ -10,11 +10,15 @@
 //! rows that the re-derivation deletes and rewrites under new ids. See
 //! [`clear`].
 
-use application::{CanonicalWeighInStore, NormalisedWeighInReader, StoreError, WeighInHistory};
+use std::collections::BTreeSet;
+
+use application::{
+    CanonicalLayer, CanonicalWeighInStore, NormalisedWeighInReader, StoreError, WeighInHistory,
+};
 use domain::{
     analytical::Weighed,
-    body::{CanonicalWeighIn, NormalisedWeighInId, Stated, WeighInAccount, WeighInCount},
-    canonical::Occurred,
+    body::{self, CanonicalWeighIn, NormalisedWeighInId, Stated, WeighInAccount, WeighInCount},
+    canonical::{Occurred, Reach},
     measure::Kg,
     normalised::{OperatorZone, StartedAt},
 };
@@ -36,6 +40,14 @@ impl SqliteNormalisedWeighInReader {
 }
 
 impl NormalisedWeighInReader for SqliteNormalisedWeighInReader {
+    async fn on(&self, days: &BTreeSet<Date>) -> Result<Vec<WeighInAccount>, StoreError> {
+        // **The whole read, filtered**: a weigh-in is one row with nothing
+        // beneath it, so reading every one costs less than working out which.
+        let mut accounts = self.all().await?;
+        accounts.retain(|account| days.contains(&account.occurred.day()));
+        Ok(accounts)
+    }
+
     async fn written_by(&self) -> Result<application::DerivedFrom, StoreError> {
         let runs = sqlx::query!(
             r#"
@@ -127,53 +139,32 @@ impl CanonicalWeighInStore for SqliteCanonicalWeighInStore {
             .await
             .map_err(|error| store_error(&error))?;
         clear(&mut tx).await?;
-        for weigh_in in &weigh_ins {
-            let (measured_at_utc, zone, on_day) = match weigh_in.occurred().value() {
-                Occurred::At(at) => (
-                    Some(at.instant().to_string()),
-                    Some(at.zone().id().to_owned()),
-                    None,
-                ),
-                Occurred::On(day) => (None, None, Some(day.to_string())),
-            };
-            let occurred_weigh_in = weigh_in.occurred().taken_from().as_i64();
-            let mass_grams = i64::try_from(weigh_in.mass().value().as_grams())
-                .map_err(|error| corrupt(&error))?;
-            let mass_weigh_in = weigh_in.mass().taken_from().as_i64();
-
-            let id = sqlx::query_scalar!(
-                r#"
-                INSERT INTO canonical_weigh_in (
-                    on_day, measured_at_utc, zone, occurred_weigh_in, mass_grams, mass_weigh_in
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                RETURNING id AS "id!: i64"
-                "#,
-                on_day,
-                measured_at_utc,
-                zone,
-                occurred_weigh_in,
-                mass_grams,
-                mass_weigh_in,
-            )
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|error| store_error(&error))?;
-
-            let accounts: Vec<i64> = weigh_in.accounts().iter().map(|id| id.as_i64()).collect();
-            for account in accounts {
-                sqlx::query!(
-                    "INSERT INTO canonical_weigh_in_account (canonical, weigh_in) VALUES (?, ?)",
-                    id,
-                    account,
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(|error| store_error(&error))?;
-            }
-        }
+        write_all(&mut tx, &weigh_ins).await?;
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(WeighInCount::from(weigh_ins.len()))
+    }
+
+    async fn reach(&self) -> Result<Reach, StoreError> {
+        let days = super::canonical_changes::days(&self.pool, CanonicalLayer::WeighIns).await?;
+        Ok(Reach::of(days, body::REACHES))
+    }
+
+    async fn replace_within(
+        &self,
+        reach: &Reach,
+        weigh_ins: Vec<CanonicalWeighIn>,
+    ) -> Result<WeighInCount, StoreError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| store_error(&error))?;
+        remove_on(&mut tx, reach.rebuilt()).await?;
+        write_all(&mut tx, &weigh_ins).await?;
+        super::canonical_changes::forget(&mut tx, CanonicalLayer::WeighIns, reach.changed())
+            .await?;
+        tx.commit().await.map_err(|error| store_error(&error))?;
+        self.count().await
     }
 
     async fn count(&self) -> Result<WeighInCount, StoreError> {
@@ -184,6 +175,59 @@ impl CanonicalWeighInStore for SqliteCanonicalWeighInStore {
                 .map_err(|error| store_error(&error))?;
         Ok(WeighInCount::from(count_from_storage(Some(count))?))
     }
+}
+
+/// Each weighing and the accounts it stands on.
+async fn write_all(
+    tx: &mut Transaction<'_, Sqlite>,
+    weigh_ins: &[CanonicalWeighIn],
+) -> Result<(), StoreError> {
+    for weigh_in in weigh_ins {
+        let (measured_at_utc, zone, on_day) = match weigh_in.occurred().value() {
+            Occurred::At(at) => (
+                Some(at.instant().to_string()),
+                Some(at.zone().id().to_owned()),
+                None,
+            ),
+            Occurred::On(day) => (None, None, Some(day.to_string())),
+        };
+        let occurred_weigh_in = weigh_in.occurred().taken_from().as_i64();
+        let mass_grams =
+            i64::try_from(weigh_in.mass().value().as_grams()).map_err(|error| corrupt(&error))?;
+        let mass_weigh_in = weigh_in.mass().taken_from().as_i64();
+
+        let id = sqlx::query_scalar!(
+            r#"
+            INSERT INTO canonical_weigh_in (
+                on_day, measured_at_utc, zone, occurred_weigh_in, mass_grams, mass_weigh_in
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            RETURNING id AS "id!: i64"
+            "#,
+            on_day,
+            measured_at_utc,
+            zone,
+            occurred_weigh_in,
+            mass_grams,
+            mass_weigh_in,
+        )
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        let accounts: Vec<i64> = weigh_in.accounts().iter().map(|id| id.as_i64()).collect();
+        for account in accounts {
+            sqlx::query!(
+                "INSERT INTO canonical_weigh_in_account (canonical, weigh_in) VALUES (?, ?)",
+                id,
+                account,
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| store_error(&error))?;
+        }
+    }
+    Ok(())
 }
 
 /// Body weight, read back for relative strength: one weigh-in per weighing.
@@ -260,7 +304,138 @@ pub(super) async fn clear(tx: &mut Transaction<'_, Sqlite>) -> Result<(), StoreE
             .await
             .map_err(|error| store_error(&error))?;
     }
-    super::derivation_ledger::forget(tx, application::CanonicalLayer::WeighIns).await
+    // A whole derivation follows, so no day is left to rebuild alone.
+    super::canonical_changes::forget_all(tx, CanonicalLayer::WeighIns).await?;
+    super::derivation_ledger::forget(tx, CanonicalLayer::WeighIns).await
+}
+
+/// Record that the normalised weigh-ins on these days changed, and empty the
+/// days that reaches (#610), in the transaction that changes them: a weighing
+/// there may name a weigh-in the caller is about to delete.
+pub(super) async fn changed(
+    tx: &mut Transaction<'_, Sqlite>,
+    days: BTreeSet<Date>,
+) -> Result<(), StoreError> {
+    if days.is_empty() {
+        return Ok(());
+    }
+    super::canonical_changes::record(tx, CanonicalLayer::WeighIns, &days).await?;
+    remove_on(tx, Reach::of(days, body::REACHES).rebuilt()).await
+}
+
+/// Record the days of the weigh-ins these rows name: each row's day, or its
+/// instant's where its zone puts it.
+pub(super) async fn changed_rows(
+    tx: &mut Transaction<'_, Sqlite>,
+    rows: impl IntoIterator<Item = (Option<String>, Option<String>, Option<String>)>,
+) -> Result<(), StoreError> {
+    let days = rows
+        .into_iter()
+        .map(|(measured_at_utc, zone, on_day)| {
+            occurred(
+                measured_at_utc.as_deref(),
+                zone.as_deref(),
+                on_day.as_deref(),
+            )
+            .map(|when| when.day())
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    changed(tx, days).await
+}
+
+/// The days of these normalised weigh-ins, given as a JSON array of their ids,
+/// recorded as changed (#610). Called before they are deleted.
+pub(super) async fn changed_weigh_ins(
+    tx: &mut Transaction<'_, Sqlite>,
+    weigh_ins: &str,
+) -> Result<(), StoreError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT measured_at_utc AS "measured_at_utc: String", zone AS "zone: String",
+               on_day AS "on_day: String"
+          FROM weigh_in WHERE id IN (SELECT value FROM json_each(?))
+        "#,
+        weigh_ins
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    changed_rows(
+        tx,
+        rows.into_iter()
+            .map(|row| (row.measured_at_utc, row.zone, row.on_day)),
+    )
+    .await
+}
+
+/// The days of every weigh-in one stream's run just wrote, recorded as changed
+/// (#610).
+pub(super) async fn changed_by_run(
+    tx: &mut Transaction<'_, Sqlite>,
+    stream: &str,
+    run_id: i64,
+) -> Result<(), StoreError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT measured_at_utc AS "measured_at_utc: String", zone AS "zone: String",
+               on_day AS "on_day: String"
+          FROM weigh_in WHERE stream = ? AND run_id = ?
+        "#,
+        stream,
+        run_id
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    changed_rows(
+        tx,
+        rows.into_iter()
+            .map(|row| (row.measured_at_utc, row.zone, row.on_day)),
+    )
+    .await
+}
+
+/// Every weighing on one of these days, the accounts it names first.
+async fn remove_on(
+    tx: &mut Transaction<'_, Sqlite>,
+    days: &BTreeSet<Date>,
+) -> Result<(), StoreError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT id AS "id!: i64", measured_at_utc AS "measured_at_utc: String",
+               zone AS "zone: String", on_day AS "on_day: String"
+          FROM canonical_weigh_in
+        "#
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    let mut weighings = Vec::new();
+    for row in rows {
+        let when = occurred(
+            row.measured_at_utc.as_deref(),
+            row.zone.as_deref(),
+            row.on_day.as_deref(),
+        )?;
+        if days.contains(&when.day()) {
+            weighings.push(row.id);
+        }
+    }
+    if weighings.is_empty() {
+        return Ok(());
+    }
+    let weighings = super::ids_json(weighings);
+    for statement in [
+        "DELETE FROM canonical_weigh_in_account WHERE canonical IN (SELECT value FROM json_each(?))",
+        "DELETE FROM canonical_weigh_in WHERE id IN (SELECT value FROM json_each(?))",
+    ] {
+        sqlx::query(statement)
+            .bind(&weighings)
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| store_error(&error))?;
+    }
+    Ok(())
 }
 
 /// When a weigh-in happened: at an instant in a zone, or on a day.

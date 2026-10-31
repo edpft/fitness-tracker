@@ -4,8 +4,11 @@
 //! which differs; 2016-07-04 is in the same six and in MyFitnessPal.
 
 use domain::{
-    body::{NormalisedWeighInId, Stated, Unsettled, WeighInAccount, WeighIns, canonical_weigh_ins},
-    canonical::Occurred,
+    body::{
+        NormalisedWeighInId, REACHES, Stated, Unsettled, WeighInAccount, WeighIns,
+        canonical_weigh_ins, canonical_weigh_ins_within,
+    },
+    canonical::{Occurred, Reach},
     measure::Kg,
     normalised::{OperatorZone, StartedAt},
 };
@@ -319,5 +322,42 @@ proptest! {
         let named: usize = merged.weighed.iter().map(|weighed| weighed.accounts().count()).sum();
         let left: usize = merged.left_out.iter().map(|gap| gap.masses.count()).sum();
         prop_assert_eq!(named + left, accounts.len());
+    }
+}
+
+proptest! {
+    /// #610: removing any one account and rebuilding only its day gives the
+    /// layer a whole rebuild gives, weighings and the ones left out alike.
+    #[test]
+    fn rebuilding_the_day_a_change_reaches_is_rebuilding_the_whole(
+        accounts in prop::collection::vec(account(), 1..30)
+            .prop_map(|mut accounts| {
+                accounts.sort_by_key(|account| account.id);
+                accounts.dedup_by_key(|account| account.id);
+                accounts
+            }),
+        removed in any::<prop::sample::Index>(),
+    ) {
+        let index = removed.index(accounts.len());
+        let day = accounts[index].occurred.day();
+        let mut without = accounts.clone();
+        without.remove(index);
+        let reach = Reach::of([day], REACHES);
+
+        for (before, after) in [(&without, &accounts), (&accounts, &without)] {
+            let mut layer = canonical_weigh_ins(before.clone());
+            layer.weighed.retain(|weighed| !reach.rebuilt().contains(&weighed.occurred().value().day()));
+            layer.left_out.retain(|left_out| !reach.rebuilt().contains(&left_out.on));
+            let within = canonical_weigh_ins_within(after.clone(), &reach);
+            layer.weighed.extend(within.weighed);
+            layer.left_out.extend(within.left_out);
+            layer.weighed.sort_by_key(|weighed| (weighed.occurred().value().day(), weighed.occurred().taken_from()));
+            layer.left_out.sort_by_key(|left_out| left_out.on);
+
+            let mut whole = canonical_weigh_ins(after.clone());
+            whole.weighed.sort_by_key(|weighed| (weighed.occurred().value().day(), weighed.occurred().taken_from()));
+            whole.left_out.sort_by_key(|left_out| left_out.on);
+            prop_assert_eq!(layer, whole);
+        }
     }
 }

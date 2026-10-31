@@ -237,7 +237,6 @@ impl NormalisedEntityStore for SqliteWeighInStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        super::canonical_weigh_in::clear(&mut tx).await?;
         // A Body Scan is stored under its composition group and each of its
         // parts under its own, so a record naming any part removes it whole.
         let doomed = sqlx::query!(
@@ -256,6 +255,8 @@ impl NormalisedEntityStore for SqliteWeighInStore {
         .map_err(|error| store_error(&error))?;
         let scans = super::ids_json(doomed.iter().map(|row| row.scan));
         let rows = super::ids_json(doomed.iter().map(|row| row.weigh_in));
+        // The canonical layer first, but only the days these are on (#610).
+        super::canonical_weigh_in::changed_weigh_ins(&mut tx, &rows).await?;
         for statement in [
             "DELETE FROM body_scan_part WHERE weigh_in IN (SELECT value FROM json_each(?))",
             "DELETE FROM body_scan_vascular WHERE weigh_in IN (SELECT value FROM json_each(?))",
@@ -286,6 +287,7 @@ impl NormalisedEntityStore for SqliteWeighInStore {
         for weigh_in in weigh_ins {
             write_weigh_in(&mut tx, run_id, &stream, &weigh_in).await?;
         }
+        super::canonical_weigh_in::changed_by_run(&mut tx, &stream, run_id).await?;
         tx.commit().await.map_err(|error| store_error(&error))?;
         Ok(WorkoutCount::from(written))
     }

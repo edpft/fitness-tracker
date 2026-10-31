@@ -143,12 +143,12 @@ fn the_ledger_hands_back_what_each_layer_was_derived_from() {
     assert_eq!(since, None);
 }
 
-/// **Whatever empties a canonical layer forgets what it was derived from**
-/// (#606). A spreadsheet revised for nothing gym-shaped still empties the gym
-/// layer, and leaves every gym session's run and count as they were, so the
-/// layer's inputs alone would read as current and it would stay empty.
+/// **A revision that reaches no gym session leaves the gym layer and its
+/// derivation standing** (#610). A spreadsheet revised for its weigh-ins alone
+/// emptied all 397 of the operator's canonical gym sessions until the layer
+/// rebuilt only what a revision reached; now it rebuilds nothing.
 #[test]
-fn emptying_a_canonical_layer_forgets_its_derivation() {
+fn a_revision_reaching_no_gym_session_leaves_the_gym_layer_standing() {
     use application::ports::NormalisedEntityStore as _;
     use infrastructure::{SpreadsheetFileLandingStore, SqliteSpreadsheetStore};
 
@@ -180,9 +180,6 @@ fn emptying_a_canonical_layer_forgets_its_derivation() {
     };
 
     assert_eq!(before, Some(from.clone()));
-    assert_eq!(
-        gym, None,
-        "the gym layer was emptied, so it is derived again"
-    );
+    assert_eq!(gym, Some(from.clone()), "nothing reached the gym layer");
     assert_eq!(cycling, Some(from), "the cycling layer was not touched");
 }

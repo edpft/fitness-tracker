@@ -32,7 +32,8 @@ pub mod venue;
 pub mod zone;
 
 pub use canonical::{
-    CanonicalBikePlusRide, CanonicalCyclingSession, CanonicalRideRecord, canonical_sessions,
+    CanonicalBikePlusRide, CanonicalCyclingSession, CanonicalRideRecord, REACHES,
+    canonical_sessions, canonical_sessions_within,
 };
 pub use delivered::DeliveredRide;
 pub use mesocycle::{
