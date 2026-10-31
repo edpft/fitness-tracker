@@ -69,12 +69,11 @@ mod exit {
 /// code: it said `0.2.0` for every build installed after 2026-08-28. The
 /// revision is the only answer that identifies what is running.
 ///
-/// The flake bakes it in. A cargo build outside nix — the dev shell, a test
-/// run — has no revision to report and says so rather than inventing one.
-const VERSION: &str = match option_env!("FITNESS_BUILD") {
-    Some(build) => build,
-    None => "(dev)",
-};
+/// The flake's wrapper sets it. A cargo build outside nix — the dev shell, a
+/// test run — has no revision to report and says so rather than inventing one.
+fn version() -> &'static str {
+    configurator::next::build().unwrap_or("(dev)")
+}
 
 /// The command surface, built rather than derived.
 ///
@@ -85,7 +84,7 @@ const VERSION: &str = match option_env!("FITNESS_BUILD") {
 /// use clap here at all.
 fn command() -> ClapCommand {
     ClapCommand::new("fitness")
-        .version(VERSION)
+        .version(version())
         .about("Ingest and analyse personal health and fitness data")
         .subcommand_required(true)
         .arg_required_else_help(true)
@@ -843,7 +842,6 @@ impl From<WiringError> for Failure {
 }
 
 fn main() -> ExitCode {
-    configurator::next::name_build(option_env!("FITNESS_BUILD"));
     // `clippy::exit` is `forbid`, so returning `ExitCode` is not a style
     // preference: `std::process::exit` will not compile, and no attribute can
     // grant an exception (E0453).

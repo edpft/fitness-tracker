@@ -464,26 +464,19 @@ pub(crate) fn canonical(
     }
 }
 
-/// The commit this build was made from, as the flake bakes it into the binary
-/// running: see [`name_build`].
-static BUILD: OnceLock<&'static str> = OnceLock::new();
-
-/// Say which build this process is, once, before anything else is composed.
+/// The commit this build was made from, and that commit's date, from the
+/// `FITNESS_BUILD` the flake's wrapper sets around each installed binary.
 ///
-/// **The binary reads `FITNESS_BUILD`, not this crate.** It changes with every
-/// commit, and a crate that reads it compiles again for every commit along
-/// with everything above it, tests included (#645).
+/// **Read when the binary runs, not when it compiles** (#658). It changes with
+/// every commit, and read at compile time it compiled `cli` and `web` again
+/// for the package, so what was installed was never the build the checks ran.
 ///
 /// **`None` outside nix**, where nothing says which commit is running.
-pub fn name_build(baked: Option<&'static str>) {
-    if let Some(baked) = baked {
-        let _ = BUILD.set(baked);
-    }
-}
-
-/// The build named by [`name_build`], if any.
-pub(crate) fn named_build() -> Option<&'static str> {
-    BUILD.get().copied()
+pub fn build() -> Option<&'static str> {
+    static BUILD: OnceLock<Option<String>> = OnceLock::new();
+    BUILD
+        .get_or_init(|| std::env::var("FITNESS_BUILD").ok())
+        .as_deref()
 }
 
 /// Where the plan stands, over this build's stores.

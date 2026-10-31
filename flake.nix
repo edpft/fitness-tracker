@@ -241,34 +241,41 @@
         # dependencies and every workspace crate beneath it, and `--bins`
         # leaves the dev-dependencies' features out, which rebuilt the crates
         # using sqlx. `--all-targets` resolves as the tests do, so the binaries
-        # are the ones the tests ran against and only what reads
-        # `FITNESS_BUILD` compiles again. Test executables are not installed.
+        # are the ones the tests ran against. Test executables are not
+        # installed.
+        #
+        # Nothing here names the commit, so it compiles nothing the workspace
+        # build already holds (#658): the commit is the wrapper's, below.
         binaries = craneLib.buildPackage (
           individualCrateArgs
           // {
             cargoArtifacts = workspaceArtifacts;
             pname = "binaries";
             cargoExtraArgs = "--locked --workspace --all-targets";
-
-            # What `fitness --version` prints, read by `option_env!` at compile
-            # time, and for `web` which build derived the store's layers
-            # (#468): a run the page starts is a build like any other, and one
-            # that cannot name its commit derives everything. Set here rather
-            # than in `commonArgs` on purpose: it changes with every commit, and
-            # there it would invalidate `cargoArtifacts` and rebuild every
-            # dependency each time.
-            FITNESS_BUILD = "${revision} (${revisionDate})";
           }
         );
 
         # One binary from `binaries`, as a package of its own. Named for the
         # commit, so `nix profile list` says which build is installed.
+        #
+        # The wrapper sets `FITNESS_BUILD`: what `fitness --version` prints,
+        # and for `web` which build derived the store's layers (#468), since a
+        # run the page starts is a build like any other, and one that cannot
+        # name its commit derives everything. Read when the binary runs rather
+        # than when it compiles (#658): it changes with every commit, and read
+        # at compile time it compiled `cli` and `web` again for the package, so
+        # what was installed was never the build the checks ran.
         binary =
           name: program:
-          pkgs.runCommand "${name}-${revision}" { meta.mainProgram = program; } ''
-            mkdir -p "$out/bin"
-            ln -s ${binaries}/bin/${program} "$out/bin/${program}"
-          '';
+          pkgs.runCommand "${name}-${revision}"
+            {
+              meta.mainProgram = program;
+              nativeBuildInputs = [ pkgs.makeWrapper ];
+            }
+            ''
+              makeWrapper ${binaries}/bin/${program} "$out/bin/${program}" \
+                --set FITNESS_BUILD ${lib.escapeShellArg "${revision} (${revisionDate})"}
+            '';
 
         # The crate is `cli`; the binary operators type is `fitness`.
         cli = binary "cli" "fitness";
