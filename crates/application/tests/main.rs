@@ -8,5 +8,6 @@ mod edge_cases;
 mod extraction;
 mod holding_ride;
 mod next;
+mod schedule;
 mod support;
 mod watermark;

@@ -132,6 +132,22 @@ pub enum EquipmentError {
     NotTheSameEquipment { id: i64, was: String, now: String },
 }
 
+/// Recording the ordinary week, altering it, or illness (#670).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ScheduleError {
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    /// The reason is the only thing that tells a holiday from a work trip.
+    #[error("an alteration says why: a change nobody explained is unreadable six months later")]
+    NoReason,
+    #[error("{days} days from {start} do not include {slot}")]
+    SlotOutsideRun { slot: String, start: Date, days: u8 },
+    #[error("no illness is open")]
+    NoIllnessOpen,
+    #[error(transparent)]
+    Illness(#[from] domain::schedule::InvalidIllness),
+}
+
 /// Authoring a version of the programme or a primary progression (#192).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DesignError {

@@ -30,6 +30,7 @@ pub mod pulse_wave_velocity;
 pub mod ranges;
 pub mod rescheduling;
 pub mod rides;
+pub mod scheduling;
 pub mod setup;
 pub mod sleep;
 pub mod store;

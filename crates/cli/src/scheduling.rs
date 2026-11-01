@@ -11,6 +11,10 @@
 //! a file to lose, and the store is where the object lives. So both are typed at
 //! a prompt, and `show` reads them back.
 //!
+//! **Asked here, refused in `application`** (#670). What each question means
+//! and which answers are refused belong to the use case, so this module only
+//! asks, passes the answers on and prints what comes back.
+//!
 //! **Every prompt refuses rather than assumes when nobody is there.** The CLI is
 //! meant to run under a scheduler, and a wizard that blocks on stdin in cron is
 //! a hang rather than an error. `is_terminal` is checked once, up front, so the
@@ -23,12 +27,12 @@ use std::{
     path::Path,
 };
 
-use application::{DiaryAuthor, DiaryStore};
-use configurator::store::Store;
+use application::{ScheduleError, schedule::weekdays};
+use configurator::{scheduling, store::Store};
 use domain::{
     normalised::OperatorZone,
     planner::Limits,
-    schedule::{self, Alteration, Illness, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
+    schedule::{PartOfDay, SlotLength, TrainingSlot},
 };
 use jiff::civil::{Date, Weekday};
 
@@ -46,6 +50,14 @@ const WEEKDAYS: [(Weekday, &str); 7] = [
 
 fn usage(message: impl std::fmt::Display) -> Failure {
     Failure::message(message.to_string(), exit::USAGE)
+}
+
+/// A refusal is the operator's to correct; a store that failed is not.
+fn refused(error: ScheduleError) -> Failure {
+    match error {
+        ScheduleError::Store(_) => Failure::message(error.to_string(), exit::STORE),
+        refusal => usage(format!("{refusal}. Nothing was recorded")),
+    }
 }
 
 /// Somebody has to be there to answer.
@@ -174,9 +186,9 @@ fn ask_slots(
     Ok(slots)
 }
 
-/// The weekdays a run of days covers, named, in the order it meets them.
+/// The weekdays the use case asks about for a run of days, named.
 fn covered_weekdays(start: Date, days: NonZeroU8) -> Vec<(Weekday, &'static str)> {
-    schedule::covered_weekdays(start, days)
+    weekdays(start, days)
         .into_iter()
         .filter_map(|covered| WEEKDAYS.iter().find(|(weekday, _)| *weekday == covered))
         .copied()
@@ -193,11 +205,10 @@ fn no(typed: &str) -> bool {
     matches!(typed.to_lowercase().as_str(), "n" | "no")
 }
 
-async fn store(database: &Path) -> Result<impl DiaryStore + DiaryAuthor, Failure> {
-    let store = Store::open(database)
+async fn store(database: &Path) -> Result<Store, Failure> {
+    Store::open(database)
         .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    Ok(store.diary())
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))
 }
 
 /// Ask for the ordinary pattern and record it.
@@ -225,13 +236,9 @@ pub async fn add(database: &Path) -> Result<(), Failure> {
         "Which parts of each day do you have room to train?",
         &WEEKDAYS,
     )?;
-    let pattern = TrainingPattern::new(from, zone, slots);
-
-    store(database)
-        .await?
-        .record_pattern(&pattern)
+    let pattern = scheduling::add(&store(database).await?, from, zone, slots)
         .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+        .map_err(refused)?;
 
     output::pattern_recorded(&pattern, Limits::STATED);
     Ok(())
@@ -280,24 +287,16 @@ pub async fn alter(database: &Path) -> Result<(), Failure> {
         None
     };
 
-    // **The reason is the only thing that tells a holiday from a work trip**
-    // (#674), and "Rome" is what makes the rearrangement readable six months
-    // later.
-    let reason = ask_until("Why? ", |typed| {
-        if typed.is_empty() {
-            Err("a change nobody explained is unreadable six months later".to_owned())
-        } else {
-            Ok(typed.to_owned())
+    // **Asked again rather than thrown away**: a reason refused at the last
+    // question should not cost every answer before it.
+    let store = store(database).await?;
+    let alteration = loop {
+        let reason = ask("Why? ")?;
+        match scheduling::alter(&store, start, days, zone.clone(), slots.clone(), &reason).await {
+            Err(ScheduleError::NoReason) => println!("  {}", ScheduleError::NoReason),
+            recorded => break recorded.map_err(refused)?,
         }
-    })?;
-
-    let alteration = Alteration::new(start, days, zone, slots, reason);
-
-    store(database)
-        .await?
-        .record_alteration(&alteration)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    };
 
     output::alteration_recorded(&alteration);
     Ok(())
@@ -317,13 +316,10 @@ fn date_or_today(typed: &str) -> Result<Date, String> {
 pub async fn ill(database: &Path) -> Result<(), Failure> {
     interactive()?;
 
-    let illness = Illness::new(ask_until("Ill from which date? [today] ", date_or_today)?);
-
-    store(database)
-        .await?
-        .record_illness(&illness)
+    let from = ask_until("Ill from which date? [today] ", date_or_today)?;
+    let illness = scheduling::ill(&store(database).await?, from)
         .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+        .map_err(refused)?;
 
     output::illness_recorded(&illness);
     Ok(())
@@ -333,24 +329,17 @@ pub async fn ill(database: &Path) -> Result<(), Failure> {
 pub async fn better(database: &Path) -> Result<(), Failure> {
     interactive()?;
 
-    let diary = store(database).await?;
-    let open = diary
-        .diary()
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?
-        .open_illness()
-        .copied()
-        .ok_or_else(|| usage("no illness is open. Nothing was recorded"))?;
+    // Refused before the question, so nobody types a date for nothing.
+    let store = store(database).await?;
+    scheduling::open_illness(&store).await.map_err(refused)?;
 
-    let illness = ask_until("Better from which date? [today] ", |typed| {
-        open.ended(date_or_today(typed)?)
-            .map_err(|error| error.to_string())
-    })?;
-
-    diary
-        .record_illness(&illness)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    let illness = loop {
+        let on = ask_until("Better from which date? [today] ", date_or_today)?;
+        match scheduling::better(&store, on).await {
+            Err(early @ ScheduleError::Illness(_)) => println!("  {early}"),
+            ended => break ended.map_err(refused)?,
+        }
+    };
 
     output::illness_recorded(&illness);
     Ok(())
@@ -358,11 +347,9 @@ pub async fn better(database: &Path) -> Result<(), Failure> {
 
 /// Report the ordinary pattern and everything that departs from it.
 pub async fn show(database: &Path) -> Result<(), Failure> {
-    let diary = store(database)
-        .await?
-        .diary()
+    let diary = scheduling::diary(&store(database).await?)
         .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+        .map_err(refused)?;
 
     output::schedule(&diary);
     Ok(())
