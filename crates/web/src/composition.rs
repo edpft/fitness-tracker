@@ -1,31 +1,29 @@
-//! Body composition, as charts (#256).
+//! Body composition, on the detail template (#619).
 //!
-//! **One chart per component, date across, the figure up, one colour per
-//! method** (#499). A component charted in more than one unit is one chart
-//! with a choice between them, the first the default (operator, 2026-10-20),
-//! switched in the page so no round trip is made. Nothing joins two points, so a gap in the record is the empty
-//! stretch it is (§ 37), and nothing joins two methods, since each one's
-//! figures are its own series (§ 6). A method keeps its colour on every chart.
+//! **Fat and fat-free mass side by side**: each one's latest trend and its
+//! change over [`AGAINST_DAYS`] days against the method's own noise, as #419
+//! reads it. It is the latest whatever the range: the range only chooses
+//! which days the charts show.
 //!
-//! **The trend is a line over each method's points** (#419), broken where the
-//! record is too thin for one, and each method's last reading against 28 days
-//! before is said above its chart.
+//! **A chart per component, its colour the component's** (operator,
+//! 2026-10-28, on the mocks). Fat is one chart with its unit a choice, kilograms
+//! first (operator, 2026-10-20). Nothing joins two points, so a gap in the
+//! record is the empty stretch it is (§ 37), and nothing joins two methods,
+//! since each one's figures are its own series (§ 6): each has its own trend,
+//! and the spreadsheets' points are hollow where the Body Scan's are solid.
 //!
-//! **The page leads with the current macrocycle against its nutrition
-//! phases** (#489): each period's cell, per method, against its phase's
-//! region and, beneath it, the goal's half-plane, whatever the phase (#519).
-//!
-//! **Server-rendered SVG** (§ 20), so the tooltip is each point's `title`, and
-//! the table beneath each chart is the same figures.
+//! **The mesocycle matrix comes after the two charts** (operator, 2026-10-28):
+//! each mesocycle of this macrocycle, per method, against its nutrition
+//! phase's region and, beneath it, the goal's half-plane (#489, #519).
+
+use std::collections::BTreeMap;
 
 use application::composition::AgainstPhase;
 use domain::{
     analytical::{
-        composition::{
-            AGAINST_DAYS, Change, ComponentSeries, Direction, Method, TREND, Trend, Unit,
-        },
+        composition::{AGAINST_DAYS, Change, ComponentSeries, Method, MethodSeries, TREND, Unit},
         range::{Over, Range, Ranges},
-        recomposition::{Cell, GOAL, MesocycleReading, NutritionPhase},
+        recomposition::{Cell as Moved, GOAL, MesocycleReading, NutritionPhase},
     },
     body::Component,
 };
@@ -33,29 +31,116 @@ use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
 use crate::{
-    chart::along,
-    range::{seconds, ticks},
+    detail::{self, Cell, Chart, Layer, Metric, Reading, Traced},
     run::View,
 };
 
-const WIDTH: f64 = 720.0;
-const HEIGHT: f64 = 300.0;
-const LEFT: f64 = 48.0;
-const RIGHT: f64 = 12.0;
-const TOP: f64 = 12.0;
-const FLOOR: f64 = 276.0;
-const RADIUS: f64 = 2.0;
-
-/// A method's colour, in the order the methods first appear on the page.
-const COLOURS: [&str; 4] = ["d1", "d2", "d3", "d4"];
-
-/// The steps a value axis may be divided in, finest first.
-const STEPS: [f64; 9] = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0];
-
-/// The most gridlines a chart's value axis is divided into.
-const MOST_GRIDLINES: f64 = 8.0;
-
 const TITLE: &str = "Body composition";
+const HERE: &str = "/body-composition";
+
+/// The whole page, over the range chosen.
+pub fn page(
+    components: &[ComponentSeries],
+    against: &AgainstPhase,
+    ranges: &Ranges,
+    over: Over,
+    run: &View,
+) -> Markup {
+    detail::page(
+        HERE,
+        TITLE,
+        over,
+        run,
+        &body(components, against, ranges, over),
+    )
+}
+
+/// The page when the store could not be read.
+pub fn unreadable(error: &str) -> Markup {
+    html! {
+        (DOCTYPE)
+        html lang="en" {
+            head { (crate::page::head(TITLE, &[])) }
+            body {
+                main {
+                    (crate::page::menu(HERE))
+                    p.failed { "the store could not be read: " (error) }
+                }
+            }
+        }
+    }
+}
+
+/// The component in the unit, where anything measured it.
+fn charted(
+    components: &[ComponentSeries],
+    component: Component,
+    unit: Unit,
+) -> Option<&ComponentSeries> {
+    components
+        .iter()
+        .find(|one| one.component == component && one.unit == unit)
+}
+
+/// The summary, the two charts over the range chosen, the matrix and the
+/// latest weigh-ins, or why there is no range.
+fn body(
+    components: &[ComponentSeries],
+    against: &AgainstPhase,
+    ranges: &Ranges,
+    over: Over,
+) -> Markup {
+    let recorded = Range::spanning(
+        components
+            .iter()
+            .flat_map(|component| &component.series)
+            .flat_map(|one| one.readings.iter().map(|reading| reading.on)),
+    );
+    let range = match crate::range::chosen(ranges, over, recorded, "Nothing has been recorded.") {
+        Ok(range) => range,
+        Err(said) => return said,
+    };
+    let today = range.to;
+    let fat: Vec<(&str, Chart<'_>)> = [Unit::Kilograms, Unit::Percentage]
+        .into_iter()
+        .filter_map(|unit| charted(components, Component::Fat, unit))
+        .map(|one| {
+            (
+                one.unit.as_str(),
+                chart(&one.within(range), Metric::Fat, range, today),
+            )
+        })
+        .collect();
+    let fat_free = charted(components, Component::FatFree, Unit::Kilograms)
+        .map(|one| chart(&one.within(range), Metric::FatFree, range, today));
+    let hollow = components
+        .iter()
+        .map(|component| component.within(range))
+        .any(|component| {
+            component
+                .series
+                .iter()
+                .any(|one| one.method == Method::Spreadsheets && !one.readings.is_empty())
+        });
+    html! {
+        (summary(components, today))
+        @match fat.as_slice() {
+            [] => {}
+            [(_, one)] => (detail::chart(one)),
+            _ => (detail::choice("fat-unit", Metric::Fat, heading(Component::Fat), &fat)),
+        }
+        @if let Some(one) = &fat_free {
+            (detail::chart(one))
+        }
+        (against_phase(against))
+        (latest(components, today))
+        (detail::foot(&if hollow {
+            format!("Dots: each weigh-in, hollow from the spreadsheets. Line: each method's trend, the {TREND}.")
+        } else {
+            format!("Dots: each weigh-in. Line: the trend, the {TREND}.")
+        }))
+    }
+}
 
 /// What a component is headed.
 const fn heading(component: Component) -> &'static str {
@@ -74,119 +159,255 @@ const fn heading(component: Component) -> &'static str {
     }
 }
 
-/// A figure as it is printed.
+/// The method whose trend is the latest, and that trend.
+fn latest_trend(
+    component: &ComponentSeries,
+) -> Option<(&MethodSeries, domain::analytical::composition::Trend)> {
+    component
+        .series
+        .iter()
+        .filter_map(|one| {
+            one.trend
+                .iter()
+                .flatten()
+                .next_back()
+                .map(|day| (one, *day))
+        })
+        .max_by_key(|(_, day)| day.on)
+}
+
+/// Fat and fat-free mass, each its latest trend and its change over
+/// [`AGAINST_DAYS`] days against the method's noise.
+fn summary(components: &[ComponentSeries], today: Date) -> Markup {
+    let read: Vec<(
+        Metric,
+        &str,
+        &MethodSeries,
+        domain::analytical::composition::Trend,
+    )> = [
+        (Component::Fat, Metric::Fat, "Fat"),
+        (Component::FatFree, Metric::FatFree, "Fat-free"),
+    ]
+    .into_iter()
+    .filter_map(|(component, metric, label)| {
+        let (one, latest) = latest_trend(charted(components, component, Unit::Kilograms)?)?;
+        Some((metric, label, one, latest))
+    })
+    .collect();
+    if read.is_empty() {
+        return html! {};
+    }
+    let cells: Vec<Cell<'_>> = read
+        .iter()
+        .map(|(metric, label, one, latest)| Cell {
+            metric: *metric,
+            label,
+            figure: format!("{:.1}", latest.value),
+            unit: "kg",
+            margin: None,
+            reading: one
+                .changes
+                .last()
+                .filter(|change| change.on == latest.on)
+                .map_or_else(
+                    || {
+                        Reading::NoRule(format!(
+                            "No trend {AGAINST_DAYS} days before to read it against."
+                        ))
+                    },
+                    |change| Reading::Change {
+                        by: change.by,
+                        noise: change.noise,
+                        direction: change.direction,
+                        said: format!("{} kg", signed(change.by)),
+                        over: format!("in {AGAINST_DAYS} days"),
+                    },
+                ),
+        })
+        .collect();
+    let mut asof: Vec<String> = read
+        .iter()
+        .map(|(_, _, one, latest)| {
+            format!(
+                "Trend on {} · {}",
+                detail::day(latest.on, today),
+                one.method
+            )
+        })
+        .collect();
+    asof.dedup();
+    detail::summary(&cells, &asof.join("; "))
+}
+
+/// One component in one unit over `range`: each method's trend, and its
+/// points, solid or hollow.
+fn chart(component: &ComponentSeries, metric: Metric, range: Range, today: Date) -> Chart<'static> {
+    let points = |hollow: bool| -> Vec<(Date, f64)> {
+        component
+            .series
+            .iter()
+            .filter(|one| (one.method == Method::Spreadsheets) == hollow)
+            .flat_map(|one| {
+                one.readings
+                    .iter()
+                    .map(|reading| (reading.on, reading.value))
+            })
+            .collect()
+    };
+    let count = component.series.iter().map(|one| one.readings.len()).sum();
+    Chart {
+        id: match (component.component, component.unit) {
+            (Component::Fat, Unit::Percentage) => "fat-percentage",
+            (Component::Fat, Unit::Kilograms) => "fat-kilograms",
+            _ => "fat-free",
+        },
+        metric,
+        title: heading(component.component),
+        sub: weigh_ins(count),
+        range,
+        layers: vec![
+            Layer::Trend(
+                component
+                    .series
+                    .iter()
+                    .flat_map(|one| &one.trend)
+                    .map(|run| {
+                        run.iter()
+                            .map(|day| Traced {
+                                on: day.on,
+                                value: day.value,
+                                margin: None,
+                            })
+                            .collect()
+                    })
+                    .collect(),
+            ),
+            Layer::Hollow(points(true)),
+            Layer::Dots(points(false)),
+        ],
+        days: days(component, today),
+    }
+}
+
+/// What a tap on each day shows: its figures, its trend, and the trend's
+/// change over [`AGAINST_DAYS`] days to it.
+fn days(component: &ComponentSeries, today: Date) -> Vec<(Date, Markup)> {
+    let unit = component.unit;
+    let mut figures: BTreeMap<Date, Vec<String>> = BTreeMap::new();
+    let mut trends: BTreeMap<Date, Vec<String>> = BTreeMap::new();
+    let mut changes: BTreeMap<Date, Vec<Change>> = BTreeMap::new();
+    for one in &component.series {
+        for reading in &one.readings {
+            figures
+                .entry(reading.on)
+                .or_default()
+                .push(figure(reading.value, unit));
+        }
+        for day in one.trend.iter().flatten() {
+            trends
+                .entry(day.on)
+                .or_default()
+                .push(figure(day.value, unit));
+        }
+        for change in &one.changes {
+            changes.entry(change.on).or_default().push(*change);
+        }
+    }
+    let mut every: Vec<Date> = figures.keys().chain(trends.keys()).copied().collect();
+    every.sort_unstable();
+    every.dedup();
+    every
+        .into_iter()
+        .map(|on| {
+            let said = html! {
+                span.on { (detail::day(on, today)) }
+                @if let Some(figures) = figures.get(&on) {
+                    " · " b { (figures.join(", ")) }
+                }
+                @if let Some(trends) = trends.get(&on) {
+                    " · trend " (trends.join(", "))
+                }
+                @for change in changes.get(&on).into_iter().flatten() {
+                    " · " (signed(change.by)) " " (unit.as_str()) " in " (AGAINST_DAYS) " days"
+                }
+            };
+            (on, said)
+        })
+        .collect()
+}
+
+/// A figure to the nearest tenth, with its unit.
 fn figure(value: f64, unit: Unit) -> String {
     match unit {
         Unit::Percentage => format!("{value:.1}%"),
-        Unit::Kilograms => format!("{value:.2} kg"),
+        Unit::Kilograms => format!("{value:.1} kg"),
     }
 }
 
-/// A change as it is printed, with its sign, to one place more than a figure
-/// so that a change just inside the noise does not read as one just outside.
-fn change(change: Change, unit: Unit) -> String {
-    let direction = match change.direction {
-        Direction::Rising => "rising",
-        Direction::Maintaining => "maintaining",
-        Direction::Falling => "falling",
-    };
-    let (by, noise) = match unit {
-        Unit::Percentage => (
-            format!("{:+.2}%", change.by),
-            format!("±{:.2}%", change.noise),
-        ),
-        Unit::Kilograms => (
-            format!("{:+.2} kg", change.by),
-            format!("±{:.2} kg", change.noise),
-        ),
-    };
-    format!(
-        "{} against {AGAINST_DAYS} days before, noise {noise}: {direction}",
-        by.replace('-', "−")
-    )
+/// A change to the nearest hundredth, with its sign: one place more than a
+/// figure, so a change just inside the noise does not read as one just
+/// outside.
+fn signed(by: f64) -> String {
+    format!("{by:+.2}").replace('-', "−")
 }
 
-/// Every method on the page, in the order it first appears.
-fn methods(components: &[ComponentSeries]) -> Vec<Method> {
-    let mut methods: Vec<(Date, Method)> = Vec::new();
-    for one in components.iter().flat_map(|component| &component.series) {
-        let Some(first) = one.readings.first().map(|reading| reading.on) else {
-            continue;
-        };
-        match methods.iter_mut().find(|(_, method)| *method == one.method) {
-            Some((earliest, _)) => *earliest = (*earliest).min(first),
-            None => methods.push((first, one.method)),
-        }
+fn weigh_ins(count: usize) -> String {
+    if count == 1 {
+        "1 weigh-in".to_owned()
+    } else {
+        format!("{count} weigh-ins")
     }
-    methods.sort();
-    methods.into_iter().map(|(_, method)| method).collect()
 }
 
-fn class(methods: &[Method], method: Method) -> &'static str {
-    methods
-        .iter()
-        .position(|one| *one == method)
-        .and_then(|index| COLOURS.get(index % COLOURS.len()).copied())
-        .unwrap_or("ink")
-}
-
-/// The whole page, over the range chosen.
-///
-/// **A method keeps its colour over every range**, so the colours are the
-/// whole record's.
-pub fn page(
-    components: &[ComponentSeries],
-    against: &AgainstPhase,
-    ranges: &Ranges,
-    over: Over,
-    run: &View,
-) -> Markup {
-    let methods = methods(components);
-    let recorded = Range::spanning(
-        components
-            .iter()
-            .flat_map(|component| &component.series)
-            .flat_map(|one| one.readings.iter().map(|reading| reading.on)),
-    );
-    let range = crate::range::chosen(ranges, over, recorded, "Nothing has been recorded.");
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head {
-                (crate::page::head(TITLE, &[crate::chart::STYLE, crate::daily::STYLE, MATRIX, UNITS]))
-            }
-            body {
-                (crate::page::following(run))
-                main.wide {
-                    (crate::page::menu("/body-composition"))
-                    h1 { (TITLE) }
-                    (against_phase(against, &methods))
-                    (crate::range::choices("/body-composition", over))
-                    p.method {
-                        "points: each weigh-in, coloured by what measured it · line: trend, the " (TREND)
-                        " · against " (AGAINST_DAYS) " days before: rising or falling beyond 1.96 × the method's own scatter between consecutive days, maintaining within it"
-                    }
-                    @match range {
-                        Err(said) => (said),
-                        Ok(range) => (charts(components, &methods, range)),
-                    }
+/// The latest seven weigh-ins, each its fat and fat-free mass.
+fn latest(components: &[ComponentSeries], today: Date) -> Markup {
+    let mut weighed: BTreeMap<(Date, Method), (Option<f64>, Option<f64>)> = BTreeMap::new();
+    for (component, fat) in [(Component::Fat, true), (Component::FatFree, false)] {
+        for one in charted(components, component, Unit::Kilograms)
+            .into_iter()
+            .flat_map(|charted| &charted.series)
+        {
+            for reading in &one.readings {
+                let entry = weighed.entry((reading.on, one.method)).or_default();
+                if fat {
+                    entry.0 = Some(reading.value);
+                } else {
+                    entry.1 = Some(reading.value);
                 }
             }
         }
     }
+    let tenths =
+        |value: Option<f64>| value.map_or_else(|| "–".to_owned(), |value| format!("{value:.1}"));
+    let rows: Vec<(String, Markup)> = weighed
+        .iter()
+        .rev()
+        .take(7)
+        .map(|((on, _), (fat, fat_free))| {
+            (
+                detail::day(*on, today),
+                html! { span.fat { (tenths(*fat)) } " · " span.fat-free { (tenths(*fat_free)) } },
+            )
+        })
+        .collect();
+    if rows.is_empty() {
+        return html! {};
+    }
+    detail::latest("Weigh-ins", "fat · fat-free, kg", &rows)
 }
 
-/// The current macrocycle, one chart per nutrition phase and a point per
+/// The current macrocycle, one matrix per nutrition phase and a point per
 /// mesocycle.
-fn against_phase(against: &AgainstPhase, methods: &[Method]) -> Markup {
-    html! {
-        @match against {
-            AgainstPhase::Unreadable(error) => {
-                p.failed { "the school calendar could not be read: " (error) }
-            }
-            AgainstPhase::NoMacrocycle => {}
-            AgainstPhase::Read(read) => {
-                h2 { (capitalised(&read.macrocycle.to_string())) }
+fn against_phase(against: &AgainstPhase) -> Markup {
+    match against {
+        AgainstPhase::Unreadable(error) => html! {
+            section.card { p.failed { "the school calendar could not be read: " (error) } }
+        },
+        AgainstPhase::NoMacrocycle => html! {},
+        AgainstPhase::Read(read) => html! {
+            section.card.matrix {
+                div.head { h2 { (capitalised(&read.macrocycle.to_string())) } span { "kg a week" } }
+                p.sub { "Each mesocycle's change in fat against fat-free mass" }
                 @for phase in [NutritionPhase::Cut, NutritionPhase::Maintenance, NutritionPhase::Bulk] {
                     @let mesocycles: Vec<&MesocycleReading> = read
                         .mesocycles
@@ -196,14 +417,14 @@ fn against_phase(against: &AgainstPhase, methods: &[Method]) -> Markup {
                     @if mesocycles.is_empty() {
                         // No macrocycle phase assumes a bulk, so none is due.
                         @if phase != NutritionPhase::Bulk {
-                            p.method { (capitalised(&phase.to_string())) ": no mesocycle yet" }
+                            p.sub { (capitalised(&phase.to_string())) ": no mesocycle yet" }
                         }
                     } @else {
-                        (matrix(phase, &mesocycles, methods))
+                        (matrix(phase, &mesocycles))
                     }
                 }
             }
-        }
+        },
     }
 }
 
@@ -223,7 +444,7 @@ const MATRIX_LEFT: f64 = 56.0;
 struct Plotted<'a> {
     mesocycle: &'a MesocycleReading,
     method: Method,
-    cell: Cell,
+    cell: Moved,
     fat: f64,
     fat_free: f64,
     fat_noise: f64,
@@ -231,7 +452,7 @@ struct Plotted<'a> {
 }
 
 impl<'a> Plotted<'a> {
-    fn of(mesocycle: &'a MesocycleReading, method: Method, cell: Cell) -> Option<Self> {
+    fn of(mesocycle: &'a MesocycleReading, method: Method, cell: Moved) -> Option<Self> {
         let weeks = cell.weeks();
         (weeks > 0.0).then(|| Self {
             mesocycle,
@@ -244,7 +465,7 @@ impl<'a> Plotted<'a> {
         })
     }
 
-    /// What the point is called on the chart: the day its mesocycle starts.
+    /// What the point is called: the day its mesocycle starts.
     fn label(&self) -> String {
         let start = self.mesocycle.span.start().strftime("%-d %b");
         let so_far = if self.mesocycle.running {
@@ -269,7 +490,7 @@ impl<'a> Plotted<'a> {
 }
 
 fn per_week(value: f64, noise: f64) -> String {
-    format!("{value:+.2} ±{noise:.2} kg a week").replace('-', "−")
+    format!("{} ±{noise:.2} kg a week", signed(value))
 }
 
 /// Half the side of the square the points fall in: whole steps past the
@@ -287,8 +508,9 @@ fn extent(plotted: &[Plotted<'_>]) -> (f64, f64) {
 }
 
 /// A nutrition phase's mesocycles as points, fat across and fat-free mass up,
-/// each in kilograms a week with its noise either way.
-fn matrix(phase: NutritionPhase, mesocycles: &[&MesocycleReading], methods: &[Method]) -> Markup {
+/// each in kilograms a week with its noise either way in the component's
+/// colour, and beneath, each one's figures.
+fn matrix(phase: NutritionPhase, mesocycles: &[&MesocycleReading]) -> Markup {
     let plotted: Vec<Plotted<'_>> = mesocycles
         .iter()
         .flat_map(|mesocycle| {
@@ -298,10 +520,10 @@ fn matrix(phase: NutritionPhase, mesocycles: &[&MesocycleReading], methods: &[Me
             })
         })
         .collect();
-    let unread: Vec<&MesocycleReading> = mesocycles
+    let unread: Vec<String> = mesocycles
         .iter()
-        .copied()
         .filter(|one| one.by_method.iter().all(|by| by.cell.is_none()))
+        .map(|one| one.span.start().strftime("%-d %b").to_string())
         .collect();
     let (extent, step) = extent(&plotted);
     let scale = (SIDE - MATRIX_LEFT - MARGIN) / (2.0 * extent);
@@ -312,75 +534,52 @@ fn matrix(phase: NutritionPhase, mesocycles: &[&MesocycleReading], methods: &[Me
         .take_while(|value| *value <= extent + step / 2.0)
         .collect();
     let name = capitalised(&phase.to_string());
-    let named_methods = plotted
-        .iter()
-        .map(|one| one.method)
-        .collect::<std::collections::BTreeSet<_>>();
     html! {
         h3 { (name) }
-        div.matrix {
-            svg.matrix viewBox=(format!("0 0 {SIDE} {:.0}", y(-extent) + 38.0)) role="img"
-                aria-label=(format!("{name}: each mesocycle's change in fat against fat-free mass, in kilograms a week")) {
-                (regions(phase, extent, &x, &y))
-                @for value in &lines {
-                    line.grid x1=(x(*value)) x2=(x(*value)) y1=(y(extent)) y2=(y(-extent)) {}
-                    line.grid x1=(x(-extent)) x2=(x(extent)) y1=(y(*value)) y2=(y(*value)) {}
-                }
-                line.baseline x1=(x(0.0)) x2=(x(0.0)) y1=(y(extent)) y2=(y(-extent)) {}
-                line.baseline x1=(x(-extent)) x2=(x(extent)) y1=(y(0.0)) y2=(y(0.0)) {}
-                @for value in &lines {
-                    text.axis x=(x(*value)) y=(y(-extent) + 14.0) text-anchor="middle" { (tick(*value, step)) }
-                    text.axis x=(x(-extent) - 4.0) y=(y(*value) + 4.0) text-anchor="end" { (tick(*value, step)) }
-                }
-                text.axis x=(x(0.0)) y=(y(-extent) + 30.0) text-anchor="middle" { "fat, kg a week" }
-                text.axis transform=(format!("translate(10 {}) rotate(-90)", y(0.0))) text-anchor="middle" { "fat-free mass, kg a week" }
-                @for one in &plotted {
-                    g {
-                        title { (one.detail()) }
-                        line.spread x1=(x(one.fat - one.fat_noise)) x2=(x(one.fat + one.fat_noise)) y1=(y(one.fat_free)) y2=(y(one.fat_free)) {}
-                        line.spread x1=(x(one.fat)) x2=(x(one.fat)) y1=(y(one.fat_free - one.fat_free_noise)) y2=(y(one.fat_free + one.fat_free_noise)) {}
-                        circle class=(format!("point {}", class(methods, one.method))) cx=(x(one.fat)) cy=(y(one.fat_free)) r="5" {}
-                        text.label x=(x(one.fat) + 8.0) y=(y(one.fat_free) - 8.0) { (one.label()) }
-                    }
+        svg viewBox=(format!("0 0 {SIDE} {:.0}", y(-extent) + 38.0)) role="img"
+            aria-label=(format!("{name}: each mesocycle's change in fat against fat-free mass, in kilograms a week")) {
+            (regions(phase, extent, &x, &y))
+            @for value in &lines {
+                line.grid x1=(x(*value)) x2=(x(*value)) y1=(y(extent)) y2=(y(-extent)) {}
+                line.grid x1=(x(-extent)) x2=(x(extent)) y1=(y(*value)) y2=(y(*value)) {}
+            }
+            line.baseline x1=(x(0.0)) x2=(x(0.0)) y1=(y(extent)) y2=(y(-extent)) {}
+            line.baseline x1=(x(-extent)) x2=(x(extent)) y1=(y(0.0)) y2=(y(0.0)) {}
+            @for value in &lines {
+                text.tick x=(x(*value)) y=(y(-extent) + 14.0) text-anchor="middle" { (tick(*value, step)) }
+                text.tick x=(x(-extent) - 4.0) y=(y(*value) + 4.0) text-anchor="end" { (tick(*value, step)) }
+            }
+            text.fat x=(x(0.0)) y=(y(-extent) + 30.0) text-anchor="middle" { "fat →" }
+            text.fat-free transform=(format!("translate(14 {}) rotate(-90)", y(0.0))) text-anchor="middle" { "fat-free mass →" }
+            @for one in &plotted {
+                g {
+                    title { (one.detail()) }
+                    line.spread.fat x1=(x(one.fat - one.fat_noise)) x2=(x(one.fat + one.fat_noise)) y1=(y(one.fat_free)) y2=(y(one.fat_free)) {}
+                    line.spread.fat-free x1=(x(one.fat)) x2=(x(one.fat)) y1=(y(one.fat_free - one.fat_free_noise)) y2=(y(one.fat_free + one.fat_free_noise)) {}
+                    circle class=(if one.method == Method::Spreadsheets { "point hollow" } else { "point" })
+                        cx=(x(one.fat)) cy=(y(one.fat_free)) r="5" {}
+                    text.label x=(x(one.fat) + 8.0) y=(y(one.fat_free) - 8.0) { (one.label()) }
                 }
             }
         }
-        @if named_methods.len() > 1 {
-            ul.legend {
-                @for method in &named_methods {
-                    li {
-                        svg.key viewBox="0 0 12 12" {
-                            circle class=(format!("point {}", class(methods, *method))) cx="6" cy="6" r="5" {}
-                        }
-                        (method)
-                    }
+        @for one in &plotted {
+            div.row {
+                span.on { (one.label()) }
+                span.value {
+                    span.fat { (signed(one.fat)) small { " ±" (format!("{:.2}", one.fat_noise)) } }
+                    " · "
+                    span.fat-free { (signed(one.fat_free)) small { " ±" (format!("{:.2}", one.fat_free_noise)) } }
                 }
             }
         }
-        @for one in unread {
-            p.method { (one.span.start().strftime("%-d %b")) ": too few weigh-ins yet" }
-        }
-        @if !plotted.is_empty() {
-            details {
-                summary { "Every mesocycle as a table" }
-                table.figures {
-                    thead { tr { th { "mesocycle from" } th { "fat" } th { "fat-free mass" } } }
-                    tbody {
-                        @for one in &plotted {
-                            tr {
-                                td { (one.mesocycle.span.start()) }
-                                td { (per_week(one.fat, one.fat_noise)) }
-                                td { (per_week(one.fat_free, one.fat_free_noise)) }
-                            }
-                        }
-                    }
-                }
-            }
+        @if !unread.is_empty() {
+            p.sub { (unread.join(" and ")) ": too few weigh-ins yet" }
         }
     }
 }
 
-/// The goal's half-plane and, over it, the phase's region, each named.
+/// The goal's half-plane and, over it, the phase's region, each named, in
+/// neutral grey.
 fn regions(
     phase: NutritionPhase,
     extent: f64,
@@ -418,299 +617,20 @@ fn tick(value: f64, step: f64) -> String {
     text.replace('-', "−")
 }
 
-/// How the matrix is drawn: the goal and, over it, the phase's region in the
-/// status colour for good, never a series colour, each named in the chart so
-/// it is not colour alone.
-const MATRIX: &str = "
-div.matrix { max-width: 28rem; }
-svg.matrix { width: 100%; height: auto; display: block; }
-.goal { fill: var(--good); fill-opacity: 0.08; }
-.phase { fill: var(--good); fill-opacity: 0.16; }
-.region { fill: var(--muted); font-size: 11px; }
-.spread { stroke: var(--ink); stroke-opacity: 0.55; stroke-width: 1.5; }
-.label { fill: var(--ink); font-size: 11px; }
-";
-
-/// Only the chosen unit's chart is shown.
-const UNITS: &str = "
-div.units label { margin: 0 0.75rem 0 0.25rem; }
-div.units input.kilograms:checked ~ div.unit:not(.kilograms),
-div.units input.percentage:checked ~ div.unit:not(.percentage) { display: none; }
-";
-
-/// The page when the store could not be read.
-pub fn unreadable(error: &str) -> Markup {
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head {
-                (crate::page::head(TITLE, &[]))
-            }
-            body {
-                main {
-                    (crate::page::menu("/body-composition"))
-                    p.failed { "the store could not be read: " (error) }
-                }
-            }
-        }
-    }
-}
-
-/// Where a day and a figure fall on the chart.
-struct Frame {
-    first: i64,
-    last: i64,
-    low: f64,
-    high: f64,
-    step: f64,
-}
-
-impl Frame {
-    fn x(&self, at: i64) -> f64 {
-        (WIDTH - LEFT - RIGHT).mul_add(along(at - self.first, self.last - self.first), LEFT)
-    }
-
-    fn y(&self, value: f64) -> f64 {
-        (FLOOR - TOP).mul_add(-(value - self.low) / (self.high - self.low), FLOOR)
-    }
-
-    /// Every gridline's value, lowest first.
-    fn gridlines(&self) -> Vec<f64> {
-        (0_u32..=20)
-            .map(|line| f64::from(line).mul_add(self.step, self.low))
-            .take_while(|value| *value <= self.high + self.step / 2.0)
-            .collect()
-    }
-}
-
-/// The value axis: the coarsest step that still divides the range into enough
-/// lines, its ends on whole steps either side of every figure.
-fn value_axis(low: f64, high: f64) -> (f64, f64, f64) {
-    let range = (high - low).max(f64::EPSILON);
-    let step = STEPS
-        .iter()
-        .copied()
-        .find(|step| range / step <= MOST_GRIDLINES)
-        .unwrap_or(100.0);
-    let low = (low / step).floor() * step;
-    let high = ((high / step).floor() + 1.0) * step;
-    (low, high, step)
-}
-
-/// Every component measured in `range`, each over it, one chart per
-/// component whatever its units.
-fn charts(components: &[ComponentSeries], methods: &[Method], range: Range) -> Markup {
-    let within: Vec<ComponentSeries> = components
-        .iter()
-        .map(|component| component.within(range))
-        .filter(|component| component.series.iter().any(|one| !one.readings.is_empty()))
-        .collect();
-    let mut grouped: Vec<Vec<&ComponentSeries>> = Vec::new();
-    for one in &within {
-        match grouped.iter_mut().find(|group| {
-            group
-                .first()
-                .is_some_and(|first| first.component == one.component)
-        }) {
-            Some(group) => group.push(one),
-            None => grouped.push(vec![one]),
-        }
-    }
-    html! {
-        @if within.is_empty() {
-            p { "Nothing recorded in this range." }
-        }
-        @for group in &grouped {
-            @match group.as_slice() {
-                [one] => {
-                    h2 { (heading(one.component)) " (" (one.unit.as_str()) ")" }
-                    (chart(one, methods, range))
-                }
-                units => (choice(units, methods, range)),
-            }
-        }
-    }
-}
-
-/// What a unit is called in a page's markup.
-const fn key(unit: Unit) -> &'static str {
-    match unit {
-        Unit::Percentage => "percentage",
-        Unit::Kilograms => "kilograms",
-    }
-}
-
-/// One component in each of its units, the first shown and the rest a choice
-/// away.
-fn choice(units: &[&ComponentSeries], methods: &[Method], range: Range) -> Markup {
-    let Some(first) = units.first() else {
-        return html! {};
-    };
-    let name = heading(first.component);
-    let group = format!("unit-{}", name.to_lowercase().replace(' ', "-"));
-    html! {
-        h2 { (name) }
-        div.units {
-            @for (index, one) in units.iter().enumerate() {
-                @let id = format!("{group}-{}", key(one.unit));
-                input type="radio" name=(group) id=(id) class=(key(one.unit)) checked[index == 0];
-                label for=(id) { (one.unit.as_str()) }
-            }
-            @for one in units {
-                div class=(format!("unit {}", key(one.unit))) {
-                    (chart(one, methods, range))
-                }
-            }
-        }
-    }
-}
-
-/// A component's chart over `range`, its legend and its table.
-fn chart(component: &ComponentSeries, methods: &[Method], range: Range) -> Markup {
-    let readings = component.series.iter().flat_map(|one| one.readings.iter());
-    let low = readings
-        .clone()
-        .map(|reading| reading.value)
-        .fold(f64::INFINITY, f64::min);
-    let high = readings
-        .map(|reading| reading.value)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let (low, high, step) = value_axis(low, high);
-    let frame = Frame {
-        first: seconds(range.from),
-        last: seconds(range.to),
-        low,
-        high,
-        step,
-    };
-    let name = heading(component.component);
-    let unit = component.unit;
-    html! {
-        @for one in &component.series {
-            @if let Some(last) = one.changes.last() {
-                p.reading { (one.method) " · " (last.on) ": " (change(*last, unit)) }
-            }
-        }
-        div.plot {
-            svg.chart viewBox=(format!("0 0 {WIDTH} {HEIGHT}")) role="img"
-                aria-label=(format!("{name}, one point per weigh-in, by date")) {
-                @for value in frame.gridlines() {
-                    line.grid x1=(LEFT) x2=(WIDTH - RIGHT) y1=(frame.y(value)) y2=(frame.y(value)) {}
-                    text.axis x=(LEFT - 6.0) y=(frame.y(value) + 4.0) text-anchor="end" { (gridline(value, step)) }
-                }
-                @for (tick, label) in ticks(range) {
-                    @let at = seconds(tick);
-                    line.grid x1=(frame.x(at)) x2=(frame.x(at)) y1=(TOP) y2=(FLOOR) {}
-                    text.axis x=(frame.x(at) + 3.0) y=(FLOOR + 14.0) { (label) }
-                }
-                line.baseline x1=(LEFT) x2=(WIDTH - RIGHT) y1=(FLOOR) y2=(FLOOR) {}
-                @for one in &component.series {
-                    @for run in &one.trend {
-                        polyline.trend points=(points(run, &frame)) {}
-                        @for day in run {
-                            circle.hover cx=(frame.x(seconds(day.on))) cy=(frame.y(day.value)) r=(RADIUS) {
-                                title {
-                                    (day.on) " · trend " (figure(day.value, unit)) " · " (one.method)
-                                    @if let Some(at) = one.changes.iter().find(|at| at.on == day.on) {
-                                        " · " (change(*at, unit))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    @for reading in &one.readings {
-                        circle class=(format!("point {}", class(methods, one.method)))
-                            cx=(frame.x(seconds(reading.on))) cy=(frame.y(reading.value)) r=(RADIUS) {
-                            title { (reading.on) " · " (figure(reading.value, unit)) " · " (one.method) }
-                        }
-                    }
-                }
-            }
-        }
-        ul.legend {
-            @for one in component.series.iter().filter(|one| !one.readings.is_empty()) {
-                li {
-                    svg.key viewBox="0 0 12 12" {
-                        circle class=(format!("point {}", class(methods, one.method))) cx="6" cy="6" r=(RADIUS) {}
-                    }
-                    (one.method) " · " (weigh_ins(one.readings.len()))
-                }
-            }
-        }
-        (table(component))
-    }
-}
-
-/// A run of the trend as SVG polyline points.
-fn points(run: &[Trend], frame: &Frame) -> String {
-    run.iter()
-        .map(|day| format!("{:.1},{:.1}", frame.x(seconds(day.on)), frame.y(day.value)))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn weigh_ins(count: usize) -> String {
-    if count == 1 {
-        "1 weigh-in".to_owned()
-    } else {
-        format!("{count} weigh-ins")
-    }
-}
-
-/// A gridline's label, to as many places as its step needs.
-fn gridline(value: f64, step: f64) -> String {
-    if step < 1.0 {
-        format!("{value:.1}")
-    } else {
-        format!("{value:.0}")
-    }
-}
-
-/// The same figures, for whoever cannot tell two colours apart.
-fn table(component: &ComponentSeries) -> Markup {
-    let mut rows: Vec<(Date, f64, Method)> = component
-        .series
-        .iter()
-        .flat_map(|one| {
-            one.readings
-                .iter()
-                .map(|reading| (reading.on, reading.value, one.method))
-        })
-        .collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.2.cmp(&b.2)));
-    html! {
-        details {
-            summary { "Every weigh-in as a table" }
-            table.figures {
-                thead { tr { th { "date" } th { (component.unit.as_str()) } th { "measured by" } } }
-                tbody {
-                    @for (on, value, method) in rows {
-                        tr { td { (on) } td { (figure(value, component.unit)) } td { (method) } }
-                    }
-                }
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use domain::{
-        analytical::{
-            composition::{ComponentSeries, Method, MethodSeries, Reading, Unit},
-            range::{Over, Range, Ranges},
-        },
-        body::Component,
-    };
-
     use std::num::NonZeroU8;
 
     use application::composition::AgainstPhase;
     use domain::{
         analytical::{
-            composition::{Measured, Stated},
+            composition::{
+                ComponentSeries, Measured, Method, MethodSeries, Reading, Stated, Unit, by_method,
+            },
+            range::{Over, Range, Ranges},
             recomposition::read,
         },
+        body::Component,
         macrocycle::Macrocycle,
         measure::Kg,
         schedule::{Holidays, SchoolHoliday},
@@ -725,6 +645,10 @@ mod tests {
         macrocycle: None,
     };
 
+    const SCAN: Method = Method::BodyScan {
+        algorithm: 218_300_672,
+    };
+
     fn reading(year: i16, month: i8, day: i8, value: f64) -> Reading<f64> {
         Reading {
             on: jiff::civil::date(year, month, day),
@@ -732,8 +656,24 @@ mod tests {
         }
     }
 
+    fn drawn(
+        components: &[ComponentSeries],
+        against: &AgainstPhase,
+        ranges: &Ranges,
+        over: Over,
+    ) -> String {
+        page(
+            components,
+            against,
+            ranges,
+            over,
+            &crate::run::View::default(),
+        )
+        .into_string()
+    }
+
     #[test]
-    fn each_method_is_its_own_colour_and_nothing_joins_two_points() {
+    fn the_spreadsheets_points_are_hollow_and_nothing_joins_two() {
         let fat = ComponentSeries {
             component: Component::Fat,
             unit: Unit::Percentage,
@@ -743,62 +683,54 @@ mod tests {
                     vec![reading(2018, 1, 1, 24.7), reading(2018, 1, 2, 24.6)],
                 ),
                 MethodSeries::of(
-                    Method::BodyScan {
-                        algorithm: 218_300_672,
-                    },
+                    SCAN,
                     vec![reading(2026, 10, 16, 17_610.0 / 83_648.0 * 100.0)],
                 ),
             ],
         };
-        let drawn = page(
-            &[fat],
-            &NONE,
-            &NO_PLAN,
-            Over::All,
-            &crate::run::View::default(),
-        )
-        .into_string();
+        let page = drawn(&[fat], &NONE, &NO_PLAN, Over::All);
 
-        assert!(drawn.contains("<h2>Fat (%)</h2>"));
-        assert_eq!(drawn.matches(r#"<circle class="point d1""#).count(), 3);
-        assert_eq!(drawn.matches(r#"<circle class="point d2""#).count(), 2);
-        assert!(drawn.contains("2018-01-01 · 24.7% · spreadsheets"));
-        assert!(drawn.contains("2026-10-16 · 21.1% · Body Scan, algorithm 218300672"));
-        assert!(!drawn.contains("<polyline") && !drawn.contains("<path"));
+        assert!(page.contains("<h2>Fat</h2>"), "{page}");
+        assert_eq!(page.matches(r#"class="hollow""#).count(), 2, "{page}");
+        assert_eq!(page.matches(r#"class="dot""#).count(), 1, "{page}");
+        assert!(page.contains("<b>24.7%</b>"), "{page}");
+        assert!(page.contains("<b>21.1%</b>"), "{page}");
+        assert!(!page.contains("<polyline"), "{page}");
+        assert!(page.contains("hollow from the spreadsheets"), "{page}");
     }
 
     #[test]
-    fn a_component_in_two_units_is_one_chart_with_a_choice() {
-        let scan = Method::BodyScan {
-            algorithm: 218_300_672,
-        };
+    fn fat_in_two_units_is_one_card_with_a_choice_kilograms_first() {
         let fat = |unit, value| ComponentSeries {
             component: Component::Fat,
             unit,
-            series: vec![MethodSeries::of(scan, vec![reading(2026, 10, 16, value)])],
+            series: vec![MethodSeries::of(SCAN, vec![reading(2026, 10, 16, value)])],
         };
-        let drawn = page(
+        let page = drawn(
             &[fat(Unit::Kilograms, 17.61), fat(Unit::Percentage, 21.05)],
             &NONE,
             &NO_PLAN,
             Over::All,
-            &crate::run::View::default(),
-        )
-        .into_string();
-
-        assert_eq!(drawn.matches("<h2>").count(), 1, "{drawn}");
-        assert!(drawn.contains("<h2>Fat</h2>"), "{drawn}");
-        assert!(
-            drawn.contains(r#"id="unit-fat-kilograms" class="kilograms" checked>"#),
-            "kg first and chosen: {drawn}"
         );
-        assert!(drawn.contains(r#"id="unit-fat-percentage" class="percentage">"#));
-        assert!(drawn.contains("2026-10-16 · 17.61 kg ·"));
-        assert!(drawn.contains("2026-10-16 · 21.1% ·"));
+
+        assert_eq!(page.matches("<h2>Fat</h2>").count(), 1, "{page}");
+        assert!(
+            page.contains(
+                r#"id="fat-unit-0" class="o0" checked><label for="fat-unit-0">kg</label>"#
+            ),
+            "kg first and chosen: {page}"
+        );
+        assert!(
+            page.contains(r#"<label for="fat-unit-1">%</label>"#),
+            "{page}"
+        );
+        assert!(page.contains("<b>17.6 kg</b>"), "{page}");
+        assert!(page.contains("<b>21.1%</b>"), "{page}");
+        assert!(!page.contains("spreadsheets"), "{page}");
     }
 
     #[test]
-    fn a_trend_is_a_line_and_its_last_reading_is_said() {
+    fn the_summary_is_the_latest_trend_and_its_change_against_the_noise() {
         let readings: Vec<Reading<f64>> = jiff::civil::date(2026, 1, 1)
             .series(jiff::Span::new().days(1))
             .take(70)
@@ -815,63 +747,47 @@ mod tests {
         let fat_free = ComponentSeries {
             component: Component::FatFree,
             unit: Unit::Kilograms,
-            series: vec![MethodSeries::of(
-                Method::BodyScan {
-                    algorithm: 218_300_672,
-                },
-                readings,
-            )],
+            series: vec![MethodSeries::of(SCAN, readings)],
         };
-        let drawn = page(
-            &[fat_free],
-            &NONE,
-            &NO_PLAN,
-            Over::All,
-            &crate::run::View::default(),
-        )
-        .into_string();
+        let page = drawn(&[fat_free], &NONE, &NO_PLAN, Over::All);
 
-        assert_eq!(drawn.matches("<polyline").count(), 1, "one unbroken run");
+        assert_eq!(
+            page.matches(r#"class="line""#).count(),
+            1,
+            "one unbroken run: {page}"
+        );
+        assert!(page.contains(r#"class="cell fat-free""#), "{page}");
         assert!(
-            drawn.contains(
-                "Body Scan, algorithm 218300672 · 2026-03-11: +0.00 kg against 28 days before, noise ±"
-            ),
-            "{drawn}"
+            page.contains(r#"<div class="figure">63.0<small>kg</small></div>"#),
+            "{page}"
         );
         assert!(
-            drawn.contains(": rising</title>"),
-            "the step up reads as rising"
+            page.contains("<b>+0.00 kg</b><span>in 28 days</span>"),
+            "{page}"
         );
+        assert!(page.contains(r#"class="noise""#), "{page}");
+        assert!(
+            page.contains("Trend on 11 Mar · Body Scan, algorithm 218300672"),
+            "{page}"
+        );
+        assert!(!page.contains("rising"), "no verdict words: {page}");
     }
 
     #[test]
     fn nothing_recorded_is_said_rather_than_drawn() {
-        assert!(
-            page(
-                &[],
-                &NONE,
-                &NO_PLAN,
-                Over::All,
-                &crate::run::View::default()
-            )
-            .into_string()
-            .contains("Nothing has been recorded.")
-        );
+        let page = drawn(&[], &NONE, &NO_PLAN, Over::All);
+        assert!(page.contains("Nothing has been recorded."), "{page}");
+        assert!(!page.contains(r#"class="plotted""#), "{page}");
     }
 
     #[test]
-    fn a_range_shows_only_its_days_and_a_method_keeps_its_colour() {
+    fn a_range_shows_only_its_days() {
         let fat = ComponentSeries {
             component: Component::Fat,
             unit: Unit::Percentage,
             series: vec![
                 MethodSeries::of(Method::Spreadsheets, vec![reading(2018, 1, 1, 24.7)]),
-                MethodSeries::of(
-                    Method::BodyScan {
-                        algorithm: 218_300_672,
-                    },
-                    vec![reading(2026, 10, 16, 21.1)],
-                ),
+                MethodSeries::of(SCAN, vec![reading(2026, 10, 16, 21.1)]),
             ],
         };
         let ranges = Ranges {
@@ -881,19 +797,16 @@ mod tests {
             }),
             macrocycle: None,
         };
-        let drawn = page(
-            &[fat],
-            &NONE,
-            &ranges,
-            Over::Mesocycle,
-            &crate::run::View::default(),
-        )
-        .into_string();
+        let page = drawn(&[fat], &NONE, &ranges, Over::Mesocycle);
 
-        assert!(!drawn.contains("2018-01-01 ·"), "before this mesocycle");
-        assert!(!drawn.contains("spreadsheets ·"), "nor in the legend");
-        assert_eq!(drawn.matches(r#"<circle class="point d2""#).count(), 2);
-        assert!(drawn.contains(r#"href="/body-composition?over=all""#));
+        assert!(!page.contains("24.7%"), "before this mesocycle: {page}");
+        assert!(!page.contains(r#"class="hollow""#), "{page}");
+        assert!(!page.contains("spreadsheets"), "{page}");
+        assert_eq!(page.matches(r#"class="dot""#).count(), 1, "{page}");
+        assert!(
+            page.contains(r#"href="/body-composition?over=all""#),
+            "{page}"
+        );
     }
 
     /// Autumn 2026, from the school's feed.
@@ -924,7 +837,7 @@ mod tests {
     }
 
     #[test]
-    fn each_mesocycle_is_a_point_on_its_phases_chart() {
+    fn each_mesocycle_is_a_point_on_its_phases_matrix_after_the_charts() {
         let measured: Vec<Measured> = jiff::civil::date(2026, 9, 7)
             .series(jiff::Span::new().days(1))
             .take(43)
@@ -934,9 +847,7 @@ mod tests {
                 let fat = 19_100 - day * 25 - wobble;
                 Measured {
                     on,
-                    method: Method::BodyScan {
-                        algorithm: 218_300_672,
-                    },
+                    method: SCAN,
                     component: Component::Fat,
                     stated: Stated::Mass(Kg::from_grams(fat)),
                     weighed: Kg::from_grams(fat + 66_000 + wobble),
@@ -952,30 +863,26 @@ mod tests {
             ],
             jiff::civil::date(2026, 10, 19),
         ));
-        let drawn = page(
-            &[],
-            &against,
-            &NO_PLAN,
-            Over::All,
-            &crate::run::View::default(),
-        )
-        .into_string();
+        let page = drawn(&by_method(&measured), &against, &NO_PLAN, Over::All);
 
-        assert!(drawn.contains("<h2>Autumn 2026</h2>"), "{drawn}");
-        assert!(drawn.contains("<h3>Cut</h3>"), "{drawn}");
-        assert_eq!(drawn.matches(r#"<polygon class="phase""#).count(), 1);
+        assert!(page.contains("<h2>Autumn 2026</h2>"), "{page}");
+        assert!(page.contains("<h3>Cut</h3>"), "{page}");
+        assert_eq!(page.matches(r#"<polygon class="phase""#).count(), 1);
         assert_eq!(
-            drawn.matches(r#"<polygon class="goal""#).count(),
+            page.matches(r#"<polygon class="goal""#).count(),
             1,
             "the goal is drawn whatever the phase"
         );
-        assert!(drawn.contains(">cut</text>"), "{drawn}");
-        assert!(drawn.contains(">goal</text>"), "{drawn}");
-        assert!(!drawn.contains("Bulk"), "no bulk is due: {drawn}");
-        assert!(drawn.contains(">14 Sep</text>"), "{drawn}");
-        assert!(!drawn.contains("failure"), "no verdict");
-        assert!(drawn.contains(">28 Sep, so far</text>"), "{drawn}");
-        assert!(drawn.contains("Maintenance: no mesocycle yet"), "{drawn}");
-        assert!(!drawn.contains(r#"<ul class="legend"><li><svg class="key" viewBox="0 0 12 12"><circle class="point d1" cx="6" cy="6" r="5">"#), "one method needs no legend");
+        assert!(page.contains(">cut</text>"), "{page}");
+        assert!(page.contains(">goal</text>"), "{page}");
+        assert!(!page.contains("Bulk"), "no bulk is due: {page}");
+        assert!(page.contains(">14 Sep</text>"), "{page}");
+        assert!(page.contains(">28 Sep, so far</text>"), "{page}");
+        assert!(page.contains("Maintenance: no mesocycle yet"), "{page}");
+        let chart = page
+            .find("<h2>Fat-free mass</h2>")
+            .expect("a fat-free chart");
+        let matrix = page.find("<h2>Autumn 2026</h2>").expect("a matrix");
+        assert!(chart < matrix, "the matrix comes after the charts");
     }
 }
