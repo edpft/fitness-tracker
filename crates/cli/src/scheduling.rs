@@ -6,8 +6,8 @@
 //!
 //! ## Asked, not authored
 //!
-//! There is no document. A pattern is four or five slots and an alteration is a
-//! date, a length and a reason — small enough that a file to hold them would be
+//! There is no document. A pattern is four or five slots, an alteration is a
+//! date, a length and a reason, and an illness is a date — small enough that a file to hold them would be
 //! a file to lose, and the store is where the object lives. So both are typed at
 //! a prompt, and `show` reads them back.
 //!
@@ -28,7 +28,7 @@ use configurator::store::Store;
 use domain::{
     normalised::OperatorZone,
     planner::Limits,
-    schedule::{self, Absence, Alteration, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
+    schedule::{self, Alteration, Illness, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
 };
 use jiff::civil::{Date, Weekday};
 
@@ -241,7 +241,7 @@ pub async fn add(database: &Path) -> Result<(), Failure> {
 pub async fn alter(database: &Path) -> Result<(), Failure> {
     interactive()?;
 
-    println!("Which absence departs from the ordinary pattern: a family holiday, or an illness?");
+    println!("When are you free for a run of days, and why?");
 
     let start = ask_until("From which date? ", parse_date)?;
     let days = ask_until("How many days? [1] ", |typed| {
@@ -255,57 +255,43 @@ pub async fn alter(database: &Path) -> Result<(), Failure> {
             .ok_or_else(|| format!("{typed:?} is not a number of days from 1 to 255"))
     })?;
 
-    // **Illness is asked first, because it settles everything else.** It is only
-    // illness when it prevents training, so it has no slots and no zone to ask
-    // about; well enough to ride is not recorded at all.
-    let absence = if yes(&ask("Too ill to train? [no] ")?) {
-        Absence::Illness
-    } else {
-        let zone = {
-            let typed = ask("In a different time zone? [no] ")?;
-            if typed.is_empty() || typed.eq_ignore_ascii_case("no") {
-                None
-            } else {
-                Some(ask_until("Which IANA time zone? ", parse_zone)?)
-            }
-        };
-
-        // **The three cases, asked so the commonest is one keystroke.** Training
-        // as usual, having no room at all, and having different slots are three
-        // different facts. Being unable to train is much the most common of them,
-        // so it is asked first and answered outright, and the walk through the
-        // days only happens for the case that actually needs it.
-        let slots = if no(&ask("Are you able to train during this period? [yes] ")?) {
-            Some(BTreeMap::new())
-        } else if yes(&ask("Does this change when you can train? [no] ")?) {
-            Some(ask_slots(
-                "Which parts of each day, while it lasts?",
-                &covered_weekdays(start, days),
-            )?)
-        } else {
+    let zone = {
+        let typed = ask("In a different time zone? [no] ")?;
+        if typed.is_empty() || typed.eq_ignore_ascii_case("no") {
             None
-        };
-
-        // **Only a family holiday is asked why.** It has somewhere to be and a week to
-        // rearrange, and "Rome" is what makes the rearrangement readable six
-        // months later. That the operator was too ill to train is the whole of
-        // an illness, and the previous question already asked it.
-        let reason = ask_until("Why? ", |typed| {
-            if typed.is_empty() {
-                Err("a trip nobody explained is unreadable six months later".to_owned())
-            } else {
-                Ok(typed.to_owned())
-            }
-        })?;
-
-        Absence::FamilyHoliday {
-            zone,
-            slots,
-            reason,
+        } else {
+            Some(ask_until("Which IANA time zone? ", parse_zone)?)
         }
     };
 
-    let alteration = Alteration::new(start, days, absence);
+    // **The three cases, asked so the commonest is one keystroke.** Training
+    // as usual, having no room at all, and having different slots are three
+    // different facts. Being unable to train is much the most common of them,
+    // so it is asked first and answered outright, and the walk through the
+    // days only happens for the case that actually needs it.
+    let slots = if no(&ask("Are you able to train during this period? [yes] ")?) {
+        Some(BTreeMap::new())
+    } else if yes(&ask("Does this change when you can train? [no] ")?) {
+        Some(ask_slots(
+            "Which parts of each day, while it lasts?",
+            &covered_weekdays(start, days),
+        )?)
+    } else {
+        None
+    };
+
+    // **The reason is the only thing that tells a holiday from a work trip**
+    // (#674), and "Rome" is what makes the rearrangement readable six months
+    // later.
+    let reason = ask_until("Why? ", |typed| {
+        if typed.is_empty() {
+            Err("a change nobody explained is unreadable six months later".to_owned())
+        } else {
+            Ok(typed.to_owned())
+        }
+    })?;
+
+    let alteration = Alteration::new(start, days, zone, slots, reason);
 
     store(database)
         .await?
@@ -314,6 +300,59 @@ pub async fn alter(database: &Path) -> Result<(), Failure> {
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
     output::alteration_recorded(&alteration);
+    Ok(())
+}
+
+/// A date typed at a prompt, or today for an empty line.
+fn date_or_today(typed: &str) -> Result<Date, String> {
+    if typed.is_empty() {
+        // What somebody at a prompt means by pressing enter, and they can see
+        // what they are agreeing to.
+        return Ok(jiff::Zoned::now().date());
+    }
+    parse_date(typed)
+}
+
+/// Ask from when the operator is ill, and record it open.
+pub async fn ill(database: &Path) -> Result<(), Failure> {
+    interactive()?;
+
+    let illness = Illness::new(ask_until("Ill from which date? [today] ", date_or_today)?);
+
+    store(database)
+        .await?
+        .record_illness(&illness)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    output::illness_recorded(&illness);
+    Ok(())
+}
+
+/// Ask from when the operator is better, and end the open illness there.
+pub async fn better(database: &Path) -> Result<(), Failure> {
+    interactive()?;
+
+    let diary = store(database).await?;
+    let open = diary
+        .diary()
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?
+        .open_illness()
+        .copied()
+        .ok_or_else(|| usage("no illness is open. Nothing was recorded"))?;
+
+    let illness = ask_until("Better from which date? [today] ", |typed| {
+        open.ended(date_or_today(typed)?)
+            .map_err(|error| error.to_string())
+    })?;
+
+    diary
+        .record_illness(&illness)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    output::illness_recorded(&illness);
     Ok(())
 }
 
@@ -336,10 +375,9 @@ mod tests {
 
     /// **An empty line takes the offered default, and the defaults differ.**
     ///
-    /// "Too ill to train" defaults to no, so a stray return cannot record an
-    /// illness; "are you able to train" defaults to yes, so it cannot cancel a
-    /// week's training; "does this change when you can train" defaults to no,
-    /// so it cannot rewrite it either.
+    /// "Are you able to train" defaults to yes, so a stray return cannot
+    /// cancel a week's training; "does this change when you can train"
+    /// defaults to no, so it cannot rewrite it either.
     #[test]
     fn an_empty_answer_is_neither_a_yes_nor_a_no() {
         assert!(!yes(""), "an empty line does not agree");

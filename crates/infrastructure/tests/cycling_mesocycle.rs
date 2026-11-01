@@ -577,9 +577,6 @@ fn an_illness_that_week_eases_the_surviving_wednesday() {
     };
     run!(author(&opened, &plan));
 
-    let Some(one) = std::num::NonZeroU8::new(1) else {
-        panic!("one is not zero")
-    };
     let Ok(zone) = domain::normalised::OperatorZone::try_from("Europe/London") else {
         panic!("Europe/London is a zone")
     };
@@ -602,12 +599,13 @@ fn an_illness_that_week_eases_the_surviving_wednesday() {
             zone,
             slots,
         )],
-        vec![domain::schedule::Alteration::new(
-            date(2026, 9, 27),
-            one,
-            domain::schedule::Absence::Illness,
-        )],
-    );
+        Vec::new(),
+    )
+    .with_illnesses(vec![
+        domain::schedule::Illness::new(date(2026, 9, 27))
+            .ended(date(2026, 9, 28))
+            .expect("it ends after it begins"),
+    ]);
 
     let (_, wednesday) = run!(application::cycling::next_ride(
         &opened.cycling,

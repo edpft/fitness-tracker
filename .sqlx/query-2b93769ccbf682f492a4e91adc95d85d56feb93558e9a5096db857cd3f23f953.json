@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT from_date, ended_on\n        FROM illness\n        ORDER BY from_date\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "from_date",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "illness",
+            "name": "from_date"
+          }
+        }
+      },
+      {
+        "name": "ended_on",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "illness",
+            "name": "ended_on"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "2b93769ccbf682f492a4e91adc95d85d56feb93558e9a5096db857cd3f23f953"
+}

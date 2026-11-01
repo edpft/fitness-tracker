@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n                    SELECT weekday, part, length\n                    FROM alteration_slot\n                    WHERE alteration = ?\n                    ",
+  "query": "\n                SELECT weekday, part, length\n                FROM alteration_slot\n                WHERE alteration = ?\n                ",
   "describe": {
     "columns": [
       {
@@ -46,5 +46,5 @@
       false
     ]
   },
-  "hash": "49e488fd5c3b7f90cdff394889d67ca806dfd17e8be1b1910970048fdf37c594"
+  "hash": "4d951d75f4af09aee0fde7029edbd7453f13e750549b589318ce9513502ee2b1"
 }

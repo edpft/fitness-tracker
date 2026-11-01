@@ -48,7 +48,7 @@ use domain::prescription::{
     PrescriptionState, Progress, SbsProgression, Scales, SlotId, WeekIndex, Workout,
 };
 use domain::provider::ExternalProgramme;
-use domain::schedule::{Alteration, Diary, Holidays, Skip, TrainingPattern};
+use domain::schedule::{Alteration, Diary, Holidays, Illness, Skip, TrainingPattern};
 use domain::sequence::NonEmpty;
 
 use crate::error::{
@@ -3362,6 +3362,19 @@ pub trait DiaryAuthor {
     fn record_alteration(
         &self,
         alteration: &Alteration,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Record an illness, open or ended.
+    ///
+    /// Keyed on the day it began, so ending one is recording it again with
+    /// the day he was better.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn record_illness(
+        &self,
+        illness: &Illness,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
     /// Record a skip — the rest of a window the operator will not train in.

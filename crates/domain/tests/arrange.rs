@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, num::NonZeroU8};
 use domain::{
     normalised::OperatorZone,
     planner::{Discipline, Limits, Relative, arrange},
-    schedule::{Absence, Alteration, Diary, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
+    schedule::{Alteration, Diary, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
 };
 use jiff::civil::{Date, Weekday};
 
@@ -183,11 +183,9 @@ fn away(start: Date, days: u8, slots: BTreeMap<TrainingSlot, SlotLength>) -> Bui
     Ok(Alteration::new(
         start,
         days,
-        Absence::FamilyHoliday {
-            zone: None,
-            slots: Some(slots),
-            reason: "away".to_owned(),
-        },
+        None,
+        Some(slots),
+        "away".to_owned(),
     ))
 }
 

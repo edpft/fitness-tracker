@@ -27,7 +27,7 @@ use domain::{
         Skip, SlotFills, StaticFill,
     },
     provider::{ExternalProgramme, ProgrammeName, Provider, PublishedAt},
-    schedule::{Absence, Alteration, Diary, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
+    schedule::{Alteration, Diary, Illness, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
     sequence::NonEmpty,
 };
 use jiff::{civil::Weekday, civil::date, tz::TimeZone};
@@ -334,12 +334,10 @@ fn a_week_keeps_the_sessions_an_absence_covered() {
     let Ok(diary) = diary() else {
         panic!("the fixture diary is valid")
     };
-    let Some(over) = std::num::NonZeroU8::new(2) else {
-        panic!("two is not zero")
+    let Ok(ill) = Illness::new(date(2026, 9, 17)).ended(date(2026, 9, 19)) else {
+        panic!("it ends after it begins")
     };
-
-    let ill = Alteration::new(date(2026, 9, 17), over, Absence::Illness);
-    let diary = Diary::new(diary.patterns().to_vec(), vec![ill]);
+    let diary = Diary::new(diary.patterns().to_vec(), Vec::new()).with_illnesses(vec![ill]);
 
     let planned = week(&plan, &diary, date(2026, 9, 16), &Missed::none());
     let read: Vec<String> = planned
@@ -354,27 +352,30 @@ fn a_week_keeps_the_sessions_an_absence_covered() {
     );
 }
 
-/// One day's absence, of a stated kind.
+/// One day's illness.
 ///
 /// Fallible and unwrapped at the call site, as the fixtures above are.
-fn absent(on: jiff::civil::Date, absence: Absence) -> Built<Diary> {
+fn ill(on: jiff::civil::Date) -> Built<Diary> {
+    let illness = Illness::new(on).ended(on.tomorrow()?)?;
+    Ok(Diary::new(diary()?.patterns().to_vec(), Vec::new()).with_illnesses(vec![illness]))
+}
+
+/// One day away with no room to train, so only being ill differs from
+/// [`ill`].
+fn away(on: jiff::civil::Date) -> Built<Diary> {
     let Some(one) = std::num::NonZeroU8::new(1) else {
         return Err("one is not zero".into());
     };
     Ok(Diary::new(
         diary()?.patterns().to_vec(),
-        vec![Alteration::new(on, one, absence)],
+        vec![Alteration::new(
+            on,
+            one,
+            None,
+            Some(BTreeMap::new()),
+            "Rome".to_owned(),
+        )],
     ))
-}
-
-/// A holiday that keeps the ordinary week, so only its kind differs from an
-/// illness.
-fn holiday() -> Absence {
-    Absence::FamilyHoliday {
-        zone: None,
-        slots: Some(BTreeMap::new()),
-        reason: "Rome".to_owned(),
-    }
 }
 
 /// **An illness eases what survives it, whichever slot that is.**
@@ -386,7 +387,7 @@ fn holiday() -> Absence {
 /// higher-intensity one its slot ordinarily asks for.
 #[test]
 fn illness_in_the_week_eases_the_session_that_survives_it() {
-    let Ok(diary) = absent(date(2026, 9, 27), Absence::Illness) else {
+    let Ok(diary) = ill(date(2026, 9, 27)) else {
         panic!("the fixture diary is valid")
     };
 
@@ -399,11 +400,11 @@ fn illness_in_the_week_eases_the_session_that_survives_it() {
 }
 
 /// **A holiday does not ease anything.** Time away says nothing about fitness;
-/// illness is assumed to have cost some, which is the whole reason an absence
-/// records its kind (#178).
+/// illness is assumed to have cost some, which is the whole reason it is
+/// recorded apart (#178, #674).
 #[test]
 fn a_holiday_leaves_the_surviving_session_alone() {
-    let Ok(diary) = absent(date(2026, 9, 27), holiday()) else {
+    let Ok(diary) = away(date(2026, 9, 27)) else {
         panic!("the fixture diary is valid")
     };
 
@@ -417,7 +418,7 @@ fn a_holiday_leaves_the_surviving_session_alone() {
 /// itself and the harder ride would never be prescribed at all.
 #[test]
 fn a_slot_is_not_eased_by_an_illness_on_its_own_day() {
-    let Ok(diary) = absent(date(2026, 9, 23), Absence::Illness) else {
+    let Ok(diary) = ill(date(2026, 9, 23)) else {
         panic!("the fixture diary is valid")
     };
 
@@ -430,7 +431,7 @@ fn a_slot_is_not_eased_by_an_illness_on_its_own_day() {
 /// plan's business (#177), not this slot's.
 #[test]
 fn an_illness_in_another_discipline_does_not_ease_this_one() {
-    let Ok(diary) = absent(date(2026, 9, 25), Absence::Illness) else {
+    let Ok(diary) = ill(date(2026, 9, 25)) else {
         panic!("the fixture diary is valid")
     };
 
@@ -556,7 +557,7 @@ fn a_skipped_session_that_is_not_essential_moves_nothing() {
 /// has nowhere to go.
 #[test]
 fn a_later_slot_taken_by_an_absence_does_not_take_the_essential_session() {
-    let Ok(diary) = absent(date(2026, 9, 27), holiday()).and_then(|diary| {
+    let Ok(diary) = away(date(2026, 9, 27)).and_then(|diary| {
         skipping(
             diary,
             (date(2026, 9, 23), PartOfDay::Evening),

@@ -290,7 +290,17 @@ where
             let plan = rescheduled(&authored, &reruns, &diary)?;
             let week = self.week_of(&plan, &diary, monday, opens, now).await?;
             missed.extend(week.missed);
-            let Some(ended) = week.ended else {
+            // **An open illness stops the walk at the week now has reached**
+            // (#674). Every session after its start reads taken, so every week
+            // after it would read ended, and the walk would run to the end of
+            // the calendar: how long it lasts is not known until he is better.
+            let ill = diary.open_illness().is_some_and(|illness| {
+                monday >= planner::commencing(now.date)
+                    && monday
+                        .checked_add(jiff::Span::new().days(6))
+                        .is_ok_and(|sunday| illness.from() <= sunday)
+            });
+            let Some(ended) = week.ended.filter(|_| !ill) else {
                 let mesocycle = plan
                     .mesocycle_on(monday)
                     .or_else(|| plan.mesocycle_on(now.date))

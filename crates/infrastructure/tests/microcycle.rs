@@ -17,8 +17,6 @@
 use crate::support;
 use domain::planner::Arrangement as _;
 
-use std::num::NonZeroU8;
-
 use application::{
     CyclingDeliveryStore as _, CyclingMesocycleStore, DestinationName, DiaryAuthor as _,
     DiaryStore as _, MesocycleStore, PerformedSessionLog, PlanAuthor as _,
@@ -41,7 +39,7 @@ use domain::{
     planner::{MicrocycleState, Rerun, SessionState},
     prescription::{WeekIndex, WeekKind},
     provider::ProgrammeName,
-    schedule::{Absence, AbsenceKind, Alteration, DayPart, PartOfDay, Skip},
+    schedule::{AbsenceKind, DayPart, Illness, PartOfDay, Skip},
     sequence::NonEmpty,
 };
 use infrastructure::{
@@ -324,13 +322,10 @@ async fn autumn_tested() -> Fallible<(SqlitePool, tempfile::TempDir)> {
 /// Ill from Thursday 17 to Sunday 20 September, as the operator is extending
 /// his record to say.
 async fn ill_to_the_sunday(pool: &SqlitePool) -> Fallible<()> {
-    let over = NonZeroU8::new(4).ok_or("four is not zero")?;
     SqliteDiaryStore::new(pool.clone())
-        .record_alteration(&Alteration::new(
-            Date::constant(2026, 9, 17),
-            over,
-            Absence::Illness,
-        ))
+        .record_illness(
+            &Illness::new(Date::constant(2026, 9, 17)).ended(Date::constant(2026, 9, 21))?,
+        )
         .await?;
     Ok(())
 }
@@ -776,13 +771,10 @@ fn an_illness_makes_a_prescribed_session_not_performed() {
         let (pool, _directory) = autumn().await?;
         gym_delivered_for_the_friday(&pool).await?;
 
-        let over = NonZeroU8::new(2).ok_or("two is not zero")?;
         SqliteDiaryStore::new(pool.clone())
-            .record_alteration(&Alteration::new(
-                Date::constant(2026, 9, 18),
-                over,
-                Absence::Illness,
-            ))
+            .record_illness(
+                &Illness::new(Date::constant(2026, 9, 18)).ended(Date::constant(2026, 9, 20))?,
+            )
             .await?;
 
         let standing = Microcycle::new(
@@ -1792,5 +1784,59 @@ fn a_missed_essential_ride_is_ridden_on_the_sunday_instead() {
         after.reruns.is_empty(),
         "the test was ridden that week, so nothing runs again: {:?}",
         after.weeks
+    );
+}
+
+/// **An open illness stops the walk at the week now has reached** (#674).
+///
+/// Every session after its start reads taken by it, so every week after reads
+/// ended, and until this was held the walk ran on towards the end of the
+/// calendar. Ill since the Friday, and asked three weeks later, the week
+/// reported is the one that Monday commences.
+#[test]
+fn an_open_illness_reports_the_week_now_is_in() {
+    let standing = corpus::block_on(async {
+        let (pool, _directory) = autumn().await?;
+        SqliteDiaryStore::new(pool.clone())
+            .record_illness(&Illness::new(Date::constant(2026, 9, 18)))
+            .await?;
+
+        let microcycle = Microcycle::new(
+            MicrocyclePorts {
+                diary: SqliteDiaryStore::new(pool.clone()),
+                plans: SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+                gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
+                cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
+                gym_performed: Trained::nothing(),
+                cycling_performed: Ridden::nothing(),
+            },
+            hevy()?,
+            peloton()?,
+        );
+
+        Ok::<_, Box<dyn std::error::Error>>(
+            microcycle
+                .standing(DayPart::new(
+                    Date::constant(2026, 10, 7),
+                    PartOfDay::Evening,
+                ))
+                .await?,
+        )
+    })
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(standing.commencing, Some(Date::constant(2026, 10, 5)));
+    assert!(
+        standing.sessions.iter().all(|session| matches!(
+            session.state,
+            SessionState::Skipped {
+                absence: AbsenceKind::Illness
+            } | SessionState::NotPerformed {
+                absence: Some(AbsenceKind::Illness)
+            }
+        )),
+        "every session of it is the illness's: {:?}",
+        standing.sessions
     );
 }

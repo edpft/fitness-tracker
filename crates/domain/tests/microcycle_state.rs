@@ -54,7 +54,9 @@ fn a_week_that_lost_both_essential_sessions_is_incomplete() {
             Discipline::Gym,
             supporting(),
             SessionState::Skipped {
-                absence: AbsenceKind::FamilyHoliday,
+                absence: AbsenceKind::Alteration {
+                    reason: "Rome".to_owned(),
+                },
             },
         ),
         session(
@@ -85,7 +87,9 @@ fn losing_a_supporting_session_does_not_stop_the_week() {
             Discipline::Gym,
             supporting(),
             SessionState::Skipped {
-                absence: AbsenceKind::FamilyHoliday,
+                absence: AbsenceKind::Alteration {
+                    reason: "Rome".to_owned(),
+                },
             },
         ),
         session(Discipline::Gym, ESSENTIAL, SessionState::Performed),
@@ -171,7 +175,9 @@ fn an_empty_week_is_complete() {
 fn every_way_of_not_performing_the_essential_session_loses_it() {
     for state in [
         SessionState::Skipped {
-            absence: AbsenceKind::FamilyHoliday,
+            absence: AbsenceKind::Alteration {
+                reason: "Rome".to_owned(),
+            },
         },
         SessionState::Skipped {
             absence: AbsenceKind::Illness,

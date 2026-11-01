@@ -1,4 +1,5 @@
-//! What 0044 does to the rows 0043 left behind (#187, #188).
+//! What 0044 does to the rows 0043 left behind (#187, #188), and what 0102
+//! does to an illness recorded as an alteration (#674).
 //!
 //! The operator's store had 0043 applied before either defect was found, so its
 //! alterations are all holidays with a reason and no way to say the ordinary
@@ -6,10 +7,10 @@
 //! migration behind is written to in 0043's shape, migrated, and read back
 //! through the store the binary actually uses.
 
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
 use application::DiaryStore as _;
-use domain::schedule::Absence;
+use domain::schedule::Illness;
 use infrastructure::{SqliteDiaryStore, connect};
 use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 
@@ -70,7 +71,8 @@ fn runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
 /// **The operator's illness loses the reason he was asked for, and nothing else
 /// is lost.** #187: a reason belongs to a holiday. #188: every row 0043 kept
 /// states its slots, so migrating cannot turn one into "the ordinary week
-/// stands" — which nothing could say before 0044.
+/// stands" — which nothing could say before 0044. And since 0102 the illness
+/// is its own record, ended the day after the one day it covered.
 #[test]
 fn an_illness_reads_back_without_its_reason() {
     runtime().expect("a runtime is available").block_on(async {
@@ -92,25 +94,87 @@ fn an_illness_reads_back_without_its_reason() {
             .await
             .expect("the diary reads back");
 
-        let [holiday, illness] = diary.alterations() else {
-            panic!("both alterations survive, found {:?}", diary.alterations());
+        let [holiday] = diary.alterations() else {
+            panic!(
+                "only the holiday is an alteration, found {:?}",
+                diary.alterations()
+            );
         };
 
+        let ill = Illness::new(jiff::civil::Date::constant(2026, 9, 19))
+            .ended(jiff::civil::Date::constant(2026, 9, 20));
         assert_eq!(
-            illness.absence(),
-            &Absence::Illness,
-            "an illness is still an illness",
+            diary.illnesses(),
+            [ill.expect("it ends after it begins")],
+            "an illness is still an illness, and is no longer asked why",
         );
-        assert_eq!(illness.reason(), None, "and is no longer asked why");
 
         assert_eq!(
             holiday.reason(),
-            Some("Rome"),
+            "Rome",
             "a holiday keeps the reason it was given",
         );
         assert!(
             holiday.slots().is_some(),
             "and states its slots, because every row 0043 kept did",
+        );
+    });
+}
+
+/// **The operator's own illness, as 0101 left it** (#674): an alteration from
+/// 17 September for five days, which 0102 makes an illness from the 17th that
+/// he was better from on the 22nd. His two holidays are untouched.
+#[test]
+fn an_illness_alteration_becomes_an_ended_illness() {
+    runtime().expect("a runtime is available").block_on(async {
+        let directory = tempfile::tempdir().expect("a scratch directory");
+        let path = directory.path().join("store.db");
+
+        let migrator = sqlx::migrate!("../../migrations");
+        let old = SqlitePool::connect_with(
+            SqliteConnectOptions::new()
+                .filename(&path)
+                .create_if_missing(true),
+        )
+        .await
+        .expect("a scratch store");
+        migrator.run_to(101, &old).await.expect("migrated to 0101");
+        sqlx::query(
+            r"
+            INSERT INTO alteration (authored_at, start_date, days, absence, zone, states_slots, reason)
+            VALUES ('2026-08-25T10:49:45Z', '2026-08-26', 7, 'holiday', NULL, 1, 'No holiday, no gym access'),
+                   ('2026-08-25T10:50:43Z', '2026-09-11', 4, 'holiday', 'Europe/Rome', 1, 'No holiday, no gym access'),
+                   ('2026-09-22T08:58:57Z', '2026-09-17', 5, 'illness', NULL, 1, NULL)
+            ",
+        )
+        .execute(&old)
+        .await
+        .expect("0101 accepts his three alterations");
+        old.close().await;
+
+        let pool = connect(&path).await.expect("the store opens and migrates");
+        let diary = SqliteDiaryStore::new(pool)
+            .diary()
+            .await
+            .expect("the diary reads back");
+
+        let ill = Illness::new(jiff::civil::Date::constant(2026, 9, 17)).ended(jiff::civil::Date::constant(2026, 9, 22));
+        assert_eq!(diary.illnesses(), [ill.expect("it ends after it begins")]);
+        assert_eq!(
+            diary
+                .alterations()
+                .iter()
+                .map(|alteration| (alteration.start().to_string(), alteration.days().get()))
+                .collect::<Vec<_>>(),
+            [("2026-08-26".to_owned(), 7), ("2026-09-11".to_owned(), 4)],
+            "the holidays are untouched",
+        );
+        assert!(
+            diary
+                .alterations()
+                .iter()
+                .all(|alteration| alteration.slots().is_some_and(BTreeMap::is_empty)),
+            "and still leave no room to train",
         );
     });
 }

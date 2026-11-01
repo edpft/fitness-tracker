@@ -15,7 +15,7 @@ use super::{
     SessionRole,
     arrange::{self, Limits},
 };
-use crate::schedule::{Absence, Alteration, Diary, SlotLength, TrainingPattern, TrainingSlot};
+use crate::schedule::{Alteration, Diary, Illness, SlotLength, TrainingPattern, TrainingSlot};
 
 /// What a training slot is given to.
 ///
@@ -324,10 +324,7 @@ impl Arrangement for Diary {
                     .arranged(cursor, false)
                     .iter()
                     .any(|slot| slot.discipline == discipline);
-                let ill = self.alterations().iter().any(|alteration| {
-                    alteration.covers(cursor) && matches!(alteration.absence(), Absence::Illness)
-                });
-                if !kept || ill {
+                if !kept || self.ill_on(cursor) {
                     lost.push(cursor);
                 }
             }
@@ -438,6 +435,7 @@ impl Arrangement for Diary {
             .iter()
             .map(TrainingPattern::from)
             .chain(self.alterations().iter().map(Alteration::last))
+            .chain(self.illnesses().iter().filter_map(Illness::ended_on))
             .max()?
             .max(date);
         let horizon = described.checked_add(jiff::Span::new().days(7)).ok()?;
@@ -468,8 +466,8 @@ impl Arrangement for Diary {
 
     /// The first slot on a day after this one.
     ///
-    /// **Bounded by what the diary says.** Past the last pattern and the last
-    /// alteration the week only repeats, so a week beyond both that holds no
+    /// **Bounded by what the diary says.** Past the last pattern, the last
+    /// alteration and the last illness's end the week only repeats, so a week beyond both that holds no
     /// slot means none ever comes — and `None` says so, rather than searching
     /// for ever.
     fn first_after(&self, date: Date) -> Option<ScheduledSlot> {
@@ -478,6 +476,7 @@ impl Arrangement for Diary {
             .iter()
             .map(TrainingPattern::from)
             .chain(self.alterations().iter().map(Alteration::last))
+            .chain(self.illnesses().iter().filter_map(Illness::ended_on))
             .max()?
             .max(date);
         let horizon = described.checked_add(jiff::Span::new().days(7)).ok()?;
