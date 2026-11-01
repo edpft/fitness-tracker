@@ -1957,7 +1957,7 @@ fn gym_week(
     rerun: Option<RerunOrdinal>,
 ) -> Option<WeekPosition> {
     let calendar = mesocycle.calendar();
-    let (kind, _) = calendar.place(date).ok()?;
+    let kind = calendar.place_week(date).ok()?;
     if kind == WeekKind::Holding {
         return Some(WeekPosition::Holding);
     }

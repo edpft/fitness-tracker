@@ -43,8 +43,8 @@ use domain::{
     planner::SessionState,
     prescription::GymMesocycle,
     schedule::{
-        Allocation, DayPart, Diary, Discipline, Holidays, PartOfDay, Relative, ScheduledSlot,
-        SessionRole, Skip, TrainingPattern, TrainingSlot,
+        DayPart, Diary, Discipline, Holidays, PartOfDay, Relative, ScheduledSlot, SessionRole,
+        Skip, SlotLength, TrainingPattern, TrainingSlot,
     },
 };
 use jiff::civil::{Date, Weekday};
@@ -477,11 +477,11 @@ impl Recorded {
         let slots = BTreeMap::from([
             (
                 TrainingSlot::new(Weekday::Monday, PartOfDay::Evening),
-                Allocation::new(Discipline::Gym, HARDER),
+                SlotLength::Shorter,
             ),
             (
                 TrainingSlot::new(Weekday::Wednesday, PartOfDay::Evening),
-                Allocation::new(Discipline::Cycling, HARDER),
+                SlotLength::Shorter,
             ),
         ]);
         Ok(Self {
@@ -572,7 +572,7 @@ fn slot(date: Date, discipline: Discipline) -> ScheduledSlot {
         date,
         slot: TrainingSlot::new(date.weekday(), PartOfDay::Evening),
         discipline,
-        role: HARDER,
+        role: Some(HARDER),
     }
 }
 

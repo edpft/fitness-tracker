@@ -616,7 +616,21 @@ impl Calendar {
                 programmed: self.week.describe(),
             });
         };
+        Ok((self.place_week(date)?, role))
+    }
 
+    /// Which week of the block a date sits in, whatever day of it.
+    ///
+    /// **What a rearranged week needs** (#673). A holiday that moves Friday's
+    /// gym session to the Saturday puts it on a day the ordinary week does not
+    /// hold, and it is still that week's session; the diary says which session
+    /// it is, so only the week is asked of the calendar.
+    ///
+    /// # Errors
+    ///
+    /// [`NotScheduled`] as [`Self::place`] gives it, except that every day of
+    /// a week is a day of it.
+    pub fn place_week(&self, date: Date) -> Result<WeekKind, NotScheduled> {
         if date < self.start {
             return Err(NotScheduled::BeforeStart {
                 date,
@@ -634,7 +648,7 @@ impl Calendar {
         }
 
         if self.holds(offset) {
-            return Ok((WeekKind::Holding, role));
+            return Ok(WeekKind::Holding);
         }
 
         // The training week: calendar weeks elapsed, less the ones the block
@@ -658,9 +672,8 @@ impl Calendar {
         // `WeekKind::Test` stays for the templates that do own their test: a
         // periodised block always ends in one, and a standalone test programme
         // is nothing else.
-        Ok((
-            WeekKind::Climbing(WeekIndex::new(week).unwrap_or(WeekIndex(1))),
-            role,
+        Ok(WeekKind::Climbing(
+            WeekIndex::new(week).unwrap_or(WeekIndex(1)),
         ))
     }
 

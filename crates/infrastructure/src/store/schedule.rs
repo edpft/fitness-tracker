@@ -20,8 +20,8 @@ use application::{DiaryAuthor, DiaryStore, StoreError};
 use domain::{
     normalised::OperatorZone,
     schedule::{
-        Absence, Allocation, Alteration, DayPart, Diary, Discipline, PartOfDay, Relative,
-        SessionRole, Skip, TrainingPattern, TrainingSlot, TrainingWeek,
+        Absence, Alteration, DayPart, Diary, Discipline, PartOfDay, Skip, SlotLength,
+        TrainingPattern, TrainingSlot, TrainingWeek,
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -61,30 +61,8 @@ fn slot_of(weekday: &str, part: &str) -> Result<TrainingSlot, StoreError> {
     Ok(TrainingSlot::new(weekday_of(weekday)?, part_of(part)?))
 }
 
-fn discipline_of(text: &str) -> Result<Discipline, StoreError> {
-    Discipline::try_from(text.to_owned()).map_err(|error| corrupt(&error))
-}
-
-fn relative_of(text: &str) -> Result<Relative, StoreError> {
-    Relative::try_from(text.to_owned()).map_err(|error| corrupt(&error))
-}
-
-fn role_of(intensity: &str, volume: &str) -> Result<SessionRole, StoreError> {
-    Ok(SessionRole::new(
-        relative_of(intensity)?,
-        relative_of(volume)?,
-    ))
-}
-
-fn allocation_of(
-    discipline: &str,
-    intensity: &str,
-    volume: &str,
-) -> Result<Allocation, StoreError> {
-    Ok(Allocation::new(
-        discipline_of(discipline)?,
-        role_of(intensity, volume)?,
-    ))
+fn length_of(text: &str) -> Result<SlotLength, StoreError> {
+    SlotLength::try_from(text).map_err(|error| corrupt(&error))
 }
 
 /// One discipline's ordinary week as of a date, for a calendar to be built
@@ -108,39 +86,53 @@ pub(super) async fn training_week(
     discipline: Discipline,
 ) -> Result<Option<TrainingWeek>, StoreError> {
     let on = date.to_string();
-    let key = discipline.as_str();
+    let Some(pattern) = sqlx::query!(
+        r"
+        SELECT id, from_date, zone FROM training_pattern
+        WHERE from_date <= ?
+        ORDER BY from_date DESC
+        LIMIT 1
+        ",
+        on
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| store_error(&error))?
+    else {
+        return Ok(None);
+    };
+
+    // **Arranged by the domain, never by SQL**: which discipline a slot is
+    // given is worked out from the whole week (#673), so the pattern is read
+    // and handed to the rules rather than filtered here.
+    let pattern = TrainingPattern::new(
+        date_of(&pattern.from_date)?,
+        zone_of(&pattern.zone)?,
+        pattern_slots(pool, pattern.id).await?,
+    );
+    Ok(Diary::new(vec![pattern], Vec::new()).training_week(date, discipline))
+}
+
+/// One pattern's free slots and how long each is.
+async fn pattern_slots(
+    pool: &SqlitePool,
+    pattern: i64,
+) -> Result<BTreeMap<TrainingSlot, SlotLength>, StoreError> {
     let rows = sqlx::query!(
         r"
-        SELECT weekday, part, intensity, volume
+        SELECT weekday, part, length
         FROM training_slot
-        WHERE discipline = ?
-          AND pattern = (
-              SELECT id FROM training_pattern
-              WHERE from_date <= ?
-              ORDER BY from_date DESC
-              LIMIT 1
-          )
-        ORDER BY part
+        WHERE pattern = ?
         ",
-        key,
-        on
+        pattern
     )
     .fetch_all(pool)
     .await
     .map_err(|error| store_error(&error))?;
 
-    let mut days = Vec::with_capacity(rows.len());
-    for row in rows {
-        // The part of day is read so the ordering matches `TrainingSlot`'s:
-        // where a discipline holds two slots on one weekday, the earlier one's
-        // role is the one the week keeps.
-        let _ = part_of(&row.part)?;
-        days.push((
-            weekday_of(&row.weekday)?,
-            role_of(&row.intensity, &row.volume)?,
-        ));
-    }
-    Ok(TrainingWeek::new(days).ok())
+    rows.iter()
+        .map(|row| Ok((slot_of(&row.weekday, &row.part)?, length_of(&row.length)?)))
+        .collect()
 }
 
 /// A holiday's reason, which the schema requires it to have and forbids an
@@ -164,27 +156,7 @@ impl DiaryStore for SqliteDiaryStore {
 
         let mut patterns = Vec::with_capacity(weeks.len());
         for week in weeks {
-            let slots = sqlx::query!(
-                r"
-                SELECT weekday, part, discipline, intensity, volume
-                FROM training_slot
-                WHERE pattern = ?
-                ",
-                week.id
-            )
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
-
-            let slots = slots
-                .iter()
-                .map(|row| {
-                    Ok((
-                        slot_of(&row.weekday, &row.part)?,
-                        allocation_of(&row.discipline, &row.intensity, &row.volume)?,
-                    ))
-                })
-                .collect::<Result<BTreeMap<_, _>, StoreError>>()?;
+            let slots = pattern_slots(&self.pool, week.id).await?;
 
             patterns.push(TrainingPattern::new(
                 date_of(&week.from_date)?,
@@ -262,7 +234,7 @@ async fn read_alterations(pool: &SqlitePool) -> Result<Vec<Alteration>, StoreErr
             "holiday" => {
                 let rows = sqlx::query!(
                     r"
-                    SELECT weekday, part, discipline, intensity, volume
+                    SELECT weekday, part, length
                     FROM alteration_slot
                     WHERE alteration = ?
                     ",
@@ -278,10 +250,7 @@ async fn read_alterations(pool: &SqlitePool) -> Result<Vec<Alteration>, StoreErr
                     slots: Some(
                         rows.iter()
                             .map(|row| {
-                                Ok((
-                                    slot_of(&row.weekday, &row.part)?,
-                                    allocation_of(&row.discipline, &row.intensity, &row.volume)?,
-                                ))
+                                Ok((slot_of(&row.weekday, &row.part)?, length_of(&row.length)?))
                             })
                             .collect::<Result<BTreeMap<_, _>, StoreError>>()?,
                     ),
@@ -337,23 +306,19 @@ impl DiaryAuthor for SqliteDiaryStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        for (slot, allocation) in pattern.slots() {
+        for (slot, length) in pattern.slots() {
             let weekday = weekday_key(slot.weekday);
             let part = slot.part.as_str();
-            let discipline = allocation.discipline.as_str();
-            let intensity = allocation.role.intensity().as_str();
-            let volume = allocation.role.volume().as_str();
+            let length = length.as_str();
             sqlx::query!(
                 r"
-                INSERT INTO training_slot (pattern, weekday, part, discipline, intensity, volume)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO training_slot (pattern, weekday, part, length)
+                VALUES (?, ?, ?, ?)
                 ",
                 id,
                 weekday,
                 part,
-                discipline,
-                intensity,
-                volume
+                length
             )
             .execute(&mut *tx)
             .await
@@ -411,23 +376,19 @@ impl DiaryAuthor for SqliteDiaryStore {
             .await
             .map_err(|error| store_error(&error))?;
 
-        for (slot, allocation) in alteration.slots().into_iter().flatten() {
+        for (slot, length) in alteration.slots().into_iter().flatten() {
             let weekday = weekday_key(slot.weekday);
             let part = slot.part.as_str();
-            let discipline = allocation.discipline.as_str();
-            let intensity = allocation.role.intensity().as_str();
-            let volume = allocation.role.volume().as_str();
+            let length = length.as_str();
             sqlx::query!(
                 r"
-                INSERT INTO alteration_slot (alteration, weekday, part, discipline, intensity, volume)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO alteration_slot (alteration, weekday, part, length)
+                VALUES (?, ?, ?, ?)
                 ",
                 id,
                 weekday,
                 part,
-                discipline,
-                intensity,
-                volume
+                length
             )
             .execute(&mut *tx)
             .await

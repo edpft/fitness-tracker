@@ -252,36 +252,24 @@ pub fn anchor() -> Result<Anchor, MesocycleFixtureError> {
 /// [`MesocycleFixtureError`] if the store is unavailable.
 pub async fn record_the_week(pool: &sqlx::SqlitePool) -> Result<(), MesocycleFixtureError> {
     use application::DiaryAuthor as _;
-    use domain::schedule::{Allocation, Discipline, PartOfDay, TrainingPattern, TrainingSlot};
+    use domain::schedule::{PartOfDay, SlotLength, TrainingPattern, TrainingSlot};
 
     let slots = [
         (
             TrainingSlot::new(jiff::civil::Weekday::Monday, PartOfDay::Evening),
-            Allocation::new(
-                Discipline::Gym,
-                SessionRole::new(Relative::Lower, Relative::Higher),
-            ),
+            SlotLength::Shorter,
         ),
         (
             TrainingSlot::new(jiff::civil::Weekday::Wednesday, PartOfDay::Evening),
-            Allocation::new(
-                Discipline::Cycling,
-                SessionRole::new(Relative::Higher, Relative::Lower),
-            ),
+            SlotLength::Shorter,
         ),
         (
             TrainingSlot::new(jiff::civil::Weekday::Friday, PartOfDay::Evening),
-            Allocation::new(
-                Discipline::Gym,
-                SessionRole::new(Relative::Higher, Relative::Lower),
-            ),
+            SlotLength::Shorter,
         ),
         (
             TrainingSlot::new(jiff::civil::Weekday::Sunday, PartOfDay::Morning),
-            Allocation::new(
-                Discipline::Cycling,
-                SessionRole::new(Relative::Lower, Relative::Higher),
-            ),
+            SlotLength::Longer,
         ),
     ]
     .into_iter()

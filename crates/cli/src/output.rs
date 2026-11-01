@@ -1844,6 +1844,10 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
 /// slots arrive ordered by weekday then part, so grouping is a fold rather than
 /// a sort.
 ///
+/// **What each slot takes is worked out and shown beside it** (#673) where
+/// `arranged` is given, which a whole pattern is. A holiday's slots are only
+/// part of a week, so what they take depends on the days around them.
+///
 /// **The role reads as the operator says it**, not as the type prints it: a
 /// slot is the harder and shorter session of its discipline's week, or the
 /// easier and longer one. "higher intensity, lower volume" is what the domain
@@ -1851,7 +1855,10 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
 fn week_slots(
     slots: &std::collections::BTreeMap<
         domain::schedule::TrainingSlot,
-        domain::schedule::Allocation,
+        domain::schedule::SlotLength,
+    >,
+    arranged: Option<
+        &std::collections::BTreeMap<domain::schedule::TrainingSlot, domain::schedule::Allocation>,
     >,
 ) {
     if slots.is_empty() {
@@ -1860,12 +1867,21 @@ fn week_slots(
     }
 
     let mut days: Vec<(jiff::civil::Weekday, Vec<String>)> = Vec::new();
-    for (slot, allocation) in slots {
-        let entry = format!(
-            "{} ({}, {})",
-            slot.part,
-            allocation.discipline,
-            said(allocation.role)
+    for (slot, length) in slots {
+        let taken = arranged.map(|arranged| {
+            arranged.get(slot).map_or_else(
+                || "unused".to_owned(),
+                |allocation| {
+                    allocation.role.map_or_else(
+                        || allocation.discipline.to_string(),
+                        |role| format!("{}, {}", allocation.discipline, said(role)),
+                    )
+                },
+            )
+        });
+        let entry = taken.map_or_else(
+            || format!("{} ({length})", slot.part),
+            |taken| format!("{} ({length}): {taken}", slot.part),
         );
         match days.last_mut() {
             Some((day, parts)) if *day == slot.weekday => parts.push(entry),
@@ -1912,17 +1928,23 @@ fn alteration_line(alteration: &domain::schedule::Alteration) {
         // would undo the distinction the schema goes to trouble to keep.
         None => println!("    when you train is unchanged"),
         Some(slots) if slots.is_empty() => println!("    no room to train at all"),
-        Some(slots) => week_slots(slots),
+        Some(slots) => week_slots(slots, None),
     }
 }
 
-pub fn pattern_recorded(pattern: &domain::schedule::TrainingPattern) {
+pub fn pattern_recorded(
+    pattern: &domain::schedule::TrainingPattern,
+    limits: domain::schedule::Limits,
+) {
     println!(
         "\nrecorded, from {} ({})",
         pattern.from(),
         pattern.zone().id()
     );
-    week_slots(pattern.slots());
+    week_slots(
+        pattern.slots(),
+        Some(&domain::schedule::allocations(pattern.slots(), limits)),
+    );
 }
 
 pub fn alteration_recorded(alteration: &domain::schedule::Alteration) {
@@ -1948,7 +1970,10 @@ pub fn schedule(diary: &domain::schedule::Diary) {
             "until superseded"
         };
         println!("{heading}, from {} ({})", week.from(), week.zone().id());
-        week_slots(week.slots());
+        week_slots(
+            week.slots(),
+            Some(&domain::schedule::allocations(week.slots(), diary.limits())),
+        );
     }
 
     // Not "holidays": a run of days that departs from the ordinary week is

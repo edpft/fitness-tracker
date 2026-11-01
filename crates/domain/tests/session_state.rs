@@ -17,8 +17,8 @@ use domain::{
     normalised::OperatorZone,
     planner::{Recorded, SessionState, closes, state_of},
     schedule::{
-        Absence, AbsenceKind, Allocation, Alteration, DayPart, Diary, Discipline, PartOfDay,
-        Relative, SessionRole, Skip, TrainingPattern, TrainingSlot,
+        Absence, AbsenceKind, Alteration, DayPart, Diary, PartOfDay, Skip, SlotLength,
+        TrainingPattern, TrainingSlot,
     },
 };
 use jiff::civil::{Date, Weekday};
@@ -37,32 +37,24 @@ fn days(count: u8) -> Built<NonZeroU8> {
     NonZeroU8::new(count).ok_or_else(|| "a run of days is at least one".into())
 }
 
-const fn harder() -> SessionRole {
-    SessionRole::new(Relative::Higher, Relative::Lower)
-}
-
-const fn easier() -> SessionRole {
-    SessionRole::new(Relative::Lower, Relative::Higher)
-}
-
 /// The operator's ordinary week, as `fitness schedule show` prints it.
-fn ordinary() -> BTreeMap<TrainingSlot, Allocation> {
+fn ordinary() -> BTreeMap<TrainingSlot, SlotLength> {
     [
         (
             TrainingSlot::new(Weekday::Monday, PartOfDay::Evening),
-            Allocation::new(Discipline::Gym, easier()),
+            SlotLength::Shorter,
         ),
         (
             TrainingSlot::new(Weekday::Wednesday, PartOfDay::Evening),
-            Allocation::new(Discipline::Cycling, harder()),
+            SlotLength::Shorter,
         ),
         (
             TrainingSlot::new(Weekday::Friday, PartOfDay::Evening),
-            Allocation::new(Discipline::Gym, harder()),
+            SlotLength::Shorter,
         ),
         (
             TrainingSlot::new(Weekday::Sunday, PartOfDay::Morning),
-            Allocation::new(Discipline::Cycling, easier()),
+            SlotLength::Longer,
         ),
     ]
     .into_iter()
@@ -359,10 +351,10 @@ fn a_holiday_that_states_slots_takes_the_parts_it_leaves_out() {
         zone("Europe/London").expect("a real zone"),
         ordinary(),
     );
-    let mut kept: BTreeMap<TrainingSlot, Allocation> = BTreeMap::new();
+    let mut kept: BTreeMap<TrainingSlot, SlotLength> = BTreeMap::new();
     kept.insert(
         TrainingSlot::new(Weekday::Saturday, PartOfDay::Morning),
-        Allocation::new(Discipline::Gym, harder()),
+        SlotLength::Shorter,
     );
     let away = Alteration::new(
         date(2026, 9, 18).expect("a real Friday"),

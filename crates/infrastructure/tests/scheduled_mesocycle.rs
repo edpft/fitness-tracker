@@ -9,6 +9,10 @@
 //!
 //! This mirrors the wiring in `cli::wizard::add`, which is the only authoring
 //! path there is.
+//!
+//! **The days are lost to illness** rather than to a family holiday, which
+//! since #673 rearranges what its week has left and so loses a block nothing
+//! while the week keeps a gym session. An illness takes its own days.
 
 use crate::support;
 
@@ -19,7 +23,7 @@ use domain::{
     normalised::OperatorZone,
     prescription::{Anchor, AnchorProvenance, Authored, EntryTest, Skip, authored::Shape},
     schedule::{
-        Absence, Allocation, Alteration, Discipline, PartOfDay, Relative, SessionRole,
+        Absence, Alteration, Discipline, PartOfDay, Relative, SessionRole, SlotLength,
         TrainingPattern, TrainingSlot,
     },
 };
@@ -69,34 +73,23 @@ macro_rules! days {
     };
 }
 
-/// Monday and Friday evenings are the gym's; Wednesday and Sunday are not.
-/// The harder, shorter session of a discipline's week; and the easier, longer
-/// one.
-const fn harder() -> SessionRole {
-    SessionRole::new(Relative::Higher, Relative::Lower)
-}
-
-const fn easier() -> SessionRole {
-    SessionRole::new(Relative::Lower, Relative::Higher)
-}
-
-fn ordinary() -> BTreeMap<TrainingSlot, Allocation> {
+fn ordinary() -> BTreeMap<TrainingSlot, SlotLength> {
     [
         (
             TrainingSlot::new(Weekday::Monday, PartOfDay::Evening),
-            Allocation::new(Discipline::Gym, easier()),
+            SlotLength::Shorter,
         ),
         (
             TrainingSlot::new(Weekday::Wednesday, PartOfDay::Evening),
-            Allocation::new(Discipline::Cycling, harder()),
+            SlotLength::Shorter,
         ),
         (
             TrainingSlot::new(Weekday::Friday, PartOfDay::Evening),
-            Allocation::new(Discipline::Gym, harder()),
+            SlotLength::Shorter,
         ),
         (
             TrainingSlot::new(Weekday::Sunday, PartOfDay::Morning),
-            Allocation::new(Discipline::Cycling, easier()),
+            SlotLength::Longer,
         ),
     ]
     .into_iter()
@@ -137,11 +130,7 @@ async fn seeded() -> Result<(SqliteDiaryStore, tempfile::TempDir), Box<dyn std::
         .record_alteration(&Alteration::new(
             date(2026, 9, 14),
             days!(1),
-            Absence::FamilyHoliday {
-                zone: None,
-                slots: Some(BTreeMap::new()),
-                reason: "away, and unable to train".to_owned(),
-            },
+            Absence::Illness,
         ))
         .await?;
 
@@ -183,11 +172,7 @@ fn an_absence_outside_the_window_is_not_the_blocks_business() {
             .record_alteration(&Alteration::new(
                 date(2026, 12, 7),
                 days!(14),
-                Absence::FamilyHoliday {
-                    zone: None,
-                    slots: Some(BTreeMap::new()),
-                    reason: "away in December".to_owned(),
-                },
+                Absence::Illness,
             ))
             .await?;
 
@@ -303,11 +288,7 @@ fn a_schedule_changed_before_the_start_is_picked_up_by_re_authoring() {
             .record_alteration(&Alteration::new(
                 date(2026, 9, 25),
                 days!(1),
-                Absence::FamilyHoliday {
-                    zone: None,
-                    slots: Some(BTreeMap::new()),
-                    reason: "a wedding".to_owned(),
-                },
+                Absence::Illness,
             ))
             .await?;
         let after = derived(&autumn()?, &store).await?;
@@ -357,11 +338,7 @@ fn a_schedule_changed_after_authoring_does_not_move_what_was_authored() {
             .record_alteration(&Alteration::new(
                 date(2026, 9, 21),
                 days!(1),
-                Absence::FamilyHoliday {
-                    zone: None,
-                    slots: Some(BTreeMap::new()),
-                    reason: "called away".to_owned(),
-                },
+                Absence::Illness,
             ))
             .await?;
 
@@ -433,15 +410,7 @@ fn a_session_performed_on_an_unavailable_day_still_counts() {
             ))
             .await?;
         diary
-            .record_alteration(&Alteration::new(
-                performed_on,
-                days!(1),
-                Absence::FamilyHoliday {
-                    zone: None,
-                    slots: Some(BTreeMap::new()),
-                    reason: "written off, and then trained anyway".to_owned(),
-                },
-            ))
+            .record_alteration(&Alteration::new(performed_on, days!(1), Absence::Illness))
             .await?;
 
         let history = SqliteExerciseHistory::new(pool.clone());

@@ -585,17 +585,11 @@ fn an_illness_that_week_eases_the_surviving_wednesday() {
     let slots: std::collections::BTreeMap<_, _> = [
         (
             domain::schedule::TrainingSlot::new(Weekday::Wednesday, PartOfDay::Evening),
-            domain::schedule::Allocation::new(
-                domain::schedule::Discipline::Cycling,
-                SessionRole::new(Relative::Higher, Relative::Lower),
-            ),
+            domain::schedule::SlotLength::Shorter,
         ),
         (
             domain::schedule::TrainingSlot::new(Weekday::Sunday, PartOfDay::Morning),
-            domain::schedule::Allocation::new(
-                domain::schedule::Discipline::Cycling,
-                SessionRole::new(Relative::Lower, Relative::Higher),
-            ),
+            domain::schedule::SlotLength::Longer,
         ),
     ]
     .into_iter()
