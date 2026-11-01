@@ -28,6 +28,8 @@ use crate::run::View;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Metric {
     BodyWeight,
+    Fat,
+    FatFree,
 }
 
 impl Metric {
@@ -35,6 +37,8 @@ impl Metric {
     const fn class(self) -> &'static str {
         match self {
             Self::BodyWeight => "weight",
+            Self::Fat => "fat",
+            Self::FatFree => "fat-free",
         }
     }
 }
@@ -240,6 +244,8 @@ pub struct Traced {
 pub enum Layer {
     /// Each observation, never joined to another.
     Dots(Vec<(Date, f64)>),
+    /// Each observation by a second method, hollow so the two are told apart.
+    Hollow(Vec<(Date, f64)>),
     /// The trend: one line per unbroken run, and its band where it has one.
     Trend(Vec<Vec<Traced>>),
     /// A reference region, from low to high on each day, in neutral grey.
@@ -249,7 +255,7 @@ pub enum Layer {
 impl Layer {
     fn values(&self) -> Vec<f64> {
         match self {
-            Self::Dots(dots) => dots.iter().map(|(_, value)| *value).collect(),
+            Self::Dots(dots) | Self::Hollow(dots) => dots.iter().map(|(_, value)| *value).collect(),
             Self::Trend(runs) => runs
                 .iter()
                 .flatten()
@@ -320,6 +326,39 @@ impl Frame {
 
 /// The chart card, or what to say where the range holds nothing.
 pub fn chart(chart: &Chart<'_>) -> Markup {
+    html! {
+        section class=(format!("card {}", chart.metric.class())) {
+            h2 { (chart.title) }
+            (drawn(chart))
+        }
+    }
+}
+
+/// One chart card for one figure in more than one unit, each option a chart
+/// and the first shown; the others are a tap away, without a script (§ 20).
+pub fn choice(id: &str, metric: Metric, title: &str, options: &[(&str, Chart<'_>)]) -> Markup {
+    html! {
+        section class=(format!("card choice {}", metric.class())) {
+            div.head {
+                h2 { (title) }
+                div.toggle {
+                    @for (index, (unit, _)) in options.iter().enumerate() {
+                        @let option = format!("{id}-{index}");
+                        input type="radio" name=(id) id=(option) class=(format!("o{index}")) checked[index == 0];
+                        label for=(option) { (unit) }
+                    }
+                }
+            }
+            @for (index, (_, chart)) in options.iter().enumerate() {
+                div class=(format!("option o{index}")) { (drawn(chart)) }
+            }
+        }
+    }
+}
+
+/// A chart's line beneath its title and its plot, or what to say where the
+/// range holds nothing.
+fn drawn(chart: &Chart<'_>) -> Markup {
     let values: Vec<f64> = chart.layers.iter().flat_map(Layer::values).collect();
     let low = values.iter().copied().reduce(f64::min);
     let high = values.iter().copied().reduce(f64::max);
@@ -328,11 +367,8 @@ pub fn chart(chart: &Chart<'_>) -> Markup {
         |(low, high)| plotted(chart, &framed(chart.range, low, high)),
     );
     html! {
-        section class=(format!("card {}", chart.metric.class())) {
-            h2 { (chart.title) }
-            p.sub { (chart.sub) }
-            (body)
-        }
+        p.sub { (chart.sub) }
+        (body)
     }
 }
 
@@ -393,6 +429,11 @@ fn plotted(chart: &Chart<'_>, frame: &Frame) -> Markup {
                         Layer::Dots(dots) => {
                             @for (on, value) in dots {
                                 circle.dot cx=(format!("{:.1}", frame.x(*on))) cy=(format!("{:.1}", frame.y(*value))) r=(radius) {}
+                            }
+                        }
+                        Layer::Hollow(dots) => {
+                            @for (on, value) in dots {
+                                circle.hollow cx=(format!("{:.1}", frame.x(*on))) cy=(format!("{:.1}", frame.y(*value))) r=(radius) {}
                             }
                         }
                         Layer::Reference(_) => {}
@@ -470,7 +511,7 @@ fn figure(value: f64, step: f64) -> String {
 }
 
 /// The latest entries as a list, newest first.
-pub fn latest(title: &str, heading: &str, rows: &[(String, String)]) -> Markup {
+pub fn latest(title: &str, heading: &str, rows: &[(String, Markup)]) -> Markup {
     html! {
         section.card.latest {
             div.head { h2 { (title) } span { (heading) } }

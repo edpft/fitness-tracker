@@ -84,7 +84,7 @@ fn body(series: &Series, ranges: &Ranges, over: Over) -> Markup {
                 .iter()
                 .rev()
                 .take(7)
-                .map(|weighed| (when(&weighed.at, today), tenths(weighed.mass)))
+                .map(|weighed| (when(&weighed.at, today), html! { (tenths(weighed.mass)) }))
                 .collect::<Vec<_>>(),
         ))
         (detail::foot(&format!("Dots: each weigh-in. Line: the trend, the {METHOD}.")))

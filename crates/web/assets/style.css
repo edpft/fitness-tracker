@@ -140,6 +140,45 @@ svg.reference { margin-top: 12px; }
 .latest .row .value { font-variant-numeric: tabular-nums; text-align: right; }
 p.foot { font-size: 12px; color: var(--muted); margin: 2px 4px; }
 
+/* A second method's points, hollow so the two are told apart. */
+.plotted .hollow { fill: none; stroke: var(--c); stroke-opacity: 0.7; stroke-width: 1.25; }
+
+/* One figure in more than one unit: one chart card, its unit a choice. */
+.card.choice .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+.card.choice .head h2 { margin: 0; }
+.toggle { display: flex; background: var(--raised); border-radius: 999px; padding: 3px; }
+.toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.toggle label { padding: 5px 12px; border-radius: 999px; font-size: 13px; color: var(--ink2); cursor: pointer; }
+.toggle input:checked + label { background: var(--ink); color: var(--bg); font-weight: 600; }
+.card.choice:has(input.o0:checked) .option:not(.o0),
+.card.choice:has(input.o1:checked) .option:not(.o1),
+.card.choice:has(input.o2:checked) .option:not(.o2) { display: none; }
+
+/* Two figures to an entry, each in its metric's colour. */
+.value > .fat, .value > .fat-free { color: var(--c); }
+.value small { font-size: 12px; color: var(--muted); }
+
+/* The mesocycle matrix (#489): regions in neutral grey, each named, and each
+   axis's noise in its component's colour. */
+.card.matrix .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.card.matrix .head h2 { margin: 0; }
+.card.matrix .head span { font-size: 15px; color: var(--ink2); }
+.card.matrix svg { display: block; width: 100%; height: auto; margin: 8px 0; }
+.card.matrix .grid { stroke: var(--grid); stroke-width: 1; }
+.card.matrix .baseline { stroke: var(--ink2); stroke-width: 1; }
+.card.matrix .tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.card.matrix text.fat, .card.matrix text.fat-free { fill: var(--c); font-size: 12px; }
+.card.matrix .goal { fill: var(--ink); fill-opacity: 0.05; }
+.card.matrix .phase { fill: var(--ink); fill-opacity: 0.1; }
+.card.matrix .region { fill: var(--ink2); font-size: 12px; }
+.card.matrix .spread { stroke: var(--c); stroke-width: 3; stroke-linecap: round; }
+.card.matrix .point { fill: var(--ink); stroke: var(--card); stroke-width: 2; }
+.card.matrix .point.hollow { fill: var(--card); stroke: var(--ink); }
+.card.matrix .label { fill: var(--ink); font-size: 12px; font-weight: 600; }
+.card.matrix .row { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; font-size: 15px; border-top: 1px solid var(--grid); }
+.card.matrix .row .on { color: var(--ink2); }
+.card.matrix .row .value { font-variant-numeric: tabular-nums; text-align: right; }
+
 /* The input template (#665): a label and what it takes, and a refusal under
    the field it is about. */
 form.input { display: grid; gap: 14px; margin: 0; }
