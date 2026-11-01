@@ -254,3 +254,154 @@ fn better_before_ill_is_refused() {
         "still open"
     );
 }
+
+/// The operator's weekly availability since 25 August: three shorter
+/// evenings and a longer Sunday morning.
+fn ordinary() -> BTreeMap<TrainingSlot, SlotLength> {
+    BTreeMap::from([
+        (
+            TrainingSlot::new(Weekday::Monday, PartOfDay::Evening),
+            SlotLength::Shorter,
+        ),
+        (
+            TrainingSlot::new(Weekday::Wednesday, PartOfDay::Evening),
+            SlotLength::Shorter,
+        ),
+        (
+            TrainingSlot::new(Weekday::Friday, PartOfDay::Evening),
+            SlotLength::Shorter,
+        ),
+        (
+            TrainingSlot::new(Weekday::Sunday, PartOfDay::Morning),
+            SlotLength::Longer,
+        ),
+    ])
+}
+
+const MONDAY_14_DECEMBER: Date = Date::constant(2026, 12, 14);
+
+fn recorded_since_august() -> Result<Scheduling<InMemoryDiary>, String> {
+    let diary = InMemoryDiary::default();
+    diary
+        .with(|recorded| {
+            recorded.patterns.push(TrainingPattern::new(
+                Date::constant(2026, 8, 25),
+                london()?,
+                ordinary(),
+            ));
+            Ok::<_, String>(())
+        })
+        .map_err(|error| error.to_string())??;
+    Ok(Scheduling::new(diary))
+}
+
+/// **A week tapped is the run from its first changed day to its last**, as
+/// `alter` would have been asked for it: Friday evening and Sunday morning
+/// off the week commencing 14 December is 18 December for 3 days, with no
+/// room to train.
+#[test]
+fn a_week_as_tapped_is_one_alteration_over_its_changed_days() {
+    let runtime = runtime().expect("a current-thread runtime builds");
+    let scheduling = recorded_since_august().expect("the diary holds the week");
+    let mut tapped = ordinary();
+    tapped.remove(&TrainingSlot::new(Weekday::Friday, PartOfDay::Evening));
+    tapped.remove(&TrainingSlot::new(Weekday::Sunday, PartOfDay::Morning));
+
+    let recorded = runtime
+        .block_on(scheduling.alter_week(Date::constant(2026, 12, 16), &tapped, "Christmas"))
+        .expect("it records");
+
+    assert_eq!(
+        recorded,
+        Alteration::new(
+            FRIDAY_18_DECEMBER,
+            three(),
+            None,
+            Some(BTreeMap::new()),
+            "Christmas".to_owned()
+        )
+    );
+}
+
+/// **Changed from the week as it stands, not the ordinary week**: putting
+/// back what an alteration took is a change, and leaving it off is not.
+#[test]
+fn a_week_is_changed_from_the_week_as_it_stands() {
+    let runtime = runtime().expect("a current-thread runtime builds");
+    let scheduling = recorded_since_august().expect("the diary holds the week");
+    let mut tapped = ordinary();
+    tapped.remove(&TrainingSlot::new(Weekday::Friday, PartOfDay::Evening));
+    runtime
+        .block_on(scheduling.alter_week(MONDAY_14_DECEMBER, &tapped, "Christmas"))
+        .expect("it records");
+
+    assert_eq!(
+        runtime.block_on(scheduling.alter_week(MONDAY_14_DECEMBER, &tapped, "again")),
+        Err(ScheduleError::Unchanged {
+            what: "week as it stands"
+        }),
+    );
+    let reverted = runtime
+        .block_on(scheduling.alter_week(MONDAY_14_DECEMBER, &ordinary(), "home after all"))
+        .expect("it records");
+    assert_eq!(reverted.start(), FRIDAY_18_DECEMBER);
+    assert_eq!(reverted.days(), NonZeroU8::MIN);
+    assert_eq!(reverted.slots(), Some(&one_slot(Weekday::Friday)));
+}
+
+/// **A week saved with no reason is refused**, before anything is compared.
+#[test]
+fn a_week_with_no_reason_is_refused() {
+    let runtime = runtime().expect("a current-thread runtime builds");
+    let scheduling = recorded_since_august().expect("the diary holds the week");
+
+    assert_eq!(
+        runtime.block_on(scheduling.alter_week(MONDAY_14_DECEMBER, &BTreeMap::new(), " ")),
+        Err(ScheduleError::NoReason),
+    );
+}
+
+/// **From now on is from the week's Monday**, in the zone of the weekly
+/// availability it replaces, and the same week again is refused.
+#[test]
+fn a_week_from_now_on_is_weekly_availability_from_its_monday() {
+    let runtime = runtime().expect("a current-thread runtime builds");
+    let scheduling = recorded_since_august().expect("the diary holds the week");
+    let mut tapped = ordinary();
+    tapped.insert(
+        TrainingSlot::new(Weekday::Tuesday, PartOfDay::Morning),
+        SlotLength::Shorter,
+    );
+
+    let recorded = runtime
+        .block_on(scheduling.from_week(Date::constant(2026, 12, 17), tapped.clone()))
+        .expect("it records");
+    assert_eq!(
+        recorded,
+        TrainingPattern::new(
+            MONDAY_14_DECEMBER,
+            london().expect("a real zone"),
+            tapped.clone()
+        )
+    );
+
+    assert_eq!(
+        runtime.block_on(scheduling.from_week(MONDAY_14_DECEMBER, tapped)),
+        Err(ScheduleError::Unchanged {
+            what: "weekly availability"
+        }),
+    );
+}
+
+/// **With no weekly availability there is no zone to take**, so it is
+/// refused rather than assumed.
+#[test]
+fn a_week_from_now_on_needs_a_weekly_availability_first() {
+    let runtime = runtime().expect("a current-thread runtime builds");
+    let scheduling = Scheduling::new(InMemoryDiary::default());
+
+    assert_eq!(
+        runtime.block_on(scheduling.from_week(MONDAY_14_DECEMBER, ordinary())),
+        Err(ScheduleError::NoWeeklyAvailability),
+    );
+}

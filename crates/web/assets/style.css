@@ -167,6 +167,39 @@ form.input button { border: 0; border-radius: 999px; font-size: 16px; padding: 1
 .card .held { font-size: 19px; font-weight: 600; margin: 4px 0 0; }
 .card .held .from, .card .held.from { font-size: 14px; font-weight: 400; color: var(--muted); }
 
+/* A week (#671): a day per row, a part of the day per column, a shorter slot
+   a circle and a longer one a lozenge. */
+:root { --shorter: #4fd8b8; --longer: #ffc266; }
+div.slots { display: grid; grid-template-columns: 3rem repeat(3, minmax(0, 1fr)); align-items: center; margin-top: 12px; }
+div.slots .part { font-size: 12px; color: var(--muted); text-align: center; padding-bottom: 6px; }
+div.slots .part + .part, div.slots .cell + .cell { border-left: 1px solid var(--grid); }
+div.slots .day { font-size: 15px; color: var(--ink2); }
+div.slots .day small { display: block; font-size: 11px; color: var(--muted); }
+div.slots .cell {
+  position: relative; height: 44px; width: auto; padding: 0; margin: 0; border: 0; border-radius: 0;
+  background: none; display: flex; align-items: center; justify-content: center; color: inherit;
+}
+div.slots button.cell { cursor: pointer; }
+div.slots .cell::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--grid); }
+div.slots .cell.shorter::after { width: 24px; height: 24px; background: var(--shorter); }
+div.slots .cell.longer::after { width: 56px; height: 24px; border-radius: 999px; background: var(--longer); }
+div.slots .cell:has(i.gone)::after { display: none; }
+div.slots i.gone { display: block; height: 22px; border: 1.5px dashed; border-radius: 999px; }
+div.slots i.gone.shorter { width: 22px; border-color: var(--shorter); }
+div.slots i.gone.longer { width: 54px; border-color: var(--longer); }
+div.slots .cell.changed { background: color-mix(in srgb, var(--ink) 7%, transparent); border-radius: 10px; }
+div.slots .past { opacity: 0.4; }
+.key { display: flex; gap: 16px; align-items: center; font-size: 13px; color: var(--ink2); margin-top: 10px; }
+.key i { display: inline-block; height: 12px; margin-right: 6px; vertical-align: -1px; }
+.key i.shorter { width: 12px; border-radius: 50%; background: var(--shorter); }
+.key i.longer { width: 26px; border-radius: 999px; background: var(--longer); }
+.weekhead { display: flex; align-items: center; gap: 8px; }
+.weekhead h2 { margin: 0; flex: 1; text-align: center; font-size: 18px; }
+.weekhead a { font-size: 26px; line-height: 1; text-decoration: none; color: var(--ink2); padding: 0 8px; }
+.actions { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
+form.input button.quiet { background: var(--raised); color: var(--ink); }
+form.input button.unseen { position: absolute; left: -9999px; width: 1px; height: 1px; padding: 0; }
+
 /* What the pages not yet on the template share. */
 div.plot { max-width: 100%; }
 svg.chart { width: 100%; height: auto; display: block; }

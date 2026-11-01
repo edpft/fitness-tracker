@@ -58,6 +58,33 @@ pub async fn alter(
         .await
 }
 
+/// Record a calendar week as it was tapped, as an alteration.
+///
+/// # Errors
+///
+/// See [`Scheduling::alter_week`].
+pub async fn alter_week(
+    store: &Store,
+    week: Date,
+    slots: &BTreeMap<TrainingSlot, SlotLength>,
+    reason: &str,
+) -> Result<Alteration, ScheduleError> {
+    scheduling(store).alter_week(week, slots, reason).await
+}
+
+/// Record a calendar week as it was tapped as the weekly availability.
+///
+/// # Errors
+///
+/// See [`Scheduling::from_week`].
+pub async fn from_week(
+    store: &Store,
+    week: Date,
+    slots: BTreeMap<TrainingSlot, SlotLength>,
+) -> Result<TrainingPattern, ScheduleError> {
+    scheduling(store).from_week(week, slots).await
+}
+
 /// Record the operator ill from a date.
 ///
 /// # Errors
