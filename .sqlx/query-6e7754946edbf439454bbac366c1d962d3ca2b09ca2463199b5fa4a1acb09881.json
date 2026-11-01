@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO illness (authored_at, from_date, ended_on)\n            VALUES (?, ?, ?)\n            ON CONFLICT (from_date) DO UPDATE\n                SET authored_at = excluded.authored_at,\n                    ended_on    = excluded.ended_on\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "6e7754946edbf439454bbac366c1d962d3ca2b09ca2463199b5fa4a1acb09881"
+}

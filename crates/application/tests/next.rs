@@ -523,6 +523,10 @@ impl DiaryAuthor for Recorded {
         Ok(())
     }
 
+    async fn record_illness(&self, _illness: &domain::schedule::Illness) -> Result<(), StoreError> {
+        Ok(())
+    }
+
     async fn record_skip(&self, skip: &Skip) -> Result<(), StoreError> {
         self.skips
             .lock()

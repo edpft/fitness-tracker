@@ -1903,11 +1903,7 @@ fn alteration_line(alteration: &domain::schedule::Alteration) {
         format!("{} to {last}", alteration.start())
     };
 
-    match alteration.reason() {
-        Some(reason) => println!("  {span} — {}: {reason}", alteration.absence().kind()),
-        // An illness has no reason, so there is nothing for a colon to introduce.
-        None => println!("  {span} — {}", alteration.absence().kind()),
-    }
+    println!("  {span} — {}", alteration.reason());
 
     if let Some(zone) = alteration.zone() {
         println!("    in {}", zone.id());
@@ -1941,6 +1937,18 @@ pub fn alteration_recorded(alteration: &domain::schedule::Alteration) {
     alteration_line(alteration);
 }
 
+fn illness_line(illness: &domain::schedule::Illness) {
+    match illness.ended_on() {
+        None => println!("  ill from {}, and still ill", illness.from()),
+        Some(better) => println!("  ill from {}, better from {better}", illness.from()),
+    }
+}
+
+pub fn illness_recorded(illness: &domain::schedule::Illness) {
+    println!("\nrecorded");
+    illness_line(illness);
+}
+
 pub fn schedule(diary: &domain::schedule::Diary) {
     if diary.patterns().is_empty() {
         println!(
@@ -1972,12 +1980,18 @@ pub fn schedule(diary: &domain::schedule::Diary) {
     // as often a course, a visitor or a late finish as it is a trip.
     if diary.alterations().is_empty() {
         println!("\nno alterations");
-        return;
+    } else {
+        println!("\nalterations");
+        for alteration in diary.alterations() {
+            alteration_line(alteration);
+        }
     }
 
-    println!("\nalterations");
-    for alteration in diary.alterations() {
-        alteration_line(alteration);
+    if !diary.illnesses().is_empty() {
+        println!("\nillnesses");
+        for illness in diary.illnesses() {
+            illness_line(illness);
+        }
     }
 }
 

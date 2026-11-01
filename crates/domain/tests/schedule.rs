@@ -14,7 +14,7 @@ use domain::{
         Allocation, Discipline, RecordedSession, Relative, ScheduledSlot, SessionRole, accounted,
     },
     schedule::{
-        Absence, Alteration, Diary, PartOfDay, SlotLength, TrainingPattern, TrainingSlot,
+        Alteration, Diary, Illness, PartOfDay, SlotLength, TrainingPattern, TrainingSlot,
         covered_weekdays,
     },
 };
@@ -104,22 +104,18 @@ fn september() -> Built<Diary> {
     let first = Alteration::new(
         date(2026, 8, 29)?,
         days(7)?,
-        Absence::FamilyHoliday {
-            zone: None,
-            slots: Some(BTreeMap::new()),
-            reason: "away with family; no free weights where we are staying".to_owned(),
-        },
+        None,
+        Some(BTreeMap::new()),
+        "away with family; no free weights where we are staying".to_owned(),
     );
 
     // Away, unable to train, and in another country.
     let second = Alteration::new(
         date(2026, 9, 11)?,
         days(4)?,
-        Absence::FamilyHoliday {
-            zone: Some(zone("Europe/Rome")?),
-            slots: Some(BTreeMap::new()),
-            reason: "away with family in Rome".to_owned(),
-        },
+        Some(zone("Europe/Rome")?),
+        Some(BTreeMap::new()),
+        "away with family in Rome".to_owned(),
     );
 
     Ok(Diary::new(vec![schedule], vec![first, second]))
@@ -329,11 +325,9 @@ fn a_day_that_keeps_either_half_keeps_its_session() {
         vec![Alteration::new(
             monday,
             days(1).expect("one day"),
-            Absence::FamilyHoliday {
-                zone: None,
-                slots: Some(morning_only),
-                reason: "trains in the morning, away from lunchtime".to_owned(),
-            },
+            None,
+            Some(morning_only),
+            "trains in the morning, away from lunchtime".to_owned(),
         )],
     );
 
@@ -739,28 +733,68 @@ fn illness_empties_the_day_and_keeps_the_zone() {
     let rome = zone("Europe/Rome").expect("a real zone");
     let saturday = date(2026, 9, 12).expect("a real date");
 
-    let mut alterations = september()
+    let diary = september()
         .expect("the diary builds")
-        .alterations()
-        .to_vec();
-    alterations.push(Alteration::new(
-        saturday,
-        days(1).expect("one day"),
-        Absence::Illness,
-    ));
-    let diary = Diary::new(
-        vec![TrainingPattern::new(
-            date(2026, 1, 1).expect("a real date"),
-            zone("Europe/London").expect("a real zone"),
-            ordinary(),
-        )],
-        alterations,
-    );
+        .with_illnesses(vec![Illness::new(saturday)]);
 
     let ill = diary.on(saturday).expect("a schedule is in force");
     assert_eq!(ill.zone, rome, "still in Rome");
     assert!(ill.slots.is_empty(), "no room to train while ill");
-    assert_eq!(diary.alterations()[2].slots(), Some(&BTreeMap::new()));
+}
+
+/// **An illness is open until he says he is better** (#674): recorded from
+/// today, it takes every day after; ended today, today is free again.
+#[test]
+fn an_illness_runs_until_it_is_ended() {
+    let today = date(2026, 11, 2).expect("a real date");
+    let next_month = date(2026, 12, 2).expect("a real date");
+    let diary = || {
+        Diary::new(
+            vec![TrainingPattern::new(
+                date(2026, 1, 1).expect("a real date"),
+                zone("Europe/London").expect("a real zone"),
+                ordinary(),
+            )],
+            Vec::new(),
+        )
+    };
+
+    let open = Illness::new(today);
+    let ill = diary().with_illnesses(vec![open]);
+    assert_eq!(ill.open_illness(), Some(&open));
+    assert!(
+        ill.ill_on(today) && ill.ill_on(next_month),
+        "open, so every day after"
+    );
+    assert!(
+        ill.on(today).is_some_and(|day| day.slots.is_empty()),
+        "nothing free today"
+    );
+
+    let ended = open.ended(today).expect("better on the day it began");
+    let better = diary().with_illnesses(vec![ended]);
+    assert_eq!(better.open_illness(), None);
+    assert!(!better.ill_on(today), "ending it today frees today");
+    assert!(
+        better.on(today).is_some_and(|day| !day.slots.is_empty()),
+        "today's slot is back"
+    );
+}
+
+/// An illness cannot end before it began.
+#[test]
+fn an_illness_ends_on_or_after_it_began() {
+    let from = date(2026, 9, 17).expect("a real date");
+    assert!(
+        Illness::new(from)
+            .ended(date(2026, 9, 16).expect("a real date"))
+            .is_err()
+    );
+    assert!(
+        Illness::new(from)
+            .ended(date(2026, 9, 22).expect("a real date"))
+            .is_ok()
+    );
 }
 
 /// **A run covers the days it contains, and no others.**

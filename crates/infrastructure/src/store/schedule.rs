@@ -22,7 +22,7 @@ use domain::{
     planner::Arrangement as _,
     planner::{Discipline, TrainingWeek},
     schedule::{
-        Absence, Alteration, DayPart, Diary, PartOfDay, Skip, SlotLength, TrainingPattern,
+        Alteration, DayPart, Diary, Illness, PartOfDay, Skip, SlotLength, TrainingPattern,
         TrainingSlot,
     },
 };
@@ -138,12 +138,6 @@ async fn pattern_slots(
         .collect()
 }
 
-/// A holiday's reason, which the schema requires it to have and forbids an
-/// illness. Only a row written round the check could be missing one.
-fn reason_of(text: Option<String>) -> Result<String, StoreError> {
-    text.ok_or_else(|| corrupt(&"a holiday with no reason"))
-}
-
 impl DiaryStore for SqliteDiaryStore {
     async fn diary(&self) -> Result<Diary, StoreError> {
         let weeks = sqlx::query!(
@@ -169,8 +163,35 @@ impl DiaryStore for SqliteDiaryStore {
         }
 
         Ok(Diary::new(patterns, read_alterations(&self.pool).await?)
+            .with_illnesses(read_illnesses(&self.pool).await?)
             .with_skips(read_skips(&self.pool).await?))
     }
+}
+
+/// Every illness, earliest first.
+async fn read_illnesses(pool: &SqlitePool) -> Result<Vec<Illness>, StoreError> {
+    let rows = sqlx::query!(
+        r"
+        SELECT from_date, ended_on
+        FROM illness
+        ORDER BY from_date
+        "
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| store_error(&error))?;
+
+    rows.into_iter()
+        .map(|row| {
+            let illness = Illness::new(date_of(&row.from_date)?);
+            match row.ended_on {
+                None => Ok(illness),
+                Some(ended) => illness
+                    .ended(date_of(&ended)?)
+                    .map_err(|error| corrupt(&format!("a stored illness: {error}"))),
+            }
+        })
+        .collect()
 }
 
 /// Every skip, oldest first, so the latest of two for one window is last.
@@ -209,7 +230,7 @@ async fn read_skips(pool: &SqlitePool) -> Result<Vec<Skip>, StoreError> {
 async fn read_alterations(pool: &SqlitePool) -> Result<Vec<Alteration>, StoreError> {
     let booked = sqlx::query!(
         r"
-        SELECT id, start_date, days, absence, zone, states_slots, reason
+        SELECT id, start_date, days, zone, states_slots, reason
         FROM alteration
         ORDER BY start_date
         "
@@ -225,47 +246,36 @@ async fn read_alterations(pool: &SqlitePool) -> Result<Vec<Alteration>, StoreErr
             .and_then(std::num::NonZeroU8::new)
             .ok_or_else(|| corrupt(&"an alteration covering no days"))?;
 
-        let absence = match alteration.absence.as_str() {
-            "illness" => Absence::Illness,
-            "holiday" if alteration.states_slots == 0 => Absence::FamilyHoliday {
-                zone: alteration.zone.as_deref().map(zone_of).transpose()?,
-                slots: None,
-                reason: reason_of(alteration.reason)?,
-            },
-            // Stated slots, which may be none: zero rows either way, so
-            // `states_slots` is what tells "none" from "the ordinary week".
-            "holiday" => {
-                let rows = sqlx::query!(
-                    r"
-                    SELECT weekday, part, length
-                    FROM alteration_slot
-                    WHERE alteration = ?
-                    ",
-                    alteration.id
-                )
-                .fetch_all(pool)
-                .await
-                .map_err(|error| store_error(&error))?;
+        // Stated slots, which may be none: zero rows either way, so
+        // `states_slots` is what tells "none" from "the ordinary week".
+        let slots = if alteration.states_slots == 0 {
+            None
+        } else {
+            let rows = sqlx::query!(
+                r"
+                SELECT weekday, part, length
+                FROM alteration_slot
+                WHERE alteration = ?
+                ",
+                alteration.id
+            )
+            .fetch_all(pool)
+            .await
+            .map_err(|error| store_error(&error))?;
 
-                Absence::FamilyHoliday {
-                    zone: alteration.zone.as_deref().map(zone_of).transpose()?,
-                    reason: reason_of(alteration.reason)?,
-                    slots: Some(
-                        rows.iter()
-                            .map(|row| {
-                                Ok((slot_of(&row.weekday, &row.part)?, length_of(&row.length)?))
-                            })
-                            .collect::<Result<BTreeMap<_, _>, StoreError>>()?,
-                    ),
-                }
-            }
-            other => return Err(corrupt(&format!("an absence of kind {other:?}"))),
+            Some(
+                rows.iter()
+                    .map(|row| Ok((slot_of(&row.weekday, &row.part)?, length_of(&row.length)?)))
+                    .collect::<Result<BTreeMap<_, _>, StoreError>>()?,
+            )
         };
 
         alterations.push(Alteration::new(
             date_of(&alteration.start_date)?,
             days,
-            absence,
+            alteration.zone.as_deref().map(zone_of).transpose()?,
+            slots,
+            alteration.reason,
         ));
     }
     Ok(alterations)
@@ -341,21 +351,19 @@ impl DiaryAuthor for SqliteDiaryStore {
         let authored_at = Timestamp::now().to_string();
         let start = alteration.start().to_string();
         let days = i64::from(alteration.days().get());
-        let absence = alteration.absence().as_str();
         let zone = alteration.zone().map(|zone| zone.id().to_owned());
         let states_slots = i64::from(alteration.slots().is_some());
-        let reason = alteration.reason().map(str::to_owned);
+        let reason = alteration.reason();
 
         let id = sqlx::query!(
             r"
             INSERT INTO alteration (
-                authored_at, start_date, days, absence, zone, states_slots, reason
+                authored_at, start_date, days, zone, states_slots, reason
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT (start_date) DO UPDATE
-                SET authored_at = excluded.authored_at,
-                    days        = excluded.days,
-                    absence     = excluded.absence,
+                SET authored_at  = excluded.authored_at,
+                    days         = excluded.days,
                     zone         = excluded.zone,
                     states_slots = excluded.states_slots,
                     reason       = excluded.reason
@@ -364,7 +372,6 @@ impl DiaryAuthor for SqliteDiaryStore {
             authored_at,
             start,
             days,
-            absence,
             zone,
             states_slots,
             reason
@@ -399,6 +406,28 @@ impl DiaryAuthor for SqliteDiaryStore {
         }
 
         tx.commit().await.map_err(|error| store_error(&error))
+    }
+
+    async fn record_illness(&self, illness: &Illness) -> Result<(), StoreError> {
+        let authored_at = Timestamp::now().to_string();
+        let from = illness.from().to_string();
+        let ended = illness.ended_on().map(|ended| ended.to_string());
+        sqlx::query!(
+            r"
+            INSERT INTO illness (authored_at, from_date, ended_on)
+            VALUES (?, ?, ?)
+            ON CONFLICT (from_date) DO UPDATE
+                SET authored_at = excluded.authored_at,
+                    ended_on    = excluded.ended_on
+            ",
+            authored_at,
+            from,
+            ended
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+        Ok(())
     }
 
     async fn record_skip(&self, skip: &Skip) -> Result<(), StoreError> {

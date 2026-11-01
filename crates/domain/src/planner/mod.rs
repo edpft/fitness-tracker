@@ -352,7 +352,7 @@ pub fn role_on(
 /// operator: *"intentional absences that are known about in advance (holidays,
 /// gym closures, etc), unintentional absences that may or may not be known
 /// about in advance (illness), and just not running the tool at all"*. Illness
-/// is not a state of its own; it is the kind an absence carries.
+/// is not a state of its own; it is what took the slot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionState {
     /// Nothing has been issued and there is still time to issue it.
@@ -614,7 +614,7 @@ fn fill(plan: &Plan, slot: ScheduledSlot) -> Result<Filled<'_>, Unfilled> {
 ///
 /// **Only illness, and only this discipline's.** A holiday is time away and
 /// says nothing about fitness; illness is assumed to have cost some, which is
-/// why the kind is recorded (#178). And a gym session lost to illness does not
+/// why it is recorded apart (#178, #674). And a gym session lost to illness does not
 /// ease a ride: the two disciplines are held apart deliberately, and what
 /// happens when one waits for the other is the *plan's* business (#177) rather
 /// than this slot's.

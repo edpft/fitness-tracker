@@ -17,8 +17,6 @@
 use crate::support;
 use domain::planner::Arrangement as _;
 
-use std::num::NonZeroU8;
-
 use application::{
     CyclingDeliveryStore as _, CyclingMesocycleStore, DestinationName, DiaryAuthor as _,
     DiaryStore as _, MesocycleStore, PerformedSessionLog, PlanAuthor as _,
@@ -41,7 +39,7 @@ use domain::{
     planner::{MicrocycleState, Rerun, SessionState},
     prescription::{WeekIndex, WeekKind},
     provider::ProgrammeName,
-    schedule::{Absence, AbsenceKind, Alteration, DayPart, PartOfDay, Skip},
+    schedule::{AbsenceKind, DayPart, Illness, PartOfDay, Skip},
     sequence::NonEmpty,
 };
 use infrastructure::{
@@ -324,13 +322,10 @@ async fn autumn_tested() -> Fallible<(SqlitePool, tempfile::TempDir)> {
 /// Ill from Thursday 17 to Sunday 20 September, as the operator is extending
 /// his record to say.
 async fn ill_to_the_sunday(pool: &SqlitePool) -> Fallible<()> {
-    let over = NonZeroU8::new(4).ok_or("four is not zero")?;
     SqliteDiaryStore::new(pool.clone())
-        .record_alteration(&Alteration::new(
-            Date::constant(2026, 9, 17),
-            over,
-            Absence::Illness,
-        ))
+        .record_illness(
+            &Illness::new(Date::constant(2026, 9, 17)).ended(Date::constant(2026, 9, 21))?,
+        )
         .await?;
     Ok(())
 }
@@ -776,13 +771,10 @@ fn an_illness_makes_a_prescribed_session_not_performed() {
         let (pool, _directory) = autumn().await?;
         gym_delivered_for_the_friday(&pool).await?;
 
-        let over = NonZeroU8::new(2).ok_or("two is not zero")?;
         SqliteDiaryStore::new(pool.clone())
-            .record_alteration(&Alteration::new(
-                Date::constant(2026, 9, 18),
-                over,
-                Absence::Illness,
-            ))
+            .record_illness(
+                &Illness::new(Date::constant(2026, 9, 18)).ended(Date::constant(2026, 9, 20))?,
+            )
             .await?;
 
         let standing = Microcycle::new(

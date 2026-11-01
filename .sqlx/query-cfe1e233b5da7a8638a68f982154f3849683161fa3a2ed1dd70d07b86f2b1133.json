@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO alteration (\n                authored_at, start_date, days, zone, states_slots, reason\n            )\n            VALUES (?, ?, ?, ?, ?, ?)\n            ON CONFLICT (start_date) DO UPDATE\n                SET authored_at  = excluded.authored_at,\n                    days         = excluded.days,\n                    zone         = excluded.zone,\n                    states_slots = excluded.states_slots,\n                    reason       = excluded.reason\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "alteration",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cfe1e233b5da7a8638a68f982154f3849683161fa3a2ed1dd70d07b86f2b1133"
+}

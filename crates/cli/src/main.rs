@@ -668,7 +668,13 @@ fn schedule_command() -> ClapCommand {
         )
         .subcommand(
             ClapCommand::new("alter")
-                .about("Ask about a family holiday or an illness, and record it"),
+                .about("Ask when you are free for a run of days, and why, and record it"),
+        )
+        .subcommand(ClapCommand::new("ill").about(
+            "Record that you are ill from a date: nothing is prescribed until you are better",
+        ))
+        .subcommand(
+            ClapCommand::new("better").about("Record the day you are better from an illness"),
         )
         .subcommand(
             ClapCommand::new("show")
@@ -955,6 +961,17 @@ async fn stated_timezone(database: &Path) -> Result<Option<String>, Failure> {
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))
 }
 
+async fn schedule_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Failure> {
+    match sub.subcommand() {
+        Some(("add", _)) => scheduling::add(database).await,
+        Some(("alter", _)) => scheduling::alter(database).await,
+        Some(("ill", _)) => scheduling::ill(database).await,
+        Some(("better", _)) => scheduling::better(database).await,
+        Some(("show", _)) => scheduling::show(database).await,
+        _ => Err(Failure::message("no schedule command given", exit::USAGE)),
+    }
+}
+
 /// The commands that need no stream.
 ///
 /// **Prescription is not a stream.** The catalogue is one entry per thing this
@@ -1053,12 +1070,7 @@ async fn authored_command(
         }
         "canonicalise" => Some(canonicalise_command_run(sub, database).await),
         "holidays" => Some(holidays::list().await),
-        "schedule" => Some(match sub.subcommand() {
-            Some(("add", _)) => scheduling::add(database).await,
-            Some(("alter", _)) => scheduling::alter(database).await,
-            Some(("show", _)) => scheduling::show(database).await,
-            _ => Err(Failure::message("no schedule command given", exit::USAGE)),
-        }),
+        "schedule" => Some(schedule_command_run(sub, database).await),
         "mesocycle" => {
             let zone = match zone(sub) {
                 Ok(zone) => zone,

@@ -17,14 +17,14 @@
 use crate::support;
 use domain::planner::Arrangement as _;
 
-use std::{collections::BTreeMap, num::NonZeroU8};
+use std::collections::BTreeMap;
 
 use application::{DiaryAuthor as _, DiaryStore as _, ExerciseHistory as _};
 use domain::{
     normalised::OperatorZone,
     planner::{Discipline, Relative, SessionRole},
     prescription::{Anchor, AnchorProvenance, Authored, EntryTest, Skip, authored::Shape},
-    schedule::{Absence, Alteration, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
+    schedule::{Illness, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
 };
 use infrastructure::{SqliteDiaryStore, SqliteExerciseHistory, connect};
 use jiff::civil::{Weekday, date};
@@ -59,15 +59,6 @@ macro_rules! zone {
         match OperatorZone::try_from($name.to_owned()) {
             Ok(zone) => zone,
             Err(error) => panic!("{} is a zone: {error}", $name),
-        }
-    };
-}
-
-macro_rules! days {
-    ($count:literal) => {
-        match NonZeroU8::new($count) {
-            Some(days) => days,
-            None => panic!("{} is not zero", $count),
         }
     };
 }
@@ -126,11 +117,7 @@ async fn seeded() -> Result<(SqliteDiaryStore, tempfile::TempDir), Box<dyn std::
         .await?;
     // The one fact the goal turns on.
     store
-        .record_alteration(&Alteration::new(
-            date(2026, 9, 14),
-            days!(1),
-            Absence::Illness,
-        ))
+        .record_illness(&Illness::new(date(2026, 9, 14)).ended(date(2026, 9, 15))?)
         .await?;
 
     Ok((store, directory))
@@ -168,11 +155,7 @@ fn an_absence_outside_the_window_is_not_the_blocks_business() {
         let (store, _directory) = seeded().await?;
         // A fortnight away, well after the ten weeks end on 22 November.
         store
-            .record_alteration(&Alteration::new(
-                date(2026, 12, 7),
-                days!(14),
-                Absence::Illness,
-            ))
+            .record_illness(&Illness::new(date(2026, 12, 7)).ended(date(2026, 12, 21))?)
             .await?;
 
         let skips = derived(&autumn()?, &store).await?;
@@ -284,11 +267,7 @@ fn a_schedule_changed_before_the_start_is_picked_up_by_re_authoring() {
 
         // The operator books something for the Friday of week two.
         store
-            .record_alteration(&Alteration::new(
-                date(2026, 9, 25),
-                days!(1),
-                Absence::Illness,
-            ))
+            .record_illness(&Illness::new(date(2026, 9, 25)).ended(date(2026, 9, 26))?)
             .await?;
         let after = derived(&autumn()?, &store).await?;
 
@@ -334,11 +313,7 @@ fn a_schedule_changed_after_authoring_does_not_move_what_was_authored() {
 
         // Afterwards, another Monday goes.
         store
-            .record_alteration(&Alteration::new(
-                date(2026, 9, 21),
-                days!(1),
-                Absence::Illness,
-            ))
+            .record_illness(&Illness::new(date(2026, 9, 21)).ended(date(2026, 9, 22))?)
             .await?;
 
         let now = derived(&autumn()?, &store).await?;
@@ -409,7 +384,7 @@ fn a_session_performed_on_an_unavailable_day_still_counts() {
             ))
             .await?;
         diary
-            .record_alteration(&Alteration::new(performed_on, days!(1), Absence::Illness))
+            .record_illness(&Illness::new(performed_on).ended(performed_on.tomorrow()?)?)
             .await?;
 
         let history = SqliteExerciseHistory::new(pool.clone());

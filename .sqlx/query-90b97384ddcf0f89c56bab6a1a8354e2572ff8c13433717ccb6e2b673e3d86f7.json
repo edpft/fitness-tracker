@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT id, start_date, days, absence, zone, states_slots, reason\n        FROM alteration\n        ORDER BY start_date\n        ",
+  "query": "\n        SELECT id, start_date, days, zone, states_slots, reason\n        FROM alteration\n        ORDER BY start_date\n        ",
   "describe": {
     "columns": [
       {
@@ -37,19 +37,8 @@
         }
       },
       {
-        "name": "absence",
-        "ordinal": 3,
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "alteration",
-            "name": "absence"
-          }
-        }
-      },
-      {
         "name": "zone",
-        "ordinal": 4,
+        "ordinal": 3,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +49,7 @@
       },
       {
         "name": "states_slots",
-        "ordinal": 5,
+        "ordinal": 4,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -71,7 +60,7 @@
       },
       {
         "name": "reason",
-        "ordinal": 6,
+        "ordinal": 5,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -88,11 +77,10 @@
       false,
       false,
       false,
-      false,
       true,
       false,
-      true
+      false
     ]
   },
-  "hash": "799b47102d11ac81d35cd1c51490f422862abf59351ebebac9006421167079b0"
+  "hash": "90b97384ddcf0f89c56bab6a1a8354e2572ff8c13433717ccb6e2b673e3d86f7"
 }

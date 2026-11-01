@@ -17,7 +17,7 @@ use domain::{
     normalised::OperatorZone,
     planner::{Recorded, SessionState, closes, state_of},
     schedule::{
-        Absence, AbsenceKind, Alteration, DayPart, Diary, PartOfDay, Skip, SlotLength,
+        AbsenceKind, Alteration, DayPart, Diary, Illness, PartOfDay, Skip, SlotLength,
         TrainingPattern, TrainingSlot,
     },
 };
@@ -68,32 +68,17 @@ fn september() -> Built<Diary> {
     let rome = Alteration::new(
         date(2026, 9, 11)?,
         days(4)?,
-        Absence::FamilyHoliday {
-            zone: Some(zone("Europe/Rome")?),
-            slots: Some(BTreeMap::new()),
-            reason: "No holiday, no gym access".to_owned(),
-        },
+        Some(zone("Europe/Rome")?),
+        Some(BTreeMap::new()),
+        "No holiday, no gym access".to_owned(),
     );
 
     Ok(Diary::new(vec![pattern], vec![rome]))
 }
 
-/// The same diary, with an illness over a run of days.
-fn september_ill_from(start: Date, over: NonZeroU8) -> Built<Diary> {
-    let diary = september()?;
-    Ok(Diary::new(
-        diary.patterns().to_vec(),
-        diary
-            .alterations()
-            .iter()
-            .cloned()
-            .chain(std::iter::once(Alteration::new(
-                start,
-                over,
-                Absence::Illness,
-            )))
-            .collect(),
-    ))
+/// The same diary, with an illness from `start` until he was better.
+fn september_ill_from(start: Date, better: Date) -> Built<Diary> {
+    Ok(september()?.with_illnesses(vec![Illness::new(start).ended(better)?]))
 }
 
 const fn at(on: Date, part: PartOfDay) -> DayPart {
@@ -141,7 +126,9 @@ fn the_week_of_14_september_reads_as_the_operator_described_it() {
             NEITHER,
         ),
         SessionState::Skipped {
-            absence: AbsenceKind::FamilyHoliday
+            absence: AbsenceKind::Alteration {
+                reason: "No holiday, no gym access".to_owned()
+            }
         },
         "gym 1 fell inside the Rome holiday, and nothing had been prescribed"
     );
@@ -192,7 +179,7 @@ fn the_week_of_14_september_reads_as_the_operator_described_it() {
 fn an_illness_over_what_is_left_makes_a_prescribed_session_not_performed() {
     let diary = september_ill_from(
         date(2026, 9, 19).expect("a real Saturday"),
-        days(1).expect("one day"),
+        date(2026, 9, 20).expect("a real Sunday"),
     )
     .expect("the diary builds");
     let friday = date(2026, 9, 18).expect("a real Friday");
@@ -224,7 +211,7 @@ fn an_illness_over_what_is_left_makes_a_prescribed_session_not_performed() {
 fn a_window_that_simply_ran_out_names_no_absence() {
     let diary = september_ill_from(
         date(2026, 9, 17).expect("a real Thursday"),
-        days(2).expect("two days"),
+        date(2026, 9, 19).expect("a real Saturday"),
     )
     .expect("the diary builds");
     let friday = date(2026, 9, 18).expect("a real Friday");
@@ -320,11 +307,9 @@ fn a_holiday_that_states_no_slots_skips_nothing() {
     let away = Alteration::new(
         date(2026, 9, 14).expect("a real Monday"),
         days(7).expect("seven days"),
-        Absence::FamilyHoliday {
-            zone: Some(zone("Europe/Rome").expect("a real zone")),
-            slots: None,
-            reason: "away, training at the usual times".to_owned(),
-        },
+        Some(zone("Europe/Rome").expect("a real zone")),
+        None,
+        "away, training at the usual times".to_owned(),
     );
     let diary = Diary::new(vec![pattern], vec![away]);
     let monday = date(2026, 9, 14).expect("a real Monday");
@@ -359,11 +344,9 @@ fn a_holiday_that_states_slots_takes_the_parts_it_leaves_out() {
     let away = Alteration::new(
         date(2026, 9, 18).expect("a real Friday"),
         days(2).expect("two days"),
-        Absence::FamilyHoliday {
-            zone: None,
-            slots: Some(kept),
-            reason: "the hotel gym is only free on the Saturday morning".to_owned(),
-        },
+        None,
+        Some(kept),
+        "the hotel gym is only free on the Saturday morning".to_owned(),
     );
     let diary = Diary::new(vec![pattern], vec![away]);
     let friday = date(2026, 9, 18).expect("a real Friday");
@@ -377,7 +360,9 @@ fn a_holiday_that_states_slots_takes_the_parts_it_leaves_out() {
     );
     assert_eq!(
         diary.taken(at(saturday, PartOfDay::Evening)),
-        Some(AbsenceKind::FamilyHoliday),
+        Some(AbsenceKind::Alteration {
+            reason: "the hotel gym is only free on the Saturday morning".to_owned()
+        }),
     );
 
     assert_eq!(

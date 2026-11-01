@@ -25,40 +25,42 @@
 //! Monday's — it constrains the week without joining the pool. What is recorded
 //! here is the residue: the times something could be *scheduled into*.
 //!
-//! ## Two shapes, and they are not versions of each other
+//! ## Three shapes, and they are not versions of each other
 //!
 //! A [`TrainingPattern`] is the ordinary run of a week, in force from a date
 //! until something supersedes it. An [`Alteration`] is a run of days that
-//! departs from it.
+//! departs from it. An [`Illness`] runs from a date until the operator says he
+//! is better.
 //!
-//! **Every alteration is an absence, and there are two kinds.** A holiday takes
-//! the operator out of the routine — away from the gym and the bike, perhaps in
-//! another zone, with whatever slots the trip allows. Illness is only illness
-//! when it prevents training, so it has no slots at all. A late finish or a
-//! session moved to the next morning is neither: a session can be performed
-//! any time in its window, and the scheduling side need not know. A lasting
-//! change is a new [`TrainingPattern`].
+//! **An alteration is only a change to when the operator is free** (#674): a
+//! family holiday, a work trip, a session moved to another evening. They
+//! differ only in their reason, so there is no kind to choose between. A late
+//! finish is not one: a session can be performed any time in its window, and
+//! the scheduling side need not know. A lasting change is a new
+//! [`TrainingPattern`].
+//!
+//! **Illness is not an alteration.** The operator, 2026-10-31: it *"doesn't
+//! just affect my ability to train but also implies a regression of fitness
+//! which needs to be accounted for"*, and how long it lasts is not known when
+//! it starts. So it has no length, only a start and, once he is better, an end.
 //!
 //! They are held apart rather than nested, because an alteration is a fact
 //! about dates and not about which pattern happened to be in force when it was
 //! recorded. Nesting them would lose every alteration already recorded the next
 //! time the ordinary pattern changed.
 //!
-//! ## What an absence can say
+//! ## What an alteration can say
 //!
-//! - **a holiday that keeps the slots** — away, perhaps in another zone,
-//!   training at the usual times.
-//! - **a holiday with no slots** — unable to train at all.
-//! - **a holiday with different slots** — able to train at times the ordinary
-//!   pattern does not offer. A Friday evening becomes a Saturday morning, which
-//!   is possible on holiday and not in ordinary life. It is also how half a day
-//!   is said: keep the morning, lose the rest.
-//! - **illness** — unable to train at all, wherever the operator is. If it runs
-//!   on, the illness is extended rather than a second one recorded beside it.
+//! - **the slots unchanged** — away, perhaps in another zone, training at the
+//!   usual times.
+//! - **no slots** — unable to train at all.
+//! - **different slots** — able to train at times the ordinary pattern does
+//!   not offer. A Friday evening becomes a Saturday morning. It is also how
+//!   half a day is said: keep the morning, lose the rest.
 //!
-//! A holiday's `None` slots are "the ordinary week stands" and `Some` of an
-//! empty set is "none at all". Those are different facts, and collapsing them
-//! would make training away as usual cancel every session of the trip.
+//! `None` slots are "the ordinary week stands" and `Some` of an empty set is
+//! "none at all". Those are different facts, and collapsing them would make
+//! training away as usual cancel every session of the trip.
 
 mod holiday;
 mod length;
@@ -291,88 +293,25 @@ impl TrainingPattern {
     }
 }
 
-/// Why a run of days departs from the ordinary pattern.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Absence {
-    /// Out of the routine. A `None` zone is "the zone is unchanged", which is
-    /// not the same as any zone; `None` slots are "the ordinary week stands",
-    /// and an empty set is "no room to train at all".
-    ///
-    /// **A family holiday, not a school or public one**, which are facts about
-    /// the world rather than the operator's own time away (2026-09-22).
-    ///
-    /// **Only a family holiday is asked why.** It has somewhere to be and a
-    /// week to rearrange, so "Rome" is what makes the rearrangement readable
-    /// six months later. Illness explains itself.
-    FamilyHoliday {
-        zone: Option<OperatorZone>,
-        slots: Option<BTreeMap<TrainingSlot, SlotLength>>,
-        reason: String,
-    },
-    /// Too ill to train. Bad enough to prevent training is what makes it
-    /// illness, so it has no slots, and where the operator is does not matter.
-    Illness,
-}
-
-impl Absence {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::FamilyHoliday { .. } => "holiday",
-            Self::Illness => "illness",
-        }
-    }
-
-    /// Which of the two this is, without what it carries.
-    ///
-    /// **What a session's state needs and all it needs.** A session skipped for
-    /// a holiday and one skipped for an illness are different facts worth
-    /// telling apart; the zone, the slots and the reason belong to the
-    /// alteration and say nothing about the session.
-    pub const fn kind(&self) -> AbsenceKind {
-        match self {
-            Self::FamilyHoliday { .. } => AbsenceKind::FamilyHoliday,
-            Self::Illness => AbsenceKind::Illness,
-        }
-    }
-}
-
-/// Which kind of absence, with nothing an alteration carries.
+/// What took a part of a day, with only what a session's state needs.
 ///
-/// **Named after [`Absence`]'s own variants**, which #178 settled, rather than
-/// after the distinction between them. An earlier proposal called the pair
-/// `Intentional` and `Illness`: that reads one of the two as the absence of the
-/// other's property, and a holiday is a holiday whether or not it was planned.
-///
-/// **A skip is the third, and carries its reason** (#391). The operator,
-/// 2026-10-10: the reason is free text *"at the level of illness and family
-/// holiday"*, and a category that emerges from it becomes a variant of its
-/// own. It is not an [`Absence`], because an alteration is a run of whole days
-/// and a skip starts in the part of the day it is said.
+/// **An alteration and a skip carry their reason** (#391, #674). The operator,
+/// 2026-10-10: a skip's reason is free text *"at the level of illness and
+/// family holiday"*. Since #674 an alteration has no kind either — a holiday,
+/// a work trip and a moved session differ only in why — so what it took reads
+/// as its reason. Illness is its own record and needs none.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AbsenceKind {
-    FamilyHoliday,
+    Alteration { reason: String },
     Illness,
     Skip { reason: String },
-}
-
-impl AbsenceKind {
-    /// The stable key. Persisted, so it outlives a rename — which is why a
-    /// family holiday is still stored as `holiday`.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::FamilyHoliday => "holiday",
-            Self::Illness => "illness",
-            Self::Skip { .. } => "skip",
-        }
-    }
 }
 
 impl std::fmt::Display for AbsenceKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::FamilyHoliday => "family holiday",
+            Self::Alteration { reason } | Self::Skip { reason } => reason,
             Self::Illness => "illness",
-            Self::Skip { reason } => reason,
         })
     }
 }
@@ -450,9 +389,6 @@ impl Skip {
     }
 }
 
-/// Illness's slots, so [`Alteration::slots`] can lend a map whatever the kind.
-static NO_SLOTS: BTreeMap<TrainingSlot, SlotLength> = BTreeMap::new();
-
 /// The weekdays a run of days actually covers, in the order it meets them.
 ///
 /// **A run meets only some weekdays.** A trip from Friday to Monday has no
@@ -480,20 +416,34 @@ pub fn covered_weekdays(start: Date, days: NonZeroU8) -> Vec<Weekday> {
     covered
 }
 
-/// A run of days that departs from the ordinary pattern.
+/// A run of days that departs from the ordinary pattern: when the operator is
+/// free while it lasts, where, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Alteration {
     start: Date,
     days: NonZeroU8,
-    absence: Absence,
+    zone: Option<OperatorZone>,
+    slots: Option<BTreeMap<TrainingSlot, SlotLength>>,
+    reason: String,
 }
 
 impl Alteration {
-    pub const fn new(start: Date, days: NonZeroU8, absence: Absence) -> Self {
+    /// A `None` zone is "the zone is unchanged", which is not the same as any
+    /// zone; `None` slots are "the ordinary week stands", and an empty set is
+    /// "no room to train at all".
+    pub const fn new(
+        start: Date,
+        days: NonZeroU8,
+        zone: Option<OperatorZone>,
+        slots: Option<BTreeMap<TrainingSlot, SlotLength>>,
+        reason: String,
+    ) -> Self {
         Self {
             start,
             days,
-            absence,
+            zone,
+            slots,
+            reason,
         }
     }
 
@@ -505,35 +455,22 @@ impl Alteration {
         self.days
     }
 
-    pub const fn absence(&self) -> &Absence {
-        &self.absence
-    }
-
-    /// The zone a holiday is spent in, when it is not the ordinary one.
+    /// The zone it is spent in, when it is not the ordinary one.
     pub const fn zone(&self) -> Option<&OperatorZone> {
-        match &self.absence {
-            Absence::FamilyHoliday { zone, .. } => zone.as_ref(),
-            Absence::Illness => None,
-        }
+        self.zone.as_ref()
     }
 
     /// The slots while it lasts, which replace the ordinary week's. `None`
     /// when the ordinary week stands.
-    pub fn slots(&self) -> Option<&BTreeMap<TrainingSlot, SlotLength>> {
-        match &self.absence {
-            Absence::FamilyHoliday { slots, .. } => slots.as_ref(),
-            Absence::Illness => Some(&NO_SLOTS),
-        }
+    pub const fn slots(&self) -> Option<&BTreeMap<TrainingSlot, SlotLength>> {
+        self.slots.as_ref()
     }
 
-    /// Why, which only a holiday has. An unexplained trip is unreadable six
-    /// months later — § II.2's obligation on an edit overlay, which this is the
-    /// authored-data analogue of. Illness needs no explanation beyond itself.
-    pub const fn reason(&self) -> Option<&str> {
-        match &self.absence {
-            Absence::FamilyHoliday { reason, .. } => Some(reason.as_str()),
-            Absence::Illness => None,
-        }
+    /// Why. An unexplained trip is unreadable six months later — § II.2's
+    /// obligation on an edit overlay, which this is the authored-data analogue
+    /// of — and it is the only thing that tells a holiday from a work trip.
+    pub fn reason(&self) -> &str {
+        &self.reason
     }
 
     /// The last day this covers.
@@ -545,6 +482,78 @@ impl Alteration {
 
     pub fn covers(&self, date: Date) -> bool {
         date >= self.start && date <= self.last()
+    }
+
+    /// What it takes a part of a day as.
+    pub fn kind(&self) -> AbsenceKind {
+        AbsenceKind::Alteration {
+            reason: self.reason.clone(),
+        }
+    }
+}
+
+/// Too ill to train, from a date until the operator says he is better (#674).
+///
+/// **Open until ended, because its length is not known when it starts.** While
+/// it is open nothing is prescribed. Ending it is a declaration rather than
+/// the first session performed afterwards: a session done while still ill is
+/// not recovery, and the first session after it is the one a return from
+/// illness shapes.
+///
+/// **Bad enough to prevent training is what makes it illness**, so it takes
+/// every part of every day it covers, and where the operator is does not
+/// matter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Illness {
+    from: Date,
+    ended: Option<Date>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidIllness {
+    #[error("an illness ends on or after the day it began, {from}")]
+    EndsBeforeItBegins { from: Date },
+}
+
+impl Illness {
+    /// Ill from this date, and still ill.
+    pub const fn new(from: Date) -> Self {
+        Self { from, ended: None }
+    }
+
+    /// The same illness, ended: `on` is the first day the operator is better.
+    ///
+    /// **Ending it on the day it began covers nothing**, which is what saying
+    /// "ill today" and then "better today" means: today is available again.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidIllness`] if `on` is before the day it began.
+    pub fn ended(self, on: Date) -> Result<Self, InvalidIllness> {
+        if on < self.from {
+            return Err(InvalidIllness::EndsBeforeItBegins { from: self.from });
+        }
+        Ok(Self {
+            from: self.from,
+            ended: Some(on),
+        })
+    }
+
+    pub const fn from(&self) -> Date {
+        self.from
+    }
+
+    /// The first day better, once he has said so.
+    pub const fn ended_on(&self) -> Option<Date> {
+        self.ended
+    }
+
+    pub const fn is_open(&self) -> bool {
+        self.ended.is_none()
+    }
+
+    pub fn covers(&self, date: Date) -> bool {
+        date >= self.from && self.ended.is_none_or(|ended| date < ended)
     }
 }
 
@@ -573,6 +582,7 @@ impl Availability {
 pub struct Diary {
     patterns: Vec<TrainingPattern>,
     alterations: Vec<Alteration>,
+    illnesses: Vec<Illness>,
     skips: Vec<Skip>,
 }
 
@@ -584,8 +594,16 @@ impl Diary {
         Self {
             patterns,
             alterations,
+            illnesses: Vec::new(),
             skips: Vec::new(),
         }
+    }
+
+    /// The same diary, holding these illnesses as well.
+    #[must_use]
+    pub fn with_illnesses(mut self, illnesses: Vec<Illness>) -> Self {
+        self.illnesses = illnesses;
+        self
     }
 
     /// The same diary, holding these skips as well.
@@ -601,6 +619,20 @@ impl Diary {
 
     pub fn alterations(&self) -> &[Alteration] {
         &self.alterations
+    }
+
+    pub fn illnesses(&self) -> &[Illness] {
+        &self.illnesses
+    }
+
+    /// The illness he has not yet said he is better from, if there is one.
+    pub fn open_illness(&self) -> Option<&Illness> {
+        self.illnesses.iter().rfind(|illness| illness.is_open())
+    }
+
+    /// Was he ill on this date?
+    pub fn ill_on(&self, date: Date) -> bool {
+        self.illnesses.iter().any(|illness| illness.covers(date))
     }
 
     pub fn skips(&self) -> &[Skip] {
@@ -638,7 +670,6 @@ impl Diary {
         let pattern = self.pattern_on(date)?;
 
         let mut zone = pattern.zone().clone();
-        let mut ill = false;
         for alteration in self
             .alterations
             .iter()
@@ -647,16 +678,11 @@ impl Diary {
             if let Some(stated) = alteration.zone() {
                 zone.clone_from(stated);
             }
-            match alteration.absence() {
-                Absence::Illness => ill = true,
-                Absence::FamilyHoliday { slots: Some(_), .. } => ill = false,
-                Absence::FamilyHoliday { slots: None, .. } => {}
-            }
         }
 
-        // **Illness takes the day and states no slots of its own**: unlike a
-        // holiday, it is not known in advance.
-        let slots = if ill {
+        // **Illness takes the day whatever an alteration states**: it is not
+        // known in advance, so nothing arranged around it can give it back.
+        let slots = if self.ill_on(date) {
             BTreeMap::new()
         } else {
             self.free_on(date, false).into_iter().collect()
@@ -666,8 +692,8 @@ impl Diary {
     }
 
     /// The free slots a date offers: the pattern in force, or — unless only
-    /// the ordinary week is asked for — the slots a family holiday covering
-    /// it states instead. The last to state slots wins, as [`Self::on`]
+    /// the ordinary week is asked for — the slots an alteration covering it
+    /// states instead. The last to state slots wins, as [`Self::on`]
     /// resolves an overlap.
     ///
     /// **Illness is never read here**, for the reason [`Self::on`] gives.
@@ -682,11 +708,7 @@ impl Diary {
                 .iter()
                 .filter(|alteration| alteration.covers(date))
             {
-                if let Absence::FamilyHoliday {
-                    slots: Some(stated),
-                    ..
-                } = alteration.absence()
-                {
+                if let Some(stated) = alteration.slots() {
                     slots = stated;
                 }
             }
@@ -714,25 +736,30 @@ impl Diary {
     /// and a stated set takes every part it does not keep. The last alteration
     /// to state slots wins, exactly as [`Self::on`] resolves an overlap.
     pub fn taken(&self, at: DayPart) -> Option<AbsenceKind> {
-        let mut stated: Option<(&BTreeMap<TrainingSlot, SlotLength>, AbsenceKind)> = None;
+        // **Illness is read first**: it takes a toll an alteration or a skip
+        // does not (#180), so where it covers a part, the part is the
+        // illness's.
+        if self.ill_on(at.date) {
+            return Some(AbsenceKind::Illness);
+        }
+
+        let mut stated: Option<(&BTreeMap<TrainingSlot, SlotLength>, &Alteration)> = None;
         for alteration in self
             .alterations
             .iter()
             .filter(|alteration| alteration.covers(at.date))
         {
             if let Some(slots) = alteration.slots() {
-                stated = Some((slots, alteration.absence().kind()));
+                stated = Some((slots, alteration));
             }
         }
 
-        // **An alteration is read first**: illness takes a toll a skip does not
-        // (#180), so where both cover a part, the part is the illness's.
-        if let Some((slots, kind)) = stated {
+        if let Some((slots, alteration)) = stated {
             let kept = slots
                 .keys()
                 .any(|slot| slot.weekday == at.date.weekday() && slot.part == at.part);
             if !kept {
-                return Some(kind);
+                return Some(alteration.kind());
             }
         }
         self.skips

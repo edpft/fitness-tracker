@@ -13,7 +13,7 @@ use application::{DiaryAuthor as _, DiaryStore as _};
 use domain::{
     normalised::OperatorZone,
     planner::{Discipline, Relative, SessionRole},
-    schedule::{Absence, Alteration, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
+    schedule::{Alteration, Illness, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
 };
 use infrastructure::{SqliteDiaryStore, connect};
 use jiff::civil::{Weekday, date};
@@ -136,11 +136,9 @@ fn a_pattern_and_its_alterations_round_trip() {
     let alteration = Alteration::new(
         date(2026, 9, 14),
         days!(1),
-        Absence::FamilyHoliday {
-            zone: None,
-            slots: Some(BTreeMap::new()),
-            reason: "away, and unable to train".to_owned(),
-        },
+        None,
+        Some(BTreeMap::new()),
+        "away, and unable to train".to_owned(),
     );
 
     run!(store.record_pattern(&pattern));
@@ -156,15 +154,12 @@ fn a_pattern_and_its_alterations_round_trip() {
     );
 }
 
-/// **The distinction the schema exists to keep.**
+/// **An illness is its own record, open until he is better** (#674).
 ///
-/// A holiday and an illness come back as what they were recorded as.
-///
-/// Both leave no room to train and both are zero rows in `alteration_slot`, so
-/// the kind is the only thing telling them apart — and an illness read back as
-/// a holiday would be a week of lost fitness read as a week of rest.
+/// Recorded open, it takes every day from its start; recorded again with the
+/// day he was better, it is the same illness, ended, and that day is free.
 #[test]
-fn an_illness_is_not_a_holiday() {
+fn an_illness_is_open_until_it_is_ended() {
     let (store, _directory) = opened!();
 
     run!(store.record_pattern(&TrainingPattern::new(
@@ -173,47 +168,30 @@ fn an_illness_is_not_a_holiday() {
         ordinary_pattern()
     )));
 
-    let holiday = Alteration::new(
-        date(2026, 10, 5),
-        days!(3),
-        Absence::FamilyHoliday {
-            zone: Some(zone!("Europe/Rome")),
-            slots: Some(BTreeMap::new()),
-            reason: "Rome".to_owned(),
-        },
-    );
-    let illness = Alteration::new(date(2026, 9, 19), days!(2), Absence::Illness);
-
-    run!(store.record_alteration(&holiday));
-    run!(store.record_alteration(&illness));
+    let open = Illness::new(date(2026, 9, 17));
+    run!(store.record_illness(&open));
 
     let diary = run!(store.diary());
-
-    assert_eq!(
-        diary
-            .alterations()
-            .iter()
-            .find(|a| a.start() == date(2026, 10, 5)),
-        Some(&holiday),
-        "the holiday is stored with its zone"
-    );
-    assert_eq!(
-        diary
-            .alterations()
-            .iter()
-            .find(|a| a.start() == date(2026, 9, 19)),
-        Some(&illness),
-        "the illness is stored as illness"
-    );
-
-    let Some(ill) = diary.on(date(2026, 9, 20)) else {
+    assert_eq!(diary.illnesses(), [open], "read back open");
+    assert!(diary.alterations().is_empty(), "and not as an alteration");
+    let Some(ill) = diary.on(date(2026, 12, 1)) else {
         panic!("the diary answers a date it covers")
     };
     assert_eq!(ill.zone.id(), "Europe/London", "illness keeps the zone");
     assert!(
-        !ill.open(date(2026, 9, 20)),
-        "the Sunday of an illness is not a day the operator can train"
+        !ill.open(date(2026, 12, 1)),
+        "still ill, so months later is not a day to train"
     );
+
+    let Ok(ended) = open.ended(date(2026, 9, 22)) else {
+        panic!("it ends after it begins")
+    };
+    run!(store.record_illness(&ended));
+
+    let diary = run!(store.diary());
+    assert_eq!(diary.illnesses(), [ended], "one illness, ended");
+    assert!(diary.ill_on(date(2026, 9, 21)));
+    assert!(!diary.ill_on(date(2026, 9, 22)), "better on the 22nd");
 }
 
 /// A holiday's slots are `Option`: absent means the ordinary week stands —
@@ -234,11 +212,9 @@ fn training_away_as_usual_is_not_a_holiday_with_no_room() {
     let as_usual = Alteration::new(
         date(2026, 10, 5),
         days!(1),
-        Absence::FamilyHoliday {
-            zone: Some(zone!("Europe/Rome")),
-            slots: None,
-            reason: "in Rome, training as usual".to_owned(),
-        },
+        Some(zone!("Europe/Rome")),
+        None,
+        "in Rome, training as usual".to_owned(),
     );
     run!(store.record_alteration(&as_usual));
 
@@ -256,30 +232,38 @@ fn training_away_as_usual_is_not_a_holiday_with_no_room() {
     assert!(in_rome.open(date(2026, 10, 5)), "a Monday in Rome is open");
 }
 
-/// Re-stating an absence from the same date corrects its kind too.
+/// Re-stating an alteration from the same date corrects it.
 #[test]
-fn restating_an_absence_can_make_it_illness() {
+fn restating_an_alteration_corrects_it() {
     let (store, _directory) = opened!();
 
     run!(store.record_alteration(&Alteration::new(
         date(2026, 9, 14),
         days!(2),
-        Absence::FamilyHoliday {
-            zone: None,
-            slots: Some(slots(&[(
-                Weekday::Monday,
-                PartOfDay::Morning,
-                Discipline::Cycling,
-                easier()
-            )])),
-            reason: "away".to_owned(),
-        },
+        None,
+        Some(slots(&[(
+            Weekday::Monday,
+            PartOfDay::Morning,
+            Discipline::Cycling,
+            easier()
+        )])),
+        "away".to_owned(),
     )));
-    let corrected = Alteration::new(date(2026, 9, 14), days!(2), Absence::Illness);
+    let corrected = Alteration::new(
+        date(2026, 9, 14),
+        days!(3),
+        None,
+        Some(BTreeMap::new()),
+        "a work trip".to_owned(),
+    );
     run!(store.record_alteration(&corrected));
 
     let diary = run!(store.diary());
-    assert_eq!(diary.alterations(), [corrected], "one absence, corrected");
+    assert_eq!(
+        diary.alterations(),
+        [corrected],
+        "one alteration, corrected"
+    );
 }
 
 /// **What step 2 will ask, answered from the store.**
@@ -299,11 +283,9 @@ fn the_fourteenth_of_september_is_the_day_the_mesocycle_loses() {
     run!(store.record_alteration(&Alteration::new(
         date(2026, 9, 14),
         days!(1),
-        Absence::FamilyHoliday {
-            zone: None,
-            slots: Some(BTreeMap::new()),
-            reason: "away, and unable to train".to_owned(),
-        },
+        None,
+        Some(BTreeMap::new()),
+        "away, and unable to train".to_owned(),
     )));
 
     let diary = run!(store.diary());
@@ -436,24 +418,22 @@ fn an_alteration_moves_the_allocation_with_the_slots() {
     run!(store.record_alteration(&Alteration::new(
         date(2026, 9, 14),
         days!(7),
-        Absence::FamilyHoliday {
-            zone: None,
-            slots: Some(slots(&[
-                (
-                    Weekday::Saturday,
-                    PartOfDay::Morning,
-                    Discipline::Gym,
-                    harder(),
-                ),
-                (
-                    Weekday::Sunday,
-                    PartOfDay::Morning,
-                    Discipline::Cycling,
-                    easier(),
-                ),
-            ])),
-            reason: "away; the hotel gym is only free at the weekend".to_owned(),
-        },
+        None,
+        Some(slots(&[
+            (
+                Weekday::Saturday,
+                PartOfDay::Morning,
+                Discipline::Gym,
+                harder(),
+            ),
+            (
+                Weekday::Sunday,
+                PartOfDay::Morning,
+                Discipline::Cycling,
+                easier(),
+            ),
+        ])),
+        "away; the hotel gym is only free at the weekend".to_owned(),
     )));
 
     let diary = run!(store.diary());
