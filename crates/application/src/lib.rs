@@ -40,13 +40,15 @@ pub mod published;
 pub mod pulse_wave_velocity;
 pub mod ranges;
 pub mod reschedule;
+pub mod schedule;
 pub mod sleep;
 pub mod status;
 pub mod strength;
 
 pub use error::{
     ComparisonError, DeliveryError, DesignError, EquipmentError, ExtractionError, FillChangeError,
-    NormalisationError, PrescriptionError, RunLockError, SourceError, StatusError, StoreError,
+    NormalisationError, PrescriptionError, RunLockError, ScheduleError, SourceError, StatusError,
+    StoreError,
 };
 pub use ports::{
     AccountReader, Authored, ByReason, CanonicalCyclingSessionStore, CanonicalGymSessionStore,
