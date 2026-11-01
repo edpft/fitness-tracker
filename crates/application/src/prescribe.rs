@@ -20,6 +20,7 @@ use domain::{
     },
     measure::{Duration, Kg, RepCount},
     plan::{Occupies, Plan, PlanId, PlanName, Span},
+    planner::{Relative, SessionRole},
     prescription::{
         Anchor, AnchorProvenance, Attempts, BlockPeriodisation, BlockWeek, ByIntensity,
         DerivedFrom, GatingTopSet, GymMesocycle, Ladder, Linear, LoadSteps, Opening, Position,
@@ -34,7 +35,6 @@ use domain::{
         },
         warmup_ramp, warmup_rested,
     },
-    schedule::{Relative, SessionRole},
     sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::{Timestamp, civil::Date};
@@ -3126,8 +3126,8 @@ mod ramp_tests {
     use domain::{
         gym::{Load, Rir},
         measure::{Kg, RepCount},
+        planner::{Relative, SessionRole},
         prescription::{LoadSteps, seed},
-        schedule::{Relative, SessionRole},
     };
 
     fn reps_of(plan: PrimaryLoad) -> Result<Vec<u32>, Box<dyn std::error::Error>> {

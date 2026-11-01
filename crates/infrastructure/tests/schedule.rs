@@ -5,16 +5,15 @@
 //! is not the same as when they could have.
 
 use crate::support;
+use domain::planner::Arrangement as _;
 
 use std::{collections::BTreeMap, num::NonZeroU8};
 
 use application::{DiaryAuthor as _, DiaryStore as _};
 use domain::{
     normalised::OperatorZone,
-    schedule::{
-        Absence, Allocation, Alteration, Discipline, PartOfDay, Relative, SessionRole, SlotLength,
-        TrainingPattern, TrainingSlot,
-    },
+    planner::{Discipline, Relative, SessionRole},
+    schedule::{Absence, Alteration, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
 };
 use infrastructure::{SqliteDiaryStore, connect};
 use jiff::civil::{Weekday, date};
@@ -394,14 +393,14 @@ fn a_later_pattern_supersedes_by_existing() {
         before
             .slots
             .get(&TrainingSlot::new(Weekday::Friday, PartOfDay::Evening)),
-        Some(&Allocation::new(Discipline::Gym, harder())),
+        Some(&SlotLength::Shorter),
         "the first pattern still answers"
     );
     assert_eq!(
         after.slots,
         std::iter::once((
             TrainingSlot::new(Weekday::Saturday, PartOfDay::Morning),
-            Allocation::new(Discipline::Gym, harder()),
+            SlotLength::Shorter,
         ))
         .collect(),
         "the later pattern answers from its own date"

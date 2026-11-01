@@ -7,11 +7,12 @@
 //! bike's; it is the week, and what re-runs is decided across both.
 
 use domain::{
+    planner::{Discipline, Relative, SessionRole},
     planner::{
         ESSENTIAL, MicrocycleState, Owed, Placed, Rerun, RerunOrdinal, SessionState,
         microcycle_state, owed_by, rerun, rerun_of,
     },
-    schedule::{AbsenceKind, Discipline, Relative, SessionRole},
+    schedule::AbsenceKind,
 };
 use jiff::civil::{Date, date};
 

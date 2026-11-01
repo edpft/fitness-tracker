@@ -16,12 +16,12 @@ use domain::{
     gym::exercise::{DurationExercise, Exercise, RepsExercise},
     measure::RepCount,
     plan::Occupies,
+    planner::{Relative, SessionRole, TrainingWeek},
     prescription::{
         Authored, AuthoringError, BlockPeriodisation, BlockWeek, ByIntensity, EntryTest, Fill,
         GymMesocycle, InconsistentMesocycle, Primary, PrimaryPattern, Progression, Skip, SlotFills,
         StaticFill, Test, Tested, WeekIndex, authored::Shape as AuthoredShape, seed,
     },
-    schedule::{Relative, SessionRole, TrainingWeek},
 };
 use jiff::{civil::Date, tz::TimeZone};
 

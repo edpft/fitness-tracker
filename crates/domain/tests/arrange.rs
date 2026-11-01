@@ -1,14 +1,13 @@
 //! Which discipline and which session each free slot takes (#673), on the
 //! weeks the operator gave on 2026-10-31.
 
+use domain::planner::Arrangement as _;
 use std::{collections::BTreeMap, num::NonZeroU8};
 
 use domain::{
     normalised::OperatorZone,
-    schedule::{
-        Absence, Alteration, Diary, Discipline, Limits, PartOfDay, Relative, SlotLength,
-        TrainingPattern, TrainingSlot, arrange,
-    },
+    planner::{Discipline, Limits, Relative, arrange},
+    schedule::{Absence, Alteration, Diary, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
 };
 use jiff::civil::{Date, Weekday};
 
@@ -30,7 +29,7 @@ fn said(free: &BTreeMap<TrainingSlot, SlotLength>) -> Vec<String> {
         .map(|(slot, (discipline, role))| {
             let session = match (
                 discipline,
-                role.map(domain::schedule::SessionRole::intensity),
+                role.map(domain::planner::SessionRole::intensity),
             ) {
                 (Discipline::Cycling, Some(Relative::Lower)) => "long ride",
                 (Discipline::Cycling, _) => "ride, harder",
@@ -216,7 +215,7 @@ fn a_holiday_rearranges_what_its_week_has_left() {
     assert_eq!(week, ["gym 2026-11-02", "cycling 2026-11-08"]);
     let roles: Vec<_> = (2..=8)
         .flat_map(|day| diary.planned_slots_of(date(2026, 11, day)))
-        .map(|slot| slot.role.map(domain::schedule::SessionRole::intensity))
+        .map(|slot| slot.role.map(domain::planner::SessionRole::intensity))
         .collect();
     assert_eq!(roles, [Some(Relative::Higher), Some(Relative::Higher)]);
     assert!(diary.lost_disciplines(date(2026, 11, 2)).is_empty());
@@ -254,7 +253,7 @@ fn a_holiday_that_moves_a_slot_moves_its_session() {
         saturday
             .iter()
             .all(|slot| slot.discipline == Discipline::Gym
-                && slot.role.map(domain::schedule::SessionRole::intensity)
+                && slot.role.map(domain::planner::SessionRole::intensity)
                     == Some(Relative::Higher))
     );
     assert!(diary.planned_slots_of(date(2026, 11, 6)).is_empty());

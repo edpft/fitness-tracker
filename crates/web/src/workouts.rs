@@ -19,12 +19,12 @@ use application::design::InForce;
 use domain::{
     measure::{Duration, Kg, RepCount, Spans},
     normalised::OperatorZone,
+    planner::Relative,
     prescription::{
         AccessoryScheme, BackOff, ByIntensity, Levels, LinearProgression, LinearRest, Percentage,
         ResetProtocol, Rest, RestScheme, SbsChart, SbsDay, SbsProgression, SbsRest, Section,
         SlotId, Superset, Target, TopSetReps, WarmupStep, Workout,
     },
-    schedule::Relative,
     sequence::NonEmpty,
 };
 use maud::{DOCTYPE, Markup, html};
@@ -866,7 +866,7 @@ fn sbs_asked(fields: &Fields) -> Result<SbsProgression, String> {
 
 #[cfg(test)]
 mod tests {
-    use domain::{prescription::seed, schedule::Relative};
+    use domain::{planner::Relative, prescription::seed};
 
     use super::{Asked, Fields, asked, linear_fields, sbs_fields, workout_fields};
 

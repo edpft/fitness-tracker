@@ -16,8 +16,8 @@ use std::fmt;
 use crate::{
     gym::exercise::Exercise,
     measure::RepCount,
+    planner::SessionRole,
     prescription::{schedule::ByIntensity, shape::SlotId},
-    schedule::SessionRole,
 };
 
 /// Which lower slot the programme is trying to move.

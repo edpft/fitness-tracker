@@ -168,7 +168,7 @@ pub async fn init(
 /// other, so the version in force at a time stays recoverable and a later change
 /// to what this build ships rewrites nothing already authored.
 async fn seed_parameters(store: &Store) -> Result<ParameterOutcome, Failure> {
-    use domain::{prescription::seed, schedule::Relative};
+    use domain::{planner::Relative, prescription::seed};
 
     let failed = |error: application::StoreError| Failure::message(error.to_string(), exit::STORE);
     let unbuildable = |error: seed::InvalidSeed| Failure::message(error.to_string(), exit::USAGE);

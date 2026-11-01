@@ -27,9 +27,8 @@ use application::{DiaryAuthor, DiaryStore};
 use configurator::store::Store;
 use domain::{
     normalised::OperatorZone,
-    schedule::{
-        self, Absence, Alteration, Limits, PartOfDay, SlotLength, TrainingPattern, TrainingSlot,
-    },
+    planner::Limits,
+    schedule::{self, Absence, Alteration, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
 };
 use jiff::civil::{Date, Weekday};
 

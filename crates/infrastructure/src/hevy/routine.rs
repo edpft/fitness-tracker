@@ -39,8 +39,8 @@ use application::{Deliverable, Unexpressed};
 use domain::{
     gym::{Exercise, Load, Rir},
     measure::{Kg, Spans},
+    planner::Relative,
     prescription::{Prescribed, PrescribedExercise, PrescribedItem, PrescribedSet, Target},
-    schedule::Relative,
 };
 use serde::Serialize;
 use serde_json::value::RawValue;

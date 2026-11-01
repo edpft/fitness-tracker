@@ -21,7 +21,7 @@ use std::{fmt, num::NonZeroU8};
 
 use jiff::{Zoned, civil::Date, tz::TimeZone};
 
-use crate::schedule::{Relative, SessionRole, TrainingWeek};
+use crate::planner::{Relative, SessionRole, TrainingWeek};
 
 /// One value per intensity, both mandatory.
 ///
@@ -795,8 +795,8 @@ fn offset_of(start: Date, date: Date) -> i64 {
 mod next_session_tests {
     use super::Calendar;
     use crate::{
+        planner::{Relative, SessionRole, TrainingWeek},
         prescription::Skip,
-        schedule::{Relative, SessionRole, TrainingWeek},
     };
     use jiff::{Timestamp, civil::Weekday};
 

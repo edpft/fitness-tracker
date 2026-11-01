@@ -21,6 +21,7 @@ use jiff::{civil::Date, tz::TimeZone};
 use crate::{
     gym::exercise::Exercise,
     measure::RepCount,
+    planner::{SessionRole, TrainingWeek},
     prescription::{
         anchor::Anchor,
         block::{BlockPeriodisation, EntryTest},
@@ -33,7 +34,6 @@ use crate::{
         test::{Test, Tested},
     },
     provider::ProvidedFrom,
-    schedule::{SessionRole, TrainingWeek},
 };
 
 /// Why a set of answers does not make a programme.

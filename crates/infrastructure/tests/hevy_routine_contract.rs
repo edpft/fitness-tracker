@@ -17,12 +17,12 @@ use domain::{
     measure::{Duration, Kg, RepCount},
     plan::MesocycleOrdinal,
     planner::RerunOrdinal,
+    planner::{Relative, SessionRole},
     prescription::{
         DerivedFrom, MesocycleId, PrescribedExercise, PrescribedItem, PrescribedSet,
         PrescribedSuperset, PrescribedWorkout, SessionOrdinal, SlotId, SupersetMember, Target,
         WeekIndex, WeekKind, WorkoutShape,
     },
-    schedule::{Relative, SessionRole},
     sequence::{AtLeastTwo, NonEmpty},
 };
 use infrastructure::HevyRoutines;

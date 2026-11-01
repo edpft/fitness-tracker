@@ -23,8 +23,9 @@ use application::{
 use domain::{
     landing::{FetchedAt, LandingStream},
     normalised::OperatorZone,
+    planner::Discipline,
     prescription::{DestinationName, InvalidDelivery},
-    schedule::{DayPart, Discipline},
+    schedule::DayPart,
 };
 use infrastructure::{
     BtwbExportLandingStore, FileRunLock, GarminActivityFileLandingStore,

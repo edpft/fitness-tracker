@@ -17,6 +17,7 @@
 
 use crate::{
     gym::exercise::Exercise,
+    planner::SessionRole,
     prescription::{
         anchor::Anchor,
         ladder::{InvalidLadder, Ladder, Opening},
@@ -25,7 +26,6 @@ use crate::{
         schedule::Calendar,
         steps::LoadSteps,
     },
-    schedule::SessionRole,
 };
 
 use super::{

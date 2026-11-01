@@ -281,7 +281,7 @@ pub fn roughly(takes: std::time::Duration) -> String {
     format!("{minutes} minutes")
 }
 
-pub fn canonicalising_started(discipline: domain::schedule::Discipline) {
+pub fn canonicalising_started(discipline: domain::planner::Discipline) {
     println!("canonicalising {} sessions …", discipline.as_str());
 }
 
@@ -1402,7 +1402,7 @@ pub fn not_prescribed(why: &dyn std::fmt::Display) {
 /// and the slot after it says when the next one opens without prescribing it.
 /// Deriving next week's session against a record that has a week left to
 /// change would be issuing something nobody can train from yet.
-pub fn microcycle_complete(after: Option<domain::schedule::ScheduledSlot>) {
+pub fn microcycle_complete(after: Option<domain::planner::ScheduledSlot>) {
     match after {
         Some(slot) => println!(
             "nothing in this microcycle is still to be prescribed. The next slot is {} on {} ({:?} {})",
@@ -1848,17 +1848,17 @@ pub fn prepared(prepared: &crate::setup::Prepared) {
 /// `arranged` is given, which a whole pattern is. A holiday's slots are only
 /// part of a week, so what they take depends on the days around them.
 ///
-/// **The role reads as the operator says it**, not as the type prints it: a
-/// slot is the harder and shorter session of its discipline's week, or the
-/// easier and longer one. "higher intensity, lower volume" is what the domain
-/// means by that and is a mouthful in a list of four lines.
+/// **The session reads by its role, and the slot by its length.** Until #673
+/// a session was "easier, longer", which put "longer" on a gym session in a
+/// shorter slot: the operator, 2026-10-31, *"the evening session is shorter
+/// and the gym session that fills it is lower intensity, higher volume"*.
 fn week_slots(
     slots: &std::collections::BTreeMap<
         domain::schedule::TrainingSlot,
         domain::schedule::SlotLength,
     >,
     arranged: Option<
-        &std::collections::BTreeMap<domain::schedule::TrainingSlot, domain::schedule::Allocation>,
+        &std::collections::BTreeMap<domain::schedule::TrainingSlot, domain::planner::Allocation>,
     >,
 ) {
     if slots.is_empty() {
@@ -1874,7 +1874,7 @@ fn week_slots(
                 |allocation| {
                     allocation.role.map_or_else(
                         || allocation.discipline.to_string(),
-                        |role| format!("{}, {}", allocation.discipline, said(role)),
+                        |role| format!("{}, {role}", allocation.discipline),
                     )
                 },
             )
@@ -1892,17 +1892,6 @@ fn week_slots(
     for (day, parts) in days {
         let name = format!("{day:?}").to_lowercase();
         println!("    {name:<10}{}", parts.join(", "));
-    }
-}
-
-/// A role in the words the prompt asks for it in.
-const fn said(role: domain::schedule::SessionRole) -> &'static str {
-    use domain::schedule::Relative;
-    match (role.intensity(), role.volume()) {
-        (Relative::Higher, Relative::Lower) => "harder, shorter",
-        (Relative::Lower, Relative::Higher) => "easier, longer",
-        (Relative::Higher, Relative::Higher) => "harder, longer",
-        (Relative::Lower, Relative::Lower) => "easier, shorter",
     }
 }
 
@@ -1934,7 +1923,7 @@ fn alteration_line(alteration: &domain::schedule::Alteration) {
 
 pub fn pattern_recorded(
     pattern: &domain::schedule::TrainingPattern,
-    limits: domain::schedule::Limits,
+    limits: domain::planner::Limits,
 ) {
     println!(
         "\nrecorded, from {} ({})",
@@ -1943,7 +1932,7 @@ pub fn pattern_recorded(
     );
     week_slots(
         pattern.slots(),
-        Some(&domain::schedule::allocations(pattern.slots(), limits)),
+        Some(&domain::planner::allocations(pattern.slots(), limits)),
     );
 }
 
@@ -1972,7 +1961,10 @@ pub fn schedule(diary: &domain::schedule::Diary) {
         println!("{heading}, from {} ({})", week.from(), week.zone().id());
         week_slots(
             week.slots(),
-            Some(&domain::schedule::allocations(week.slots(), diary.limits())),
+            Some(&domain::planner::allocations(
+                week.slots(),
+                domain::planner::Limits::STATED,
+            )),
         );
     }
 

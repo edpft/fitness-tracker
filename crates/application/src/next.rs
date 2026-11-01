@@ -34,6 +34,7 @@
 //! that can still be performed is the one delivered — again, if it already was
 //! (#390).
 
+use domain::planner::Arrangement as _;
 use std::{
     collections::BTreeSet,
     future::{Future, poll_fn},
@@ -50,8 +51,9 @@ use domain::{
     normalised::{OperatorZone, WorkoutCount},
     plan::{MesocycleOrdinal, Plan, PlanName, Span},
     planner::{self, RerunOrdinal, SessionState},
+    planner::{Discipline, ScheduledSlot},
     prescription::{GymMesocycle, schedule::WeekKind},
-    schedule::{DayPart, Diary, Discipline, Holidays, ScheduledSlot, Skip},
+    schedule::{DayPart, Diary, Holidays, Skip},
 };
 use jiff::civil::Date;
 

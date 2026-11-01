@@ -38,8 +38,8 @@ pub async fn standing(
             gym_performed: store.canonical_gym(),
             cycling_performed: store.rides(),
         },
-        destination(domain::schedule::Discipline::Gym)?,
-        destination(domain::schedule::Discipline::Cycling)?,
+        destination(domain::planner::Discipline::Gym)?,
+        destination(domain::planner::Discipline::Cycling)?,
     )
     .standing(now)
     .await?)

@@ -101,6 +101,7 @@ use jiff::{civil::Date, tz::TimeZone};
 use crate::measure::RepCount;
 use crate::{gym::exercise::Exercise, measure::Kg};
 
+use crate::planner::{SessionRole, TrainingWeek};
 use crate::prescription::{
     anchor::Anchor,
     linear::{Primary, PrimaryPattern, SlotFills},
@@ -110,7 +111,6 @@ use crate::prescription::{
     repmax::{PER_REPETITION, rep_max},
     schedule::{Calendar, InvalidCalendar, Skip, WeekIndex, WeekKind},
 };
-use crate::schedule::{SessionRole, TrainingWeek};
 
 /// Why a block could not be planned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

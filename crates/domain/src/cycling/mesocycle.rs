@@ -45,8 +45,8 @@ use std::collections::BTreeMap;
 use jiff::civil::Date;
 
 use crate::{
+    planner::{SessionRole, TrainingWeek},
     provider::{ExternalProgramme, InvalidProvision, ProvidedFrom, PublishedAt},
-    schedule::{SessionRole, TrainingWeek},
     sequence::NonEmpty,
 };
 

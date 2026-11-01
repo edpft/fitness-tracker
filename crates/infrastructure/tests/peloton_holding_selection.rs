@@ -28,7 +28,7 @@ use std::{collections::BTreeSet, error::Error};
 use application::{HoldingRides as _, RiddenVenues, StoreError};
 use domain::{
     cycling::RideVenue,
-    schedule::{Relative, SessionRole},
+    planner::{Relative, SessionRole},
 };
 use infrastructure::{
     SqlitePelotonClassStore, connect,

@@ -14,12 +14,12 @@
 
 use crate::{
     gym::exercise::Exercise,
+    planner::{Relative, SessionRole},
     prescription::{
         linear::{Primary, PrimaryPattern, SlotFills},
         mesocycle::{InconsistentMesocycle, check_primary},
         schedule::Calendar,
     },
-    schedule::{Relative, SessionRole},
 };
 
 use super::chart::WEEKS;

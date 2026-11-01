@@ -41,10 +41,10 @@ use domain::{
     normalised::{NormalisationRunId, OperatorZone, RefusalCount, WorkoutCount},
     plan::{Plan, PlanId, PlanName, PlanWindow},
     planner::SessionState,
+    planner::{Discipline, Relative, ScheduledSlot, SessionRole},
     prescription::GymMesocycle,
     schedule::{
-        DayPart, Diary, Discipline, Holidays, PartOfDay, Relative, ScheduledSlot, SessionRole,
-        Skip, SlotLength, TrainingPattern, TrainingSlot,
+        DayPart, Diary, Holidays, PartOfDay, Skip, SlotLength, TrainingPattern, TrainingSlot,
     },
 };
 use jiff::civil::{Date, Weekday};

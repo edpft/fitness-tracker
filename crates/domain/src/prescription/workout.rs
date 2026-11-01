@@ -18,7 +18,7 @@ use std::fmt;
 
 use jiff::{Timestamp, civil::Date};
 
-use crate::{measure::Kg, schedule::SessionRole};
+use crate::{measure::Kg, planner::SessionRole};
 
 use super::{anchor::Anchor, schedule::WeekKind, shape::WorkoutShape};
 

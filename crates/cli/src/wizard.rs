@@ -24,6 +24,7 @@
 //! done before, so the list is an offer and not a menu: any key in the
 //! vocabulary is accepted, and the numbers are a shortcut rather than a fence.
 
+use domain::planner::Arrangement as _;
 use std::{
     io::{IsTerminal, Write},
     path::Path,
@@ -42,6 +43,7 @@ use domain::{
     measure::{Kg, RepCount},
     normalised::OperatorZone,
     plan::{Mesocycles, Plan, PlanName},
+    planner::{Discipline, Relative, SessionRole, TrainingWeek},
     // The periodised block, named for what it holds: the plan a duration
     // divides into.
     prescription::{
@@ -50,7 +52,7 @@ use domain::{
         StaticFill, authored::Shape, block::Block as BlockPlan, rep_max,
     },
     provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
-    schedule::{Diary, Discipline, Relative, SessionRole, TrainingWeek},
+    schedule::Diary,
 };
 use jiff::civil::Date;
 

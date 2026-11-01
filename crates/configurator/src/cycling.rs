@@ -13,7 +13,7 @@ use application::{
 use domain::{
     cycling::{CyclingMesocycle, Ftp},
     normalised::OperatorZone,
-    schedule::SessionRole,
+    planner::SessionRole,
 };
 use infrastructure::{
     SqlitePelotonClassStore,

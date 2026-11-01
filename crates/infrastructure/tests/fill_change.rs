@@ -10,8 +10,8 @@ use crate::support;
 use application::{FillChangeStore, MesocycleStore, PlanAuthor, prescribe::Authoring};
 use domain::{
     gym::exercise::{Exercise, Implement, RepsExercise},
+    planner::SessionRole,
     prescription::{FillChange, SlotId, linear::SlotContent},
-    schedule::SessionRole,
 };
 use jiff::civil::date;
 use support::mesocycle::{self, entry_test_from};

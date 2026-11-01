@@ -14,7 +14,7 @@ use configurator::{
     prescribing::{self, PreviewFailure},
     store::Store,
 };
-use domain::{normalised::OperatorZone, schedule::Relative};
+use domain::{normalised::OperatorZone, planner::Relative};
 use jiff::civil::Date;
 
 use crate::{Failure, catalogue, config, exit, output};

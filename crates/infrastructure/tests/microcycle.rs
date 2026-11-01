@@ -15,6 +15,7 @@
 //! which slot a date answers for.
 
 use crate::support;
+use domain::planner::Arrangement as _;
 
 use std::num::NonZeroU8;
 
@@ -36,13 +37,11 @@ use domain::{
     measure::PositiveDuration,
     normalised::{OperatorZone, StartedAt},
     plan::{Mesocycles, Plan, PlanName},
+    planner::{Discipline, Relative, SessionRole},
     planner::{MicrocycleState, Rerun, SessionState},
     prescription::{WeekIndex, WeekKind},
     provider::ProgrammeName,
-    schedule::{
-        Absence, AbsenceKind, Alteration, DayPart, Discipline, PartOfDay, Relative, SessionRole,
-        Skip,
-    },
+    schedule::{Absence, AbsenceKind, Alteration, DayPart, PartOfDay, Skip},
     sequence::NonEmpty,
 };
 use infrastructure::{

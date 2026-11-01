@@ -12,7 +12,7 @@ use application::{
     WorkoutStore as _,
 };
 use domain::plan::MesocycleOrdinal;
-use domain::schedule::{Relative, SessionRole};
+use domain::planner::{Relative, SessionRole};
 use infrastructure::{
     SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqlitePlanStore, connect,
 };

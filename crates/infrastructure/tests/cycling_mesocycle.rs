@@ -16,8 +16,9 @@ use domain::{
     },
     measure::PositiveDuration,
     plan::{Mesocycles, Plan, PlanName},
+    planner::{Relative, SessionRole, TrainingWeek},
     provider::{ExternalProgramme, ProgrammeName, Provider, PublishedAt},
-    schedule::{Diary, PartOfDay, Relative, SessionRole, TrainingWeek},
+    schedule::{Diary, PartOfDay},
     sequence::NonEmpty,
 };
 use infrastructure::{SqliteCyclingMesocycleStore, SqlitePlanStore, connect};

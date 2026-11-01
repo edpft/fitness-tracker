@@ -19,9 +19,11 @@ use std::collections::BTreeMap;
 use application::{DiaryAuthor, DiaryStore, StoreError};
 use domain::{
     normalised::OperatorZone,
+    planner::Arrangement as _,
+    planner::{Discipline, TrainingWeek},
     schedule::{
-        Absence, Alteration, DayPart, Diary, Discipline, PartOfDay, Skip, SlotLength,
-        TrainingPattern, TrainingSlot, TrainingWeek,
+        Absence, Alteration, DayPart, Diary, PartOfDay, Skip, SlotLength, TrainingPattern,
+        TrainingSlot,
     },
 };
 use jiff::{Timestamp, civil::Date};
@@ -102,9 +104,10 @@ pub(super) async fn training_week(
         return Ok(None);
     };
 
-    // **Arranged by the domain, never by SQL**: which discipline a slot is
-    // given is worked out from the whole week (#673), so the pattern is read
-    // and handed to the rules rather than filtered here.
+    // **The store reads free time and the planner arranges it** (#673):
+    // which discipline a slot is given is programming, worked out from the
+    // whole week, so the pattern is read whole and handed over rather than
+    // filtered here.
     let pattern = TrainingPattern::new(
         date_of(&pattern.from_date)?,
         zone_of(&pattern.zone)?,

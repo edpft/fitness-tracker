@@ -19,12 +19,14 @@
 //! asked for the id by the mesocycle's authored start, which only that
 //! mesocycle covers.
 
+use domain::planner::Arrangement as _;
 use domain::{
     cycling::{CyclingMesocycle, CyclingMesocycleId},
     plan::{Mesocycles, Occupies, Plan, PlanId, PlanName, PlanWindow},
     planner::{self, Missed, Rerun, RerunOrdinal},
+    planner::{Discipline, SessionRole},
     prescription::{GymMesocycle, MesocycleId},
-    schedule::{Diary, Discipline, SessionRole},
+    schedule::Diary,
 };
 use jiff::civil::Date;
 

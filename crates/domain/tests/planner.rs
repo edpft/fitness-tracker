@@ -9,6 +9,7 @@
 //! mesocycle are built without one; the week comes from the diary, and the
 //! planner joins the two on the role.
 
+use domain::planner::Arrangement as _;
 use std::collections::BTreeMap;
 
 use domain::{
@@ -20,15 +21,13 @@ use domain::{
     measure::{PositiveDuration, RepCount},
     plan::{Mesocycles, Plan, PlanName},
     planner::{self, Filled, Missed, Planned, week},
+    planner::{Discipline, Relative, SessionRole},
     prescription::{
         BlockPeriodisation, EntryTest, Fill, GymMesocycle, Primary, PrimaryPattern, Progression,
         Skip, SlotFills, StaticFill,
     },
     provider::{ExternalProgramme, ProgrammeName, Provider, PublishedAt},
-    schedule::{
-        Absence, Alteration, Diary, Discipline, PartOfDay, Relative, SessionRole, SlotLength,
-        TrainingPattern, TrainingSlot,
-    },
+    schedule::{Absence, Alteration, Diary, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
     sequence::NonEmpty,
 };
 use jiff::{civil::Weekday, civil::date, tz::TimeZone};

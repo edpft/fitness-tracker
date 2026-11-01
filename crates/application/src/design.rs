@@ -6,8 +6,8 @@
 //! reaches only the plans made after it.
 
 use domain::{
+    planner::Relative,
     prescription::{ByIntensity, LinearProgression, SbsProgression, Workout},
-    schedule::Relative,
 };
 use jiff::Timestamp;
 
@@ -123,11 +123,11 @@ mod tests {
 
     use domain::{
         measure::RepCount,
+        planner::Relative,
         prescription::{
             AccessoryScheme, LinearProgression, Percentage, SbsProgression, Section, Target,
             Workout, seed,
         },
-        schedule::Relative,
     };
     use jiff::{Timestamp, ToSpan as _};
 

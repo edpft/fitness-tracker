@@ -20,8 +20,9 @@ use domain::{
     cycling::{CyclingMicrocycle, Ride, clock},
     gym::Load,
     measure::{PositiveDuration, Spans},
+    planner::ScheduledSlot,
     prescription::{Prescribed as Set, PrescribedExercise, PrescribedSet},
-    schedule::{DayPart, ScheduledSlot},
+    schedule::DayPart,
 };
 use maud::{Markup, html};
 

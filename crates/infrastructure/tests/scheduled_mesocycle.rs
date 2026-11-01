@@ -15,17 +15,16 @@
 //! while the week keeps a gym session. An illness takes its own days.
 
 use crate::support;
+use domain::planner::Arrangement as _;
 
 use std::{collections::BTreeMap, num::NonZeroU8};
 
 use application::{DiaryAuthor as _, DiaryStore as _, ExerciseHistory as _};
 use domain::{
     normalised::OperatorZone,
+    planner::{Discipline, Relative, SessionRole},
     prescription::{Anchor, AnchorProvenance, Authored, EntryTest, Skip, authored::Shape},
-    schedule::{
-        Absence, Alteration, Discipline, PartOfDay, Relative, SessionRole, SlotLength,
-        TrainingPattern, TrainingSlot,
-    },
+    schedule::{Absence, Alteration, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
 };
 use infrastructure::{SqliteDiaryStore, SqliteExerciseHistory, connect};
 use jiff::civil::{Weekday, date};

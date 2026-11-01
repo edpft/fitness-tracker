@@ -42,12 +42,13 @@ use domain::normalised::{
 };
 use domain::plan::{MesocycleOrdinal, Plan, PlanId, PlanName, PlanWindow};
 use domain::planner::RerunOrdinal;
+use domain::planner::{Relative, SessionRole};
 use domain::prescription::{
     Anchor, ByIntensity, GymMesocycle, LinearProgression, MesocycleId, PrescribedWorkout,
     PrescriptionState, Progress, SbsProgression, Scales, SlotId, WeekIndex, Workout,
 };
 use domain::provider::ExternalProgramme;
-use domain::schedule::{Alteration, Diary, Holidays, Relative, SessionRole, Skip, TrainingPattern};
+use domain::schedule::{Alteration, Diary, Holidays, Skip, TrainingPattern};
 use domain::sequence::NonEmpty;
 
 use crate::error::{

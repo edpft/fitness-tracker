@@ -6,8 +6,8 @@ use application::{
     design::{Designing, InForce},
 };
 use domain::{
+    planner::Relative,
     prescription::{LinearProgression, SbsProgression, Workout},
-    schedule::Relative,
 };
 
 use crate::store::Store;

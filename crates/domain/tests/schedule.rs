@@ -5,13 +5,16 @@
 //! Friday 11 September through Monday 14 September, and in `Europe/Rome` for the
 //! second of those.
 
+use domain::planner::Arrangement as _;
 use std::{collections::BTreeMap, num::NonZeroU8};
 
 use domain::{
     normalised::OperatorZone,
+    planner::{
+        Allocation, Discipline, RecordedSession, Relative, ScheduledSlot, SessionRole, accounted,
+    },
     schedule::{
-        Absence, Allocation, Alteration, Diary, Discipline, Limits, PartOfDay, RecordedSession,
-        Relative, ScheduledSlot, SessionRole, SlotLength, TrainingPattern, TrainingSlot, accounted,
+        Absence, Alteration, Diary, PartOfDay, SlotLength, TrainingPattern, TrainingSlot,
         covered_weekdays,
     },
 };
@@ -132,11 +135,11 @@ fn an_ordinary_day_reads_the_schedule_in_force() {
     assert_eq!(availability.zone.id(), "Europe/London");
     assert_eq!(
         availability.slots,
-        ordinary_allocated()
+        ordinary()
             .into_iter()
             .filter(|(slot, _)| slot.weekday == Weekday::Monday)
             .collect(),
-        "Monday's slot, as the ordinary week arranges it"
+        "Monday's free slot"
     );
     assert!(availability.open(monday), "Monday evening is a slot");
 }
@@ -288,20 +291,14 @@ fn each_discipline_loses_its_own_days() {
     );
 }
 
-/// **A day is lost when the allocated slot is gone, not when the day empties.**
+/// **A day that keeps either half keeps its session.**
 ///
-/// The operator trains Monday morning and Monday evening, which takes two
-/// sessions a day where he states one: the week puts the gym in the morning
-/// and the ride in the evening. An alteration leaves the morning and takes the
-/// rest — he trains, then goes away at lunchtime. The Monday is lost to
-/// cycling even though the day is not empty.
-///
-/// Asking `Availability::open` answers "could he train at all", which is a
-/// different question: it read the surviving morning as a surviving evening and
-/// reported nothing lost. That is the whole reason a slot carries a part of the
-/// day rather than only a weekday.
+/// The operator is free Monday morning and Monday evening, and a day takes one
+/// session, so the week puts it in the evening. An alteration leaves the
+/// morning and takes the rest — he trains, then goes away at lunchtime. The
+/// session takes the morning, and the Monday is not lost.
 #[test]
-fn a_day_that_keeps_the_wrong_half_is_still_lost() {
+fn a_day_that_keeps_either_half_keeps_its_session() {
     let monday = date(2026, 9, 14).expect("a real Monday");
 
     let ordinary: BTreeMap<TrainingSlot, SlotLength> = [
@@ -338,21 +335,20 @@ fn a_day_that_keeps_the_wrong_half_is_still_lost() {
                 reason: "trains in the morning, away from lunchtime".to_owned(),
             },
         )],
-    )
-    .with_limits(Limits {
-        sessions_a_day: 2,
-        days_a_week: 6,
-    });
+    );
 
     assert_eq!(
-        diary.unavailable(monday, monday, Discipline::Cycling),
-        vec![monday],
-        "cycling's evening is gone, so cycling loses the day"
+        diary
+            .ordinary_slots_of(monday)
+            .first()
+            .map(|slot| slot.slot.part),
+        Some(PartOfDay::Evening),
+        "ordinarily the evening"
     );
     assert_eq!(
         diary.unavailable(monday, monday, Discipline::Gym),
-        Vec::new(),
-        "the gym keeps the morning it was allocated"
+        Vec::<Date>::new(),
+        "the gym keeps the Monday"
     );
     assert_eq!(
         diary.slots_on(monday, Discipline::Gym),
@@ -360,7 +356,7 @@ fn a_day_that_keeps_the_wrong_half_is_still_lost() {
             TrainingSlot::new(Weekday::Monday, PartOfDay::Morning),
             Some(harder())
         )],
-        "and can say what it still has"
+        "in the morning"
     );
 }
 

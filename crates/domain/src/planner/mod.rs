@@ -32,9 +32,18 @@ use crate::{
     cycling::{CyclingMesocycle, PlannedRide, SessionPosition},
     plan::Plan,
     prescription::{GymMesocycle, NotScheduled, Skip, WeekKind},
-    schedule::{
-        AbsenceKind, DayPart, Diary, Discipline, PartOfDay, Relative, ScheduledSlot, SessionRole,
-    },
+    schedule::{AbsenceKind, DayPart, Diary, PartOfDay},
+};
+
+mod arrange;
+mod role;
+mod week;
+
+pub use arrange::{Limits, allocations, arrange};
+pub use role::{Relative, SessionRole, UnknownRelative};
+pub use week::{
+    Allocation, Arrangement, Discipline, NoTrainingDays, RecordedSession, ScheduledSlot,
+    TrainingWeek, UnknownDiscipline, accounted,
 };
 
 /// What answers for one slot.
@@ -419,7 +428,7 @@ pub enum Remaining {
 /// won't be done."* Of his 83 sessions in 2026, the only ones performed on a
 /// later day were three of Monday's gym. Closing early costs nothing when he
 /// does train late: a state is derived on every read, and a session performed
-/// after its window still answers for its slot ([`crate::schedule::accounted`]).
+/// after its window still answers for its slot ([`crate::planner::accounted`]).
 ///
 /// `next` is where the next slot of either discipline begins, `None` where the
 /// diary describes nothing after this one. `None` back only at the end of the

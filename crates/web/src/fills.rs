@@ -12,8 +12,8 @@ use domain::{
         equipment::{EquipmentFacts, Maker, Model, Specific},
         exercise::{Exercise, Implement, RepsExercise},
     },
+    planner::{Relative, SessionRole},
     prescription::{FillChange, SlotId, linear::SlotContent},
-    schedule::{Relative, SessionRole},
 };
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};

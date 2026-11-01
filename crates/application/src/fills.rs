@@ -6,8 +6,8 @@
 
 use domain::{
     gym::exercise::Implement,
+    planner::SessionRole,
     prescription::{FillChange, SlotId, linear::SlotContent},
-    schedule::SessionRole,
 };
 use jiff::civil::Date;
 

@@ -12,16 +12,15 @@
 //! Delivering [`Standing::current`] is the caller's, and
 //! rescheduling what was lost is #177's.
 
+use domain::planner::Arrangement as _;
 use domain::{
     plan::{Plan, Span},
     planner::{
         self, Filled, MicrocycleState, Missed, Placed, Recorded, Rerun, SessionState,
         Unreschedulable,
     },
-    schedule::{
-        DayPart, Diary, Discipline, PartOfDay, RecordedSession, ScheduledSlot, SessionRole,
-        accounted,
-    },
+    planner::{Discipline, RecordedSession, ScheduledSlot, SessionRole, accounted},
+    schedule::{DayPart, Diary, PartOfDay},
 };
 use jiff::civil::{Date, DateTime};
 
