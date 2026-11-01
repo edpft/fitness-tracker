@@ -1161,6 +1161,36 @@ fn a_settled_microcycle_prescribes_nothing() {
     assert!(matches!(report.next, WhatIsNext::MicrocycleComplete { .. }));
 }
 
+/// **While he is ill the answer is the illness** (#674), not the slot after
+/// the week: nothing is prescribed in it until he says he is better.
+#[test]
+fn an_open_illness_prescribes_nothing_and_says_so() {
+    let mut recorded = Recorded::week().expect("a week");
+    recorded.diary = recorded
+        .diary
+        .with_illnesses(vec![domain::schedule::Illness::new(now().date)]);
+    let ports = ports(
+        recorded,
+        Week(vec![
+            SessionState::Performed,
+            SessionState::Skipped {
+                absence: domain::schedule::AbsenceKind::Illness,
+            },
+        ]),
+        Committer(None),
+    )
+    .expect("the ports build");
+    let report = runtime()
+        .expect("a current-thread runtime builds")
+        .block_on(Next::new(ports).run(now(), None, IfGoing::Refuse, &Heard::default()))
+        .expect("the run answers");
+
+    assert!(matches!(
+        report.next,
+        WhatIsNext::Ill { since } if since == now().date
+    ));
+}
+
 /// **A second run is refused before it reads anything**, whichever frontend
 /// started the first (#398).
 #[test]

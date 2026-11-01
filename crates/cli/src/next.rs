@@ -90,6 +90,10 @@ fn render(next: &WhatIsNext) -> Result<(), Failure> {
             output::microcycle_complete(*after);
             return Ok(());
         }
+        WhatIsNext::Ill { since } => {
+            output::ill(*since);
+            return Ok(());
+        }
         WhatIsNext::NoPlanCovers { week_of } => {
             output::no_plan_covers(*week_of);
             return Ok(());

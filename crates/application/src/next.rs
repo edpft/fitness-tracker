@@ -623,6 +623,9 @@ pub enum WhatIsNext {
     },
     /// Every session of the microcycle is settled.
     MicrocycleComplete { after: Option<ScheduledSlot> },
+    /// Every session left is the illness's, and nothing is prescribed until
+    /// he says he is better (#674).
+    Ill { since: Date },
     /// The week has slots and no plan covers it.
     NoPlanCovers { week_of: Date },
     /// The schedule holds no slot on or after the date.
@@ -1744,6 +1747,11 @@ where
             };
         }
         let Some(session) = standing.current() else {
+            if let Some(illness) = diary.open_illness() {
+                return WhatIsNext::Ill {
+                    since: illness.from(),
+                };
+            }
             let after = standing
                 .sessions
                 .last()

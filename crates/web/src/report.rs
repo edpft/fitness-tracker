@@ -235,6 +235,11 @@ fn what_is_next(next: &WhatIsNext) -> Markup {
         WhatIsNext::NoSlot { from } => {
             return html! { p { "the schedule holds no slot on or after " (from) } };
         }
+        WhatIsNext::Ill { since } => {
+            return html! {
+                p { "ill since " (since) ": nothing is prescribed until " code { "fitness schedule better" } }
+            };
+        }
     };
     let until = match session.closes {
         _ if session.closes_at_midnight() => ", until midnight".to_owned(),

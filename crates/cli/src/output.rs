@@ -1414,6 +1414,10 @@ pub fn microcycle_complete(after: Option<domain::planner::ScheduledSlot>) {
     }
 }
 
+pub fn ill(since: jiff::civil::Date) {
+    println!("ill since {since}: nothing is prescribed until `fitness schedule better`");
+}
+
 pub fn no_next_slot(from: jiff::civil::Date) {
     println!("the schedule holds no slot on or after {from}");
 }
