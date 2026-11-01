@@ -13,6 +13,7 @@ mod detail;
 mod equipment;
 mod fills;
 mod ftp;
+mod input;
 mod one_rep_max;
 mod page;
 mod pulse_wave_velocity;
@@ -634,8 +635,9 @@ async fn equipment_post(
     }
 }
 
-/// The fills in force today, read afresh, with what the last post came to.
-async fn fills_shown(runs: &Runs, said: Option<&str>) -> Markup {
+/// The fills in force today, read afresh, with the last post if it was
+/// refused.
+async fn fills_shown(runs: &Runs, refused: Option<&fills::Refused<'_>>) -> Markup {
     let store = match configurator::store::Store::open(&runs.setting().database).await {
         Ok(store) => store,
         Err(error) => return fills::unreadable(&error.to_string()),
@@ -646,7 +648,7 @@ async fn fills_shown(runs: &Runs, said: Option<&str>) -> Markup {
     let facts = configurator::equipment::facts(&store).await;
     store.close().await;
     match (found, facts) {
-        (Ok(found), Ok(facts)) => fills::page(found.as_ref(), &facts, today, said),
+        (Ok(found), Ok(facts)) => fills::page(found.as_ref(), &facts, today, refused),
         (Err(error), _) => fills::unreadable(&error.to_string()),
         (_, Err(error)) => fills::unreadable(&error.to_string()),
     }
@@ -656,25 +658,34 @@ async fn fills_page(State(runs): State<Arc<Runs>>) -> Markup {
     fills_shown(&runs, None).await
 }
 
-/// Change a fill, then show the page again, as the equipment page does.
+/// Change a fill, then show the page again, keeping what was typed when it is
+/// refused.
 async fn fills_post(
     State(runs): State<Arc<Runs>>,
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
-    let refused = match fills::asked(&form) {
-        Err(refused) => Some(refused),
+    let refusal = match fills::asked(&form) {
+        Err(refusal) => Some(refusal),
         Ok(asked) => match configurator::store::Store::open(&runs.setting().database).await {
-            Err(error) => Some(error.to_string()),
+            Err(error) => Some(input::Refusal::whole(error.to_string())),
             Ok(store) => {
                 let done = configurator::fills::change(&store, &runs.setting().zone, asked).await;
                 store.close().await;
-                done.err().map(|error| error.to_string())
+                done.err().map(|error| fills::refusal(&error))
             }
         },
     };
-    match refused {
+    match refusal {
         None => Redirect::to("/fills").into_response(),
-        Some(refused) => fills_shown(&runs, Some(&refused)).await.into_response(),
+        Some(refusal) => fills_shown(
+            &runs,
+            Some(&fills::Refused {
+                typed: &form,
+                refusal: &refusal,
+            }),
+        )
+        .await
+        .into_response(),
     }
 }
 
