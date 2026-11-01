@@ -196,10 +196,6 @@ div.slots .past { opacity: 0.4; }
 .weekhead { display: flex; align-items: center; gap: 8px; }
 .weekhead h2 { margin: 0; flex: 1; text-align: center; font-size: 18px; }
 .weekhead a { font-size: 26px; line-height: 1; text-decoration: none; color: var(--ink2); padding: 0 8px; }
-.given .row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: 14px; }
-.given .row + .row { border-top: 1px solid var(--grid); }
-.given .row .on { color: var(--ink2); white-space: nowrap; }
-.given .row span:last-child { text-align: right; }
 .actions { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
 form.input button.quiet { background: var(--raised); color: var(--ink); }
 form.input button.unseen { position: absolute; left: -9999px; width: 1px; height: 1px; padding: 0; }

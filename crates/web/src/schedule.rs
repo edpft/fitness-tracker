@@ -10,15 +10,19 @@
 //! steps it free → shorter → longer → free. Whether the change is for that
 //! week or from then on is chosen on saving.
 //!
+//! **Availability only.** Which discipline and session each slot takes is
+//! programming, not the schedule's (operator, 2026-11-01: *"that's a
+//! programming concern, this is just availability"*), so the page does not
+//! show it.
+//!
 //! **A tap is a post that records nothing.** The server steps the cell and
-//! draws the page again, so what the rules give each slot is shown for the
-//! grid as tapped, and the page holds no rule of its own about either.
+//! draws the page again.
 
 use std::collections::BTreeMap;
 
 use application::{ScheduleError, schedule::days_of};
 use domain::{
-    planner::{Limits, allocations, commencing},
+    planner::commencing,
     schedule::{Diary, PartOfDay, SlotLength, TrainingSlot},
 };
 use jiff::civil::{Date, Weekday};
@@ -231,8 +235,8 @@ fn title(word: &str) -> String {
     })
 }
 
-/// The week commencing a date: the grid as tapped, what the rules give each
-/// slot of it, and the two ways to save it.
+/// The week commencing a date: the grid as tapped, and the two ways to save
+/// it.
 fn week(diary: &Diary, today: Date, tapped: &Tapped, refused: Option<&Refusal>) -> Markup {
     let days = days_of(tapped.monday);
     let step = |by: i64| {
@@ -248,7 +252,6 @@ fn week(diary: &Diary, today: Date, tapped: &Tapped, refused: Option<&Refusal>) 
             days.iter().any(|date| alteration.covers(*date)) && alteration.slots().is_some()
         })
         .collect();
-    let given = allocations(&tapped.slots, Limits::STATED);
     let whole = refused
         .filter(|refusal| refusal.field == Some("week"))
         .map(|refusal| refusal.reason.as_str());
@@ -294,19 +297,6 @@ fn week(diary: &Diary, today: Date, tapped: &Tapped, refused: Option<&Refusal>) 
                     }
                 }
                 (key_line())
-                @if !given.is_empty() {
-                    div.given {
-                        @for (slot, allocation) in &given {
-                            div.row {
-                                span.on { (WEEKDAYS.iter().find(|(weekday, _)| *weekday == slot.weekday).map_or("", |(_, name)| name)) " " (slot.part) }
-                                span {
-                                    (allocation.discipline)
-                                    @if let Some(role) = allocation.role { ", " (role) }
-                                }
-                            }
-                        }
-                    }
-                }
                 (input::field("week-reason", "reason", "Why", &html! {
                     input id="week-reason" type="text" name="reason" value=(tapped.reason) autocomplete="off";
                 }, refused))
