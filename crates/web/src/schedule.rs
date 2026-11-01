@@ -1,11 +1,14 @@
 //! The schedule page (#671): weekly availability, a calendar week altered from
 //! it, and illness, as `fitness schedule` records them in the terminal.
 //!
-//! **One grid for both.** Weekly availability is a day per row and a part of
-//! the day per column, a shorter slot a circle and a longer one a lozenge. A
-//! week commencing a date is the same grid, starting from the week as it
-//! stands, and tapping a cell steps it free → shorter → longer → free. Whether
-//! the change is for that week or from then on is chosen on saving.
+//! **One grid, for the week commencing a date**: this week when the page
+//! opens, and the arrows step a week at a time. The operator, 2026-11-01:
+//! *"I don't think we should repeat the weekly grid."* A day per row and a
+//! part of the day per column, a shorter slot a circle and a longer one a
+//! lozenge, starting from the week as it stands; a slot weekly availability
+//! has and the week does not is a dashed outline of its shape. Tapping a cell
+//! steps it free → shorter → longer → free. Whether the change is for that
+//! week or from then on is chosen on saving.
 //!
 //! **A tap is a post that records nothing.** The server steps the cell and
 //! draws the page again, so what the rules give each slot is shown for the
@@ -180,8 +183,8 @@ pub fn refusal(error: &ScheduleError) -> Refusal {
     }
 }
 
-/// The page: weekly availability today, the week commencing `monday` as
-/// tapped or as it stands, and illness.
+/// The page: the week commencing `monday` as tapped or as it stands, and
+/// illness.
 pub fn page(
     diary: &Diary,
     today: Date,
@@ -195,7 +198,6 @@ pub fn page(
         TITLE,
         &html! {
             script src="/htmx.min.js" {}
-            (ordinarily(diary, today))
             (week(diary, today, &tapped, refused))
             (illness(diary, today, refused))
         },
@@ -218,38 +220,6 @@ const fn mark(length: Option<SlotLength>) -> &'static str {
         None => "",
         Some(SlotLength::Shorter) => "shorter",
         Some(SlotLength::Longer) => "longer",
-    }
-}
-
-/// Weekly availability in force today, as it is: not tapped here.
-fn ordinarily(diary: &Diary, today: Date) -> Markup {
-    html! {
-        section.card {
-            @match diary.pattern_on(today) {
-                None => {
-                    h2 { "Weekly availability" }
-                    p { "None is recorded yet." }
-                }
-                Some(pattern) => {
-                    div.latest { div.head {
-                        h2 { "Weekly availability" }
-                        span { "from " (detail::day(pattern.from(), today)) }
-                    } }
-                    div.slots {
-                        span {}
-                        @for part in PartOfDay::ALL { span.part { (title(part.as_str())) } }
-                        @for (weekday, name) in WEEKDAYS {
-                            span.day { (name) }
-                            @for part in PartOfDay::ALL {
-                                @let length = pattern.slots().get(&TrainingSlot::new(weekday, *part)).copied();
-                                span.cell.(mark(length)) {}
-                            }
-                        }
-                    }
-                    (key_line())
-                }
-            }
-        }
     }
 }
 
