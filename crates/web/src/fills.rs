@@ -111,7 +111,7 @@ fn slots(found: &MesocycleInForce, offered: &Offered<'_>, refused: Option<&Refus
     html! {
         @for slot in SlotId::ALL.iter().copied().filter(|slot| changeable(*slot)) {
             section.card {
-                h2 { (slot.as_str()) }
+                h2.small { (slot.name()) }
                 @let held = |intensity: Relative| {
                     SessionRole::ALL
                         .iter()

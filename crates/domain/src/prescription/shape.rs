@@ -105,6 +105,30 @@ impl SlotId {
         }
     }
 
+    /// What a page calls it, in title case as the exercises are (the
+    /// operator, 2026-11-01, of `/fills`).
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Plyometric => "Plyometric",
+            Self::Power => "Power",
+            Self::KneeDominant => "Knee Dominant",
+            Self::UpperPush => "Upper Push",
+            Self::UpperPull => "Upper Pull",
+            Self::HipDominant => "Hip Dominant",
+            Self::Biceps => "Biceps",
+            Self::Triceps => "Triceps",
+            Self::WristFlexion => "Wrist Flexion",
+            Self::WristExtension => "Wrist Extension",
+            Self::Core => "Core",
+            Self::HandstandHold => "Handstand Hold",
+            Self::DeadHang => "Dead Hang",
+            Self::HipFlexorStretch => "Hip Flexor Stretch",
+            Self::HipExternalRotatorStretch => "Hip External Rotator Stretch",
+            Self::HamstringStretch => "Hamstring Stretch",
+            Self::GroinStretch => "Groin Stretch",
+        }
+    }
+
     /// Which section this slot belongs to. Derived, never stored beside the slot —
     /// a second source of truth is a second thing that can disagree.
     pub const fn section(self) -> Section {

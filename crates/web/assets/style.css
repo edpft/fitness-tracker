@@ -162,9 +162,10 @@ details.folded > summary {
 details.folded > summary::-webkit-details-marker { display: none; }
 details.folded[open] > summary { margin-bottom: 14px; }
 form.input button { border: 0; border-radius: 999px; font-size: 16px; padding: 13px; background: var(--ink); color: var(--bg); }
-.card > h3 { font-size: 15px; font-weight: 600; color: var(--ink2); margin: 18px 0 0; }
-.card .held { font-size: 15px; margin: 4px 0 0; }
-.card .held .from { color: var(--muted); }
+.card > h2.small, .card > h3 { font-size: 13px; font-weight: 600; color: var(--ink2); margin: 0; }
+.card > h3 { margin-top: 18px; }
+.card .held { font-size: 19px; font-weight: 600; margin: 4px 0 0; }
+.card .held .from, .card .held.from { font-size: 14px; font-weight: 400; color: var(--muted); }
 
 /* What the pages not yet on the template share. */
 div.plot { max-width: 100%; }
