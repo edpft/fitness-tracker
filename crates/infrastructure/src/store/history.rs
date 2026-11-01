@@ -49,7 +49,7 @@ use domain::{
     gym::{Load, Performed, SetKind, SignedKg, exercise::RepsExercise},
     measure::RepCount,
     plan::PlanName,
-    schedule::{Relative, SessionRole},
+    planner::{Relative, SessionRole},
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;

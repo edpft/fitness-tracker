@@ -21,12 +21,12 @@ use domain::{
     },
     measure::{Distance, Duration, Kg, Metres, RepCount, Spans},
     plan::PlanName,
+    planner::{Relative, SessionRole},
     prescription::{
         Anchor, AnchorProvenance, DerivedFrom, MesocycleId, Prescribed, PrescribedExercise,
         PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout, SlotId,
         SupersetMember, Target, WeekIndex, WeekKind, WorkoutShape,
     },
-    schedule::{Relative, SessionRole},
     sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::civil::Date;

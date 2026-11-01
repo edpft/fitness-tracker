@@ -25,13 +25,13 @@ use domain::{
     gym::exercise::{DistanceExercise, DurationExercise, Exercise, Implement, RepsExercise},
     measure::{Kg, RepCount},
     plan::{Mesocycles, Plan, PlanName},
+    planner::{Relative, SessionRole, TrainingWeek},
     prescription::{
         Anchor, AnchorProvenance, Authored, AuthoringError, ByIntensity, Calendar, GymMesocycle,
         Linear, LoadSteps, PrescribedWorkout, Progression, Scales, Skip, Step,
         authored::Shape,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
-    schedule::{Relative, SessionRole, TrainingWeek},
 };
 use jiff::{civil::Date, tz::TimeZone};
 
@@ -138,7 +138,7 @@ pub fn parameters() -> Result<Parameters, MesocycleFixtureError> {
 /// [`MesocycleFixtureError`] if a fixture value is invalid or the store refuses.
 pub async fn design(pool: &sqlx::SqlitePool) -> Result<(), MesocycleFixtureError> {
     use application::{EquipmentStore as _, ProgressionStore as _, WorkoutStore as _};
-    use domain::schedule::Relative;
+    use domain::planner::Relative;
     use infrastructure::store::{SqliteEquipmentStore, SqliteGenerationParameterStore};
 
     let fixture = parameters()?;
@@ -252,36 +252,24 @@ pub fn anchor() -> Result<Anchor, MesocycleFixtureError> {
 /// [`MesocycleFixtureError`] if the store is unavailable.
 pub async fn record_the_week(pool: &sqlx::SqlitePool) -> Result<(), MesocycleFixtureError> {
     use application::DiaryAuthor as _;
-    use domain::schedule::{Allocation, Discipline, PartOfDay, TrainingPattern, TrainingSlot};
+    use domain::schedule::{PartOfDay, SlotLength, TrainingPattern, TrainingSlot};
 
     let slots = [
         (
             TrainingSlot::new(jiff::civil::Weekday::Monday, PartOfDay::Evening),
-            Allocation::new(
-                Discipline::Gym,
-                SessionRole::new(Relative::Lower, Relative::Higher),
-            ),
+            SlotLength::Shorter,
         ),
         (
             TrainingSlot::new(jiff::civil::Weekday::Wednesday, PartOfDay::Evening),
-            Allocation::new(
-                Discipline::Cycling,
-                SessionRole::new(Relative::Higher, Relative::Lower),
-            ),
+            SlotLength::Shorter,
         ),
         (
             TrainingSlot::new(jiff::civil::Weekday::Friday, PartOfDay::Evening),
-            Allocation::new(
-                Discipline::Gym,
-                SessionRole::new(Relative::Higher, Relative::Lower),
-            ),
+            SlotLength::Shorter,
         ),
         (
             TrainingSlot::new(jiff::civil::Weekday::Sunday, PartOfDay::Morning),
-            Allocation::new(
-                Discipline::Cycling,
-                SessionRole::new(Relative::Lower, Relative::Higher),
-            ),
+            SlotLength::Longer,
         ),
     ]
     .into_iter()

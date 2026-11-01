@@ -37,6 +37,7 @@ use domain::{
     normalised::OperatorZone,
     plan::{MesocycleOrdinal, Occupies, PlanName},
     planner::RerunOrdinal,
+    planner::{Discipline, Relative, SessionRole},
     prescription::{
         Anchor, AnchorProvenance, BlockPeriodisation, ByIntensity, Calendar, FillChange,
         FillChanges, GymMesocycle, Linear, MesocycleId, Progression, Sbs, Skip, SlotId, Test,
@@ -45,7 +46,6 @@ use domain::{
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
     provider::{ExternalProgramme, ProgrammeName, ProvidedFrom, Provider},
-    schedule::{Discipline, Relative, SessionRole},
 };
 use jiff::{
     Timestamp,

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT weekday, part, intensity, volume\n        FROM training_slot\n        WHERE discipline = ?\n          AND pattern = (\n              SELECT id FROM training_pattern\n              WHERE from_date <= ?\n              ORDER BY from_date DESC\n              LIMIT 1\n          )\n        ORDER BY part\n        ",
+  "query": "\n        SELECT weekday, part, length\n        FROM training_slot\n        WHERE pattern = ?\n        ",
   "describe": {
     "columns": [
       {
@@ -26,37 +26,25 @@
         }
       },
       {
-        "name": "intensity",
+        "name": "length",
         "ordinal": 2,
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "training_slot",
-            "name": "intensity"
-          }
-        }
-      },
-      {
-        "name": "volume",
-        "ordinal": 3,
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "training_slot",
-            "name": "volume"
+            "name": "length"
           }
         }
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 1
     },
     "nullable": [
-      false,
       false,
       false,
       false
     ]
   },
-  "hash": "864046f1bf89396f1df4da38e2508a377225d5198531b6df1b4c4ae31b5afba5"
+  "hash": "bd3eddeb65163bb063d69d7fd1206705e3a5764fbe94de000f7a464ee762f1c9"
 }

@@ -32,7 +32,7 @@ use domain::{
         CyclingMesocycle, CyclingMicrocycle, CyclingProvenance, PlannedRide, RideVenue,
         SessionPosition,
     },
-    schedule::SessionRole,
+    planner::SessionRole,
     sequence::NonEmpty,
 };
 use jiff::civil::Date;
@@ -309,8 +309,8 @@ pub async fn ride<C: HoldingRides + Sync, R: RiddenVenues + Sync>(
     let venue = choose(catalogue, record, day.role).await?;
     let session = catalogue.session_at(&venue).await?;
     let position = match day.role.intensity() {
-        domain::schedule::Relative::Higher => 1,
-        domain::schedule::Relative::Lower => 2,
+        domain::planner::Relative::Higher => 1,
+        domain::planner::Relative::Lower => 2,
     };
     let session_position =
         SessionPosition::new(position).map_err(|_| NoHoldingRide::Unbuildable {

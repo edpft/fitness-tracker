@@ -12,8 +12,8 @@ use application::{
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
 use domain::normalised::StatedZones;
+use domain::planner::{Relative, SessionRole};
 use domain::prescription::{PrescribedItem, Section, SlotId, WeekKind};
-use domain::schedule::{Relative, SessionRole};
 use infrastructure::{
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGenerationParameterStore,

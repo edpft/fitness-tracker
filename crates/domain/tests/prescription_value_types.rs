@@ -6,11 +6,11 @@
 //! properties assert what those constructors are supposed to guarantee.
 
 use domain::measure::{Kg, RepCount};
+use domain::planner::{Relative, SessionRole};
 use domain::prescription::{
     Anchor, AnchorProvenance, ByIntensity, LoadSteps, Percentage, SlotId, Target, TopSetReps,
     WeekIndex, WeekKind,
 };
-use domain::schedule::{Relative, SessionRole};
 use jiff::civil::Date;
 use proptest::prelude::*;
 

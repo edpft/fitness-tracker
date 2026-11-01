@@ -45,6 +45,7 @@
 
 use crate::{
     gym::exercise::Exercise,
+    planner::SessionRole,
     prescription::{
         block::BlockPeriodisation,
         linear::{Linear, PrimaryPattern, SlotFills},
@@ -52,7 +53,6 @@ use crate::{
         schedule::{Calendar, WeekKind},
     },
     provider::ProvidedFrom,
-    schedule::SessionRole,
 };
 
 /// What was authored: one programme, of whichever kind.

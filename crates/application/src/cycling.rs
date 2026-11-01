@@ -16,6 +16,7 @@
 //! last month stays reproducible and a source being unavailable costs nothing
 //! (§ 36).
 
+use domain::planner::Arrangement as _;
 use domain::{
     cycling::{
         CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide, Ftp, PlannedRide,
@@ -23,8 +24,9 @@ use domain::{
     },
     measure::PositiveDuration,
     planner,
+    planner::{Discipline, SessionRole, TrainingWeek},
     provider::ProgrammeName,
-    schedule::{Diary, Discipline, SessionRole, TrainingWeek},
+    schedule::Diary,
     sequence::NonEmpty,
 };
 use jiff::civil::Date;

@@ -24,8 +24,8 @@ use application::{
     DeliveryReference, DestinationName, PrescriptionDeliveryStore as _, WorkoutPrescriber as _,
     prescribe::{Prescribing, PrescriptionPorts},
 };
+use domain::planner::{Relative, SessionRole};
 use domain::prescription::{PrescribedItem, SlotId, WeekIndex, WeekKind};
-use domain::schedule::{Relative, SessionRole};
 use infrastructure::{
     SqliteExerciseHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
     SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,

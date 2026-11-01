@@ -7,11 +7,12 @@
 //! bike's; it is the week, and what re-runs is decided across both.
 
 use domain::{
+    planner::{Discipline, Relative, SessionRole},
     planner::{
         ESSENTIAL, MicrocycleState, Owed, Placed, Rerun, RerunOrdinal, SessionState,
         microcycle_state, owed_by, rerun, rerun_of,
     },
-    schedule::{AbsenceKind, Discipline, Relative, SessionRole},
+    schedule::AbsenceKind,
 };
 use jiff::civil::{Date, date};
 
@@ -71,7 +72,7 @@ fn a_week_that_lost_both_essential_sessions_is_incomplete() {
         session(Discipline::Cycling, supporting(), SessionState::Performed),
     ];
 
-    assert_eq!(microcycle_state(&week), MicrocycleState::Incomplete);
+    assert_eq!(microcycle_state(&week, &[]), MicrocycleState::Incomplete);
 }
 
 /// **A supporting session lost costs the microcycle nothing.** That is what
@@ -96,7 +97,7 @@ fn losing_a_supporting_session_does_not_stop_the_week() {
         ),
     ];
 
-    assert_eq!(microcycle_state(&week), MicrocycleState::Completed);
+    assert_eq!(microcycle_state(&week, &[]), MicrocycleState::Completed);
 }
 
 /// **One did and one did not**: the transition a holding week comes from. The
@@ -116,7 +117,7 @@ fn one_discipline_completing_and_one_losing_is_partially_completed() {
     ];
 
     assert_eq!(
-        microcycle_state(&week),
+        microcycle_state(&week, &[]),
         MicrocycleState::PartiallyCompleted {
             completed: Discipline::Cycling,
             lost: Discipline::Gym,
@@ -136,7 +137,7 @@ fn an_essential_session_with_time_left_keeps_the_week_running() {
         ];
 
         assert_eq!(
-            microcycle_state(&week),
+            microcycle_state(&week, &[]),
             MicrocycleState::Running,
             "{state} leaves the week running"
         );
@@ -153,14 +154,14 @@ fn a_discipline_with_no_essential_session_owes_nothing() {
         session(Discipline::Cycling, supporting(), SessionState::Performed),
     ];
 
-    assert_eq!(owed_by(&week, Discipline::Cycling), Owed::Absent);
-    assert_eq!(microcycle_state(&week), MicrocycleState::Completed);
+    assert_eq!(owed_by(&week, Discipline::Cycling, &[]), Owed::Absent);
+    assert_eq!(microcycle_state(&week, &[]), MicrocycleState::Completed);
 }
 
 /// **A week with nothing in it is complete**, because nothing is waiting on it.
 #[test]
 fn an_empty_week_is_complete() {
-    assert_eq!(microcycle_state(&[]), MicrocycleState::Completed);
+    assert_eq!(microcycle_state(&[], &[]), MicrocycleState::Completed);
 }
 
 /// **Every way of losing an essential session loses it**, whatever the reason.
@@ -182,7 +183,7 @@ fn every_way_of_not_performing_the_essential_session_loses_it() {
         },
     ] {
         let week = [session(Discipline::Gym, ESSENTIAL, state.clone())];
-        assert_eq!(owed_by(&week, Discipline::Gym), Owed::Lost, "{state}");
+        assert_eq!(owed_by(&week, Discipline::Gym, &[]), Owed::Lost, "{state}");
     }
 }
 
@@ -202,7 +203,7 @@ fn a_test_completed_holds_while_the_test_missed_re_runs() {
     ];
 
     assert_eq!(
-        rerun(MONDAY, microcycle_state(&week), &week),
+        rerun(MONDAY, microcycle_state(&week, &[]), &week),
         Some(Rerun {
             monday: MONDAY,
             holding: Some(Discipline::Cycling),
@@ -219,7 +220,7 @@ fn the_gym_holds_when_its_test_was_done_and_the_ride_was_not() {
     ];
 
     assert_eq!(
-        rerun(MONDAY, microcycle_state(&week), &week),
+        rerun(MONDAY, microcycle_state(&week, &[]), &week),
         Some(Rerun {
             monday: MONDAY,
             holding: Some(Discipline::Gym),
@@ -242,7 +243,7 @@ fn a_partially_completed_week_of_no_test_re_runs_for_both() {
     ];
 
     assert_eq!(
-        rerun(MONDAY, microcycle_state(&week), &week),
+        rerun(MONDAY, microcycle_state(&week, &[]), &week),
         Some(Rerun {
             monday: MONDAY,
             holding: None,
@@ -260,7 +261,7 @@ fn a_test_missed_is_never_held() {
     ];
 
     assert_eq!(
-        rerun(MONDAY, microcycle_state(&week), &week),
+        rerun(MONDAY, microcycle_state(&week, &[]), &week),
         Some(Rerun {
             monday: MONDAY,
             holding: None,
@@ -280,8 +281,11 @@ fn a_completed_or_running_week_runs_nothing_again() {
         test(Discipline::Cycling, SessionState::Prescribed),
     ];
 
-    assert_eq!(rerun(MONDAY, microcycle_state(&done), &done), None);
-    assert_eq!(rerun(MONDAY, microcycle_state(&running), &running), None);
+    assert_eq!(rerun(MONDAY, microcycle_state(&done, &[]), &done), None);
+    assert_eq!(
+        rerun(MONDAY, microcycle_state(&running, &[]), &running),
+        None
+    );
 }
 
 /// **Which attempt a week is, counted back through the weeks lost** (#313).

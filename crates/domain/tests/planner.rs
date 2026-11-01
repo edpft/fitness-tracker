@@ -9,6 +9,7 @@
 //! mesocycle are built without one; the week comes from the diary, and the
 //! planner joins the two on the role.
 
+use domain::planner::Arrangement as _;
 use std::collections::BTreeMap;
 
 use domain::{
@@ -20,15 +21,13 @@ use domain::{
     measure::{PositiveDuration, RepCount},
     plan::{Mesocycles, Plan, PlanName},
     planner::{self, Filled, Missed, Planned, week},
+    planner::{Discipline, Relative, SessionRole},
     prescription::{
         BlockPeriodisation, EntryTest, Fill, GymMesocycle, Primary, PrimaryPattern, Progression,
         Skip, SlotFills, StaticFill,
     },
     provider::{ExternalProgramme, ProgrammeName, Provider, PublishedAt},
-    schedule::{
-        Absence, Allocation, Alteration, Diary, Discipline, PartOfDay, Relative, SessionRole,
-        TrainingPattern, TrainingSlot,
-    },
+    schedule::{Absence, Alteration, Diary, PartOfDay, SlotLength, TrainingPattern, TrainingSlot},
     sequence::NonEmpty,
 };
 use jiff::{civil::Weekday, civil::date, tz::TimeZone};
@@ -45,22 +44,22 @@ const fn easier() -> SessionRole {
 
 /// The operator's week, exactly as `fitness schedule add` records it.
 fn diary() -> Built<Diary> {
-    let slots: BTreeMap<TrainingSlot, Allocation> = [
+    let slots: BTreeMap<TrainingSlot, SlotLength> = [
         (
             TrainingSlot::new(Weekday::Monday, PartOfDay::Evening),
-            Allocation::new(Discipline::Gym, easier()),
+            SlotLength::Shorter,
         ),
         (
             TrainingSlot::new(Weekday::Wednesday, PartOfDay::Evening),
-            Allocation::new(Discipline::Cycling, harder()),
+            SlotLength::Shorter,
         ),
         (
             TrainingSlot::new(Weekday::Friday, PartOfDay::Evening),
-            Allocation::new(Discipline::Gym, harder()),
+            SlotLength::Shorter,
         ),
         (
             TrainingSlot::new(Weekday::Sunday, PartOfDay::Morning),
-            Allocation::new(Discipline::Cycling, easier()),
+            SlotLength::Longer,
         ),
     ]
     .into_iter()
@@ -234,7 +233,10 @@ fn line(planned: &Planned<'_>) -> String {
     format!(
         "{:?} {} — {what}",
         planned.slot.date.weekday(),
-        planned.slot.role
+        planned
+            .slot
+            .role
+            .map_or_else(|| "no role".to_owned(), |role| role.to_string())
     )
 }
 
@@ -468,7 +470,7 @@ fn roles_missing(
     planner::slots(diary, date(2026, 9, 21), missed)
         .into_iter()
         .filter(|slot| slot.discipline == discipline)
-        .map(|slot| (slot.date, slot.role))
+        .filter_map(|slot| Some((slot.date, slot.role?)))
         .collect()
 }
 
@@ -550,7 +552,8 @@ fn a_skipped_session_that_is_not_essential_moves_nothing() {
 }
 
 /// **A later slot already taken is not left.** With the Sunday lost to a
-/// holiday, a skipped Wednesday has nowhere to go.
+/// holiday, the week rearranges into one ride (#673), and a skipped Wednesday
+/// has nowhere to go.
 #[test]
 fn a_later_slot_taken_by_an_absence_does_not_take_the_essential_session() {
     let Ok(diary) = absent(date(2026, 9, 27), holiday()).and_then(|diary| {
@@ -565,7 +568,7 @@ fn a_later_slot_taken_by_an_absence_does_not_take_the_essential_session() {
 
     assert_eq!(
         roles(&diary, Discipline::Cycling),
-        vec![(date(2026, 9, 23), harder()), (date(2026, 9, 27), easier())],
+        vec![(date(2026, 9, 23), harder())],
     );
 }
 
@@ -624,24 +627,20 @@ fn a_missed_session_that_is_not_essential_moves_nothing() {
     );
 }
 
-/// **The rule reads slots, not weekdays.** A week with the heavy gym session
-/// on the Tuesday and two lighter ones after it: skipping the Tuesday puts the
-/// heavy session in the Thursday, the next gym slot, and leaves the Saturday as
-/// it was.
+/// **The rule reads slots, not weekdays.** Free Tuesday, Thursday and Saturday
+/// evenings and a longer Sunday morning: the harder gym session is the Tuesday,
+/// which has the most recovery before it, and skipping it puts it in the
+/// Saturday, the next gym slot.
 #[test]
 fn the_next_slot_takes_it_whatever_day_it_is() {
-    let slots: BTreeMap<TrainingSlot, Allocation> = [
-        (Weekday::Tuesday, harder()),
-        (Weekday::Thursday, easier()),
-        (Weekday::Saturday, easier()),
+    let slots: BTreeMap<TrainingSlot, SlotLength> = [
+        (Weekday::Tuesday, PartOfDay::Evening, SlotLength::Shorter),
+        (Weekday::Thursday, PartOfDay::Evening, SlotLength::Shorter),
+        (Weekday::Saturday, PartOfDay::Evening, SlotLength::Shorter),
+        (Weekday::Sunday, PartOfDay::Morning, SlotLength::Longer),
     ]
     .into_iter()
-    .map(|(day, role)| {
-        (
-            TrainingSlot::new(day, PartOfDay::Evening),
-            Allocation::new(Discipline::Gym, role),
-        )
-    })
+    .map(|(day, part, length)| (TrainingSlot::new(day, part), length))
     .collect();
     let Ok(zone) = domain::normalised::OperatorZone::try_from("Europe/London") else {
         panic!("a real zone")
@@ -649,6 +648,10 @@ fn the_next_slot_takes_it_whatever_day_it_is() {
     let week = Diary::new(
         vec![TrainingPattern::new(date(2026, 1, 1), zone, slots)],
         vec![],
+    );
+    assert_eq!(
+        roles(&week, Discipline::Gym),
+        vec![(date(2026, 9, 22), harder()), (date(2026, 9, 26), easier())],
     );
     let Ok(diary) = skipping(
         week,
@@ -660,10 +663,6 @@ fn the_next_slot_takes_it_whatever_day_it_is() {
 
     assert_eq!(
         roles(&diary, Discipline::Gym),
-        vec![
-            (date(2026, 9, 22), easier()),
-            (date(2026, 9, 24), harder()),
-            (date(2026, 9, 26), easier()),
-        ],
+        vec![(date(2026, 9, 22), easier()), (date(2026, 9, 26), harder())],
     );
 }

@@ -15,6 +15,7 @@
 //! which slot a date answers for.
 
 use crate::support;
+use domain::planner::Arrangement as _;
 
 use std::num::NonZeroU8;
 
@@ -36,13 +37,11 @@ use domain::{
     measure::PositiveDuration,
     normalised::{OperatorZone, StartedAt},
     plan::{Mesocycles, Plan, PlanName},
+    planner::{Discipline, Relative, SessionRole},
     planner::{MicrocycleState, Rerun, SessionState},
     prescription::{WeekIndex, WeekKind},
     provider::ProgrammeName,
-    schedule::{
-        Absence, AbsenceKind, Alteration, DayPart, Discipline, PartOfDay, Relative, SessionRole,
-        Skip,
-    },
+    schedule::{Absence, AbsenceKind, Alteration, DayPart, PartOfDay, Skip},
     sequence::NonEmpty,
 };
 use infrastructure::{
@@ -365,19 +364,18 @@ async fn autumn() -> Fallible<(SqlitePool, tempfile::TempDir)> {
     Ok((pool, directory))
 }
 
-/// Away in Rome to the Monday, as his diary records it.
+/// The Monday lost, as a skip.
+///
+/// **His diary records it as the end of the Rome holiday**, and until #673 that
+/// is what this recorded. A family holiday now rearranges what its week has
+/// left — the gym takes the Wednesday and the Sunday — so a holiday no longer
+/// leaves a session to read as lost, and these tests are about one that is.
+/// A skip takes the time and rearranges nothing.
 async fn away_over_the_monday(pool: &SqlitePool) -> Fallible<()> {
-    let over = NonZeroU8::new(4).ok_or("four is not zero")?;
+    let from = domain::schedule::DayPart::new(Date::constant(2026, 9, 14), PartOfDay::Morning);
+    let until = domain::schedule::DayPart::new(Date::constant(2026, 9, 16), PartOfDay::Morning);
     SqliteDiaryStore::new(pool.clone())
-        .record_alteration(&Alteration::new(
-            Date::constant(2026, 9, 11),
-            over,
-            Absence::FamilyHoliday {
-                zone: None,
-                slots: Some(std::collections::BTreeMap::new()),
-                reason: "No holiday, no gym access".to_owned(),
-            },
-        ))
+        .record_skip(&Skip::new(from, until, "away")?)
         .await?;
     Ok(())
 }
@@ -534,7 +532,7 @@ fn the_microcycle_reports_a_state_for_every_session() {
     assert_eq!(
         read,
         vec![
-            "gym 1 2026-09-14 — skipped (family holiday)",
+            "gym 1 2026-09-14 — skipped (away)",
             "cycling 1 2026-09-16 — performed",
             "gym 2 2026-09-18 — prescribed",
             "cycling 2 2026-09-20 — to be prescribed",
@@ -1685,7 +1683,7 @@ fn a_skipped_essential_ride_is_ridden_on_the_sunday_instead() {
         )),
         Some((
             Date::constant(2026, 9, 20),
-            SessionRole::new(Relative::Higher, Relative::Lower),
+            Some(SessionRole::new(Relative::Higher, Relative::Lower)),
             true,
             SessionState::ToBePrescribed
         )),
@@ -1773,7 +1771,7 @@ fn a_missed_essential_ride_is_ridden_on_the_sunday_instead() {
         )),
         Some((
             Date::constant(2026, 9, 20),
-            SessionRole::new(Relative::Higher, Relative::Lower),
+            Some(SessionRole::new(Relative::Higher, Relative::Lower)),
             true,
             SessionState::ToBePrescribed
         )),

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO alteration_slot (alteration, weekday, part, length)\n                VALUES (?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "90d74058f678502dcc7c754d537d5867a3f53daee51087ea7427a2dea20612b1"
+}

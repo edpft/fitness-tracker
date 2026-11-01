@@ -32,9 +32,18 @@ use crate::{
     cycling::{CyclingMesocycle, PlannedRide, SessionPosition},
     plan::Plan,
     prescription::{GymMesocycle, NotScheduled, Skip, WeekKind},
-    schedule::{
-        AbsenceKind, DayPart, Diary, Discipline, PartOfDay, Relative, ScheduledSlot, SessionRole,
-    },
+    schedule::{AbsenceKind, DayPart, Diary, PartOfDay},
+};
+
+mod arrange;
+mod role;
+mod week;
+
+pub use arrange::{Limits, allocations, arrange};
+pub use role::{Relative, SessionRole, UnknownRelative};
+pub use week::{
+    Allocation, Arrangement, Discipline, NoTrainingDays, RecordedSession, ScheduledSlot,
+    TrainingWeek, UnknownDiscipline, accounted,
 };
 
 /// What answers for one slot.
@@ -97,6 +106,12 @@ pub enum Unfilled {
     NotScheduled(#[from] NotScheduled),
     #[error("this microcycle rides nothing that is {role}")]
     NoSessionForRole { role: SessionRole },
+    /// The week gives the gym more sessions than the full-body split takes,
+    /// and the split that alternates primaries is not built yet (#676).
+    #[error(
+        "this week gives the gym more than two sessions, and no split for that many is built yet"
+    )]
+    NoGymSplit,
 }
 
 /// One slot of a calendar week, and what answers for it.
@@ -132,14 +147,18 @@ pub fn commencing(date: Date) -> Date {
 /// the diary says nothing about is empty rather than absent — there are no
 /// slots to fill, which is a different thing from a plan with nothing in it.
 ///
-/// **The ordinary week, so an absence does not delete a session.** This read
+/// **The week as planned, so an illness does not delete a session.** This read
 /// [`Diary::slots_of`] until 2026-09-20, which applies every alteration — and
-/// an absence takes a day's slots away, so a session lost to a holiday had no
-/// slot and did not appear at all. The operator's week of 14 September came
-/// back as two sessions rather than four, silently missing the gym test he was
-/// too ill to do. A session the operator could not train is still a session of
-/// the microcycle, and #185 exists to say *why* it did not happen; the
-/// alteration is read for that rather than to decide what is here.
+/// an illness takes a day's slots away, so a session lost to it had no slot
+/// and did not appear at all. The operator's week of 14 September came back as
+/// two sessions rather than four, silently missing the gym test he was too ill
+/// to do. A session the operator could not train is still a session of the
+/// microcycle, and #185 exists to say *why* it did not happen.
+///
+/// **A family holiday rearranges the week instead** (#673), because it is
+/// known in advance: what its week has left is arranged as a week of its own
+/// ([`Diary::planned_slots_of`]). Where that leaves a discipline nothing, the
+/// microcycle has lost it ([`Diary::lost_disciplines`]).
 #[must_use]
 pub fn week<'a>(
     plan: &'a Plan,
@@ -247,7 +266,7 @@ pub fn slots(diary: &Diary, containing: Date, missed: &Missed) -> Vec<ScheduledS
     let monday = commencing(containing);
     let mut slots: Vec<ScheduledSlot> = (0..7)
         .filter_map(|offset| monday.checked_add(jiff::Span::new().days(offset)).ok())
-        .flat_map(|date| diary.ordinary_slots_of(date))
+        .flat_map(|date| diary.planned_slots_of(date))
         .collect();
 
     let after = slots
@@ -275,7 +294,7 @@ pub fn slots(diary: &Diary, containing: Date, missed: &Missed) -> Vec<ScheduledS
     for discipline in Discipline::ALL {
         let Some(essential) = slots.iter().enumerate().position(|(at, slot)| {
             slot.discipline == *discipline
-                && slot.role == ESSENTIAL
+                && slot.role == Some(ESSENTIAL)
                 && (skipped(at) || missed.contains(slot.discipline, slot.date))
         }) else {
             continue;
@@ -300,7 +319,7 @@ pub fn slots(diary: &Diary, containing: Date, missed: &Missed) -> Vec<ScheduledS
             skipped.role = displaced;
         }
         if let Some(later) = slots.get_mut(into) {
-            later.role = ESSENTIAL;
+            later.role = Some(ESSENTIAL);
         }
     }
     slots
@@ -319,7 +338,7 @@ pub fn role_on(
     slots(diary, date, missed)
         .into_iter()
         .find(|slot| slot.date == date && slot.discipline == discipline)
-        .map(|slot| slot.role)
+        .and_then(|slot| slot.role)
 }
 
 /// Where one session of the microcycle stands.
@@ -409,7 +428,7 @@ pub enum Remaining {
 /// won't be done."* Of his 83 sessions in 2026, the only ones performed on a
 /// later day were three of Monday's gym. Closing early costs nothing when he
 /// does train late: a state is derived on every read, and a session performed
-/// after its window still answers for its slot ([`crate::schedule::accounted`]).
+/// after its window still answers for its slot ([`crate::planner::accounted`]).
 ///
 /// `next` is where the next slot of either discipline begins, `None` where the
 /// diary describes nothing after this one. `None` back only at the end of the
@@ -530,6 +549,9 @@ pub fn state_of(
 fn fill(plan: &Plan, slot: ScheduledSlot) -> Result<Filled<'_>, Unfilled> {
     match slot.discipline {
         Discipline::Gym => {
+            if slot.role.is_none() {
+                return Err(Unfilled::NoGymSplit);
+            }
             let side = plan.gym().ok_or(Unfilled::NotTrained {
                 discipline: Discipline::Gym,
             })?;
@@ -538,10 +560,8 @@ fn fill(plan: &Plan, slot: ScheduledSlot) -> Result<Filled<'_>, Unfilled> {
                 date: slot.date,
             })?;
             // **The calendar is asked for the week, and the slot supplies the
-            // role.** The two agree by construction: the calendar was built
-            // against this same diary, so the role it would answer with is the
-            // one already on the slot.
-            let (week, _) = mesocycle.calendar().place(slot.date)?;
+            // role**, whatever day the week put the session on (#673).
+            let week = mesocycle.calendar().place_week(slot.date)?;
             Ok(Filled::Gym { mesocycle, week })
         }
         Discipline::Cycling => {
@@ -561,10 +581,13 @@ fn fill(plan: &Plan, slot: ScheduledSlot) -> Result<Filled<'_>, Unfilled> {
                     discipline: Discipline::Cycling,
                     date: slot.date,
                 })?;
+            // A ride always has a role: only the gym's split can leave one
+            // unsaid.
+            let role = slot.role.unwrap_or(ESSENTIAL);
             let (position, ride) = mesocycle
                 .microcycle(microcycle)
-                .and_then(|week| week.for_role(slot.role))
-                .ok_or(Unfilled::NoSessionForRole { role: slot.role })?;
+                .and_then(|week| week.for_role(role))
+                .ok_or(Unfilled::NoSessionForRole { role })?;
             Ok(Filled::Cycling {
                 mesocycle,
                 microcycle,
@@ -725,13 +748,21 @@ impl fmt::Display for MicrocycleState {
 /// the whole reason the essential one is named. The light gym session lost to
 /// Rome on 14 September cost the microcycle nothing; the entry test lost to
 /// illness on the 18th cost it everything.
+///
+/// `lost` is the disciplines a rearranged week left with no session at all
+/// ([`Diary::lost_disciplines`]): the essential session was not skipped, it
+/// had nowhere to go, and the microcycle has lost it all the same.
 #[must_use]
-pub fn owed_by(sessions: &[Placed], discipline: Discipline) -> Owed {
+pub fn owed_by(sessions: &[Placed], discipline: Discipline, lost: &[Discipline]) -> Owed {
     let Some(essential) = sessions
         .iter()
         .find(|session| session.discipline == discipline && session.role == ESSENTIAL)
     else {
-        return Owed::Absent;
+        return if lost.contains(&discipline) {
+            Owed::Lost
+        } else {
+            Owed::Absent
+        };
     };
 
     match essential.state {
@@ -753,12 +784,14 @@ pub fn owed_by(sessions: &[Placed], discipline: Discipline) -> Owed {
 /// nothing, so nothing is waiting on it. That is the same answer a week every
 /// discipline finished gets, and deliberately: what the caller does with this
 /// is decide whether the plan moves on, and in both cases it does.
+///
+/// `lost` is as [`owed_by`] reads it.
 #[must_use]
-pub fn microcycle_state(sessions: &[Placed]) -> MicrocycleState {
+pub fn microcycle_state(sessions: &[Placed], lost: &[Discipline]) -> MicrocycleState {
     let read: Vec<(Discipline, Owed)> = Discipline::ALL
         .iter()
         .copied()
-        .map(|discipline| (discipline, owed_by(sessions, discipline)))
+        .map(|discipline| (discipline, owed_by(sessions, discipline, lost)))
         .collect();
 
     if read.iter().any(|(_, owed)| *owed == Owed::Running) {

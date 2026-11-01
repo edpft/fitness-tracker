@@ -12,8 +12,8 @@ use domain::{
         Answer, CyclingMesocycle, CyclingMicrocycle, CyclingProvenance, PlannedRide,
         SessionPosition,
     },
+    planner::{Relative, SessionRole},
     provider::PublishedAt,
-    schedule::{Relative, SessionRole},
     sequence::NonEmpty,
 };
 use jiff::civil::{Date, Weekday};

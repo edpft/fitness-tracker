@@ -27,6 +27,7 @@
 //! the half-written intermediate state #73 named, without merging the two
 //! wizards.
 
+use domain::planner::Arrangement as _;
 use std::path::Path;
 
 use application::{
@@ -40,9 +41,9 @@ use domain::{
     macrocycle::PROGRESSIONS,
     normalised::OperatorZone,
     plan::{Mesocycles, Plan, PlanName},
+    planner::Discipline,
     prescription::{PrimaryPattern, sbs},
     provider::{ExternalProgramme, ProgrammeName, Provider},
-    schedule::Discipline,
 };
 use jiff::civil::{Date, Weekday};
 

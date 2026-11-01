@@ -461,7 +461,7 @@ mod tests {
         canonicalise::{Canonicalised, WeighInsCanonicalised},
         next::{Canonicalising, Done, Found, NoAccess, Progress, Step, StepFailure},
     };
-    use domain::{canonical::SessionCount, landing::LandingStream, schedule::Discipline};
+    use domain::{canonical::SessionCount, landing::LandingStream, planner::Discipline};
     use sqlx::{Connection as _, Row as _};
     use tracing_subscriber::layer::SubscriberExt as _;
 

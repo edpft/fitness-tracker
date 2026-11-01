@@ -19,7 +19,7 @@
 use application::{HoldingRides, SourceError};
 use domain::{
     cycling::{CyclingSession, RideVenue},
-    schedule::{Relative, SessionRole},
+    planner::{Relative, SessionRole},
 };
 
 use super::{

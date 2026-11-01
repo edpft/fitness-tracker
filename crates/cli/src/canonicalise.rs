@@ -14,7 +14,7 @@ use std::path::Path;
 
 use application::{Rederivation, next::Canonicalising};
 use configurator::store::Store;
-use domain::schedule::Discipline;
+use domain::planner::Discipline;
 
 use crate::{Failure, output};
 

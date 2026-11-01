@@ -24,8 +24,8 @@ use application::{
 };
 use domain::{
     measure::RepCount,
+    planner::{Relative, SessionRole},
     prescription::{GymMesocycle, Skip, authored::Shape},
-    schedule::{Relative, SessionRole},
 };
 use infrastructure::{SqliteGymMesocycleStore, SqlitePlanStore, connect};
 use jiff::civil::Date;

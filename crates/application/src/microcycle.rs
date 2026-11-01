@@ -12,16 +12,15 @@
 //! Delivering [`Standing::current`] is the caller's, and
 //! rescheduling what was lost is #177's.
 
+use domain::planner::Arrangement as _;
 use domain::{
     plan::{Plan, Span},
     planner::{
         self, Filled, MicrocycleState, Missed, Placed, Recorded, Rerun, SessionState,
         Unreschedulable,
     },
-    schedule::{
-        DayPart, Diary, Discipline, PartOfDay, RecordedSession, ScheduledSlot, SessionRole,
-        accounted,
-    },
+    planner::{Discipline, RecordedSession, ScheduledSlot, SessionRole, accounted},
+    schedule::{DayPart, Diary, PartOfDay},
 };
 use jiff::civil::{Date, DateTime};
 
@@ -307,7 +306,8 @@ where
             };
 
             let placed = placed(&week.sessions);
-            let state = planner::microcycle_state(&placed);
+            let lost = lost_by(&plan, &diary, monday);
+            let state = planner::microcycle_state(&placed, &lost);
             if let Some(rerun) = planner::rerun(monday, state, &placed) {
                 reruns.push(rerun);
             }
@@ -664,7 +664,7 @@ fn rescheduled(plan: &Plan, reruns: &[Rerun], diary: &Diary) -> Result<Plan, Sto
 fn missed_in(sessions: &[Session], diary: &Diary) -> Missed {
     sessions
         .iter()
-        .filter(|session| session.programmed && session.slot.role == planner::ESSENTIAL)
+        .filter(|session| session.programmed && session.slot.role == Some(planner::ESSENTIAL))
         .filter(|session| {
             matches!(
                 session.state,
@@ -681,15 +681,42 @@ fn missed_in(sessions: &[Session], diary: &Diary) -> Missed {
 }
 
 /// The sessions the microcycle machine reads: the ones the plan programmes.
+///
+/// **A session with no role is not programmed**: the gym's split for that
+/// many is not built, so the plan could not fill it.
 fn placed(sessions: &[Session]) -> Vec<Placed> {
     sessions
         .iter()
         .filter(|session| session.programmed)
-        .map(|session| Placed {
-            discipline: session.slot.discipline,
-            role: session.slot.role,
-            state: session.state.clone(),
-            test: session.test,
+        .filter_map(|session| {
+            Some(Placed {
+                discipline: session.slot.discipline,
+                role: session.slot.role?,
+                state: session.state.clone(),
+                test: session.test,
+            })
+        })
+        .collect()
+}
+
+/// The disciplines the plan programmes in a week that the rearranged week left
+/// no session ([`Diary::lost_disciplines`]).
+///
+/// **Only the plan's**: a discipline it does not train that week has nothing
+/// to lose, and reading it as lost would re-run the other's microcycle for it.
+fn lost_by(plan: &Plan, diary: &Diary, monday: Date) -> Vec<Discipline> {
+    let sunday = monday
+        .checked_add(jiff::Span::new().days(6))
+        .unwrap_or(monday);
+    diary
+        .lost_disciplines(monday)
+        .into_iter()
+        .filter(|discipline| {
+            let covers = |date| match discipline {
+                Discipline::Gym => plan.gym().and_then(|side| side.on(date)).is_some(),
+                Discipline::Cycling => plan.cycling().and_then(|side| side.on(date)).is_some(),
+            };
+            covers(monday) || covers(sunday)
         })
         .collect()
 }

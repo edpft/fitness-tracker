@@ -13,7 +13,7 @@ use application::{
 use domain::{
     cycling::{CyclingMesocycleId, CyclingSession, Interval, PowerZone, Ride, RideVenue},
     measure::PositiveDuration,
-    schedule::{Relative, SessionRole},
+    planner::{Relative, SessionRole},
     sequence::NonEmpty,
 };
 use jiff::civil::Date;

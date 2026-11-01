@@ -25,12 +25,12 @@ use application::{
     prescribe::{Authoring, Prescribing, PrescriptionPorts},
 };
 use domain::normalised::StatedZones;
+use domain::planner::{Relative, SessionRole};
 use domain::prescription::{
     Anchor, AnchorProvenance, DerivedFrom, EntryTest, PrescribedItem, SlotId, WeekKind,
     authored::Shape,
 };
 use domain::provider::{ExternalProgramme, ProvidedFrom};
-use domain::schedule::{Relative, SessionRole};
 use infrastructure::{
     HevySessionAccountReader, HevySessionTranslator, HevyWorkoutLandingStore,
     SqliteExerciseHistory, SqliteExtractionRunLog, SqliteGenerationParameterStore,
@@ -666,7 +666,7 @@ async fn held_after_the_test()
     let reschedule = application::reschedule::Reschedule::new(
         vec![domain::planner::Rerun {
             monday: Date::constant(2026, 6, 29),
-            holding: Some(domain::schedule::Discipline::Gym),
+            holding: Some(domain::planner::Discipline::Gym),
         }],
         diary,
         domain::planner::Missed::none(),

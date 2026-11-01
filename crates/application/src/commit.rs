@@ -10,6 +10,7 @@
 //! in `cli` because building a cycling mesocycle read Peloton through the
 //! `plan` wizard's code; [`PublishedProgrammes`] is that code's port.
 
+use domain::planner::Arrangement as _;
 use std::num::NonZeroU32;
 
 use domain::{
@@ -18,13 +19,14 @@ use domain::{
     normalised::OperatorZone,
     plan::{Plan, Span},
     planner,
+    planner::Discipline,
     prescription::{
         GymMesocycle, Progression,
         authored::{Authored, Shape},
         schedule::Skip,
     },
     provider::{ExternalProgramme, ProvidedFrom},
-    schedule::{DayPart, Diary, Discipline, Holidays},
+    schedule::{DayPart, Diary, Holidays},
 };
 use jiff::civil::{Date, Weekday};
 

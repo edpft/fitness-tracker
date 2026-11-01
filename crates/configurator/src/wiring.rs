@@ -26,7 +26,7 @@ use application::{
 use domain::{
     landing::{FetchedAt, LandingStream, RecordCount, Watermark},
     normalised::{OperatorZone, StatedZones},
-    schedule::Discipline,
+    planner::Discipline,
 };
 use infrastructure::{
     BtwbExportAccountReader, BtwbExportLandingStore, BtwbTranslator, FileRunLock, FolderFiles,

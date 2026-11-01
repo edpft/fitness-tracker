@@ -31,8 +31,8 @@ use domain::{
     },
     measure::PositiveDuration,
     plan::{Occupies, PlanName},
+    planner::{Relative, SessionRole},
     provider::{ExternalProgramme, ProgrammeName, Provider, PublishedAt},
-    schedule::{Relative, SessionRole},
     sequence::NonEmpty,
 };
 use jiff::civil::Date;

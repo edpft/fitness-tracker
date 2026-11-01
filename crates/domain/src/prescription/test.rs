@@ -44,6 +44,7 @@ use jiff::{civil::Date, tz::TimeZone};
 use crate::{
     gym::exercise::Exercise,
     measure::RepCount,
+    planner::{Relative, SessionRole, TrainingWeek},
     prescription::{
         anchor::Anchor,
         linear::{PrimaryPattern, SlotFills},
@@ -53,7 +54,6 @@ use crate::{
         shape::SlotId,
     },
     provider::ProvidedFrom,
-    schedule::{Relative, SessionRole, TrainingWeek},
 };
 
 /// What is being tested, and how it is being measured.

@@ -33,7 +33,7 @@ use domain::{
     measure::PositiveDuration,
     normalised::OperatorZone,
     plan::{Mesocycles, Plan},
-    schedule::{Relative, SessionRole},
+    planner::{Relative, SessionRole},
 };
 use jiff::civil::{Date, Weekday};
 

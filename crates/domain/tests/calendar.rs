@@ -13,8 +13,8 @@
 use std::num::NonZeroU8;
 
 use domain::{
+    planner::{Relative, SessionRole, TrainingWeek},
     prescription::{Calendar, InvalidCalendar, NotScheduled, Skip, WeekIndex, WeekKind},
-    schedule::{Relative, SessionRole, TrainingWeek},
 };
 use jiff::{
     civil::{Date, Weekday},

@@ -4,6 +4,7 @@
 //! cargo's discovery of the rest, so a file not named here is not compiled.
 //! The `test-targets` check fails the gate on one.
 
+mod arrange;
 mod attempts;
 mod block;
 mod body_weight;

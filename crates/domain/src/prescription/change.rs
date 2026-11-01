@@ -21,7 +21,7 @@ use jiff::{Timestamp, civil::Date};
 
 use crate::{
     gym::{Exercise, equipment::Specific, exercise::Implement},
-    schedule::{Relative, SessionRole},
+    planner::{Relative, SessionRole},
 };
 
 use super::{ByIntensity, Fill, SlotFills, SlotId};

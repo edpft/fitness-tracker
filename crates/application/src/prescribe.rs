@@ -20,6 +20,7 @@ use domain::{
     },
     measure::{Duration, Kg, RepCount},
     plan::{Occupies, Plan, PlanId, PlanName, Span},
+    planner::{Relative, SessionRole},
     prescription::{
         Anchor, AnchorProvenance, Attempts, BlockPeriodisation, BlockWeek, ByIntensity,
         DerivedFrom, GatingTopSet, GymMesocycle, Ladder, Linear, LoadSteps, Opening, Position,
@@ -34,7 +35,6 @@ use domain::{
         },
         warmup_ramp, warmup_rested,
     },
-    schedule::{Relative, SessionRole},
     sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::{Timestamp, civil::Date};
@@ -422,10 +422,14 @@ where
         let with = planned_with(&self.ports.parameters, found.planned_at).await?;
         // The increments true on the session's date, not today's (issue #450).
         let scales = self.ports.parameters.scales_on(date).await?;
-        let (week, role) = mesocycle.calendar().place(date)?;
-        // A skipped essential session earlier in the week is prescribed here
-        // instead (#392).
-        let role = self.ports.mesocycles.role_on(date).await?.unwrap_or(role);
+        // **The diary says which session a date holds**, as its week is
+        // arranged (#673), and with a skipped essential session earlier in the
+        // week moved here (#392); the calendar answers only for a date the
+        // diary gives no slot.
+        let (week, role) = match self.ports.mesocycles.role_on(date).await? {
+            Some(role) => (mesocycle.calendar().place_week(date)?, role),
+            None => mesocycle.calendar().place(date)?,
+        };
         let mut ladders = BTreeMap::new();
         for slot in SlotId::ALL {
             let Some(specific) = changes.assisted_by(*slot, role, date) else {
@@ -727,8 +731,8 @@ where
             .filter(|performance| performance.on < before)
             .filter(|performance| {
                 matches!(
-                    calendar.place(performance.on),
-                    Ok((WeekKind::Climbing(week), _)) if week == domain::prescription::WeekIndex::FIRST
+                    calendar.place_week(performance.on),
+                    Ok(WeekKind::Climbing(week)) if week == domain::prescription::WeekIndex::FIRST
                 )
             })
             .collect();
@@ -872,8 +876,8 @@ where
             // prescription where the record links one, the calendar otherwise.
             let (week, role) = match &performance.fulfilled {
                 Some(fulfilled) if fulfilled.plan == *plan => {
-                    match sbs.calendar().place(performance.on) {
-                        Ok((week, _)) => (week, fulfilled.role),
+                    match sbs.calendar().place_week(performance.on) {
+                        Ok(week) => (week, fulfilled.role),
                         Err(_) => continue,
                     }
                 }
@@ -3122,8 +3126,8 @@ mod ramp_tests {
     use domain::{
         gym::{Load, Rir},
         measure::{Kg, RepCount},
+        planner::{Relative, SessionRole},
         prescription::{LoadSteps, seed},
-        schedule::{Relative, SessionRole},
     };
 
     fn reps_of(plan: PrimaryLoad) -> Result<Vec<u32>, Box<dyn std::error::Error>> {

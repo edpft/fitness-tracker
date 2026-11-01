@@ -20,8 +20,8 @@ use domain::{
     measure::{Duration, Metres, PositiveDuration},
     normalised::{OperatorZone, StartedAt},
     plan::Occupies,
+    planner::{Relative, SessionRole, TrainingWeek},
     provider::{ExternalProgramme, ProgrammeName, Provider, PublishedAt},
-    schedule::{Relative, SessionRole, TrainingWeek},
     sequence::NonEmpty,
 };
 use jiff::civil::{Weekday, date};

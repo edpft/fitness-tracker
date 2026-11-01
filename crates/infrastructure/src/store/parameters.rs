@@ -12,12 +12,12 @@ use std::collections::BTreeMap;
 use application::{GenerationParameterStore, ProgressionStore, StoreError, WorkoutStore};
 use domain::{
     measure::{Duration, Kg, RepCount},
+    planner::Relative,
     prescription::{
         AccessoryScheme, BackOff, ByIntensity, Levels, LinearProgression, LinearRest, Percentage,
         ResetProtocol, Rest, RestScheme, SbsProgression, SbsRest, Scales, Section, SlotId,
         Superset, Target, TopSetReps, WarmupStep, Workout,
     },
-    schedule::Relative,
     sequence::NonEmpty,
 };
 use jiff::Timestamp;
