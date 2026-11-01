@@ -32,7 +32,7 @@ pub fn index(view: &View) -> Markup {
 
 /// Every page, in the order the menu lists them: the home page, then the rest
 /// as the home page used to list them.
-pub const PAGES: [(&str, &str); 13] = [
+pub const PAGES: [(&str, &str); 14] = [
     ("/", "Home"),
     ("/heart-rate", "Heart rate per power zone"),
     ("/ftp", "FTP tests"),
@@ -44,6 +44,7 @@ pub const PAGES: [(&str, &str); 13] = [
     ("/sleep", "Sleep"),
     ("/estimated-1rm", "Estimated 1RM"),
     ("/workouts", "Workouts"),
+    ("/schedule", "Schedule"),
     ("/fills", "Fills"),
     ("/equipment", "Equipment"),
 ];

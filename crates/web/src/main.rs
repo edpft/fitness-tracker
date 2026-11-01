@@ -20,6 +20,7 @@ mod pulse_wave_velocity;
 mod range;
 mod report;
 mod run;
+mod schedule;
 mod sleep;
 mod weight;
 mod workouts;
@@ -146,6 +147,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/", get(index))
         .merge(charts)
         .route("/equipment", get(equipment_page).post(equipment_post))
+        .route(schedule::HERE, get(schedule_page).post(schedule_post))
         .route("/fills", get(fills_page).post(fills_post))
         .route("/workouts", get(workouts_page).post(workouts_post))
         .route("/run/events", get(events))
@@ -632,6 +634,103 @@ async fn equipment_post(
     match refused {
         None => Redirect::to("/equipment").into_response(),
         Some(refused) => equipment_shown(&runs, Some(&refused)).await.into_response(),
+    }
+}
+
+/// The schedule, read afresh, at the week commencing `week` or as tapped.
+async fn schedule_shown(
+    runs: &Runs,
+    week: Option<jiff::civil::Date>,
+    tapped: Option<&schedule::Tapped>,
+    refused: Option<&input::Refusal>,
+) -> Markup {
+    let store = match configurator::store::Store::open(&runs.setting().database).await {
+        Ok(store) => store,
+        Err(error) => return schedule::unreadable(&error.to_string()),
+    };
+    let diary = configurator::scheduling::diary(&store).await;
+    store.close().await;
+    let today = configurator::equipment::today(&runs.setting().zone);
+    let monday = domain::planner::commencing(week.unwrap_or(today));
+    match diary {
+        Ok(diary) => schedule::page(&diary, today, monday, tapped, refused),
+        Err(error) => schedule::unreadable(&error.to_string()),
+    }
+}
+
+async fn schedule_page(
+    State(runs): State<Arc<Runs>>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Markup {
+    let week = query.get("week").and_then(|typed| typed.parse().ok());
+    schedule_shown(&runs, week, None, None).await
+}
+
+/// Tap, clear or save the week, or start or end an illness, then show the
+/// page again: redirected on a save, so a reload does not post it twice, and
+/// drawn as tapped otherwise.
+async fn schedule_post(
+    State(runs): State<Arc<Runs>>,
+    Form(form): Form<Vec<(String, String)>>,
+) -> Response {
+    let asked = match schedule::asked(&form) {
+        Ok(asked) => asked,
+        Err(refusal) => {
+            return schedule_shown(&runs, None, None, Some(&refusal))
+                .await
+                .into_response();
+        }
+    };
+    let tapped = match &asked {
+        schedule::Asked::Redrawn(tapped) => {
+            return schedule_shown(&runs, Some(tapped.monday), Some(tapped), None)
+                .await
+                .into_response();
+        }
+        schedule::Asked::ThisWeek(tapped) | schedule::Asked::FromNowOn(tapped) => Some(tapped),
+        schedule::Asked::Ill(_) | schedule::Asked::Better => None,
+    };
+    let refused = match configurator::store::Store::open(&runs.setting().database).await {
+        Err(error) => Some(input::Refusal::of("week", error.to_string())),
+        Ok(store) => {
+            let today = configurator::equipment::today(&runs.setting().zone);
+            let done = match &asked {
+                schedule::Asked::ThisWeek(tapped) => configurator::scheduling::alter_week(
+                    &store,
+                    tapped.monday,
+                    &tapped.slots,
+                    &tapped.reason,
+                )
+                .await
+                .map(drop),
+                schedule::Asked::FromNowOn(tapped) => {
+                    configurator::scheduling::from_week(&store, tapped.monday, tapped.slots.clone())
+                        .await
+                        .map(drop)
+                }
+                schedule::Asked::Ill(from) => {
+                    configurator::scheduling::ill(&store, *from).await.map(drop)
+                }
+                schedule::Asked::Better | schedule::Asked::Redrawn(_) => {
+                    configurator::scheduling::better(&store, today)
+                        .await
+                        .map(drop)
+                }
+            };
+            store.close().await;
+            done.err().map(|error| schedule::refusal(&error))
+        }
+    };
+    let week = tapped.map(|tapped| tapped.monday);
+    match refused {
+        None => Redirect::to(&week.map_or_else(
+            || schedule::HERE.to_owned(),
+            |week| format!("{}?week={week}", schedule::HERE),
+        ))
+        .into_response(),
+        Some(refusal) => schedule_shown(&runs, week, tapped, Some(&refusal))
+            .await
+            .into_response(),
     }
 }
 

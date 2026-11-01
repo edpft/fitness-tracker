@@ -146,6 +146,12 @@ pub enum ScheduleError {
     NoIllnessOpen,
     #[error(transparent)]
     Illness(#[from] domain::schedule::InvalidIllness),
+    #[error("that is the {what} already: nothing was recorded")]
+    Unchanged { what: &'static str },
+    #[error(
+        "no weekly availability is recorded yet: `fitness schedule add` records the first, with its time zone"
+    )]
+    NoWeeklyAvailability,
 }
 
 /// Authoring a version of the programme or a primary progression (#192).

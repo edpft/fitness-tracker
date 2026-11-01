@@ -9,6 +9,7 @@ use std::{collections::BTreeMap, num::NonZeroU8};
 
 use domain::{
     normalised::OperatorZone,
+    planner::commencing,
     schedule::{self, Alteration, Diary, Illness, SlotLength, TrainingPattern, TrainingSlot},
 };
 use jiff::civil::{Date, Weekday};
@@ -22,6 +23,15 @@ use crate::{DiaryAuthor, DiaryStore, ScheduleError};
 #[must_use]
 pub fn weekdays(start: Date, days: NonZeroU8) -> Vec<Weekday> {
     schedule::covered_weekdays(start, days)
+}
+
+/// The seven days of the calendar week containing `date`, Monday first.
+#[must_use]
+pub fn days_of(date: Date) -> Vec<Date> {
+    let monday = commencing(date);
+    (0..7)
+        .filter_map(|offset| monday.checked_add(jiff::Span::new().days(offset)).ok())
+        .collect()
 }
 
 /// The use case, over the store that keeps the diary.
@@ -101,6 +111,95 @@ impl<S: DiaryStore + DiaryAuthor + Sync> Scheduling<S> {
         let alteration = Alteration::new(start, days, zone, slots, reason.to_owned());
         self.store.record_alteration(&alteration).await?;
         Ok(alteration)
+    }
+
+    /// Record a calendar week as it was tapped: the days that differ from the
+    /// week as it stands, as one alteration from the first of them to the
+    /// last (#671).
+    ///
+    /// **One run, as `alter` would have been asked for it.** Friday evening
+    /// and Sunday morning tapped off the week commencing 14 December is 18
+    /// December for 3 days with no room to train; Saturday, unchanged, is in
+    /// the run and keeps what it had.
+    ///
+    /// `week` is any date in the week; `slots` is the whole week as tapped.
+    ///
+    /// # Errors
+    ///
+    /// [`ScheduleError::NoReason`] for a blank reason,
+    /// [`ScheduleError::Unchanged`] when no day differs, and
+    /// [`ScheduleError::Store`] if the store cannot be read or written.
+    pub async fn alter_week(
+        &self,
+        week: Date,
+        slots: &BTreeMap<TrainingSlot, SlotLength>,
+        reason: &str,
+    ) -> Result<Alteration, ScheduleError> {
+        if reason.trim().is_empty() {
+            return Err(ScheduleError::NoReason);
+        }
+
+        let diary = self.store.diary().await?;
+        let tapped = |date: Date| -> Vec<(TrainingSlot, SlotLength)> {
+            slots
+                .iter()
+                .filter(|(slot, _)| slot.weekday == date.weekday())
+                .map(|(slot, length)| (*slot, *length))
+                .collect()
+        };
+        let changed: Vec<Date> = days_of(week)
+            .into_iter()
+            .filter(|date| diary.free_on(*date, false) != tapped(*date))
+            .collect();
+        let (Some(&start), Some(&last)) = (changed.first(), changed.last()) else {
+            return Err(ScheduleError::Unchanged {
+                what: "week as it stands",
+            });
+        };
+
+        let run = start.until(last).map_or(0, |span| span.get_days()) + 1;
+        let days = u8::try_from(run)
+            .ok()
+            .and_then(NonZeroU8::new)
+            .unwrap_or(NonZeroU8::MIN);
+        let covered = weekdays(start, days);
+        let stated = slots
+            .iter()
+            .filter(|(slot, _)| covered.contains(&slot.weekday))
+            .map(|(slot, length)| (*slot, *length))
+            .collect();
+        self.alter(start, days, None, Some(stated), reason).await
+    }
+
+    /// Record a calendar week as it was tapped as the weekly availability,
+    /// from its Monday on (#671), in the time zone of the one it replaces.
+    ///
+    /// # Errors
+    ///
+    /// [`ScheduleError::NoWeeklyAvailability`] when none is recorded to take
+    /// a time zone from, [`ScheduleError::Unchanged`] when it is the weekly
+    /// availability already in force, and [`ScheduleError::Store`] if the
+    /// store cannot be read or written.
+    pub async fn from_week(
+        &self,
+        week: Date,
+        slots: BTreeMap<TrainingSlot, SlotLength>,
+    ) -> Result<TrainingPattern, ScheduleError> {
+        let monday = commencing(week);
+        let diary = self.store.diary().await?;
+        let replaced = diary
+            .pattern_on(monday)
+            .or_else(|| diary.patterns().first())
+            .ok_or(ScheduleError::NoWeeklyAvailability)?;
+        if diary
+            .pattern_on(monday)
+            .is_some_and(|ordinary| *ordinary.slots() == slots)
+        {
+            return Err(ScheduleError::Unchanged {
+                what: "weekly availability",
+            });
+        }
+        self.add(monday, replaced.zone().clone(), slots).await
     }
 
     /// Record the operator ill from `from`, and still ill.
