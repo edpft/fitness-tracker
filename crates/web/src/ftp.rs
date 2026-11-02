@@ -1,8 +1,9 @@
 //! The FTP tests, in watts and over body weight, as a chart (#469).
 //!
 //! **Date across, one point per test, nothing joining them.** A test is a
-//! measurement, so each says which way it moved from the test before and no
-//! line claims anything about the days between.
+//! measurement, so each says how it moved from the test before, and whether
+//! that or the change since the start of its run is beyond the noise of two
+//! tests (#688), and no line claims anything about the days between.
 //!
 //! **One chart, the unit a choice**: watts, or watts a kilo where the test was
 //! weighed. A test with no weigh-in that day is named beneath the per-kilo
@@ -92,7 +93,7 @@ fn body(tests: &[Test], ranges: &Ranges, over: Over) -> Markup {
         .collect();
     html! {
         p.reading { (last.on()) ": " (watts(last)) @if last.per_kilo.is_some() { " · " (per_kilo(last)) } }
-        p.legend { "points: each test's FTP · against the test before it, by any difference · per kilo over that day's weigh-in, against the test before only where both were weighed" }
+        p.legend { "points: each test's FTP · rising or falling beyond the noise of two tests, about 8% of the earlier (a 20-minute test repeats to 2.9%, Borszcz et al. 2020), against the test before or else the first test since the last clear change; higher is better · per kilo over that day's weigh-in, against the test before only where both were weighed" }
         div.units {
             input type="radio" name="unit" id="unit-watts" class="watts" checked;
             label for="unit-watts" { "W" }
@@ -215,11 +216,19 @@ fn chart(tests: &[Test], range: Range, unit: Unit) -> Markup {
     }
 }
 
-/// The FTP and how it moved: `182W, +5W, rising`.
+/// The FTP and how it moved: `182W, +5W, no clear change`, or `187W, +5W,
+/// rising, +15W since 2026-07-22`.
 fn watts(test: &Test) -> String {
     let moved = test
         .watts_moved
-        .map(|moved| format!(", {}W, {}", signed(moved.by), direction(moved)))
+        .map(|moved| {
+            format!(
+                ", {}W, {}{}",
+                signed(moved.by),
+                direction(moved),
+                since(moved, |by| format!("{}W", signed(by)))
+            )
+        })
         .unwrap_or_default();
     format!("{}{moved}", test.ftp.watts())
 }
@@ -231,17 +240,33 @@ fn per_kilo(test: &Test) -> String {
     };
     let moved = test
         .per_kilo_moved
-        .map(|moved| format!(", {}W/kg, {}", hundredths(moved.by), direction(moved)))
+        .map(|moved| {
+            format!(
+                ", {}W/kg, {}{}",
+                hundredths(moved.by),
+                direction(moved),
+                since(moved, |by| format!("{}W/kg", hundredths(by)))
+            )
+        })
         .unwrap_or_default();
     format!("{ratio}{moved}")
 }
 
 const fn direction(moved: Moved) -> &'static str {
     match moved.direction {
-        Direction::Rising => "rising",
-        Direction::Maintaining => "maintaining",
-        Direction::Falling => "falling",
+        Some(Direction::Rising) => "rising",
+        Some(Direction::Falling) => "falling",
+        Some(Direction::Maintaining) | None => "no clear change",
     }
+}
+
+/// Where the direction is read against the start of the run, how far it has
+/// moved since: `, +15W since 2026-07-22`.
+fn since(moved: Moved, unit: impl Fn(i64) -> String) -> String {
+    moved
+        .since
+        .map(|since| format!(", {} since {}", unit(since.by), since.on))
+        .unwrap_or_default()
 }
 
 const fn sign(by: i64) -> &'static str {
@@ -379,7 +404,9 @@ mod tests {
             "four in watts, three weighed"
         );
         assert!(!page.contains("<polyline"), "nothing joins two tests");
-        assert!(page.contains("2026-10-25: 182W, +5W, rising · 2.16W/kg, +0.05W/kg, rising"));
+        assert!(page.contains(
+            "2026-10-25: 182W, +5W, no clear change · 2.16W/kg, +0.05W/kg, no clear change"
+        ));
         assert!(page.contains("Not weighed that day: 2026-05-10"));
     }
 
@@ -397,7 +424,26 @@ mod tests {
     fn a_range_keeps_each_test_s_reading_against_the_one_before() {
         let page = shown(&autumn().expect("the tests"), Over::Mesocycle);
         assert_eq!(page.matches(r#"class="point""#).count(), 2);
-        assert!(page.contains("2026-10-25 · 182W, +5W, rising"));
+        assert!(page.contains("2026-10-25 · 182W, +5W, no clear change"));
+    }
+
+    #[test]
+    fn a_rise_read_against_the_start_of_the_run_says_since_when() {
+        let tests = tests(
+            &[
+                tested(date(2026, 5, 10), 155).expect("a test"),
+                tested(date(2026, 7, 22), 172).expect("a test"),
+                tested(date(2026, 9, 23), 177).expect("a test"),
+                tested(date(2026, 10, 25), 182).expect("a test"),
+                tested(date(2026, 10, 27), 187).expect("a test"),
+            ],
+            &[],
+        );
+        let page = shown(&tests, Over::Macrocycle);
+        assert!(
+            page.contains("2026-10-27: 187W, +5W, rising, +15W since 2026-07-22"),
+            "{page}"
+        );
     }
 
     #[test]

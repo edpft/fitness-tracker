@@ -4,7 +4,7 @@ use domain::{
     analytical::{
         Weighed,
         body_weight::Direction,
-        ftp_test::{Moved, PowerToWeight, Test, tests, within},
+        ftp_test::{Moved, PowerToWeight, Since, Test, tests, within},
         range::Range,
     },
     canonical::Occurred,
@@ -63,8 +63,15 @@ fn autumn() -> Fallible<Vec<Test>> {
     ))
 }
 
+fn watts(tests: &[Test]) -> Vec<Option<Direction>> {
+    tests
+        .iter()
+        .map(|test| test.watts_moved.and_then(|moved| moved.direction))
+        .collect()
+}
+
 #[test]
-fn each_test_is_read_against_the_one_before_by_any_difference() {
+fn a_test_moves_only_beyond_the_noise_of_two_tests() {
     let tests = autumn().expect("the tests");
     let days: Vec<Date> = tests.iter().map(Test::on).collect();
     assert_eq!(
@@ -82,15 +89,68 @@ fn each_test_is_read_against_the_one_before_by_any_difference() {
         "the first has nothing before it"
     );
     assert_eq!(
+        tests[1].watts_moved,
+        Some(Moved {
+            by: 17,
+            direction: Some(Direction::Rising),
+            since: None
+        }),
+        "+17 W against 155 W's ± 12.5"
+    );
+    assert_eq!(
         tests[3].watts_moved,
         Some(Moved {
             by: 5,
-            direction: Direction::Rising
-        })
+            direction: None,
+            since: None
+        }),
+        "+5 W against 177 W's ± 14.2, and +10 W against 172 W's ± 13.8"
+    );
+    assert_eq!(watts(&tests), [None, Some(Direction::Rising), None, None]);
+}
+
+#[test]
+fn small_steps_one_way_move_once_they_add_up_from_the_start_of_the_run() {
+    // The operator, 2026-11-02: "what if my next test is 187?"
+    let tests = tests(
+        &[
+            tested(date(2026, 5, 10), 155).expect("a test"),
+            tested(date(2026, 7, 22), 172).expect("a test"),
+            tested(date(2026, 9, 23), 177).expect("a test"),
+            tested(date(2026, 10, 25), 182).expect("a test"),
+            tested(date(2026, 11, 25), 187).expect("a test"),
+        ],
+        &[],
     );
     assert_eq!(
-        tests[1].watts_moved.map(|moved| moved.direction),
-        Some(Direction::Rising)
+        tests[4].watts_moved,
+        Some(Moved {
+            by: 5,
+            direction: Some(Direction::Rising),
+            since: Some(Since {
+                on: date(2026, 7, 22),
+                by: 15
+            })
+        }),
+        "+15 W against 172 W's ± 13.8"
+    );
+}
+
+#[test]
+fn a_clear_change_starts_a_new_run() {
+    let tests = tests(
+        &[
+            tested(date(2026, 7, 22), 172).expect("a test"),
+            tested(date(2026, 9, 23), 182).expect("a test"),
+            tested(date(2026, 10, 25), 160).expect("a test"),
+            tested(date(2026, 11, 25), 170).expect("a test"),
+        ],
+        &[],
+    );
+    assert_eq!(
+        watts(&tests),
+        [None, None, Some(Direction::Falling), None],
+        "170 is read against 160, where the run starts, not against 172"
     );
 }
 
@@ -126,18 +186,20 @@ fn per_kilo_moves_only_against_a_weighed_test_immediately_before() {
         tests[2].per_kilo_moved,
         Some(Moved {
             by: 8,
-            direction: Direction::Rising
+            direction: None,
+            since: None
         }),
-        "2.03 to 2.11"
+        "2.03 to 2.11, within 2.03's ± 0.16"
     );
     assert_eq!(
-        tests[3].per_kilo_moved.map(|moved| moved.direction),
-        Some(Direction::Rising)
+        tests[3].per_kilo_moved.and_then(|moved| moved.direction),
+        None,
+        "2.16 is within the noise of 2.11 and of 22 Jul's 2.03, where its run starts"
     );
 }
 
 #[test]
-fn the_same_figure_is_maintaining() {
+fn the_same_figure_is_no_clear_change() {
     let tests = tests(
         &[
             tested(date(2026, 9, 23), 177).expect("a test"),
@@ -149,7 +211,8 @@ fn the_same_figure_is_maintaining() {
         tests[1].watts_moved,
         Some(Moved {
             by: 0,
-            direction: Direction::Maintaining
+            direction: None,
+            since: None
         })
     );
 }
