@@ -1,58 +1,40 @@
-//! The FTP tests, in watts and over body weight, as a chart (#469).
+//! The FTP tests, in watts and over body weight, on the detail template
+//! (#620, #469).
 //!
-//! **Date across, one point per test, nothing joining them.** A test is a
-//! measurement, so each says which way it moved from the test before and no
-//! line claims anything about the days between.
+//! **The summary is the latest test in watts and per kilo**, each with its
+//! change against its noise (#688): against the test before, or since the
+//! start of its run where that is what decided the reading. The arrow only
+//! where the change is beyond the noise; higher is better. It is the latest
+//! whatever the range.
 //!
-//! **One chart, the unit a choice**: watts, or watts a kilo where the test was
-//! weighed. A test with no weigh-in that day is named beneath the per-kilo
-//! chart rather than drawn.
+//! **One chart, the unit a choice**: each test a dot, nothing joining them,
+//! since a test is a measurement and no line claims anything about the days
+//! between. A test with no weigh-in that day has no per-kilo dot.
 //!
-//! **The range only chooses which tests are shown**: each one's reading is
-//! against the test before it, whether or not that one is in the range.
+//! **Opens on All** (operator, 2026-10-28): *"inherently, there won't be
+//! very many per macrocycle"*. The range only chooses which tests are shown;
+//! each is read against the whole record.
+
+use std::collections::BTreeMap;
 
 use domain::analytical::{
-    body_weight::Direction,
-    ftp_test::{Moved, PowerToWeight, Test, within},
+    ftp_test::{Moved, Test, noise, within},
     range::{Over, Range, Ranges},
 };
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
+use crate::{
+    detail::{self, Axis, Cell, Chart, Layer, Metric, Reading},
+    run::View,
+};
+
 pub const PATH: &str = "/ftp";
 const TITLE: &str = "FTP tests";
-const WIDTH: f64 = 720.0;
-const HEIGHT: f64 = 360.0;
-const LEFT: f64 = 64.0;
-const RIGHT: f64 = 12.0;
-const TOP: f64 = 12.0;
-const FLOOR: f64 = 336.0;
-const RADIUS: f64 = 4.5;
-/// How far inside the chart's edges the first and last days fall, so a test on
-/// either is drawn whole.
-const INSET: f64 = 12.0;
-/// The width the days are spread across.
-const ACROSS: f64 = WIDTH - LEFT - RIGHT - INSET - INSET;
 
-/// The whole page.
-pub fn page(tests: &[Test], ranges: &Ranges, over: Over, run: &crate::run::View) -> Markup {
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head {
-                (crate::page::head(TITLE, &[STYLE]))
-            }
-            body {
-                (crate::page::following(run))
-                main.wide {
-                    (crate::page::menu(PATH))
-                    h1 { (TITLE) }
-                    (crate::range::choices(PATH, over))
-                    (body(tests, ranges, over))
-                }
-            }
-        }
-    }
+/// The page: the summary, then the chart over the range chosen.
+pub fn page(tests: &[Test], ranges: &Ranges, over: Over, run: &View) -> Markup {
+    detail::page(PATH, TITLE, over, run, &body(tests, ranges, over))
 }
 
 /// The page when the store could not be read.
@@ -60,9 +42,7 @@ pub fn unreadable(error: &str) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
-            head {
-                (crate::page::head(TITLE, &[]))
-            }
+            head { (crate::page::head(TITLE, &[])) }
             body {
                 main {
                     (crate::page::menu(PATH))
@@ -73,7 +53,8 @@ pub fn unreadable(error: &str) -> Markup {
     }
 }
 
-/// The range chosen, or why there is none.
+/// The summary, the chart over the range chosen and the latest tests, or why
+/// there is no range.
 fn body(tests: &[Test], ranges: &Ranges, over: Over) -> Markup {
     let recorded = Range::spanning(tests.iter().map(Test::on));
     let range = match crate::range::chosen(ranges, over, recorded, "No FTP test has been recorded.")
@@ -81,40 +62,80 @@ fn body(tests: &[Test], ranges: &Ranges, over: Over) -> Markup {
         Ok(range) => range,
         Err(said) => return said,
     };
-    let tests = within(tests, range);
-    let Some(last) = tests.last() else {
-        return html! { p { "No FTP test in this range." } };
-    };
-    let unweighed: Vec<Date> = tests
-        .iter()
-        .filter(|test| test.per_kilo.is_none())
-        .map(Test::on)
-        .collect();
+    let today = range.to;
+    let shown = within(tests, range);
     html! {
-        p.reading { (last.on()) ": " (watts(last)) @if last.per_kilo.is_some() { " · " (per_kilo(last)) } }
-        p.legend { "points: each test's FTP · against the test before it, by any difference · per kilo over that day's weigh-in, against the test before only where both were weighed" }
-        div.units {
-            input type="radio" name="unit" id="unit-watts" class="watts" checked;
-            label for="unit-watts" { "W" }
-            input type="radio" name="unit" id="unit-per-kilo" class="per-kilo";
-            label for="unit-per-kilo" { "W/kg" }
-            div.unit.watts {
-                (chart(&tests, range, Unit::Watts))
-            }
-            div."unit"."per-kilo" {
-                (chart(&tests, range, Unit::PerKilo))
-                @if !unweighed.is_empty() {
-                    p.legend {
-                        "Not weighed that day: "
-                        @for (index, on) in unweighed.iter().enumerate() {
-                            @if index > 0 { ", " }
-                            (on)
-                        }
-                    }
-                }
-            }
-        }
-        (table(&tests))
+        (summary(tests, today))
+        (detail::choice("ftp", Metric::Ftp, "FTP", &[
+            ("W", chart(&shown, range, today, Unit::Watts)),
+            ("W/kg", chart(&shown, range, today, Unit::PerKilo)),
+        ]))
+        (latest(tests, today))
+        (detail::foot(
+            "Dots: each FTP test; per kilo over that day's weigh-in. A change is clear beyond the noise of two tests, about 8% of the earlier (a 20-minute test repeats to 2.9%, Borszcz et al. 2020), against the test before or else the first test since the last clear change. Higher is better."
+        ))
+    }
+}
+
+/// The latest test, in watts and per kilo, each read against its noise.
+fn summary(tests: &[Test], today: Date) -> Markup {
+    let Some(last) = tests.last() else {
+        return html! {};
+    };
+    let mut cells = vec![Cell {
+        metric: Metric::Ftp,
+        label: "FTP",
+        figure: last.ftp.watts().as_u32().to_string(),
+        unit: "W",
+        margin: None,
+        readings: vec![reading(
+            last.ftp.watts().as_u32(),
+            last.watts_moved,
+            &|by| format!("{} W", signed(by)),
+        )],
+    }];
+    if let Some(ratio) = last.per_kilo {
+        cells.push(Cell {
+            metric: Metric::Ftp,
+            label: "Per kilo",
+            figure: hundredths(i64::from(ratio.as_hundredths()), ""),
+            unit: "W/kg",
+            margin: None,
+            readings: vec![reading(ratio.as_hundredths(), last.per_kilo_moved, &|by| {
+                format!("{} W/kg", hundredths(by, "+"))
+            })],
+        });
+    }
+    detail::summary(
+        &cells,
+        &format!("Test on {}", detail::day(last.on(), today)),
+    )
+}
+
+/// A figure's change against the noise of two tests: since the start of its
+/// run where that decided it, else against the test before.
+fn reading(now: u32, moved: Option<Moved>, said: &dyn Fn(i64) -> String) -> Reading {
+    let Some(moved) = moved else {
+        return Reading::NoRule("No test before it to read it against.".to_owned());
+    };
+    let (by, over) = moved.since.map_or_else(
+        || (moved.by, "against the test before".to_owned()),
+        |since| {
+            (
+                since.by,
+                format!("since {}", since.on.strftime("%-d %b %Y")),
+            )
+        },
+    );
+    let Ok(earlier) = u32::try_from(i64::from(now) - by) else {
+        return Reading::NoRule("No test before it to read it against.".to_owned());
+    };
+    Reading::Change {
+        by: f64::from(now) - f64::from(earlier),
+        noise: noise(earlier),
+        direction: moved.direction,
+        said: said(by),
+        over,
     }
 }
 
@@ -125,180 +146,152 @@ enum Unit {
 }
 
 impl Unit {
-    /// The test's figure, in watts or hundredths of a watt a kilo.
-    fn of(self, test: &Test) -> Option<u32> {
+    /// The test's figure, in watts or watts a kilo.
+    fn of(self, test: &Test) -> Option<f64> {
         match self {
-            Self::Watts => Some(test.ftp.watts().as_u32()),
-            Self::PerKilo => test.per_kilo.map(PowerToWeight::as_hundredths),
-        }
-    }
-
-    fn label(self, value: u32) -> String {
-        match self {
-            Self::Watts => format!("{value}W"),
-            Self::PerKilo => format!("{}.{:02}", value / 100, value % 100),
-        }
-    }
-
-    fn reading(self, test: &Test) -> String {
-        match self {
-            Self::Watts => watts(test),
-            Self::PerKilo => per_kilo(test),
-        }
-    }
-
-    const fn name(self) -> &'static str {
-        match self {
-            Self::Watts => "FTP in watts by date",
-            Self::PerKilo => "FTP in watts a kilo by date",
+            Self::Watts => Some(f64::from(test.ftp.watts().as_u32())),
+            Self::PerKilo => test
+                .per_kilo
+                .map(|ratio| f64::from(ratio.as_hundredths()) / 100.0),
         }
     }
 }
 
-/// Where a day and a figure fall on the chart.
-struct Frame {
-    range: Range,
-    days: i32,
-    low: u32,
-    high: u32,
-}
-
-impl Frame {
-    fn x(&self, on: Date) -> f64 {
-        let along = if self.days <= 0 {
-            0.5
-        } else {
-            f64::from(days_between(self.range.from, on)) / f64::from(self.days)
-        };
-        ACROSS.mul_add(along, LEFT + INSET)
-    }
-
-    fn y(&self, value: u32) -> f64 {
-        let share = f64::from(value.saturating_sub(self.low)) / f64::from(self.high - self.low);
-        (FLOOR - TOP).mul_add(-share, FLOOR)
-    }
-}
-
-fn chart(tests: &[Test], range: Range, unit: Unit) -> Markup {
-    let values: Vec<u32> = tests.iter().filter_map(|test| unit.of(test)).collect();
-    let (Some(&min), Some(&max)) = (values.iter().min(), values.iter().max()) else {
-        return html! { p { "No test in this range was weighed that day." } };
+/// Each test a dot, in one unit; a tap names the test and how it was read.
+fn chart(tests: &[Test], range: Range, today: Date, unit: Unit) -> Chart<'static> {
+    let dots: Vec<(Date, f64)> = tests
+        .iter()
+        .filter_map(|test| Some((test.on(), unit.of(test)?)))
+        .collect();
+    let said: BTreeMap<Date, String> = tests
+        .iter()
+        .filter(|test| unit.of(test).is_some())
+        .map(|test| (test.on(), described(test, unit)))
+        .collect();
+    let (id, sub) = match unit {
+        Unit::Watts => ("ftp-watts", format!("{} · W", counted(dots.len(), "test"))),
+        Unit::PerKilo => (
+            "ftp-per-kilo",
+            format!(
+                "{} of {} weighed that day · W/kg",
+                dots.len(),
+                counted(tests.len(), "test")
+            ),
+        ),
     };
-    let step = step(max - min);
-    let frame = Frame {
+    Chart {
+        id,
+        metric: Metric::Ftp,
+        title: "FTP",
+        sub,
         range,
-        days: days_between(range.from, range.to),
-        low: min.saturating_sub(step / 2) / step * step,
-        high: (max + step / 2) / step * step + step,
-    };
-    html! {
-        div.plot {
-            svg.chart viewBox=(format!("0 0 {WIDTH} {HEIGHT}")) role="img" aria-label=(unit.name()) {
-                @for value in (frame.low..=frame.high).step_by(step as usize) {
-                    line.grid x1=(LEFT) x2=(WIDTH - RIGHT) y1=(frame.y(value)) y2=(frame.y(value)) {}
-                    text.axis x=(LEFT - 6.0) y=(frame.y(value) + 4.0) text-anchor="end" { (unit.label(value)) }
-                }
-                @for (tick, label) in crate::range::ticks(range) {
-                    line.grid x1=(frame.x(tick)) x2=(frame.x(tick)) y1=(TOP) y2=(FLOOR) {}
-                    text.axis x=(frame.x(tick) + 3.0) y=(FLOOR + 14.0) { (label) }
-                }
-                line.baseline x1=(LEFT) x2=(WIDTH - RIGHT) y1=(FLOOR) y2=(FLOOR) {}
-                @for test in tests {
-                    @if let Some(value) = unit.of(test) {
-                        circle.point cx=(frame.x(test.on())) cy=(frame.y(value)) r=(RADIUS) {
-                            title { (test.on()) " · " (unit.reading(test)) }
-                        }
-                    }
-                }
+        axis: Axis::Figures,
+        layers: vec![Layer::Dots(dots)],
+        days: said
+            .into_iter()
+            .map(|(on, said)| {
+                (
+                    on,
+                    html! { span.on { (detail::day(on, today)) } " · " (said) },
+                )
+            })
+            .collect(),
+    }
+}
+
+/// A test in one unit, and how it was read: `182 W · +5 W, no clear change`.
+fn described(test: &Test, unit: Unit) -> String {
+    match unit {
+        Unit::Watts => format!(
+            "{} W{}",
+            test.ftp.watts().as_u32(),
+            moved(test.watts_moved, |by| format!("{} W", signed(by)))
+        ),
+        Unit::PerKilo => format!(
+            "{} W/kg{}",
+            test.per_kilo.map_or_else(String::new, |ratio| hundredths(
+                i64::from(ratio.as_hundredths()),
+                ""
+            )),
+            moved(test.per_kilo_moved, |by| format!(
+                "{} W/kg",
+                hundredths(by, "+")
+            ))
+        ),
+    }
+}
+
+/// ` · +5 W, no clear change`, or ` · +5 W, rising, +15 W since 22 Jul 2026`.
+fn moved(moved: Option<Moved>, said: impl Fn(i64) -> String) -> String {
+    moved.map_or_else(String::new, |moved| {
+        let read = match moved.direction {
+            Some(domain::analytical::body_weight::Direction::Rising) => "rising",
+            Some(domain::analytical::body_weight::Direction::Falling) => "falling",
+            Some(domain::analytical::body_weight::Direction::Maintaining) | None => {
+                "no clear change"
             }
-        }
+        };
+        let since = moved.since.map_or_else(String::new, |since| {
+            format!(
+                ", {} since {}",
+                said(since.by),
+                since.on.strftime("%-d %b %Y")
+            )
+        });
+        format!(" · {}, {read}{since}", said(moved.by))
+    })
+}
+
+/// The latest seven tests, newest first, in watts and per kilo.
+fn latest(tests: &[Test], today: Date) -> Markup {
+    let rows: Vec<(String, Markup)> = tests
+        .iter()
+        .rev()
+        .take(7)
+        .map(|test| {
+            (
+                detail::day(test.on(), today),
+                html! {
+                    (test.ftp.watts().as_u32()) " W"
+                    @if let Some(ratio) = test.per_kilo {
+                        " · " (hundredths(i64::from(ratio.as_hundredths()), "")) " W/kg"
+                    }
+                },
+            )
+        })
+        .collect();
+    if rows.is_empty() {
+        return html! {};
     }
+    detail::latest("Tests", "FTP · per kilo", &rows)
 }
 
-/// The FTP and how it moved: `182W, +5W, rising`.
-fn watts(test: &Test) -> String {
-    let moved = test
-        .watts_moved
-        .map(|moved| format!(", {}W, {}", signed(moved.by), direction(moved)))
-        .unwrap_or_default();
-    format!("{}{moved}", test.ftp.watts())
-}
-
-/// Per kilo and how it moved: `2.16W/kg, +0.05W/kg, rising`.
-fn per_kilo(test: &Test) -> String {
-    let Some(ratio) = test.per_kilo else {
-        return "not weighed that day".to_owned();
-    };
-    let moved = test
-        .per_kilo_moved
-        .map(|moved| format!(", {}W/kg, {}", hundredths(moved.by), direction(moved)))
-        .unwrap_or_default();
-    format!("{ratio}{moved}")
-}
-
-const fn direction(moved: Moved) -> &'static str {
-    match moved.direction {
-        Direction::Rising => "rising",
-        Direction::Maintaining => "maintaining",
-        Direction::Falling => "falling",
-    }
-}
-
-const fn sign(by: i64) -> &'static str {
+const fn sign(by: i64, plus: &'static str) -> &'static str {
     match by.signum() {
-        1 => "+",
+        1 => plus,
         -1 => "−",
         _ => "",
     }
 }
 
+/// Watts with their sign: `+5`, `−25`.
 fn signed(by: i64) -> String {
-    format!("{}{}", sign(by), by.unsigned_abs())
+    format!("{}{}", sign(by, "+"), by.unsigned_abs())
 }
 
-fn hundredths(by: i64) -> String {
+/// Hundredths as a figure to two places, signed with `plus` where positive.
+fn hundredths(by: i64, plus: &'static str) -> String {
     let abs = by.unsigned_abs();
-    format!("{}{}.{:02}", sign(by), abs / 100, abs % 100)
+    format!("{}{}.{:02}", sign(by, plus), abs / 100, abs % 100)
 }
 
-/// The same figures as a table.
-fn table(tests: &[Test]) -> Markup {
-    html! {
-        details {
-            summary { "Every test as a table" }
-            table.figures {
-                thead { tr { th { "date" } th { "FTP" } th { "weigh-in" } th { "per kilo" } } }
-                tbody {
-                    @for test in tests {
-                        tr {
-                            td { (test.on()) }
-                            td { (watts(test)) }
-                            td { @if let Some(body) = test.body { (body) "kg" } }
-                            td { (per_kilo(test)) }
-                        }
-                    }
-                }
-            }
-        }
+fn counted(count: usize, one: &str) -> String {
+    if count == 1 {
+        format!("1 {one}")
+    } else {
+        format!("{count} {one}s")
     }
 }
-
-/// How often the axis is marked across a spread, in watts or hundredths of a
-/// watt a kilo alike: every 10, or every 20 across more than 60.
-const fn step(spread: u32) -> u32 {
-    if spread > 60 { 20 } else { 10 }
-}
-
-fn days_between(from: Date, to: Date) -> i32 {
-    from.until(to).map_or(0, |span| span.get_days())
-}
-
-const STYLE: &str = "
-.point { fill: var(--mark); }
-div.units label { margin: 0 0.75rem 0 0.25rem; }
-div.units input.watts:checked ~ div.unit:not(.watts),
-div.units input.per-kilo:checked ~ div.unit:not(.per-kilo) { display: none; }
-";
 
 #[cfg(test)]
 mod tests {
@@ -371,39 +364,89 @@ mod tests {
     }
 
     #[test]
-    fn each_test_is_a_point_in_each_unit_it_has() {
+    fn each_test_is_a_dot_in_each_unit_it_has() {
         let page = shown(&autumn().expect("the tests"), Over::Macrocycle);
         assert_eq!(
-            page.matches(r#"class="point""#).count(),
+            page.matches(r#"class="dot""#).count(),
             7,
-            "four in watts, three weighed"
+            "four in watts, three weighed: {page}"
         );
-        assert!(!page.contains("<polyline"), "nothing joins two tests");
-        assert!(page.contains("2026-10-25: 182W, +5W, rising · 2.16W/kg, +0.05W/kg, rising"));
-        assert!(page.contains("Not weighed that day: 2026-05-10"));
+        assert!(!page.contains(r#"class="line""#), "nothing joins two tests");
+        assert!(page.contains("4 tests · W"), "{page}");
+        assert!(
+            page.contains("3 of 4 tests weighed that day · W/kg"),
+            "{page}"
+        );
+    }
+
+    #[test]
+    fn the_summary_is_the_latest_test_against_its_noise() {
+        let page = shown(&autumn().expect("the tests"), Over::Macrocycle);
+        assert!(page.contains(r#"class="cell ftp""#), "{page}");
+        assert!(page.contains("182<small>W</small>"), "{page}");
+        assert!(page.contains("2.16<small>W/kg</small>"), "{page}");
+        assert!(page.contains("+5 W"), "{page}");
+        assert!(page.contains("+0.05 W/kg"), "{page}");
+        assert_eq!(
+            page.matches("<span>against the test before</span>").count(),
+            2,
+            "{page}"
+        );
+        assert!(
+            !page.contains(r#"class="badge"#),
+            "no arrow: +5 W is within 177 W's noise"
+        );
+        assert!(page.contains("Test on 25 Oct"), "{page}");
     }
 
     #[test]
     fn per_kilo_has_no_direction_after_an_unweighed_test() {
         let page = shown(&autumn().expect("the tests"), Over::Macrocycle);
         assert!(
-            page.contains("2026-07-22 · 2.03W/kg<"),
+            page.contains("22 Jul</span> · 2.03 W/kg<"),
             "10 May was not weighed: {page}"
         );
-        assert!(page.contains("2026-07-22 · 172W, +17W, rising<"));
+        assert!(
+            page.contains("22 Jul</span> · 172 W · +17 W, rising<"),
+            "{page}"
+        );
     }
 
     #[test]
     fn a_range_keeps_each_test_s_reading_against_the_one_before() {
         let page = shown(&autumn().expect("the tests"), Over::Mesocycle);
-        assert_eq!(page.matches(r#"class="point""#).count(), 2);
-        assert!(page.contains("2026-10-25 · 182W, +5W, rising"));
+        assert_eq!(page.matches(r#"class="dot""#).count(), 2, "{page}");
+        assert!(
+            page.contains("25 Oct</span> · 182 W · +5 W, no clear change<"),
+            "{page}"
+        );
+    }
+
+    #[test]
+    fn a_rise_read_against_the_start_of_the_run_says_since_when() {
+        let tests = tests(
+            &[
+                tested(date(2026, 5, 10), 155).expect("a test"),
+                tested(date(2026, 7, 22), 172).expect("a test"),
+                tested(date(2026, 9, 23), 177).expect("a test"),
+                tested(date(2026, 10, 25), 182).expect("a test"),
+                tested(date(2026, 10, 27), 187).expect("a test"),
+            ],
+            &[],
+        );
+        let page = shown(&tests, Over::Macrocycle);
+        assert!(page.contains("since 22 Jul 2026"), "{page}");
+        assert!(page.contains(r#"class="badge"#), "rising: {page}");
+        assert!(
+            page.contains("187 W · +5 W, rising, +15 W since 22 Jul 2026"),
+            "{page}"
+        );
     }
 
     #[test]
     fn no_tests_is_said_rather_than_drawn() {
         let page = page(&[], &ranges(), Over::All, &crate::run::View::default()).into_string();
         assert!(page.contains("No FTP test has been recorded."));
-        assert!(!page.contains("<svg class=\"chart\""));
+        assert!(!page.contains(r#"class="dot""#));
     }
 }
