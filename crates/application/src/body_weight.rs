@@ -5,9 +5,17 @@
 //! re-derives from them exactly (§ 5). The ranges it is read over are every
 //! chart's ([`crate::ranges`]).
 
-use domain::analytical::body_weight::Series;
+use domain::{
+    analytical::body_weight::{Aim, Series, aims},
+    macrocycle::Macrocycle,
+    schedule::Holidays,
+};
+use jiff::civil::Date;
 
-use crate::{error::StoreError, ports::WeighInHistory};
+use crate::{
+    error::{SourceError, StoreError},
+    ports::{PlanStore, WeighInHistory},
+};
 
 /// The body-weight use case.
 pub struct BodyWeight<W> {
@@ -23,12 +31,53 @@ where
     }
 
     /// Every canonical weigh-in, oldest first, the trend through them and
-    /// which way it went.
+    /// how fast it moved.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
     pub async fn series(&self) -> Result<Series, StoreError> {
         Ok(Series::of(self.weigh_ins.weigh_ins().await?))
+    }
+}
+
+/// What the plans intended over the current macrocycle's mesocycles (#689).
+pub struct Aims<P> {
+    plans: P,
+}
+
+impl<P> Aims<P>
+where
+    P: PlanStore + Sync,
+{
+    pub const fn new(plans: P) -> Self {
+        Self { plans }
+    }
+
+    /// Each started mesocycle's aim on `today`; none where the school
+    /// calendar could not be read or `today` is past its reach, since then
+    /// there is no macrocycle to assume a phase from.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    pub async fn on(
+        &self,
+        today: Date,
+        holidays: Result<Holidays, SourceError>,
+    ) -> Result<Vec<Aim>, StoreError> {
+        let Some(macrocycle) = holidays
+            .ok()
+            .and_then(|holidays| Macrocycle::on(today, &holidays))
+        else {
+            return Ok(Vec::new());
+        };
+        let mut mesocycles = Vec::new();
+        for window in self.plans.windows().await? {
+            if let Some(plan) = self.plans.named(window.name()).await? {
+                mesocycles.extend(plan.mesocycle_spans());
+            }
+        }
+        Ok(aims(macrocycle, &mesocycles, today))
     }
 }

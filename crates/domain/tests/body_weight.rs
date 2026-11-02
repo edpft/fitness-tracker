@@ -1,15 +1,20 @@
 //! Body weight as one time series (#250).
 
+use std::num::NonZeroU8;
+
 use domain::{
     analytical::{
         Weighed,
-        body_weight::{Direction, Series, Trend, body_weight, changes, trend},
+        body_weight::{Series, Trend, aims, body_weight, trend, weight_change},
         range::{Over, Range, Ranges},
+        recomposition::NutritionPhase,
     },
     canonical::Occurred,
+    macrocycle::Macrocycle,
     measure::Kg,
     normalised::{OperatorZone, StartedAt},
     plan::Span,
+    schedule::{Holidays, PublicHoliday, SchoolHoliday, SchoolHolidayKind},
 };
 use jiff::civil::{Date, date};
 
@@ -154,54 +159,124 @@ fn no_weigh_ins_is_no_trend() {
     assert!(trend(&[]).is_empty());
 }
 
-#[test]
-fn within_an_eighth_of_a_kilo_over_seven_days_is_maintaining() {
-    // A week at 84 kg from 2026-09-01, then single days at other masses: each
-    // day's trend is read against the trend 7 days before it.
-    let reading = |last: u64| {
-        let mut series = daily(date(2026, 9, 1), 7, 84_000, &[]).expect("a series");
-        series.extend(daily(date(2026, 9, 8), 7, last, &[]).expect("a series"));
-        let changes = changes(&trend(&series));
-        let change = changes
-            .iter()
-            .find(|change| change.on == date(2026, 9, 14))
-            .expect("a reading a week after a full week");
-        (change.grams, change.direction)
-    };
-    assert_eq!(reading(84_125), (125, Direction::Maintaining));
-    assert_eq!(reading(83_875), (-125, Direction::Maintaining));
-    assert_eq!(reading(84_126), (126, Direction::Rising));
-    assert_eq!(
-        reading(83_750),
-        (-250, Direction::Falling),
-        "the aim is falling, not maintaining"
-    );
+/// Daily from `from`, falling `grams_a_day` each day from `grams`.
+fn falling(from: Date, days: i32, grams: u64, grams_a_day: u64) -> Fallible<Vec<Weighed>> {
+    let mut series = Vec::new();
+    for offset in 0..days {
+        let on = from.checked_add(jiff::Span::new().days(offset))?;
+        series.push(dated(on, grams - grams_a_day * u64::try_from(offset)?));
+    }
+    Ok(series)
 }
 
 #[test]
-fn a_day_whose_trend_a_week_before_is_missing_has_no_reading() {
-    // Trend from 09-04; the first day with a trend 7 days before it is 09-11.
-    let series = daily(date(2026, 9, 1), 14, 84_000, &[]).expect("a series");
-    let changes = changes(&trend(&series));
+fn weight_change_is_the_trend_s_slope_a_week() {
+    // 40 g a day for 60 days from 2026-09-01: 0.28 kg a week, wherever both
+    // trends it reads are full weeks.
+    let series = falling(date(2026, 9, 1), 60, 85_000, 40).expect("a series");
+    let runs = weight_change(&trend(&series));
+    let change = runs
+        .iter()
+        .flatten()
+        .find(|change| change.on == date(2026, 10, 1))
+        .expect("a weight change mid-record");
+    assert!((change.per_week + 0.28).abs() < 1e-9, "{}", change.per_week);
+}
+
+#[test]
+fn weight_change_sits_at_the_middle_of_what_it_measures() {
+    // The trend starts on 09-04 (4 of 7 days), centred on 09-01; the first
+    // weight change reads it 14 days before its own day, 09-15. The last
+    // weigh-in is 10-30, whose trend is centred on 10-27, so the last weight
+    // change is 14 days before that: 17 days before the last weigh-in.
+    let series = daily(date(2026, 9, 1), 60, 84_000, &[]).expect("a series");
+    let runs = weight_change(&trend(&series));
+    assert_eq!(runs.len(), 1);
+    let run = runs.first().expect("one run");
+    assert_eq!(run.first().map(|change| change.on), Some(date(2026, 9, 15)));
+    assert_eq!(run.last().map(|change| change.on), Some(date(2026, 10, 13)));
+    assert!(run.iter().all(|change| change.per_week.abs() < 1e-9));
+}
+
+#[test]
+fn a_gap_in_the_trend_breaks_the_weight_change() {
+    // A fortnight with no weigh-ins from 09-29: no trend from 10-02 to 10-15.
+    let skip: Vec<Date> = (0..14)
+        .map(|offset| {
+            date(2026, 9, 29)
+                .checked_add(jiff::Span::new().days(offset))
+                .expect("a day")
+        })
+        .collect();
+    let series = daily(date(2026, 9, 1), 90, 84_000, &skip).expect("a series");
+    assert!(weight_change(&trend(&series)).len() > 1);
+}
+
+#[test]
+fn the_aim_is_the_cut_s_where_a_plan_says_cut() {
+    let autumn = autumn().expect("the macrocycle");
+    let mesocycles = [
+        Span::new(date(2026, 9, 14), 1),
+        Span::new(date(2026, 9, 28), 4),
+        Span::new(date(2026, 10, 26), 4),
+        Span::new(date(2026, 11, 23), 4),
+    ];
+    let aims = aims(autumn, &mesocycles, date(2026, 11, 2));
     assert_eq!(
-        changes.first().map(|change| change.on),
-        Some(date(2026, 9, 11))
+        aims.iter()
+            .map(|aim| (aim.span.start(), aim.phase, aim.per_week))
+            .collect::<Vec<_>>(),
+        vec![
+            (date(2026, 9, 14), NutritionPhase::Cut, Some(-0.25)),
+            (date(2026, 9, 28), NutritionPhase::Cut, Some(-0.25)),
+            (date(2026, 10, 26), NutritionPhase::Cut, Some(-0.25)),
+        ],
+        "a mesocycle not yet started has no aim"
     );
-    assert_eq!(changes.len(), 4);
+}
+
+fn holiday(first: Date, last: Date) -> Option<SchoolHoliday> {
+    let days = (last - first).get_days().checked_add(1)?;
+    Some(SchoolHoliday::new(
+        first,
+        NonZeroU8::new(u8::try_from(days).ok()?)?,
+    ))
+}
+
+/// Summer 2026 to Christmas 2026 as the school's feed published them.
+fn autumn() -> Option<Macrocycle> {
+    let school = Holidays::from_school(
+        vec![
+            holiday(date(2026, 7, 21), date(2026, 9, 5))?,
+            holiday(date(2026, 10, 26), date(2026, 10, 30))?,
+            holiday(date(2026, 12, 21), date(2027, 1, 3))?,
+        ],
+        Some(date(2027, 1, 3)),
+    );
+    let public = Holidays::from_public(
+        vec![
+            PublicHoliday::new(date(2026, 8, 31), "Summer bank holiday".to_owned())
+                .naming(SchoolHolidayKind::Summer),
+            PublicHoliday::new(date(2026, 12, 25), "Christmas Day".to_owned()),
+        ],
+        Some(date(2027, 12, 31)),
+    );
+    Macrocycle::on(date(2026, 10, 19), &school.and(public))
 }
 
 #[test]
 fn a_range_keeps_the_readings_of_its_own_days() {
-    let series = Series::of(daily(date(2026, 9, 1), 30, 84_000, &[]).expect("a series"));
+    // Weight change runs from 09-15, 14 days after the first trend's centre.
+    let series = Series::of(daily(date(2026, 9, 1), 60, 84_000, &[]).expect("a series"));
     let within = series.within(Range {
-        from: date(2026, 9, 14),
-        to: date(2026, 9, 20),
+        from: date(2026, 9, 15),
+        to: date(2026, 9, 21),
     });
     assert_eq!(within.weigh_ins.len(), 7);
     assert_eq!(
-        within.changes.len(),
+        within.weight_change.iter().flatten().count(),
         7,
-        "each day's reading is the trend's, not the range's"
+        "each day's weight change is the trend's, not the range's"
     );
     assert_eq!(
         within

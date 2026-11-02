@@ -252,6 +252,10 @@ pub enum Layer {
     Reference(Vec<(Date, f64, f64)>),
     /// Each observation's span, from low to high on its day, never joined.
     Bars(Vec<(Date, f64, f64)>),
+    /// Zero, across the whole chart, where a change is none.
+    Zero,
+    /// What was intended, dashed, one line per stretch a plan states it.
+    Aim(Vec<Vec<(Date, f64)>>),
 }
 
 impl Layer {
@@ -270,6 +274,8 @@ impl Layer {
                 .iter()
                 .flat_map(|(_, low, high)| [*low, *high])
                 .collect(),
+            Self::Zero => vec![0.0],
+            Self::Aim(runs) => runs.iter().flatten().map(|(_, value)| *value).collect(),
         }
     }
 }
@@ -381,7 +387,7 @@ fn drawn(chart: &Chart<'_>) -> Markup {
     let recorded = chart
         .layers
         .iter()
-        .filter(|layer| !matches!(layer, Layer::Reference(_)))
+        .filter(|layer| !matches!(layer, Layer::Reference(_) | Layer::Zero | Layer::Aim(_)))
         .any(|layer| !layer.values().is_empty());
     let values: Vec<f64> = chart.layers.iter().flat_map(Layer::values).collect();
     let low = values.iter().copied().reduce(f64::min).filter(|_| recorded);
@@ -478,6 +484,14 @@ fn plotted(chart: &Chart<'_>, frame: &Frame) -> Markup {
                                     stroke-width=(if frame.days > 400 { "1" } else { "2" }) {}
                             }
                         }
+                        Layer::Zero => {
+                            line.zero x1="0" x2=(WIDTH) y1=(format!("{:.1}", frame.y(0.0))) y2=(format!("{:.1}", frame.y(0.0))) {}
+                        }
+                        Layer::Aim(runs) => {
+                            @for run in runs {
+                                polyline.aim points=(run.iter().map(|(on, value)| format!("{:.1},{:.1}", frame.x(*on), frame.y(*value))).collect::<Vec<_>>().join(" ")) {}
+                            }
+                        }
                         Layer::Reference(_) => {}
                     }
                 }
@@ -541,8 +555,14 @@ fn line(run: &[Traced], frame: &Frame) -> String {
         .join(" ")
 }
 
-/// A value to as many places as the axis's step has.
+/// A value to as many places as the axis's step has; a mark a rounding error
+/// below zero is zero, not "-0.0".
 fn figure(value: f64, step: f64) -> String {
+    let value = if value.abs() < step / 1_000.0 {
+        0.0
+    } else {
+        value
+    };
     if step < 0.1 {
         format!("{value:.2}")
     } else if step < 1.0 || step.fract() > 0.0 {
@@ -753,6 +773,11 @@ mod tests {
             "a step of 2.5 keeps its half"
         );
         assert_eq!(super::figure(10.0, 5.0), "10");
+        assert_eq!(
+            super::figure(-1e-17, 0.2),
+            "0.0",
+            "a mark a rounding error below zero"
+        );
         let night_long = super::framed(range(), Axis::Clock, -6.0, 40.0);
         assert!(
             (night_long.step - 12.0).abs() < f64::EPSILON,
