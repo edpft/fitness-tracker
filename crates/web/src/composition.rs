@@ -32,7 +32,7 @@ use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
 use crate::{
-    detail::{self, Cell, Chart, Layer, Metric, Reading, Traced},
+    detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced},
     run::View,
 };
 
@@ -206,24 +206,25 @@ fn summary(components: &[ComponentSeries], today: Date) -> Markup {
             figure: format!("{:.1}", latest.value),
             unit: "kg",
             margin: latest.margin.map(|margin| format!("{margin:.1} kg")),
-            reading: one
-                .changes
-                .last()
-                .filter(|change| change.on == latest.on)
-                .map_or_else(
-                    || {
-                        Reading::NoRule(format!(
-                            "No trend {AGAINST_DAYS} days before to read it against."
-                        ))
-                    },
-                    |change| Reading::Change {
-                        by: change.by,
-                        noise: change.noise,
-                        direction: change.direction,
-                        said: format!("{} kg", signed(change.by)),
-                        over: format!("in {AGAINST_DAYS} days"),
-                    },
-                ),
+            readings: vec![
+                one.changes
+                    .last()
+                    .filter(|change| change.on == latest.on)
+                    .map_or_else(
+                        || {
+                            Reading::NoRule(format!(
+                                "No trend {AGAINST_DAYS} days before to read it against."
+                            ))
+                        },
+                        |change| Reading::Change {
+                            by: change.by,
+                            noise: change.noise,
+                            direction: change.direction,
+                            said: format!("{} kg", signed(change.by)),
+                            over: format!("in {AGAINST_DAYS} days"),
+                        },
+                    ),
+            ],
         })
         .collect();
     let mut asof: Vec<String> = read
@@ -266,6 +267,7 @@ fn chart(component: &ComponentSeries, metric: Metric, range: Range, today: Date)
         title: heading(component.component),
         sub: weigh_ins(count),
         range,
+        axis: Axis::Figures,
         layers: vec![
             Layer::Trend(
                 component
