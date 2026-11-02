@@ -96,10 +96,12 @@ pub enum Reading {
     Position { segments: Vec<Segment>, at: f64 },
     /// A change against the noise: the badge, the signed change, and a bar
     /// centred on zero with the noise shaded and a dot where the change fell.
+    /// No direction, no badge: where the change turns weeks after the line
+    /// does, a badge would contradict the chart (#688).
     Change {
         by: f64,
         noise: f64,
-        direction: Direction,
+        direction: Option<Direction>,
         /// The change as it is written, signed.
         said: String,
         /// What it is a change over.
@@ -152,8 +154,10 @@ fn reading(reading: &Reading) -> Markup {
             said,
             over,
         } => html! {
-            div.change {
-                (badge(*direction))
+            div.change.plain[direction.is_none()] {
+                @if let Some(direction) = direction {
+                    (badge(*direction))
+                }
                 div { b { (said) } span { (over) } }
                 (noise_bar(*by, *noise))
             }
@@ -695,7 +699,7 @@ mod tests {
                 readings: vec![Reading::Change {
                     by: 0.21,
                     noise: 0.125,
-                    direction: Direction::Rising,
+                    direction: Some(Direction::Rising),
                     said: "+0.21 kg".to_owned(),
                     over: "in 7 days".to_owned(),
                 }],

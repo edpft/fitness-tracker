@@ -219,7 +219,7 @@ fn summary(components: &[ComponentSeries], today: Date) -> Markup {
                         |change| Reading::Change {
                             by: change.by,
                             noise: change.noise,
-                            direction: change.direction,
+                            direction: None,
                             said: format!("{} kg", signed(change.by)),
                             over: format!("in {AGAINST_DAYS} days"),
                         },
@@ -774,6 +774,10 @@ mod tests {
             "{page}"
         );
         assert!(!page.contains("rising"), "no verdict words: {page}");
+        assert!(
+            !page.contains(r#"class="badge"#),
+            "no badge, which would contradict the line: {page}"
+        );
     }
 
     #[test]

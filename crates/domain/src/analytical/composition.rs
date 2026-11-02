@@ -27,12 +27,22 @@
 //!
 //! **Each day's trend is read against the trend 28 days earlier**, not 7: over
 //! the Body Scan's first ten months the 7-day reading moved in 7 of 35 weeks
-//! and flipped week to week, where 28 days showed the losses and gains. A
-//! change is rising or falling only beyond the least significant change at
-//! 95% (ISCD's 2.77 × precision error, that is 1.96 × √2) applied to two
-//! means: 1.96 × σ × √(1/n₁ + 1/n₀), where σ is the method's own scatter
-//! between consecutive days over its whole record, not the vendor's figure
-//! (operator, 2026-10-16), and n is the figures in each mean.
+//! and flipped week to week, where 28 days showed the losses and gains. Its
+//! noise is the least significant change at 95% (ISCD's 2.77 × precision
+//! error, that is 1.96 × √2) applied to two means: 1.96 × σ × √(1/n₁ + 1/n₀),
+//! where σ is the method's own scatter between consecutive days over its whole
+//! record, not the vendor's figure (operator, 2026-10-16), and n is the
+//! figures in each mean.
+//!
+//! **No direction is read off it** (operator, 2026-11-02, #688). A 28-day
+//! change turns weeks after the trend does, so a direction named from it
+//! contradicts the line: on 25 Sep 2026 it said fat was rising after the trend
+//! had turned down. The change and its noise are given; the line shows a bend.
+//!
+//! **Fat-free mass is read only as having changed** (operator, 2026-11-02,
+//! #688). The scale estimates water from impedance and fat-free mass from the
+//! water, and muscle gained and glycogen refilled both move water into the
+//! cells, so which tissue moved is not known.
 //!
 //! **Each trend's band is [`super::confidence`]'s**, per method and per
 //! component. A composition figure is the impedance scale's own reading, and
@@ -57,7 +67,7 @@ use crate::{
     measure::Kg,
 };
 
-pub use super::{body_weight::Direction, per_device::Reading};
+pub use super::per_device::Reading;
 
 /// What the trend is called, so a different method is never mistaken for it.
 pub const TREND: &str = "mean of the 7 days ending on the day, at least 4 of them measured";
@@ -147,7 +157,6 @@ pub struct Change {
     pub by: f64,
     /// How far either way is within the noise.
     pub noise: f64,
-    pub direction: Direction,
 }
 
 /// Every figure one method gave for one component, in date order, the trend
@@ -416,18 +425,10 @@ fn changes(trend: &[Vec<Trend>], sigma: f64) -> Vec<Change> {
             let then = f64::from(u32::try_from(earlier.figures).ok()?);
             let noise = CONFIDENCE * sigma * (1.0 / now + 1.0 / then).sqrt();
             let by = day.value - earlier.value;
-            let direction = if by > noise {
-                Direction::Rising
-            } else if by < -noise {
-                Direction::Falling
-            } else {
-                Direction::Maintaining
-            };
             Some(Change {
                 on: day.on,
                 by,
                 noise,
-                direction,
             })
         })
         .collect()
