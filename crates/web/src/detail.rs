@@ -36,6 +36,7 @@ pub enum Metric {
     RestingHeartRate,
     Hrv,
     PulseWaveVelocity,
+    Ftp,
 }
 
 impl Metric {
@@ -50,6 +51,7 @@ impl Metric {
             Self::RestingHeartRate => "resting-heart-rate",
             Self::Hrv => "hrv",
             Self::PulseWaveVelocity => "pulse-wave-velocity",
+            Self::Ftp => "ftp",
         }
     }
 }
@@ -458,7 +460,21 @@ fn framed(range: Range, axis: Axis, low: f64, high: f64) -> Frame {
 }
 
 fn plotted(chart: &Chart<'_>, frame: &Frame) -> Markup {
-    let radius = if frame.days > 400 { 1.5 } else { 3.0 };
+    // Small only where a long range is crowded: a few tests over years are
+    // as easy to miss as a year of nights is to read at full size.
+    let dots: usize = chart
+        .layers
+        .iter()
+        .map(|layer| match layer {
+            Layer::Dots(dots) | Layer::Hollow(dots) => dots.len(),
+            _ => 0,
+        })
+        .sum();
+    let radius = if frame.days > 400 && dots > 100 {
+        1.5
+    } else {
+        3.0
+    };
     html! {
         div.plotted {
             svg viewBox=(format!("0 0 {WIDTH} {HEIGHT}")) role="img" aria-label=(chart.title) {

@@ -301,6 +301,16 @@ fn over(query: &Query<HashMap<String, String>>) -> domain::analytical::range::Ov
     range::named(query.get("over").map(String::as_str))
 }
 
+/// The range `?over=` names, or all where it names none: the FTP tests open
+/// on All, since there are few in a macrocycle (operator, 2026-10-28).
+fn tests_over(query: &Query<HashMap<String, String>>) -> domain::analytical::range::Over {
+    query
+        .get("over")
+        .map_or(domain::analytical::range::Over::All, |over| {
+            range::named(Some(over))
+        })
+}
+
 /// Every main ride's heart rate per power zone over a range, read afresh from
 /// the store.
 async fn heart_rate(
@@ -347,7 +357,7 @@ async fn ftp_tests(
         &runs,
         &collects,
         ftp::PATH,
-        Some(over(&query)),
+        Some(tests_over(&query)),
         &run,
         async {
             let setting = runs.setting();
@@ -359,7 +369,7 @@ async fn ftp_tests(
             let ranges = configurator::ranges::today(&store, &setting.zone).await;
             store.close().await;
             match tests.and_then(|tests| Ok((tests, ranges?))) {
-                Ok((tests, ranges)) => ftp::page(&tests, &ranges, over(&query), &run),
+                Ok((tests, ranges)) => ftp::page(&tests, &ranges, tests_over(&query), &run),
                 Err(error) => ftp::unreadable(&error.to_string()),
             }
         },
