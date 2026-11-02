@@ -32,8 +32,7 @@ use jiff::civil::{Date, DateTime};
 use maud::{DOCTYPE, Markup, html};
 
 use crate::{
-    daily::name,
-    detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Segment, Traced},
+    detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Segment, Traced, name},
     run::View,
 };
 

@@ -16,6 +16,7 @@
 
 use domain::analytical::{
     body_weight::Direction,
+    per_device::SentBy,
     range::{Over, Range},
 };
 use jiff::civil::Date;
@@ -33,6 +34,7 @@ pub enum Metric {
     Asleep,
     Regularity,
     RestingHeartRate,
+    Hrv,
 }
 
 impl Metric {
@@ -45,6 +47,7 @@ impl Metric {
             Self::Asleep => "sleep",
             Self::Regularity => "sleep-regularity",
             Self::RestingHeartRate => "resting-heart-rate",
+            Self::Hrv => "hrv",
         }
     }
 }
@@ -655,6 +658,14 @@ pub fn day(on: Date, today: Date) -> String {
         on.strftime("%-d %b").to_string()
     } else {
         on.strftime("%-d %b %Y").to_string()
+    }
+}
+
+/// The watch that recorded a series, as the pages name it.
+pub fn name(sent_by: &SentBy) -> String {
+    match sent_by {
+        SentBy::Device(device) => device.name().to_string(),
+        SentBy::Unknown => "device unknown".to_owned(),
     }
 }
 

@@ -21,8 +21,7 @@ use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
 use crate::{
-    daily::name,
-    detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced},
+    detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced, name},
     run::View,
 };
 

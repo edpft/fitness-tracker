@@ -8,11 +8,11 @@
 
 mod chart;
 mod composition;
-mod daily;
 mod detail;
 mod equipment;
 mod fills;
 mod ftp;
+mod hrv;
 mod input;
 mod one_rep_max;
 mod page;
@@ -139,7 +139,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/body-weight", get(body_weight))
         .route("/body-composition", get(body_composition))
         .route(pulse_wave_velocity::PATH, get(pulse_wave_velocity_page))
-        .route("/hrv", get(overnight_hrv))
+        .route(hrv::PATH, get(overnight_hrv))
         .route(resting::PATH, get(resting_heart_rate))
         .route("/sleep", get(sleep_page))
         .route("/estimated-1rm", get(estimated_one_rep_max))
@@ -447,21 +447,27 @@ async fn overnight_hrv(
 ) -> Markup {
     let collects = configurator::per_device::overnight_hrv_collects();
     let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(&runs, &collects, "/hrv", Some(over(&query)), &run, async {
-        let shown = daily::OVERNIGHT_HRV;
-        let setting = runs.setting();
-        let store = match configurator::store::Store::open(&setting.database).await {
-            Ok(store) => store,
-            Err(error) => return daily::unreadable(shown, &error.to_string()),
-        };
-        let trended = configurator::per_device::overnight_hrv_trend(&store).await;
-        let ranges = configurator::ranges::today(&store, &setting.zone).await;
-        store.close().await;
-        match trended.and_then(|trended| Ok((trended, ranges?))) {
-            Ok((trended, ranges)) => daily::overnight_hrv(&trended, &ranges, over(&query), &run),
-            Err(error) => daily::unreadable(shown, &error.to_string()),
-        }
-    })
+    drawn(
+        &runs,
+        &collects,
+        hrv::PATH,
+        Some(over(&query)),
+        &run,
+        async {
+            let setting = runs.setting();
+            let store = match configurator::store::Store::open(&setting.database).await {
+                Ok(store) => store,
+                Err(error) => return hrv::unreadable(&error.to_string()),
+            };
+            let trended = configurator::per_device::overnight_hrv_trend(&store).await;
+            let ranges = configurator::ranges::today(&store, &setting.zone).await;
+            store.close().await;
+            match trended.and_then(|trended| Ok((trended, ranges?))) {
+                Ok((trended, ranges)) => hrv::page(&trended, &ranges, over(&query), &run),
+                Err(error) => hrv::unreadable(&error.to_string()),
+            }
+        },
+    )
     .await
 }
 
