@@ -149,6 +149,9 @@ p.foot { font-size: 12px; color: var(--muted); margin: 2px 4px; }
 /* A second method's points, hollow so the two are told apart. */
 .plotted .hollow { fill: none; stroke: var(--c); stroke-opacity: 0.7; stroke-width: 1.25; }
 
+/* Observations singled out, ringed. */
+.plotted .ring { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+
 /* One figure in more than one unit: one chart card, its unit a choice. */
 .card.choice .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
 .card.choice .head h2 { margin: 0; }

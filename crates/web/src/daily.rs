@@ -1,4 +1,5 @@
-//! Overnight HRV and resting heart rate, as charts (#254).
+//! Overnight HRV, as a chart (#254), until it moves to the detail template
+//! (#622).
 //!
 //! **Date across, the figure up, one point per day and one colour per
 //! watch.** Nothing joins two points: a line would claim something about the
@@ -18,9 +19,8 @@ use domain::{
         hrv::{self, Against, Trended},
         per_device::{DeviceSeries, SentBy},
         range::{Over, Range, Ranges},
-        resting,
     },
-    measure::{BeatsPerMinute, HeartRateVariability},
+    measure::HeartRateVariability,
 };
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
@@ -49,13 +49,6 @@ pub trait Figure: Copy {
     fn number(self) -> u32;
 }
 
-impl Figure for BeatsPerMinute {
-    const UNIT: &'static str = "bpm";
-    fn number(self) -> u32 {
-        self.as_u32()
-    }
-}
-
 impl Figure for HeartRateVariability {
     const UNIT: &'static str = "ms";
     fn number(self) -> u32 {
@@ -79,12 +72,6 @@ pub const OVERNIGHT_HRV: Shown = Shown {
     point: "Last night's average, on the morning Garmin reports it under.",
 };
 
-pub const RESTING_HEART_RATE: Shown = Shown {
-    title: "Resting heart rate",
-    path: "/resting-heart-rate",
-    point: "Garmin's resting heart rate for the day.",
-};
-
 /// The trends a page draws, one for each device that has one.
 pub struct Trends {
     pub overlays: Vec<Overlay>,
@@ -96,15 +83,6 @@ pub struct Trends {
 pub struct Overlay {
     pub runs: Vec<Vec<Drawn>>,
     pub latest: Option<String>,
-    /// Nights ringed, and listed beneath the chart.
-    pub flags: Vec<Marked>,
-}
-
-/// A night ringed on the chart.
-pub struct Marked {
-    pub on: Date,
-    pub value: u32,
-    pub title: String,
 }
 
 /// One day of a trend.
@@ -160,93 +138,7 @@ fn hrv_overlay(trended: &Trended) -> Overlay {
             hrv_reading(day)
         )
     });
-    Overlay {
-        runs,
-        latest,
-        flags: Vec::new(),
-    }
-}
-
-/// The resting heart rate page: each watch's days, the slow line through
-/// them, and the nights flagged, over the range chosen.
-pub fn resting_heart_rate(
-    trended: &[resting::Trended],
-    ranges: &Ranges,
-    over: Over,
-    run: &View,
-) -> Markup {
-    let recorded = recorded(trended.iter().map(|one| &one.series));
-    let range = crate::range::chosen(ranges, over, recorded, NOTHING);
-    let trended: Vec<resting::Trended> = range.as_ref().map_or_else(
-        |_| Vec::new(),
-        |range| trended.iter().map(|one| one.within(*range)).collect(),
-    );
-    let series: Vec<DeviceSeries<BeatsPerMinute>> =
-        trended.iter().map(|one| one.series.clone()).collect();
-    let trends = Trends {
-        overlays: trended.iter().map(resting_overlay).collect(),
-        method: format!(
-            "points: each day · line: the {} · ringed: flagged, {}",
-            resting::METHOD,
-            resting::FLAG
-        ),
-    };
-    page(RESTING_HEART_RATE, &series, Some(&trends), over, range, run)
-}
-
-fn resting_overlay(trended: &resting::Trended) -> Overlay {
-    let runs = trended
-        .line
-        .iter()
-        .map(|run| {
-            run.iter()
-                .map(|day| Drawn {
-                    on: day.on,
-                    value: day.bpm,
-                    band: None,
-                    title: format!("{} · 90-day average {:.1} bpm", day.on, day.bpm),
-                })
-                .collect()
-        })
-        .collect();
-    let flagged = |flag: &resting::Flag| {
-        format!(
-            "{} bpm against a normal of {:.0}",
-            flag.rate.as_u32(),
-            flag.normal
-        )
-    };
-    let latest = trended.line.iter().flatten().next_back().map(|day| {
-        let last_flag = trended.flags.last().map_or_else(
-            || "never flagged".to_owned(),
-            |flag| format!("last flagged {}, {}", flag.on, flagged(flag)),
-        );
-        format!(
-            "{}, {}: 90-day average {:.1} bpm · {last_flag}",
-            name(&trended.series.sent_by),
-            day.on,
-            day.bpm
-        )
-    });
-    let flags = trended
-        .flags
-        .iter()
-        .map(|flag| Marked {
-            on: flag.on,
-            value: flag.rate.as_u32(),
-            title: format!(
-                "{} · flagged · {} · {}",
-                flag.on,
-                flagged(flag),
-                name(&trended.series.sent_by)
-            ),
-        })
-        .collect();
-    Overlay {
-        runs,
-        latest,
-        flags,
-    }
+    Overlay { runs, latest }
 }
 
 /// A day's trend, where it sits against the band, and the week's scatter.
@@ -310,16 +202,6 @@ fn page<T: Figure>(
                             }
                             (chart(shown, series, overlays, range))
                             @if let Some(trends) = trends { p.method { (trends.method) } }
-                        }
-                    }
-                    @if overlays.iter().any(|overlay| !overlay.flags.is_empty()) {
-                        details {
-                            summary { "Every night flagged" }
-                            ul.flags {
-                                @for flag in overlays.iter().flat_map(|overlay| &overlay.flags) {
-                                    li { (flag.title) }
-                                }
-                            }
                         }
                     }
                 }
@@ -453,11 +335,6 @@ fn plot<T: Figure>(
                 }
             }
             @for overlay in overlays {
-                @for flag in &overlay.flags {
-                    circle.flag cx=(frame.x(seconds(flag.on))) cy=(frame.y(flag.value)) r=(RADIUS + 3.0) {
-                        title { (flag.title) }
-                    }
-                }
                 @for run in &overlay.runs {
                     polyline.trend points=(line_points(run, frame)) {}
                     @for day in run {
@@ -563,7 +440,6 @@ pub const STYLE: &str = "
 .point.d1, .point.d2, .point.d3, .point.d4 { stroke: none; }
 .trend { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; }
 .band { fill: var(--ink); fill-opacity: 0.08; stroke: none; }
-.flag { fill: none; stroke: var(--ink); stroke-width: 1.5; }
 .hover { fill: transparent; }
 p.reading { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
 ";
@@ -575,12 +451,11 @@ mod tests {
             hrv::Trended,
             per_device::{DeviceSeries, Reading, SentBy},
             range::{Over, Range, Ranges},
-            resting,
         },
-        measure::{BeatsPerMinute, HeartRateVariability},
+        measure::HeartRateVariability,
     };
 
-    use super::{RESTING_HEART_RATE, chart};
+    use super::{OVERNIGHT_HRV, chart};
 
     const NO_PLAN: Ranges = Ranges {
         mesocycle: None,
@@ -594,10 +469,10 @@ mod tests {
         }
     }
 
-    fn reading(day: i8, beats: u32) -> Reading<BeatsPerMinute> {
+    fn reading(day: i8, milliseconds: u32) -> Reading<HeartRateVariability> {
         Reading {
             on: jiff::civil::date(2024, 12, day),
-            value: BeatsPerMinute::new(beats).expect("a rate"),
+            value: HeartRateVariability::from_milliseconds(milliseconds).expect("a night"),
         }
     }
 
@@ -607,10 +482,10 @@ mod tests {
             sent_by: SentBy::Unknown,
             readings: vec![reading(21, 63), reading(22, 53)],
         }];
-        let drawn = chart(RESTING_HEART_RATE, &series, &[], december()).into_string();
+        let drawn = chart(OVERNIGHT_HRV, &series, &[], december()).into_string();
 
         assert_eq!(drawn.matches("<circle class=\"ring ink\"").count(), 3);
-        assert!(drawn.contains("2024-12-21 · 63bpm · device unknown"));
+        assert!(drawn.contains("2024-12-21 · 63ms · device unknown"));
         assert!(!drawn.contains("<path") && !drawn.contains("<polyline"));
     }
 
@@ -641,70 +516,5 @@ mod tests {
         assert_eq!(page.matches(r#"class="band""#).count(), 1);
         assert!(page.contains("device unknown, 2026-03-11: last 7 nights 53 ms, within the band"));
         assert!(page.contains("at least 26 of them recorded"));
-    }
-
-    #[test]
-    fn resting_heart_rate_is_a_line_and_a_ring_on_each_flagged_night() {
-        let rates = (0..40)
-            .map(|index| if index % 2 == 0 { 50 } else { 52 })
-            .chain([57, 58]);
-        let readings = rates
-            .enumerate()
-            .map(|(index, beats)| Reading {
-                on: jiff::civil::date(2026, 1, 1)
-                    .checked_add(jiff::Span::new().days(i64::try_from(index).expect("small")))
-                    .expect("a day"),
-                value: BeatsPerMinute::new(beats).expect("a rate"),
-            })
-            .collect();
-        let trended = [resting::Trended::of(DeviceSeries {
-            sent_by: SentBy::Unknown,
-            readings,
-        })];
-        let page =
-            super::resting_heart_rate(&trended, &NO_PLAN, Over::All, &crate::run::View::default())
-                .into_string();
-
-        assert_eq!(page.matches(r#"class="trend""#).count(), 1);
-        assert_eq!(page.matches(r#"class="flag""#).count(), 1);
-        assert!(page.contains("last flagged 2026-02-11, 58 bpm against a normal of 51"));
-    }
-
-    #[test]
-    fn nothing_recorded_is_said_rather_than_drawn() {
-        let trended: [resting::Trended; 0] = [];
-        let page =
-            super::resting_heart_rate(&trended, &NO_PLAN, Over::All, &crate::run::View::default())
-                .into_string();
-        assert!(page.contains("Nothing has been recorded."));
-        assert!(!page.contains("<svg class=\"chart\""));
-    }
-
-    #[test]
-    fn a_range_shows_only_its_days_and_a_day_with_no_plan_says_so() {
-        let trended = [resting::Trended::of(DeviceSeries {
-            sent_by: SentBy::Unknown,
-            readings: vec![reading(2, 50), reading(21, 63), reading(22, 53)],
-        })];
-        let ranges = Ranges {
-            mesocycle: Some(Range {
-                from: jiff::civil::date(2024, 12, 16),
-                to: jiff::civil::date(2024, 12, 22),
-            }),
-            macrocycle: None,
-        };
-        let run = crate::run::View::default();
-        let page =
-            super::resting_heart_rate(&trended, &ranges, Over::Mesocycle, &run).into_string();
-        assert!(page.contains("2024-12-21 · 63bpm"));
-        assert!(
-            !page.contains("2024-12-02 · 50bpm"),
-            "before this mesocycle"
-        );
-        assert!(page.contains(r#"href="/resting-heart-rate?over=all""#));
-
-        let page =
-            super::resting_heart_rate(&trended, &ranges, Over::Macrocycle, &run).into_string();
-        assert!(page.contains("No macrocycle is planned for today."));
     }
 }
