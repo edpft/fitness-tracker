@@ -1,22 +1,23 @@
 //! A night's sleep as the series read it, and the trend through each (#255,
 //! #418).
 //!
-//! **Both figures are read against a published band** (operator,
-//! 2026-10-28: *"we're comparing my figures to known guidelines"*).
+//! **Both figures are read against a published band, and only against it**
+//! (operator, 2026-10-28: *"we're comparing my figures to known
+//! guidelines"*). Neither has a direction (operator, 2026-11-02, #688): for
+//! time asleep, *"it only matters if I'm within the band, on average, and the
+//! band is just a stand in for my personal need"*. Each direction was read by
+//! a number with nothing behind it (± 15 minutes, ± 2 SRI points) that sat
+//! inside the noise of two 28-night means (± 37 minutes, ± 6.5 on the
+//! Forerunner 165).
 //!
-//! - **Time asleep** against the NHS's 7 to 9 hours for adults, and nothing
-//!   else. Its direction is withdrawn (operator, 2026-11-02, #688): *"it only
-//!   matters if I'm within the band, on average, and the band is just a stand
-//!   in for my personal need."* The ± 15 minutes it was read by was a number
-//!   with nothing behind it, and inside the ± 37 minutes two 28-night means
-//!   differ by chance.
+//! - **Time asleep** against the NHS's 7 to 9 hours for adults.
 //! - **Regularity** is the Sleep Regularity Index (Phillips et al. 2017): the
 //!   chance of being in the same state, asleep or awake, at the same clock
 //!   time on consecutive days, scaled so 100 is perfectly regular and 0 is
 //!   random. It is read against the fifths of Windred et al. (*Sleep*
-//!   2024), in whose 61,000 adults the risk of dying fell steadily from the
-//!   lowest fifth to the highest. It has a direction within them, since a
-//!   trend in the best fifth can still be sliding out of it.
+//!   2024). In their 61,000 adults the risk of dying fell from the lowest
+//!   fifth to the highest, most of it between the lowest and the rest: 0.80
+//!   of the lowest's in the second, 0.70 in the highest.
 //!
 //! **The SRI here is the window's**, from falling asleep to waking, since the
 //! window is what the record holds from 2018; Windred's also counts waking in
@@ -26,8 +27,7 @@
 //!
 //! **The trend is the mean of the 28 nights ending on the day**, at least 12
 //! of them recorded, the 3-in-7 that every window here needs: the question is
-//! whether the training is being coped with, which is weeks. A day's
-//! regularity direction is its trend against the trend 28 days earlier.
+//! whether the training is being coped with, which is weeks.
 //!
 //! **One device's nights**, as HRV's are (§ 6); the attribution is
 //! [`super::per_device`]'s. A gap is a gap (§ 37): the line breaks wherever
@@ -41,7 +41,6 @@ use jiff::{
 };
 
 use super::{
-    body_weight::Direction,
     hrv::Against,
     per_device::{DeviceSeries, Reading},
     range::{Range, runs_within},
@@ -72,10 +71,6 @@ pub const NHS: (f64, f64) = (420.0, 540.0);
 /// The lower edge of each of Windred et al.'s fifths above the lowest.
 pub const WINDRED: [f64; 4] = [71.6, 78.6, 83.2, 87.3];
 
-/// The most the SRI may move in 28 days and still be maintaining: about half
-/// the width of Windred's middle fifths (operator, 2026-10-28).
-pub const REGULARITY_MAINTAINING: f64 = 2.0;
-
 /// Which fifth of Windred et al.'s cohort an SRI falls in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fifth {
@@ -98,16 +93,11 @@ impl Fifth {
     }
 }
 
-/// A trend on one day: the 28 nights' mean, and which way it went since 28
-/// days before, where that day has a trend too.
+/// A trend on one day: the 28 nights' mean.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Trend {
     pub on: Date,
     pub value: f64,
-    /// The trend less the trend 28 days earlier, where the series is read
-    /// by its change.
-    pub change: Option<f64>,
-    pub direction: Option<Direction>,
 }
 
 /// Time asleep, against the NHS's band.
@@ -168,11 +158,7 @@ fn index(before: &Night, night: &Night) -> f64 {
 
 /// The trend through `values`, oldest first, as unbroken runs of consecutive
 /// days from the first value to the last.
-///
-/// Where `maintaining` is given, each day carries its change and its
-/// direction beyond it, where they can be read; where it is not, the series
-/// has no direction and neither is kept.
-pub fn trend(values: &BTreeMap<Date, f64>, maintaining: Option<f64>) -> Vec<Vec<Trend>> {
+pub fn trend(values: &BTreeMap<Date, f64>) -> Vec<Vec<Trend>> {
     let (Some(&first), Some(&last)) = (values.keys().next(), values.keys().next_back()) else {
         return Vec::new();
     };
@@ -194,27 +180,7 @@ pub fn trend(values: &BTreeMap<Date, f64>, maintaining: Option<f64>) -> Vec<Vec<
             }
             continue;
         };
-        let read = maintaining.and_then(|maintaining| {
-            let before = on.checked_sub(jiff::Span::new().days(NIGHTS)).ok()?;
-            Some((
-                means.get(&before).map(|before| value - before)?,
-                maintaining,
-            ))
-        });
-        run.push(Trend {
-            on,
-            value,
-            change: read.map(|(change, _)| change),
-            direction: read.map(|(change, maintaining)| {
-                if change > maintaining {
-                    Direction::Rising
-                } else if change < -maintaining {
-                    Direction::Falling
-                } else {
-                    Direction::Maintaining
-                }
-            }),
-        });
+        run.push(Trend { on, value });
     }
     if !run.is_empty() {
         runs.push(run);
@@ -240,7 +206,7 @@ pub struct Trended {
     pub series: DeviceSeries<Night>,
     /// Each morning's SRI against the night before.
     pub regularity: BTreeMap<Date, f64>,
-    /// Time asleep's trend, in minutes, with no direction.
+    /// Time asleep's trend, in minutes.
     pub asleep: Vec<Vec<Trend>>,
     /// The SRI's trend.
     pub regular: Vec<Vec<Trend>>,
@@ -249,8 +215,8 @@ pub struct Trended {
 impl Trended {
     pub fn of(series: DeviceSeries<Night>) -> Self {
         let regularity = regularity(&series.readings);
-        let asleep = trend(&asleep(&series.readings), None);
-        let regular = trend(&regularity, Some(REGULARITY_MAINTAINING));
+        let asleep = trend(&asleep(&series.readings));
+        let regular = trend(&regularity);
         Self {
             series,
             regularity,
@@ -280,7 +246,7 @@ impl Trended {
 mod tests {
     use jiff::civil::{Date, date};
 
-    use super::{Direction, Fifth, Night, Reading, against_nhs, regularity, trend};
+    use super::{Fifth, Night, Reading, against_nhs, regularity, trend};
     use crate::{analytical::hrv::Against, measure::PositiveDuration};
 
     fn night(on: Date, fell: (i8, i8), woke: (i8, i8)) -> Reading<Night> {
@@ -350,72 +316,9 @@ mod tests {
                 )
             }))
             .collect();
-        let runs = trend(&values, None);
+        let runs = trend(&values);
         assert_eq!(runs.len(), 2, "a gap of 28 nights breaks the line");
         assert_eq!(runs[0].first().map(|day| day.on), Some(date(2026, 1, 12)));
-    }
-
-    #[test]
-    fn the_direction_is_against_the_trend_28_days_earlier() {
-        let start = date(2026, 1, 1);
-        let values = (0..120)
-            .map(|day| {
-                let on = start.checked_add(jiff::Span::new().days(day)).expect("day");
-                (on, if day < 56 { 420.0 } else { 460.0 })
-            })
-            .collect();
-        let days: Vec<_> = trend(&values, Some(15.0)).into_iter().flatten().collect();
-        let on = |on: Date| {
-            days.iter()
-                .find(|day| day.on == on)
-                .expect("a trend that day")
-        };
-
-        assert_eq!(
-            on(date(2026, 1, 28)).direction,
-            None,
-            "nothing 28 days before"
-        );
-        assert_eq!(
-            on(date(2026, 2, 25)).direction,
-            Some(Direction::Maintaining)
-        );
-        assert_eq!(on(date(2026, 3, 25)).direction, Some(Direction::Rising));
-        assert!((on(date(2026, 3, 25)).change.expect("a change") - 40.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn time_asleep_has_no_direction_and_regularity_has_one() {
-        let nights: Vec<Reading<Night>> = (1..=60)
-            .map(|day| {
-                let on = date(2026, 1, 1)
-                    .checked_add(jiff::Span::new().days(day))
-                    .expect("day");
-                night(on, (23, 0), (7, 0))
-            })
-            .collect();
-        let trended = super::Trended::of(crate::analytical::per_device::DeviceSeries {
-            sent_by: crate::analytical::per_device::SentBy::Unknown,
-            readings: nights,
-        });
-        let last = |runs: &[Vec<super::Trend>]| {
-            *runs
-                .iter()
-                .flatten()
-                .next_back()
-                .expect("a trend on the last day")
-        };
-
-        let asleep = last(&trended.asleep);
-        assert_eq!(
-            (asleep.change, asleep.direction),
-            (None, None),
-            "operator, 2026-11-02: only where it sits in the NHS's band"
-        );
-        assert_eq!(
-            last(&trended.regular).direction,
-            Some(Direction::Maintaining)
-        );
     }
 
     #[test]
