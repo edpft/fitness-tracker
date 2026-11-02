@@ -1,8 +1,9 @@
 //! A night's sleep, on the detail template (#625, #255, #418).
 //!
-//! **Time asleep and regularity side by side**: each its latest trend, where
-//! that falls in its published reference, and its change on the trend
-//! [`NIGHTS`] days before against the page's own threshold. It is the latest
+//! **Time asleep and regularity side by side**: each its latest trend and
+//! where that falls in its published reference, and nothing else. Neither has
+//! a change (operator, 2026-11-02, #688): only where it sits in its band
+//! matters, the band standing in for his own need. It is the latest
 //! whatever the range: the range only chooses which days the charts show.
 //! The operator, 2026-10-28, on the mock: *"This is a really good summary!"*
 //!
@@ -23,10 +24,7 @@ use std::collections::BTreeMap;
 use domain::analytical::{
     per_device::SentBy,
     range::{Over, Range, Ranges},
-    sleep::{
-        self, ASLEEP_MAINTAINING_MINUTES, METHOD, NIGHTS, Night, REGULARITY_MAINTAINING, Trend,
-        Trended, WINDRED,
-    },
+    sleep::{self, METHOD, Night, Trend, Trended, WINDRED},
 };
 use jiff::civil::{Date, DateTime};
 use maud::{DOCTYPE, Markup, html};
@@ -84,7 +82,7 @@ fn body(nights: &[Trended], ranges: &Ranges, over: Over) -> Markup {
         (detail::chart(&regularity(&within, range, today)))
         (latest(nights, today))
         (detail::foot(&format!(
-            "Dots: each night. Bars: fell asleep to woke. Line: each watch's trend, the {METHOD}. Grey: the NHS's 7 to 9 hours for adults; the fifths of Windred et al. (Sleep, 2024), 7 days of wrist actigraphy in 61,000 UK adults, among whom higher was better throughout, darker higher."
+            "Dots: each night. Bars: fell asleep to woke. Line: each watch's trend, the {METHOD}. Grey: the NHS's 7 to 9 hours for adults, against which a wrist watch probably reads tens of minutes high, since it takes lying still for sleep; the fifths of Windred et al. (Sleep, 2024), 7 days of wrist actigraphy in 61,000 UK adults, among whom the risk of dying fell from the lowest fifth to the highest, most of it between the lowest and the rest, darker higher."
         )))
     }
 }
@@ -106,22 +104,8 @@ fn latest_trend(
         .max_by_key(|(_, day)| day.on)
 }
 
-/// Its change on the trend [`NIGHTS`] days before, against `maintaining`.
-fn change(day: &Trend, maintaining: f64, said: impl Fn(f64) -> String) -> Reading {
-    match (day.change, day.direction) {
-        (Some(by), Some(direction)) => Reading::Change {
-            by,
-            noise: maintaining,
-            direction: Some(direction),
-            said: said(by),
-            over: format!("in {NIGHTS} days"),
-        },
-        _ => Reading::NoRule(format!("No trend {NIGHTS} days before to read it against.")),
-    }
-}
-
 /// Time asleep and regularity, each where its latest trend falls in its
-/// reference, and its change.
+/// reference.
 fn summary(nights: &[Trended], today: Date) -> Markup {
     let asleep = latest_trend(nights, |one| &one.asleep);
     let regular = latest_trend(nights, |one| &one.regular);
@@ -135,19 +119,14 @@ fn summary(nights: &[Trended], today: Date) -> Markup {
             figure: hours_and_minutes(day.value, ""),
             unit: "min",
             margin: None,
-            readings: vec![
-                Reading::Position {
-                    segments: vec![
-                        segment(5.0, low / 60.0, "< 7 h"),
-                        segment(low / 60.0, high / 60.0, "7–9 h"),
-                        segment(high / 60.0, 11.0, "> 9 h"),
-                    ],
-                    at: day.value / 60.0,
-                },
-                change(&day, ASLEEP_MAINTAINING_MINUTES, |by| {
-                    format!("{} min", signed(by, 0))
-                }),
-            ],
+            readings: vec![Reading::Position {
+                segments: vec![
+                    segment(5.0, low / 60.0, "< 7 h"),
+                    segment(low / 60.0, high / 60.0, "7–9 h"),
+                    segment(high / 60.0, 11.0, "> 9 h"),
+                ],
+                at: day.value / 60.0,
+            }],
         });
         asof.push(format!(
             "Trend on {} · {}",
@@ -166,22 +145,19 @@ fn summary(nights: &[Trended], today: Date) -> Markup {
             figure: format!("{:.1}", day.value),
             unit: "",
             margin: None,
-            readings: vec![
-                Reading::Position {
-                    segments: edges
-                        .windows(2)
-                        .enumerate()
-                        .filter_map(|(fifth, pair)| match pair {
-                            [from, to] => {
-                                Some(segment(*from, *to, if fifth == 2 { "fifths" } else { "" }))
-                            }
-                            _ => None,
-                        })
-                        .collect(),
-                    at: day.value,
-                },
-                change(&day, REGULARITY_MAINTAINING, |by| signed(by, 1)),
-            ],
+            readings: vec![Reading::Position {
+                segments: edges
+                    .windows(2)
+                    .enumerate()
+                    .filter_map(|(fifth, pair)| match pair {
+                        [from, to] => {
+                            Some(segment(*from, *to, if fifth == 2 { "fifths" } else { "" }))
+                        }
+                        _ => None,
+                    })
+                    .collect(),
+                at: day.value,
+            }],
         });
         asof.push(format!(
             "Trend on {} · {}",
@@ -238,11 +214,9 @@ fn asleep(within: &[Trended], range: Range, today: Date) -> Chart<'static> {
             ));
         }
         for day in one.asleep.iter().flatten() {
-            let entry = said.entry(day.on).or_default();
-            entry.push(format!("trend {}", hours_and_minutes(day.value, " min")));
-            if let Some(by) = day.change {
-                entry.push(format!("{} min in {NIGHTS} days", signed(by, 0)));
-            }
+            said.entry(day.on)
+                .or_default()
+                .push(format!("trend {}", hours_and_minutes(day.value, " min")));
         }
     }
     Chart {
@@ -312,11 +286,9 @@ fn regularity(within: &[Trended], range: Range, today: Date) -> Chart<'static> {
                 .push(format!("{value:.1} · {}", name(&one.series.sent_by)));
         }
         for day in one.regular.iter().flatten() {
-            let entry = said.entry(day.on).or_default();
-            entry.push(format!("trend {:.1}", day.value));
-            if let Some(by) = day.change {
-                entry.push(format!("{} in {NIGHTS} days", signed(by, 1)));
-            }
+            said.entry(day.on)
+                .or_default()
+                .push(format!("trend {:.1}", day.value));
         }
     }
     let layers = WINDRED
@@ -438,11 +410,6 @@ fn hours_and_minutes(minutes: f64, unit: &str) -> String {
     format!("{} h {:02}{unit}", whole / 60, whole % 60)
 }
 
-/// A change with its sign, to `places`.
-fn signed(by: f64, places: usize) -> String {
-    format!("{by:+.places$}").replace('-', "−")
-}
-
 fn counted(count: usize, one: &str) -> String {
     if count == 1 {
         format!("1 {one}")
@@ -545,7 +512,7 @@ mod tests {
     }
 
     #[test]
-    fn the_summary_is_each_trend_in_its_reference_and_its_change() {
+    fn the_summary_is_each_trend_in_its_reference_and_nothing_else() {
         let page = shown(&october(), &NO_PLAN, Over::All);
 
         assert!(page.contains(r#"class="cell sleep""#), "{page}");
@@ -553,11 +520,9 @@ mod tests {
         assert!(page.contains("7 h 30<small>min</small>"), "{page}");
         assert!(page.contains("99.3<small></small>"), "{page}");
         assert_eq!(page.matches(r#"class="segment lit""#).count(), 2, "{page}");
-        assert_eq!(
-            page.matches("No trend 28 days before to read it against.")
-                .count(),
-            2,
-            "October alone has nothing 28 days before"
+        assert!(
+            !page.contains("in 28 days") && !page.contains("No trend 28 days before"),
+            "neither has a change (operator, 2026-11-02)"
         );
         assert!(page.contains("Trend on 27 Oct · device unknown"), "{page}");
         assert!(!page.contains('±'), "a night is what happened");
