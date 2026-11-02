@@ -233,7 +233,9 @@ async fn replace(
     wear: &[WearDay],
 ) -> Result<WorkoutCount, StoreError> {
     let run_id = normalisation_run_for_storage(run)?;
-    let mut tx = pool.begin().await.map_err(|error| store_error(&error))?;
+    let mut tx = super::writing(pool)
+        .await
+        .map_err(|error| store_error(&error))?;
 
     match removed {
         None => {

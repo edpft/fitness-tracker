@@ -316,9 +316,7 @@ impl NormalisedEntityStore for SqliteCyclingSessionStore {
         sessions: Vec<PerformedSession>,
     ) -> Result<WorkoutCount, StoreError> {
         let run_id = normalisation_run_for_storage(run)?;
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 
@@ -369,9 +367,7 @@ impl NormalisedEntityStore for SqliteCyclingSessionStore {
     ) -> Result<WorkoutCount, StoreError> {
         let run_id = normalisation_run_for_storage(run)?;
         let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 

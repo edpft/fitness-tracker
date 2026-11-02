@@ -165,9 +165,7 @@ impl NormalisedEntityStore for SqliteGymSessionStore {
     ) -> Result<WorkoutCount, StoreError> {
         let run_id = normalisation_run_for_storage(run)?;
         let stream = self.stream.to_string();
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 
@@ -194,9 +192,7 @@ impl NormalisedEntityStore for SqliteGymSessionStore {
     ) -> Result<WorkoutCount, StoreError> {
         let run_id = normalisation_run_for_storage(run)?;
         let stream = self.stream.to_string();
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
         clear_sessions(&mut tx, &stream, &removed).await?;

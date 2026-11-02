@@ -215,9 +215,7 @@ impl RefusalStore for SqliteRefusalStore {
         refusals: Vec<Refusal>,
     ) -> Result<RefusalCount, StoreError> {
         let run_id = normalisation_run_for_storage(run)?;
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 
@@ -250,9 +248,7 @@ impl RefusalStore for SqliteRefusalStore {
                 .collect::<Vec<_>>(),
         )
         .map_err(|error| corrupt(&error))?;
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
         sqlx::query!(

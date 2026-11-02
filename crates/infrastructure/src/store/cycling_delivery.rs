@@ -122,9 +122,7 @@ impl CyclingDeliveryStore for SqliteCyclingDeliveryStore {
         let session = i64::from(delivered.session.as_u8());
         let delivered_at = delivered.delivered_at.to_string();
 
-        let mut transaction = self
-            .pool
-            .begin()
+        let mut transaction = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 

@@ -137,9 +137,7 @@ impl PlanStore for SqlitePlanStore {
     }
 
     async fn author(&self, plan: &Plan) -> Result<PlanId, StoreError> {
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 
@@ -182,9 +180,7 @@ impl PlanStore for SqlitePlanStore {
         gym: &[GymMesocycle],
         cycling: &[CyclingMesocycle],
     ) -> Result<(), StoreError> {
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 

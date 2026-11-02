@@ -76,7 +76,9 @@ impl CanonicalGymSessionStore for SqliteCanonicalGymSessionStore {
         &self,
         sessions: Vec<CanonicalGymSession>,
     ) -> Result<SessionCount, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(|e| store_error(&e))?;
+        let mut tx = super::writing(&self.pool)
+            .await
+            .map_err(|e| store_error(&e))?;
         clear(&mut tx).await?;
         let written = sessions.len();
         for session in &sessions {
@@ -100,7 +102,9 @@ impl CanonicalGymSessionStore for SqliteCanonicalGymSessionStore {
         reach: &Reach,
         sessions: Vec<CanonicalGymSession>,
     ) -> Result<SessionCount, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(|e| store_error(&e))?;
+        let mut tx = super::writing(&self.pool)
+            .await
+            .map_err(|e| store_error(&e))?;
         remove_on(&mut tx, reach.rebuilt()).await?;
         for session in &sessions {
             let id = write_session(&mut tx, session).await?;
@@ -150,7 +154,9 @@ impl SqliteCanonicalGymSessionStore {
     /// [`StoreError`] if the store cannot be read.
     pub async fn reading(&self) -> Result<CanonicalGymReading, StoreError> {
         Ok(CanonicalGymReading {
-            snapshot: self.pool.begin().await.map_err(|e| store_error(&e))?,
+            snapshot: super::reading(&self.pool)
+                .await
+                .map_err(|e| store_error(&e))?,
         })
     }
 }

@@ -151,9 +151,7 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
         // the hand-over through it is what makes "a performed session is not
         // replaced" hold here without a check in the use case — an `UPDATE ...
         // SET prescription = ?` would slide straight past it.
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 

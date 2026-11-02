@@ -141,6 +141,41 @@ pub use withings_landing::{
 };
 pub use withings_normalised::{SqliteWeighInStore, WithingsWeighInAccountReader};
 
+/// A transaction that will write, holding the store's write lock from its
+/// first statement (#608).
+///
+/// **Not `pool.begin()`.** That opens deferred: the transaction reads, and asks
+/// for the lock only at its first write. A run fetches its sources side by
+/// side, so another source often holds the lock by then, and SQLite refuses the
+/// upgrade outright rather than waiting out the busy timeout. `BEGIN IMMEDIATE`
+/// asks at the start, where it does wait.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if no connection is free or the lock is not given up within
+/// the busy timeout.
+pub(crate) async fn writing(
+    pool: &sqlx::SqlitePool,
+) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>, sqlx::Error> {
+    pool.begin_with("BEGIN IMMEDIATE").await
+}
+
+/// A transaction that only reads: every query in it sees the store as it stood
+/// at the first, and it takes no lock (#467).
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if no connection is free.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one place a read snapshot is opened"
+)]
+pub(crate) async fn reading(
+    pool: &sqlx::SqlitePool,
+) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>, sqlx::Error> {
+    pool.begin().await
+}
+
 /// Translate a store failure into the application's view of one.
 ///
 /// This is the boundary: no `sqlx::Error` and no SQLite result code exists

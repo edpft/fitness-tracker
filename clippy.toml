@@ -24,3 +24,11 @@ doc-valid-idents = [
   "JUnit",
   "..",
 ]
+
+# A store transaction is opened as a write (`BEGIN IMMEDIATE`) or a read, never
+# deferred: a deferred transaction that reads and then writes is refused the
+# lock outright while another source is writing (#608).
+disallowed-methods = [
+  { path = "sqlx::Pool::begin", reason = "use `store::writing` or `store::reading` (#608)" },
+  { path = "sqlx::Pool::try_begin", reason = "use `store::writing` or `store::reading` (#608)" },
+]

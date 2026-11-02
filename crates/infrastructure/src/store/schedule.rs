@@ -283,9 +283,7 @@ async fn read_alterations(pool: &SqlitePool) -> Result<Vec<Alteration>, StoreErr
 
 impl DiaryAuthor for SqliteDiaryStore {
     async fn record_pattern(&self, pattern: &TrainingPattern) -> Result<(), StoreError> {
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 
@@ -342,9 +340,7 @@ impl DiaryAuthor for SqliteDiaryStore {
     }
 
     async fn record_alteration(&self, alteration: &Alteration) -> Result<(), StoreError> {
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 

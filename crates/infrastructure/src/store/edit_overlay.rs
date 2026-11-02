@@ -243,9 +243,7 @@ impl SqliteEditOverlayStore {
         let at = asserted_at.to_string();
         let reason = reason.as_str().to_owned();
 
-        let mut transaction = self
-            .pool
-            .begin()
+        let mut transaction = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 
@@ -316,9 +314,7 @@ impl SqliteEditOverlayStore {
         let (reps, load) = columns(figures);
         let assisted = i64::from(figures.is_assisted());
 
-        let mut transaction = self
-            .pool
-            .begin()
+        let mut transaction = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 
