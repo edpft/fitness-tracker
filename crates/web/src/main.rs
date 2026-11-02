@@ -19,6 +19,7 @@ mod page;
 mod pulse_wave_velocity;
 mod range;
 mod report;
+mod resting;
 mod run;
 mod schedule;
 mod sleep;
@@ -139,7 +140,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/body-composition", get(body_composition))
         .route(pulse_wave_velocity::PATH, get(pulse_wave_velocity_page))
         .route("/hrv", get(overnight_hrv))
-        .route("/resting-heart-rate", get(resting_heart_rate))
+        .route(resting::PATH, get(resting_heart_rate))
         .route("/sleep", get(sleep_page))
         .route("/estimated-1rm", get(estimated_one_rep_max))
         .route_layer(middleware::from_fn(recorded));
@@ -511,24 +512,21 @@ async fn resting_heart_rate(
     drawn(
         &runs,
         &collects,
-        "/resting-heart-rate",
+        resting::PATH,
         Some(over(&query)),
         &run,
         async {
-            let shown = daily::RESTING_HEART_RATE;
             let setting = runs.setting();
             let store = match configurator::store::Store::open(&setting.database).await {
                 Ok(store) => store,
-                Err(error) => return daily::unreadable(shown, &error.to_string()),
+                Err(error) => return resting::unreadable(&error.to_string()),
             };
             let trended = configurator::per_device::resting_heart_rate_trend(&store).await;
             let ranges = configurator::ranges::today(&store, &setting.zone).await;
             store.close().await;
             match trended.and_then(|trended| Ok((trended, ranges?))) {
-                Ok((trended, ranges)) => {
-                    daily::resting_heart_rate(&trended, &ranges, over(&query), &run)
-                }
-                Err(error) => daily::unreadable(shown, &error.to_string()),
+                Ok((trended, ranges)) => resting::page(&trended, &ranges, over(&query), &run),
+                Err(error) => resting::unreadable(&error.to_string()),
             }
         },
     )

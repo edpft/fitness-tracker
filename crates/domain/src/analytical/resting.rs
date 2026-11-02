@@ -29,12 +29,23 @@
 //! illness, a hard block or a run of short nights raises several in a row. So
 //! 90 nights hold about 13 independent ones, and the band, σ about 3.1 bpm, is
 //! about ± 1.7 bpm where σ/√n would say ± 0.6.
+//!
+//! **The line is read against itself 90 days before** (#615): rising or
+//! falling where the change is beyond the noise of the two lines, and no clear
+//! change otherwise (operator, 2026-11-02). There is no steady: at this noise
+//! a reading cannot show that nothing moved. On the Forerunner 165 two lines
+//! differ by about ± 2.4 bpm by chance, and endurance training lowers resting
+//! heart rate by 2.7 to 5.8 bpm over about 12 weeks (Reimers et al. 2018), so
+//! the training effect sits at the noise or above it. On his record the
+//! Forerunner 165 read falling on 39 days of 553 and the Vivoactive 3 moved on
+//! 543 of 1,885 (#688).
 
 use std::collections::BTreeMap;
 
 use jiff::civil::Date;
 
 use super::{
+    body_weight::Direction,
     confidence::Noise,
     per_device::{DeviceSeries, Reading},
     range::{Range, runs_within},
@@ -73,6 +84,47 @@ pub struct Flag {
     pub normal: f64,
 }
 
+/// The line on one day against the line [`LINE_DAYS`] days before.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Change {
+    pub on: Date,
+    /// Beats a minute, negative where the line fell.
+    pub by: f64,
+    /// How far either side its 95% band runs: the two lines' margins
+    /// combined. `None` where either has none.
+    pub margin: Option<f64>,
+    /// Rising or falling where the whole band is one side of no change;
+    /// `None` otherwise, and wherever there is no band to read.
+    pub direction: Option<Direction>,
+}
+
+impl Change {
+    /// `now` against `then`, read by the rule.
+    #[must_use]
+    pub fn between(now: &Day, then: &Day) -> Self {
+        let by = now.bpm - then.bpm;
+        let margin = now
+            .margin
+            .zip(then.margin)
+            .map(|(now, then)| now.hypot(then));
+        let direction = margin.and_then(|margin| {
+            if by - margin > 0.0 {
+                Some(Direction::Rising)
+            } else if by + margin < 0.0 {
+                Some(Direction::Falling)
+            } else {
+                None
+            }
+        });
+        Self {
+            on: now.on,
+            by,
+            margin,
+            direction,
+        }
+    }
+}
+
 /// One device's days, the slow line through them, and the flagged nights.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Trended {
@@ -92,6 +144,17 @@ impl Trended {
             line,
             flags,
         }
+    }
+
+    /// The line's latest day against the line [`LINE_DAYS`] days before it;
+    /// `None` where either has no line.
+    #[must_use]
+    pub fn change(&self) -> Option<Change> {
+        let mut days = self.line.iter().flatten();
+        let now = days.clone().next_back()?;
+        let before = now.on.checked_sub(jiff::Span::new().days(LINE_DAYS)).ok()?;
+        let then = days.find(|day| day.on == before)?;
+        Some(Change::between(now, then))
     }
 
     /// Only `range`'s days. The line and the flags on each are the whole
