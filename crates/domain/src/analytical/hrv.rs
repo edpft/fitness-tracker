@@ -1,15 +1,19 @@
 //! Overnight HRV as a trend against its own band (#417).
 //!
-//! **The method is Plews et al.'s, its numbers the operator's** (2026-10-16):
-//! the mean of log rMSSD over the 7 nights ending on a day, read against a band
-//! of ± 1 × CV of log rMSSD over the 60 nights before those 7. 1 × CV is
-//! Plews 2012 and 2013 as Buchheit (2014) reports them; on the operator's
-//! nights 0.5 × CV flagged about half of all weeks. Garmin's nightly figure is
-//! RMSSD averaged over sleep, so it is log-transformed as it stands.
+//! **The method is Plews et al.'s** (operator, 2026-10-16): the mean of log
+//! rMSSD over the 7 nights ending on a day, against the 60 nights before
+//! those 7. Garmin's nightly figure is RMSSD averaged over sleep, so it is
+//! log-transformed as it stands.
 //!
-//! **A CV of log rMSSD times its mean is its SD**, so the band is the
-//! baseline's mean ± one standard deviation, in log units, and only shown in
-//! milliseconds.
+//! **The band is the noise, not a fraction of the CV** (operator, 2026-11-02,
+//! #688): the baseline's mean ± 1.96 × its nights' SD × √(1/week + 1/baseline),
+//! in log units and only shown in milliseconds, so a week outside it differs
+//! from the baseline beyond chance. Nights do not carry over (#616), so σ/√n
+//! holds. ± 1 × CV, a fraction picked from Plews's papers, is withdrawn:
+//! Buchheit (2014) finds no evidence that any fraction is meaningful, and the
+//! literature gives a direction but no size for one person's change (Bellenger
+//! et al. 2016). On the Forerunner 165 a full week's band is about ± 15%, and
+//! 117 of 631 days read below and 60 above.
 //!
 //! **Each night is its device's**, so this runs over one
 //! [`DeviceSeries`](super::per_device::DeviceSeries) and a band never mixes two
@@ -20,8 +24,9 @@
 //! the line breaks; with fewer than 26 of the 60, the same proportion, there is
 //! no band and nothing to read the trend against.
 //!
-//! **The day-to-day variation is shown beside it**, as the CV of the 7
-//! nights' log rMSSD: Plews's early warning of over-reaching.
+//! **The 7 nights' variation is not read** (operator, 2026-11-02, #688): its
+//! only published use is one over-reached triathlete (Plews et al. 2012), with
+//! no size and no normal range to read a figure against.
 
 use std::collections::BTreeMap;
 
@@ -38,8 +43,10 @@ pub const METHOD: &str =
     "mean of log rMSSD over the 7 nights ending on the day, at least 3 of them recorded";
 
 /// What the band is.
-pub const BAND: &str =
-    "± 1 × CV of log rMSSD over the 60 nights before those 7, at least 26 of them recorded";
+pub const BAND: &str = "the mean of the 60 nights before those 7, at least 26 of them recorded, ± how far a week can differ from it by chance, at 95%";
+
+/// The normal deviate for a two-sided 95% interval.
+const Z: f64 = 1.96;
 
 /// The nights a trend is the mean of, the day itself included.
 const WEEK_NIGHTS: i64 = 7;
@@ -57,10 +64,13 @@ pub enum Against {
     Above,
 }
 
-/// What is normal for this body, in milliseconds.
+/// The baseline, and how far from it a week can be by chance, in
+/// milliseconds.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Band {
     pub low: f64,
+    /// The baseline nights' mean of log rMSSD, back in milliseconds.
+    pub normal: f64,
     pub high: f64,
 }
 
@@ -70,8 +80,6 @@ pub struct Day {
     pub on: Date,
     /// The 7 nights' mean of log rMSSD, back in milliseconds.
     pub milliseconds: f64,
-    /// The CV of the 7 nights' log rMSSD, as a percentage.
-    pub variation: f64,
     /// `None` with fewer than 26 of the 60 nights before.
     pub band: Option<Band>,
 }
@@ -124,20 +132,28 @@ fn day(nights: &BTreeMap<Date, f64>, on: Date) -> Option<Day> {
     if week.len() < WEEK_RECORDED {
         return None;
     }
-    let (mean, deviation) = mean_and_deviation(&week)?;
+    let mean = week.iter().sum::<f64>() / count(&week);
     let band = window(nights, on, WEEK_NIGHTS, BASELINE_NIGHTS)
         .filter(|baseline| baseline.len() >= BASELINE_RECORDED)
-        .and_then(|baseline| mean_and_deviation(&baseline))
-        .map(|(normal, deviation)| Band {
-            low: (normal - deviation).exp(),
-            high: (normal + deviation).exp(),
+        .and_then(|baseline| {
+            let (normal, spread) = mean_and_deviation(&baseline)?;
+            let noise = Z * spread * (count(&week).recip() + count(&baseline).recip()).sqrt();
+            Some(Band {
+                low: (normal - noise).exp(),
+                normal: normal.exp(),
+                high: (normal + noise).exp(),
+            })
         });
     Some(Day {
         on,
         milliseconds: mean.exp(),
-        variation: deviation / mean * 100.0,
         band,
     })
+}
+
+/// How many values, as a float.
+fn count(values: &[f64]) -> f64 {
+    f64::from(u32::try_from(values.len()).unwrap_or(u32::MAX))
 }
 
 /// The nights in the `length` days ending `before` days ahead of `on`.

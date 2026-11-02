@@ -67,9 +67,21 @@ fn the_band_is_the_sixty_nights_before_the_week_and_needs_twenty_six() {
     // On 2 Feb the week is 27 Jan to 2 Feb and the 60 nights before hold all 26.
     let last = day(date(2026, 2, 2)).expect("a trend");
     let band = last.band.expect("26 of the 60");
-    assert!(band.low < 40.0 && band.high > 60.0 && band.low > 30.0);
+    // The baseline's geometric mean is √(40 × 60), and the band is how far a
+    // week of 7 can differ from 26 nights by chance: 1.96 × their SD in log
+    // units × √(1/7 + 1/26).
+    let spread = (f64::ln(60.0 / 40.0) / 2.0) * (26.0_f64 / 25.0).sqrt();
+    let noise = 1.96 * spread * (1.0 / 7.0 + 1.0 / 26.0_f64).sqrt();
+    assert!((band.normal - 2400.0_f64.sqrt()).abs() < 1e-9, "{band:?}");
+    assert!(
+        ((band.high / band.normal).ln() - noise).abs() < 1e-9,
+        "{band:?}"
+    );
+    assert!(
+        ((band.normal / band.low).ln() - noise).abs() < 1e-9,
+        "{band:?}"
+    );
     assert_eq!(last.against(), Some(Against::Below));
-    assert!(last.variation.abs() < 1e-9);
 
     // On 1 Feb the 60 nights before stop at 25 Jan: 25 recorded, so no band.
     assert!(day(date(2026, 2, 1)).expect("a trend").band.is_none());
@@ -86,7 +98,6 @@ fn a_week_like_its_baseline_is_within() {
     let runs = trend(&nights);
     let last = runs.iter().flatten().next_back().copied().expect("a trend");
     assert_eq!(last.against(), Some(Against::Within));
-    assert!(last.variation > 0.0);
 }
 
 #[test]
