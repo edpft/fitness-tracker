@@ -34,6 +34,12 @@
 //! between consecutive days over its whole record, not the vendor's figure
 //! (operator, 2026-10-16), and n is the figures in each mean.
 //!
+//! **Each trend's band is [`super::confidence`]'s**, per method and per
+//! component. A composition figure is the impedance scale's own reading, and
+//! on the Body Scan a day's fat does not follow the day before's (no positive
+//! ρ₁ on the operator's record), so the band is σ/√n: σ about ± 0.53 kg of
+//! fat, and a full week's band about ± 0.39 kg.
+//!
 //! **Copies of one workbook are one reading.** The same day sits in up to four
 //! copies of a sheet, and they never disagree; a day where two did would show
 //! both figures rather than choose.
@@ -42,7 +48,10 @@ use std::{collections::BTreeMap, fmt};
 
 use jiff::civil::Date;
 
-use super::range::{Range, runs_within};
+use super::{
+    confidence::Noise,
+    range::{Range, runs_within},
+};
 use crate::{
     body::{Component, Percentage},
     measure::Kg,
@@ -125,6 +134,9 @@ pub struct Trend {
     pub value: f64,
     /// How many figures it is the mean of.
     pub figures: usize,
+    /// How far either side its 95% band runs, in the component's unit;
+    /// `None` where the record is too short to measure the noise.
+    pub margin: Option<f64>,
 }
 
 /// The trend on a day against the trend [`AGAINST_DAYS`] earlier.
@@ -316,6 +328,11 @@ pub(super) fn trend(by_day: &BTreeMap<Date, Vec<f64>>) -> Vec<Vec<Trend>> {
     let (Some(&first), Some(&last)) = (by_day.keys().next(), by_day.keys().next_back()) else {
         return Vec::new();
     };
+    let daily: BTreeMap<Date, f64> = by_day
+        .iter()
+        .filter_map(|(&on, values)| Some((on, mean(values)?)))
+        .collect();
+    let noise = Noise::of(&daily, WINDOW_DAYS, MEASURED_DAYS);
     let mut runs: Vec<Vec<Trend>> = Vec::new();
     let mut run: Vec<Trend> = Vec::new();
     for on in first
@@ -323,7 +340,10 @@ pub(super) fn trend(by_day: &BTreeMap<Date, Vec<f64>>) -> Vec<Vec<Trend>> {
         .take_while(|on| *on <= last)
     {
         match mean_of_week(by_day, on) {
-            Some(day) => run.push(day),
+            Some(day) => run.push(Trend {
+                margin: noise.as_ref().and_then(|noise| noise.margin(&daily, on)),
+                ..day
+            }),
             None if run.is_empty() => {}
             None => runs.push(std::mem::take(&mut run)),
         }
@@ -347,6 +367,7 @@ fn mean_of_week(by_day: &BTreeMap<Date, Vec<f64>>, on: Date) -> Option<Trend> {
         on,
         value: mean(&values)?,
         figures: values.len(),
+        margin: None,
     })
 }
 

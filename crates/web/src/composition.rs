@@ -22,6 +22,7 @@ use application::composition::AgainstPhase;
 use domain::{
     analytical::{
         composition::{AGAINST_DAYS, Change, ComponentSeries, Method, MethodSeries, TREND, Unit},
+        confidence::BAND,
         range::{Over, Range, Ranges},
         recomposition::{Cell as Moved, GOAL, MesocycleReading, NutritionPhase},
     },
@@ -135,9 +136,9 @@ fn body(
         (against_phase(against))
         (latest(components, today))
         (detail::foot(&if hollow {
-            format!("Dots: each weigh-in, hollow from the spreadsheets. Line: each method's trend, the {TREND}.")
+            format!("Dots: each weigh-in, hollow from the spreadsheets. Line: each method's trend, the {TREND}. Band: {BAND}.")
         } else {
-            format!("Dots: each weigh-in. Line: the trend, the {TREND}.")
+            format!("Dots: each weigh-in. Line: the trend, the {TREND}. Band: {BAND}.")
         }))
     }
 }
@@ -204,7 +205,7 @@ fn summary(components: &[ComponentSeries], today: Date) -> Markup {
             label,
             figure: format!("{:.1}", latest.value),
             unit: "kg",
-            margin: None,
+            margin: latest.margin.map(|margin| format!("{margin:.1} kg")),
             reading: one
                 .changes
                 .last()
@@ -276,7 +277,7 @@ fn chart(component: &ComponentSeries, metric: Metric, range: Range, today: Date)
                             .map(|day| Traced {
                                 on: day.on,
                                 value: day.value,
-                                margin: None,
+                                margin: day.margin,
                             })
                             .collect()
                     })

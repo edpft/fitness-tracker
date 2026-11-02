@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use domain::{
     analytical::{
         body_weight::{Change, MAINTAINING_GRAMS, METHOD, Series, Trend},
+        confidence::BAND,
         range::{Over, Range, Ranges},
     },
     canonical::Occurred,
@@ -87,7 +88,7 @@ fn body(series: &Series, ranges: &Ranges, over: Over) -> Markup {
                 .map(|weighed| (when(&weighed.at, today), html! { (tenths(weighed.mass)) }))
                 .collect::<Vec<_>>(),
         ))
-        (detail::foot(&format!("Dots: each weigh-in. Line: the trend, the {METHOD}.")))
+        (detail::foot(&format!("Dots: each weigh-in. Line: the trend, the {METHOD}. Band: {BAND}.")))
     }
 }
 
@@ -116,7 +117,7 @@ fn summary(series: &Series, today: Date) -> Markup {
             label: "Trend",
             figure: tenths(latest.mass),
             unit: "kg",
-            margin: None,
+            margin: latest.margin.map(|margin| format!("{margin:.1} kg")),
             reading,
         }],
         &detail::day(latest.on, today),
@@ -171,7 +172,7 @@ fn traced(day: &Trend) -> Traced {
     Traced {
         on: day.on,
         value: kilograms(day.mass),
-        margin: None,
+        margin: day.margin,
     }
 }
 
