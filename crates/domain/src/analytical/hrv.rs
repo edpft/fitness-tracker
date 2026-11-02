@@ -24,8 +24,9 @@
 //! the line breaks; with fewer than 26 of the 60, the same proportion, there is
 //! no band and nothing to read the trend against.
 //!
-//! **The day-to-day variation is shown beside it**, as the CV of the 7
-//! nights' log rMSSD: Plews's early warning of over-reaching.
+//! **The 7 nights' variation is not read** (operator, 2026-11-02, #688): its
+//! only published use is one over-reached triathlete (Plews et al. 2012), with
+//! no size and no normal range to read a figure against.
 
 use std::collections::BTreeMap;
 
@@ -79,8 +80,6 @@ pub struct Day {
     pub on: Date,
     /// The 7 nights' mean of log rMSSD, back in milliseconds.
     pub milliseconds: f64,
-    /// The CV of the 7 nights' log rMSSD, as a percentage.
-    pub variation: f64,
     /// `None` with fewer than 26 of the 60 nights before.
     pub band: Option<Band>,
 }
@@ -133,7 +132,7 @@ fn day(nights: &BTreeMap<Date, f64>, on: Date) -> Option<Day> {
     if week.len() < WEEK_RECORDED {
         return None;
     }
-    let (mean, deviation) = mean_and_deviation(&week)?;
+    let mean = week.iter().sum::<f64>() / count(&week);
     let band = window(nights, on, WEEK_NIGHTS, BASELINE_NIGHTS)
         .filter(|baseline| baseline.len() >= BASELINE_RECORDED)
         .and_then(|baseline| {
@@ -148,7 +147,6 @@ fn day(nights: &BTreeMap<Date, f64>, on: Date) -> Option<Day> {
     Some(Day {
         on,
         milliseconds: mean.exp(),
-        variation: deviation / mean * 100.0,
         band,
     })
 }

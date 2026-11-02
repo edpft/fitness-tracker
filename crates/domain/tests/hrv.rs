@@ -82,7 +82,6 @@ fn the_band_is_the_sixty_nights_before_the_week_and_needs_twenty_six() {
         "{band:?}"
     );
     assert_eq!(last.against(), Some(Against::Below));
-    assert!(last.variation.abs() < 1e-9);
 
     // On 1 Feb the 60 nights before stop at 25 Jan: 25 recorded, so no band.
     assert!(day(date(2026, 2, 1)).expect("a trend").band.is_none());
@@ -99,7 +98,6 @@ fn a_week_like_its_baseline_is_within() {
     let runs = trend(&nights);
     let last = runs.iter().flatten().next_back().copied().expect("a trend");
     assert_eq!(last.against(), Some(Against::Within));
-    assert!(last.variation > 0.0);
 }
 
 #[test]

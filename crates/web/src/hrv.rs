@@ -3,8 +3,8 @@
 //! **The summary is the last 7 nights' mean and where it sits against the 60
 //! nights before**: below, within or above, the band being how far a week can
 //! differ from them by chance (#688). It is the latest whatever the range: the
-//! range only chooses which days the chart shows. Beside it, the 7 nights'
-//! variation, Plews's early sign of over-reaching, with no rule to read it by.
+//! range only chooses which days the chart shows. The 7 nights' variation is
+//! not shown: there is nothing to read it against (operator, 2026-11-02).
 //!
 //! **No ± on the trend** (#616): the band it is read against is already the
 //! noise.
@@ -75,7 +75,7 @@ fn body(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
     }
 }
 
-/// The last 7 nights' mean against its band, and their variation.
+/// The last 7 nights' mean against its band.
 fn summary(trended: &[Trended], today: Date) -> Markup {
     let Some((one, day)) = trended
         .iter()
@@ -95,24 +95,14 @@ fn summary(trended: &[Trended], today: Date) -> Markup {
         |band| position(band, day.milliseconds),
     );
     detail::summary(
-        &[
-            Cell {
-                metric: Metric::Hrv,
-                label: "Last 7 nights",
-                figure: format!("{:.0}", day.milliseconds),
-                unit: "ms",
-                margin: None,
-                readings: vec![against],
-            },
-            Cell {
-                metric: Metric::Hrv,
-                label: "Variation",
-                figure: format!("{:.1}", day.variation),
-                unit: "%",
-                margin: None,
-                readings: Vec::new(),
-            },
-        ],
+        &[Cell {
+            metric: Metric::Hrv,
+            label: "Last 7 nights",
+            figure: format!("{:.0}", day.milliseconds),
+            unit: "ms",
+            margin: None,
+            readings: vec![against],
+        }],
         &format!(
             "Trend on {} · {}",
             detail::day(day.on, today),
@@ -295,7 +285,7 @@ mod tests {
     }
 
     #[test]
-    fn the_summary_is_the_week_against_its_band_and_its_variation() {
+    fn the_summary_is_the_week_against_its_band() {
         // 67 nights alternating 50 and 56 ms, then a week at 30: far below.
         let page = shown(
             &nights(74, |index| match index {
@@ -309,7 +299,7 @@ mod tests {
 
         assert!(page.contains(r#"class="cell hrv""#), "{page}");
         assert!(page.contains("30<small>ms</small>"), "{page}");
-        assert!(page.contains("0.0<small>%</small>"), "a week all alike");
+        assert!(!page.contains("Variation"), "nothing to read it against");
         assert_eq!(page.matches(r#"class="segment lit""#).count(), 1);
         let lit = page.find(r#"class="segment lit""#).expect("lit");
         let below = page.find(">below<").expect("below");
