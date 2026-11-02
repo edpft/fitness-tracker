@@ -115,9 +115,7 @@ impl SqlitePelotonClassStore {
     /// [`StoreError`] if the store is unavailable.
     pub async fn record_listed(&self, classes: &[ClassSummary]) -> Result<u64, StoreError> {
         let listed_at = Timestamp::now().to_string();
-        let mut transaction = self
-            .pool
-            .begin()
+        let mut transaction = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
         // **Counted, not inferred.** An upsert reports one row affected
@@ -217,9 +215,7 @@ impl SqlitePelotonClassStore {
     /// [`StoreError`] if the store is unavailable.
     pub async fn record_not_served(&self, reference: &str) -> Result<(), StoreError> {
         let now = Timestamp::now().to_string();
-        let mut transaction = self
-            .pool
-            .begin()
+        let mut transaction = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
         sqlx::query!(
@@ -283,9 +279,7 @@ impl SqlitePelotonClassStore {
     ) -> Result<(), StoreError> {
         let now = Timestamp::now().to_string();
         let duration = i64::try_from(duration_seconds).unwrap_or(i64::MAX).max(1);
-        let mut transaction = self
-            .pool
-            .begin()
+        let mut transaction = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
         sqlx::query!(

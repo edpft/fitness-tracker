@@ -81,9 +81,7 @@ impl LandingStore for GarminActivityFileLandingStore {
             return Ok(RecordCount::default());
         }
 
-        let mut transaction = self
-            .pool
-            .begin()
+        let mut transaction = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 

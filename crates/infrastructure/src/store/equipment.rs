@@ -388,9 +388,7 @@ impl EquipmentStore for SqliteEquipmentStore {
         recorded_at: Timestamp,
         corrects: Option<FactId>,
     ) -> Result<FactId, StoreError> {
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
         let fact = insert(&mut tx, statement, from, recorded_at, corrects).await?;

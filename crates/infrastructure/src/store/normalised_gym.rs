@@ -53,9 +53,7 @@ impl NormalisedGymSessionReader for SqliteNormalisedGymSessionReader {
         // **One snapshot** (#467): re-deriving a stream rewrites its rows under
         // fresh ids, so a spine read before that commit and parts read after
         // it would not be one session.
-        let mut snapshot = self
-            .pool
-            .begin()
+        let mut snapshot = super::reading(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
         let spine = Self::spine(&mut snapshot).await?;
@@ -69,9 +67,7 @@ impl NormalisedGymSessionReader for SqliteNormalisedGymSessionReader {
     async fn on(&self, days: &BTreeSet<Date>) -> Result<Vec<NormalisedGymSession>, StoreError> {
         // The spine whole and the parts only for the days asked for: a day is
         // where its zone puts it, which SQLite cannot work out (#610).
-        let mut snapshot = self
-            .pool
-            .begin()
+        let mut snapshot = super::reading(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
         let spine = Self::spine(&mut snapshot).await?;

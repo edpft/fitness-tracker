@@ -187,9 +187,7 @@ impl NormalisedEntityStore for SqliteWeighInStore {
         weigh_ins: Vec<BodyScanWeighIn>,
     ) -> Result<WorkoutCount, StoreError> {
         let run_id = normalisation_run_for_storage(run)?;
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 
@@ -231,9 +229,7 @@ impl NormalisedEntityStore for SqliteWeighInStore {
         let run_id = normalisation_run_for_storage(run)?;
         let stream = self.stream.to_string();
         let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 

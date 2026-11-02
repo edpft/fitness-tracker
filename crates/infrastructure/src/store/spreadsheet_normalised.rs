@@ -83,9 +83,7 @@ impl NormalisedEntityStore for SqliteSpreadsheetStore {
 
         let (weigh_ins, sessions) = split(entities);
 
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 
@@ -110,9 +108,7 @@ impl NormalisedEntityStore for SqliteSpreadsheetStore {
         let written = entities.len();
         let (weigh_ins, sessions) = split(entities);
 
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
         revise_manual_weigh_ins(&mut tx, run_id, &stream, &removed, &weigh_ins).await?;

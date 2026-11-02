@@ -68,9 +68,7 @@ impl NormalisedEntityStore for SqliteGarminActivityStore {
 
         let (sessions, devices) = split(entities);
 
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
         clear_stream(&mut tx, &stream).await?;
@@ -98,9 +96,7 @@ impl NormalisedEntityStore for SqliteGarminActivityStore {
         let stream = self.stream.to_string();
         let (sessions, devices) = split(entities);
 
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
         clear_sessions(&mut tx, &stream, &removed).await?;
@@ -241,7 +237,9 @@ async fn sightings(
     stream: &str,
     source: &'static str,
 ) -> Result<Vec<Sighting>, StoreError> {
-    let mut snapshot = pool.begin().await.map_err(|error| store_error(&error))?;
+    let mut snapshot = super::reading(pool)
+        .await
+        .map_err(|error| store_error(&error))?;
     let rows = sqlx::query!(
         r#"
         SELECT id AS "id!: i64", device AS "device!: String", name AS "name!: String",

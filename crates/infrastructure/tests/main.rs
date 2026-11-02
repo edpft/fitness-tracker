@@ -11,6 +11,7 @@ mod btwb_sessions;
 mod canonical_gym_session;
 mod canonicalise;
 mod comparison;
+mod concurrent_writes;
 mod cycling_mesocycle;
 mod cycling_session;
 mod delivery;

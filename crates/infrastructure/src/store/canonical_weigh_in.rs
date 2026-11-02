@@ -133,9 +133,7 @@ impl SqliteCanonicalWeighInStore {
 
 impl CanonicalWeighInStore for SqliteCanonicalWeighInStore {
     async fn replace(&self, weigh_ins: Vec<CanonicalWeighIn>) -> Result<WeighInCount, StoreError> {
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
         clear(&mut tx).await?;
@@ -154,9 +152,7 @@ impl CanonicalWeighInStore for SqliteCanonicalWeighInStore {
         reach: &Reach,
         weigh_ins: Vec<CanonicalWeighIn>,
     ) -> Result<WeighInCount, StoreError> {
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
         remove_on(&mut tx, reach.rebuilt()).await?;

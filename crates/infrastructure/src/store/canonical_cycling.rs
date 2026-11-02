@@ -135,7 +135,9 @@ impl SqliteNormalisedCyclingSessionReader {
     async fn read(&self, only: Option<String>) -> Result<Vec<CanonicalCyclingSession>, StoreError> {
         // **Three queries, one snapshot** (#467): a ride and its series read
         // either side of a re-derivation's commit would not be one ride.
-        let mut snapshot = self.pool.begin().await.map_err(|e| store_error(&e))?;
+        let mut snapshot = super::reading(&self.pool)
+            .await
+            .map_err(|e| store_error(&e))?;
 
         // A normalised session's id is its first ride's landing record, which
         // is what `cycling_session` is keyed on; a ride is keyed on its own.
@@ -246,7 +248,9 @@ impl CanonicalCyclingSessionStore for SqliteCanonicalCyclingSessionStore {
         &self,
         sessions: Vec<CanonicalCyclingSession>,
     ) -> Result<SessionCount, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(|e| store_error(&e))?;
+        let mut tx = super::writing(&self.pool)
+            .await
+            .map_err(|e| store_error(&e))?;
         clear(&mut tx).await?;
         let written = sessions.len();
         for session in &sessions {
@@ -266,7 +270,9 @@ impl CanonicalCyclingSessionStore for SqliteCanonicalCyclingSessionStore {
         reach: &Reach,
         sessions: Vec<CanonicalCyclingSession>,
     ) -> Result<SessionCount, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(|e| store_error(&e))?;
+        let mut tx = super::writing(&self.pool)
+            .await
+            .map_err(|e| store_error(&e))?;
         remove_on(&mut tx, reach.rebuilt()).await?;
         for session in &sessions {
             write_session(&mut tx, session).await?;
@@ -319,7 +325,9 @@ impl PerformedCyclingSessions for SqliteCanonicalCyclingSessionStore {
         // under fresh session ids, so rides read before its commit and series
         // read after it would name sessions the other no longer holds, and a
         // page would report a ride with no samples.
-        let mut snapshot = self.pool.begin().await.map_err(|e| store_error(&e))?;
+        let mut snapshot = super::reading(&self.pool)
+            .await
+            .map_err(|e| store_error(&e))?;
         let rides = sqlx::query_as!(
             CanonicalRideRow,
             r#"

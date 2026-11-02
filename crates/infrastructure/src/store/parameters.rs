@@ -559,9 +559,7 @@ impl WorkoutStore for SqliteGenerationParameterStore {
         at: Timestamp,
         workout: &Workout,
     ) -> Result<(), StoreError> {
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 
@@ -701,9 +699,7 @@ impl ProgressionStore for SqliteGenerationParameterStore {
         at: Timestamp,
         linear: &LinearProgression,
     ) -> Result<(), StoreError> {
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 
@@ -846,9 +842,7 @@ impl ProgressionStore for SqliteGenerationParameterStore {
     }
 
     async fn author_sbs(&self, at: Timestamp, sbs: &SbsProgression) -> Result<(), StoreError> {
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 

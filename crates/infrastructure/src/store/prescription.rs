@@ -424,9 +424,7 @@ fn ordinal_of(position: usize) -> Result<i64, StoreError> {
 
 impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
     async fn issue(&self, workout: &PrescribedWorkout) -> Result<PrescribedWorkoutId, StoreError> {
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx = super::writing(&self.pool)
             .await
             .map_err(|error| store_error(&error))?;
 
