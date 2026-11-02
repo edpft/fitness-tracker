@@ -892,6 +892,9 @@ where
             let WeekKind::Climbing(index) = week else {
                 continue;
             };
+            if abandoned_at_the_top_set(performance) {
+                continue;
+            }
             performed.push((index.as_u32(), completed_sets_of(performance)));
         }
 
@@ -1229,6 +1232,35 @@ fn completed_sets_of(performance: &Performance) -> Vec<CompletedSet> {
                 .map(|reps| CompletedSet::new(load, *reps))
         })
         .collect()
+}
+
+/// Whether a rep-max day stopped at its top set, with no back-off set attempted.
+///
+/// **A did-not-finish, and it counts towards nothing** (the operator,
+/// 2026-11-01). On 30 October 2026 his back twinged during the 8RM day's top
+/// set: `6 @ 75kg`, then nothing. Read as a rep-max day, the `8 @ 45kg` of its
+/// warm-up ramp was the heaviest set that made the count, and the training
+/// maximum fell from 95kg to 57.5kg. A finished day, missed or not, goes on to
+/// its back-off sets; an abandoned one does not, and that is a different shape
+/// from a failure rather than a worse one.
+///
+/// **The top set is the first at the day's heaviest load**, since a 3RM day's
+/// back-off singles are at the top set's load. Sets are read in the order the
+/// record holds them, and of any kind or outcome: a failed back-off set was
+/// still attempted.
+fn abandoned_at_the_top_set(performance: &Performance) -> bool {
+    let absolute = |set: &PerformedSetSummary| match set.load {
+        Load::Absolute(load) => Some(load),
+        Load::Relative(_) => None,
+    };
+    let Some(heaviest) = performance.sets.iter().filter_map(absolute).max() else {
+        return false;
+    };
+    performance
+        .sets
+        .iter()
+        .position(|set| absolute(set) == Some(heaviest))
+        .is_some_and(|top| top + 1 == performance.sets.len())
 }
 
 /// What a derivation consults, and it is two kinds of thing.
@@ -3098,6 +3130,59 @@ mod measurement_tests {
             Some(Kg::from_grams(92_500)),
             "92.5kg went up, whatever the source called the set"
         );
+    }
+
+    /// 30 October 2026: the 8RM day stopped at its top set, and its warm-up
+    /// ramp made the count at 45kg.
+    #[test]
+    fn a_rep_max_day_stopped_at_its_top_set_is_abandoned() {
+        let day = performance(
+            Date::constant(2026, 10, 30),
+            vec![
+                set(30_000, Some(8), SetKind::Warmup).expect("a ramp step"),
+                set(45_000, Some(8), SetKind::Warmup).expect("a ramp step"),
+                set(60_000, Some(6), SetKind::Warmup).expect("a ramp step"),
+                set(67_500, Some(5), SetKind::Warmup).expect("a ramp step"),
+                set(75_000, Some(6), SetKind::Working).expect("the top set"),
+            ],
+        );
+
+        assert!(super::abandoned_at_the_top_set(&day));
+    }
+
+    /// 2 October 2026: the top set missed its count and the back-off sets
+    /// followed, so it finished.
+    #[test]
+    fn a_missed_top_set_with_back_off_sets_is_finished() {
+        let day = performance(
+            Date::constant(2026, 10, 2),
+            vec![
+                set(72_500, Some(8), SetKind::Working).expect("a set"),
+                set(75_000, Some(8), SetKind::Working).expect("a set"),
+                set(77_500, Some(5), SetKind::Working).expect("the top set"),
+                set(75_000, Some(6), SetKind::Working).expect("a back-off set"),
+                set(75_000, Some(5), SetKind::Working).expect("a back-off set"),
+            ],
+        );
+
+        assert!(!super::abandoned_at_the_top_set(&day));
+    }
+
+    /// 16 October 2026: a 3RM day whose back-off singles are at the top set's
+    /// load.
+    #[test]
+    fn back_off_sets_at_the_top_load_still_finish_the_day() {
+        let day = performance(
+            Date::constant(2026, 10, 16),
+            vec![
+                set(87_500, Some(3), SetKind::Working).expect("a set"),
+                set(90_000, Some(3), SetKind::Working).expect("the top set"),
+                set(90_000, Some(1), SetKind::Working).expect("a back-off set"),
+                set(90_000, None, SetKind::Working).expect("a failed back-off set"),
+            ],
+        );
+
+        assert!(!super::abandoned_at_the_top_set(&day));
     }
 
     #[test]
