@@ -35,6 +35,7 @@ pub enum Metric {
     Regularity,
     RestingHeartRate,
     Hrv,
+    PulseWaveVelocity,
 }
 
 impl Metric {
@@ -48,6 +49,7 @@ impl Metric {
             Self::Regularity => "sleep-regularity",
             Self::RestingHeartRate => "resting-heart-rate",
             Self::Hrv => "hrv",
+            Self::PulseWaveVelocity => "pulse-wave-velocity",
         }
     }
 }

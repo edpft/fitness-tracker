@@ -58,7 +58,7 @@ pub const METHOD: &str = "mean of the 90 days ending on the day, at least 39 of 
 /// What a flag is.
 pub const FLAG: &str = "two nights running, each more than twice the standard deviation above the mean of the 28 nights before it";
 
-const LINE_DAYS: i64 = 90;
+pub(super) const LINE_DAYS: i64 = 90;
 const LINE_RECORDED: usize = 39;
 
 const NORMAL_DAYS: i64 = 28;
@@ -84,11 +84,12 @@ pub struct Flag {
     pub normal: f64,
 }
 
-/// The line on one day against the line [`LINE_DAYS`] days before.
+/// The line on one day against the line [`LINE_DAYS`] days before. Pulse
+/// wave velocity's line is read the same way (#688).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Change {
     pub on: Date,
-    /// Beats a minute, negative where the line fell.
+    /// In the line's unit, negative where the line fell.
     pub by: f64,
     /// How far either side its 95% band runs: the two lines' margins
     /// combined. `None` where either has none.
@@ -102,11 +103,15 @@ impl Change {
     /// `now` against `then`, read by the rule.
     #[must_use]
     pub fn between(now: &Day, then: &Day) -> Self {
-        let by = now.bpm - then.bpm;
-        let margin = now
-            .margin
-            .zip(then.margin)
-            .map(|(now, then)| now.hypot(then));
+        Self::of(now.on, (now.bpm, now.margin), (then.bpm, then.margin))
+    }
+
+    /// The line on `on`, and its margin, against the line and its margin
+    /// [`LINE_DAYS`] days before.
+    #[must_use]
+    pub fn of(on: Date, now: (f64, Option<f64>), then: (f64, Option<f64>)) -> Self {
+        let by = now.0 - then.0;
+        let margin = now.1.zip(then.1).map(|(now, then)| now.hypot(then));
         let direction = margin.and_then(|margin| {
             if by - margin > 0.0 {
                 Some(Direction::Rising)
@@ -117,7 +122,7 @@ impl Change {
             }
         });
         Self {
-            on: now.on,
+            on,
             by,
             margin,
             direction,
