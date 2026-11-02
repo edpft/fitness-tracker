@@ -403,7 +403,7 @@ fn framed(range: Range, axis: Axis, low: f64, high: f64) -> Frame {
     const STEPS: [f64; 16] = [
         0.05, 0.1, 0.2, 0.25, 0.5, 1.0, 2.0, 2.5, 5.0, 10.0, 20.0, 25.0, 50.0, 100.0, 200.0, 500.0,
     ];
-    const HOURS: [f64; 5] = [1.0, 2.0, 3.0, 6.0, 12.0];
+    const HOURS: [f64; 6] = [1.0, 2.0, 3.0, 6.0, 12.0, 24.0];
     let spread = high - low;
     let steps: &[f64] = match axis {
         Axis::Figures => &STEPS,
@@ -545,7 +545,7 @@ fn line(run: &[Traced], frame: &Frame) -> String {
 fn figure(value: f64, step: f64) -> String {
     if step < 0.1 {
         format!("{value:.2}")
-    } else if step < 1.0 {
+    } else if step < 1.0 || step.fract() > 0.0 {
         format!("{value:.1}")
     } else {
         format!("{value:.0}")
@@ -554,7 +554,8 @@ fn figure(value: f64, step: f64) -> String {
 
 /// Hours from midnight as a clock reads them, the evening before included.
 fn clock(hours: f64) -> String {
-    let minutes = (hours * 60.0).round().rem_euclid(24.0 * 60.0);
+    // Plus zero, so minus zero is written as zero.
+    let minutes = (hours * 60.0).round().rem_euclid(24.0 * 60.0) + 0.0;
     format!("{:02.0}:{:02.0}", (minutes / 60.0).floor(), minutes % 60.0)
 }
 
@@ -745,6 +746,21 @@ mod tests {
         assert!((frame.step - 2.0).abs() < f64::EPSILON, "{}", frame.step);
         assert_eq!(super::clock(-2.0), "22:00");
         assert_eq!(super::clock(6.5), "06:30");
+        assert_eq!(super::clock(-24.0), "00:00", "never minus zero");
+        assert_eq!(
+            super::figure(7.5, 2.5),
+            "7.5",
+            "a step of 2.5 keeps its half"
+        );
+        assert_eq!(super::figure(10.0, 5.0), "10");
+        let night_long = super::framed(range(), Axis::Clock, -6.0, 40.0);
+        assert!(
+            (night_long.step - 12.0).abs() < f64::EPSILON,
+            "{}",
+            night_long.step
+        );
+        let longer = super::framed(range(), Axis::Clock, -30.0, 60.0);
+        assert!((longer.step - 24.0).abs() < f64::EPSILON, "{}", longer.step);
     }
 
     #[test]
