@@ -2,8 +2,7 @@
 
 use domain::{
     analytical::composition::{
-        ComponentSeries, Direction, Measured, Method, MethodSeries, Reading, Stated, Unit,
-        by_method,
+        ComponentSeries, Measured, Method, MethodSeries, Reading, Stated, Unit, by_method,
     },
     body::{Component, InvalidPercentage, Percentage},
     measure::Kg,
@@ -191,7 +190,7 @@ fn the_trend_breaks_where_fewer_than_four_of_seven_days_were_measured() {
 }
 
 #[test]
-fn a_change_over_28_days_counts_only_beyond_the_methods_own_scatter() {
+fn a_change_over_28_days_is_read_against_the_methods_own_scatter() {
     let mut values = level(10.0, 35);
     values.extend(level(12.0, 35));
     let series = MethodSeries::of(SCAN, daily(&values));
@@ -201,11 +200,13 @@ fn a_change_over_28_days_counts_only_beyond_the_methods_own_scatter() {
             .changes
             .iter()
             .find(|change| change.on == date(2026, month, day))
-            .map(|change| change.direction)
+            .copied()
     };
     assert_eq!(on(1, 31), None, "no trend 28 days before");
-    assert_eq!(on(2, 1), Some(Direction::Maintaining), "both weeks at 10");
-    assert_eq!(on(2, 15), Some(Direction::Rising), "12 against 10");
+    let level = on(2, 1).expect("both weeks at 10");
+    assert!(level.by.abs() <= level.noise, "within the noise: {level:?}");
+    let risen = on(2, 15).expect("12 against 10");
+    assert!(risen.by > risen.noise, "beyond the noise: {risen:?}");
     let noise = series.changes.first().map(|change| change.noise);
     assert!(
         noise.is_some_and(|noise| noise > 0.1 && noise < 0.5),
@@ -214,7 +215,7 @@ fn a_change_over_28_days_counts_only_beyond_the_methods_own_scatter() {
 }
 
 #[test]
-fn without_two_pairs_of_consecutive_days_no_direction_is_read() {
+fn without_two_pairs_of_consecutive_days_no_change_is_read() {
     let readings: Vec<Reading<f64>> = daily(&level(18.0, 60)).into_iter().step_by(2).collect();
     let series = MethodSeries::of(SCAN, readings);
     assert!(series.changes.is_empty(), "{:?}", series.changes);

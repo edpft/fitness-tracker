@@ -89,6 +89,7 @@ header.detail a { font-size: 28px; line-height: 1; text-decoration: none; }
 .summary .asof { grid-column: 1 / -1; margin-top: 14px; font-size: 13px; color: var(--muted); }
 .summary .none { margin-top: 12px; font-size: 13px; color: var(--muted); }
 .change { display: grid; grid-template-columns: 22px 1fr; gap: 6px 8px; align-items: center; margin-top: 12px; }
+.change.plain { grid-template-columns: 1fr; }
 .change b { font-size: 15px; font-weight: 600; }
 .change span { font-size: 13px; color: var(--ink2); margin-left: 6px; }
 .change svg.gauge, svg.reference { grid-column: 1 / -1; width: 100%; height: auto; display: block; }

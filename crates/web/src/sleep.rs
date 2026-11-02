@@ -113,7 +113,7 @@ fn change(day: &Trend, maintaining: f64, said: impl Fn(f64) -> String) -> Readin
         (Some(by), Some(direction)) => Reading::Change {
             by,
             noise: maintaining,
-            direction,
+            direction: Some(direction),
             said: said(by),
             over: format!("in {NIGHTS} days"),
         },
