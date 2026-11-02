@@ -82,7 +82,7 @@ fn too_few_nights_before_is_no_normal() {
 }
 
 /// A line of `bpm` on 2 November, its band `margin` either side.
-fn on_the_line(day: i8, month: i8, bpm: f64, margin: Option<f64>) -> Day {
+const fn on_the_line(day: i8, month: i8, bpm: f64, margin: Option<f64>) -> Day {
     Day {
         on: date(2026, month, day),
         bpm,
