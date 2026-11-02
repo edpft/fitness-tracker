@@ -9,12 +9,13 @@
 //! line breaks.
 //!
 //! **Weight change is a second chart** (#689): how fast the trend moved, in kg
-//! a week, against zero and the plan's aim. No word says what it means; the
+//! a week, filled down to zero and against the plan's aim. No word says what it means; the
 //! line against them shows it (operator, 2026-11-02, #688).
 //!
-//! **The summary is the latest trend and the latest weight change**, each the
-//! latest whatever the range: the range only chooses which days the charts
-//! show.
+//! **The summary is the latest trend weight**, whatever the range: the range
+//! only chooses which days the charts show. Weight change is not in it: its
+//! latest day is 17 days back, and as a figure it read as this week's change
+//! (operator, 2026-11-02).
 
 use std::collections::BTreeMap;
 
@@ -96,9 +97,9 @@ fn body(series: &Series, aims: &[Aim], ranges: &Ranges, over: Over) -> Markup {
             range,
             axis: Axis::Figures,
             layers: vec![
-                Layer::Zero,
+                Layer::Filled(within.weight_change.iter().map(|run| run.iter().map(changed).collect()).collect()),
                 Layer::Aim(aimed(aims, range)),
-                Layer::Trend(within.weight_change.iter().map(|run| run.iter().map(changed).collect()).collect()),
+                Layer::Zero,
             ],
             days: change_days(&within, today),
         }))
@@ -119,32 +120,22 @@ fn body(series: &Series, aims: &[Aim], ranges: &Ranges, over: Over) -> Markup {
     }
 }
 
-/// The latest trend, and the latest weight change with the day it is for.
+/// The latest trend weight: what the underlying weight is taken to be now.
 fn summary(series: &Series, today: Date) -> Markup {
     let Some(latest) = series.trend.iter().flatten().next_back() else {
         return html! {};
     };
-    let change = series.weight_change.iter().flatten().next_back();
-    let label = change.map(|change| format!("Weight change, {}", detail::day(change.on, today)));
-    let mut cells = vec![Cell {
-        metric: Metric::BodyWeight,
-        label: "Trend",
-        figure: tenths(latest.mass),
-        unit: "kg",
-        margin: latest.margin.map(|margin| format!("{margin:.1} kg")),
-        readings: Vec::new(),
-    }];
-    if let (Some(change), Some(label)) = (change, &label) {
-        cells.push(Cell {
+    detail::summary(
+        &[Cell {
             metric: Metric::BodyWeight,
-            label,
-            figure: signed(change.per_week),
-            unit: "kg a week",
-            margin: change.margin.map(|margin| format!("{margin:.2} kg")),
+            label: "Trend weight",
+            figure: tenths(latest.mass),
+            unit: "kg",
+            margin: latest.margin.map(|margin| format!("{margin:.1} kg")),
             readings: Vec::new(),
-        });
-    }
-    detail::summary(&cells, &detail::day(latest.on, today))
+        }],
+        &detail::day(latest.on, today),
+    )
 }
 
 /// What a tap on each day shows: its weigh-ins and its trend.
@@ -369,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn the_summary_is_the_latest_trend_and_the_latest_weight_change() {
+    fn the_summary_is_trend_weight_and_weight_change_is_charted() {
         // 40 g a day for 60 days from 2026-08-01: 0.28 kg a week. The last
         // weigh-in is 09-29, so the last weight change is 17 days before it.
         let weigh_ins = (0..60)
@@ -385,10 +376,10 @@ mod tests {
             })
             .collect();
         let page = shown(weigh_ins, &ranges(date(2026, 9, 29)), Over::All);
-        assert!(page.contains("Weight change, 12 Sep"), "{page}");
+        assert!(page.contains("Trend weight"), "{page}");
         assert!(
-            page.contains(r#"<div class="figure">−0.28<small>kg a week</small></div>"#),
-            "{page}"
+            !page.contains("<small>kg a week</small>"),
+            "weight change is not a figure in the summary: {page}"
         );
         assert!(!page.contains(r#"class="badge""#), "no arrow: {page}");
         assert!(
@@ -424,6 +415,11 @@ mod tests {
         assert!(page.contains("<h2>Weight change</h2>"), "{page}");
         assert_eq!(page.matches(r#"class="zero""#).count(), 1, "{page}");
         assert_eq!(page.matches(r#"class="aim""#).count(), 1, "{page}");
+        assert_eq!(
+            page.matches(r#"class="below""#).count(),
+            1,
+            "filled down to zero, not a trend's band: {page}"
+        );
     }
 
     #[test]

@@ -256,6 +256,10 @@ pub enum Layer {
     Zero,
     /// What was intended, dashed, one line per stretch a plan states it.
     Aim(Vec<Vec<(Date, f64)>>),
+    /// A change: one line per unbroken run, filled down to zero, more
+    /// strongly below it than above, so which side of zero it falls reads at
+    /// a glance rather than as a trend (operator, 2026-11-02, #689).
+    Filled(Vec<Vec<Traced>>),
 }
 
 impl Layer {
@@ -276,6 +280,12 @@ impl Layer {
                 .collect(),
             Self::Zero => vec![0.0],
             Self::Aim(runs) => runs.iter().flatten().map(|(_, value)| *value).collect(),
+            Self::Filled(runs) => runs
+                .iter()
+                .flatten()
+                .map(|day| day.value)
+                .chain(std::iter::once(0.0))
+                .collect(),
         }
     }
 }
@@ -487,6 +497,21 @@ fn plotted(chart: &Chart<'_>, frame: &Frame) -> Markup {
                         Layer::Zero => {
                             line.zero x1="0" x2=(WIDTH) y1=(format!("{:.1}", frame.y(0.0))) y2=(format!("{:.1}", frame.y(0.0))) {}
                         }
+                        Layer::Filled(runs) => {
+                            @let zero = frame.y(0.0);
+                            defs {
+                                clipPath id=(format!("{}-below", chart.id)) { rect x="0" y=(format!("{zero:.1}")) width=(WIDTH) height=(HEIGHT) {} }
+                                clipPath id=(format!("{}-above", chart.id)) { rect x="0" y="0" width=(WIDTH) height=(format!("{zero:.1}")) {} }
+                            }
+                            @for run in runs {
+                                @if let (Some(first), Some(last)) = (run.first(), run.last()) {
+                                    @let area = format!("{:.1},{zero:.1} {} {:.1},{zero:.1}", frame.x(first.on), line(run, frame), frame.x(last.on));
+                                    polygon.below points=(area) clip-path=(format!("url(#{}-below)", chart.id)) {}
+                                    polygon.above points=(area) clip-path=(format!("url(#{}-above)", chart.id)) {}
+                                }
+                                polyline.line points=(line(run, frame)) {}
+                            }
+                        }
                         Layer::Aim(runs) => {
                             @for run in runs {
                                 polyline.aim points=(run.iter().map(|(on, value)| format!("{:.1},{:.1}", frame.x(*on), frame.y(*value))).collect::<Vec<_>>().join(" ")) {}
@@ -503,15 +528,27 @@ fn plotted(chart: &Chart<'_>, frame: &Frame) -> Markup {
 
 /// The date axis's labels, each kept inside the chart and none on top of
 /// the one before.
+///
+/// **A label pushed in from the edge gives way** to the next one where the
+/// two would collide, so the range's first day does not cost the axis its
+/// second tick (21 Sep went missing after 14 Sep, operator, 2026-11-02).
 fn ticks(frame: &Frame) -> Vec<(f64, String)> {
-    let mut kept: Vec<(f64, String)> = Vec::new();
+    let mut kept: Vec<(f64, String, bool)> = Vec::new();
     for (tick, label) in crate::range::ticks(frame.range) {
-        let x = frame.x(tick).clamp(LEFT + 20.0, WIDTH - RIGHT - 20.0);
-        if kept.last().is_none_or(|(before, _)| x - before >= 48.0) {
-            kept.push((x, label));
+        let at = frame.x(tick);
+        let x = at.clamp(LEFT + 20.0, WIDTH - RIGHT - 20.0);
+        let pushed = (x - at).abs() > f64::EPSILON;
+        match kept.last() {
+            Some((before, _, before_pushed)) if x - before < 48.0 => {
+                if *before_pushed && !pushed {
+                    kept.pop();
+                    kept.push((x, label, pushed));
+                }
+            }
+            _ => kept.push((x, label, pushed)),
         }
     }
-    kept
+    kept.into_iter().map(|(x, label, _)| (x, label)).collect()
 }
 
 /// Each day's figures, shown by tapping anywhere nearer to it than to the
@@ -623,6 +660,27 @@ mod tests {
             from: date(2026, 10, 1),
             to: date(2026, 10, 28),
         }
+    }
+
+    /// This macrocycle on 2026-11-02: 14 Sep is pushed in from the edge, and
+    /// gives way to 21 Sep rather than hiding it.
+    #[test]
+    fn a_label_pushed_in_from_the_edge_gives_way() {
+        let range = Range {
+            from: date(2026, 9, 14),
+            to: date(2026, 11, 2),
+        };
+        let frame = super::framed(range, Axis::Figures, 83.0, 86.0);
+        let labels: Vec<String> = super::ticks(&frame)
+            .into_iter()
+            .map(|(_, label)| label)
+            .collect();
+        assert_eq!(
+            labels.first().map(String::as_str),
+            Some("21 Sep"),
+            "{labels:?}"
+        );
+        assert!(labels.contains(&"28 Sep".to_owned()), "{labels:?}");
     }
 
     #[test]
