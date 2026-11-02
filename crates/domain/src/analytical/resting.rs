@@ -22,12 +22,20 @@
 //!
 //! **One device's days**, so a watch's figures are never read against
 //! another's (§ 6).
+//!
+//! **The line's band is [`super::confidence`]'s**, and here a night follows
+//! the nights before it: on the Forerunner 165 the correlation is 0.41 a
+//! night apart and still 0.3 a week apart, fading over a fortnight, because an
+//! illness, a hard block or a run of short nights raises several in a row. So
+//! 90 nights hold about 13 independent ones, and the band, σ about 3.1 bpm, is
+//! about ± 1.7 bpm where σ/√n would say ± 0.6.
 
 use std::collections::BTreeMap;
 
 use jiff::civil::Date;
 
 use super::{
+    confidence::Noise,
     per_device::{DeviceSeries, Reading},
     range::{Range, runs_within},
 };
@@ -51,6 +59,9 @@ const DEVIATIONS: f64 = 2.0;
 pub struct Day {
     pub on: Date,
     pub bpm: f64,
+    /// How far either side its 95% band runs; `None` where the record is too
+    /// short to measure the noise.
+    pub margin: Option<f64>,
 }
 
 /// A night high enough, after one that was too, to suggest illness.
@@ -104,19 +115,24 @@ impl Trended {
 pub fn line(readings: &[Reading<BeatsPerMinute>]) -> Vec<Vec<Day>> {
     slow_line(&by_day(readings))
         .into_iter()
-        .map(|run| run.into_iter().map(|(on, bpm)| Day { on, bpm }).collect())
+        .map(|run| {
+            run.into_iter()
+                .map(|(on, bpm, margin)| Day { on, bpm, margin })
+                .collect()
+        })
         .collect()
 }
 
 /// The mean of the 90 days ending on each day, at least 39 of them recorded,
-/// from the first day to the last and never past, as unbroken runs. Pulse
-/// wave velocity's line is this one too (#471).
-pub(super) fn slow_line(days: &BTreeMap<Date, f64>) -> Vec<Vec<(Date, f64)>> {
+/// and its band's margin, from the first day to the last and never past, as
+/// unbroken runs. Pulse wave velocity's line is this one too (#471).
+pub(super) fn slow_line(days: &BTreeMap<Date, f64>) -> Vec<Vec<(Date, f64, Option<f64>)>> {
     let (Some(&first), Some(&last)) = (days.keys().next(), days.keys().next_back()) else {
         return Vec::new();
     };
-    let mut runs: Vec<Vec<(Date, f64)>> = Vec::new();
-    let mut run: Vec<(Date, f64)> = Vec::new();
+    let noise = Noise::of(days, LINE_DAYS, LINE_RECORDED);
+    let mut runs: Vec<Vec<(Date, f64, Option<f64>)>> = Vec::new();
+    let mut run: Vec<(Date, f64, Option<f64>)> = Vec::new();
     for on in first
         .series(jiff::Span::new().days(1))
         .take_while(|on| *on <= last)
@@ -125,7 +141,11 @@ pub(super) fn slow_line(days: &BTreeMap<Date, f64>) -> Vec<Vec<(Date, f64)>> {
             .filter(|values| values.len() >= LINE_RECORDED)
             .map(|values| mean(&values));
         match mean {
-            Some(value) => run.push((on, value)),
+            Some(value) => run.push((
+                on,
+                value,
+                noise.as_ref().and_then(|noise| noise.margin(days, on)),
+            )),
             None if run.is_empty() => {}
             None => runs.push(std::mem::take(&mut run)),
         }

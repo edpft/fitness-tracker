@@ -14,6 +14,14 @@
 //! the calendar. **Nor are published bands for age**, given the scale's
 //! possible systematic error against the clinical method (Collier et al. 2020).
 //!
+//! **The line's band is [`super::confidence`]'s**, and it matters most here.
+//! A reading barely moves from the day before's (σ 0.07 m/s between
+//! consecutive days) but drifts over a fortnight with what confounds it
+//! (σ 0.21 about the 90-day mean, correlation 0.92 a day apart, gone by two
+//! weeks). So 80 readings in 90 days hold about 7 independent ones and the
+//! band is about ± 0.15 m/s, where σ/√n from consecutive days said ± 0.02.
+//! Readings bunched into a fortnight count as about one.
+//!
 //! **A method is the scale's algorithm** (§ 6): a reading by another is a
 //! series of its own, and no line joins two.
 
@@ -40,6 +48,9 @@ pub struct Measured {
 pub struct Day {
     pub on: Date,
     pub metres_per_second: f64,
+    /// How far either side its 95% band runs, in metres per second; `None`
+    /// where the record is too short to measure the noise.
+    pub margin: Option<f64>,
 }
 
 /// Every reading one algorithm took, oldest first, and the line through them.
@@ -92,9 +103,10 @@ pub fn by_algorithm(measured: &[Measured]) -> Vec<Series> {
                 .into_iter()
                 .map(|run| {
                     run.into_iter()
-                        .map(|(on, metres_per_second)| Day {
+                        .map(|(on, metres_per_second, margin)| Day {
                             on,
                             metres_per_second,
+                            margin,
                         })
                         .collect()
                 })
@@ -162,6 +174,30 @@ mod tests {
                 .all(|day| (day.metres_per_second - 7.2).abs() < 0.02),
             "the mean of alternating 7.0 and 7.4"
         );
+    }
+
+    #[test]
+    fn the_line_carries_its_band_and_fewer_readings_widen_it() {
+        let mut readings = daily(200, 0);
+        let full = by_algorithm(&readings);
+        let on = date(2026, 6, 1);
+        let margin = |series: &[super::Series]| {
+            series[0]
+                .line
+                .iter()
+                .flatten()
+                .find(|day| day.on == on)
+                .and_then(|day| day.margin)
+                .expect("a band on 1 June")
+        };
+        let wide = margin(&full);
+        // σ is 0.2 about a level of 7.2, and no day follows the one before.
+        assert!(
+            (wide - 1.96 * 0.2 / 90.0_f64.sqrt()).abs() < 0.005,
+            "{wide}"
+        );
+        readings.retain(|one| one.on.day() % 2 == 0 || one.on.month() != 5);
+        assert!(margin(&by_algorithm(&readings)) > wide);
     }
 
     #[test]

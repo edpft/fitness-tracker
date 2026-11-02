@@ -26,12 +26,18 @@
 //! shows the same reading; a range only chooses which days are shown. No
 //! period of rising or falling is drawn: whether a rise belongs to a longer
 //! fall depends on how far back it is read.
+//!
+//! **Its band is [`super::confidence`]'s**, σ about ± 0.43 kg on the
+//! operator's record and steady at 0.3 to 0.5 kg in every year and source
+//! from 2015. A day's weight barely follows the day before's (ρ₁ about 0.1),
+//! so a full week's band is about ± 0.35 kg and 4 days' about ± 0.45 kg. The
+//! weekend's rise is not noise in it: every week holds one weekend.
 
 use std::collections::BTreeMap;
 
 use jiff::civil::Date;
 
-use super::{Weighed, range::Range};
+use super::{Weighed, confidence::Noise, range::Range};
 use crate::measure::Kg;
 
 /// What the trend is called, so a different method is never mistaken for it.
@@ -65,14 +71,17 @@ pub struct Change {
 }
 
 /// Body weight's trend on one day.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Trend {
     pub on: Date,
     pub mass: Kg,
+    /// How far either side its 95% band runs, in kilograms; `None` where the
+    /// record is too short to measure the noise.
+    pub margin: Option<f64>,
 }
 
 /// Every weigh-in, the trend through them, and which way it went.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Series {
     /// Oldest first, as [`body_weight`] orders them.
     pub weigh_ins: Vec<Weighed>,
@@ -182,6 +191,19 @@ pub fn trend(series: &[Weighed]) -> Vec<Vec<Trend>> {
         return Vec::new();
     };
 
+    let kilograms: BTreeMap<Date, f64> = by_day
+        .iter()
+        .filter_map(|(&on, grams)| {
+            let count = f64::from(u32::try_from(grams.len()).ok()?);
+            let total = grams
+                .iter()
+                .map(|&gram| u32::try_from(gram).ok().map(f64::from))
+                .sum::<Option<f64>>()?;
+            Some((on, total / count / 1_000.0))
+        })
+        .collect();
+    let noise = Noise::of(&kilograms, WINDOW_DAYS, WEIGHED_DAYS);
+
     let mut runs: Vec<Vec<Trend>> = Vec::new();
     let mut run: Vec<Trend> = Vec::new();
     for on in first
@@ -189,7 +211,13 @@ pub fn trend(series: &[Weighed]) -> Vec<Vec<Trend>> {
         .take_while(|on| *on <= last)
     {
         match mean_of_week(&by_day, on) {
-            Some(mass) => run.push(Trend { on, mass }),
+            Some(mass) => run.push(Trend {
+                on,
+                mass,
+                margin: noise
+                    .as_ref()
+                    .and_then(|noise| noise.margin(&kilograms, on)),
+            }),
             None if run.is_empty() => {}
             None => runs.push(std::mem::take(&mut run)),
         }
