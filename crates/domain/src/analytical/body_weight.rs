@@ -20,12 +20,18 @@
 //! were weighed there is no trend, and the line breaks rather than guessing
 //! across (§ 37). It runs from the first weigh-in to the last, and never past.
 //!
-//! **Each day's trend is read against the trend 7 days before it**
-//! (operator, 2026-10-14, #252): rising or falling beyond 0.125 kg, maintaining
-//! within it. That is a property of the trend, so whatever shows the trend
-//! shows the same reading; a range only chooses which days are shown. No
-//! period of rising or falling is drawn: whether a rise belongs to a longer
-//! fall depends on how far back it is read.
+//! **Weight change is the rate the trend moved, in kg a week** (operator,
+//! 2026-11-02, #688, #689): the trend centred 14 days after a day less the
+//! trend centred 14 days before it, over the 4 weeks between. It is placed at
+//! the middle of what it measures, so it follows the trend's slope rather than
+//! lagging it by a fortnight, and the last 17 days of the record have none
+//! yet. It replaced a 7-day reading at ± 0.125 kg, which was a quarter of the
+//! noise of the difference it read. No word says what it means: the line
+//! against zero and the aim shows it.
+//!
+//! **The aim is the operator's, 2026-10-14** (#252): to lose 0.25 kg a
+//! microcycle in a cut. It is drawn only where a plan says what he intended,
+//! each mesocycle in the phase assumed from the macrocycle (#489).
 //!
 //! **Its band is [`super::confidence`]'s**, σ about ± 0.43 kg on the
 //! operator's record and steady at 0.3 to 0.5 kg in every year and source
@@ -37,8 +43,8 @@ use std::collections::BTreeMap;
 
 use jiff::civil::Date;
 
-use super::{Weighed, confidence::Noise, range::Range};
-use crate::measure::Kg;
+use super::{Weighed, confidence::Noise, range::Range, recomposition::NutritionPhase};
+use crate::{macrocycle::Macrocycle, measure::Kg, plan::Span};
 
 /// What the trend is called, so a different method is never mistaken for it.
 pub const METHOD: &str = "mean of the 7 days ending on the day, at least 4 of them weighed";
@@ -49,11 +55,18 @@ const WINDOW_DAYS: i64 = 7;
 /// How many of them must have a weigh-in for there to be a trend.
 const WEIGHED_DAYS: usize = 4;
 
-/// The most the trend may move in 7 days and still be maintaining: half the
-/// operator's aim of losing 0.25 kg a microcycle (2026-10-14, #252).
-pub const MAINTAINING_GRAMS: i64 = 125;
+/// How many days either side of a day its weight change reads the trend
+/// (operator, 2026-11-02, #688).
+const HALF_SPAN_DAYS: i64 = 14;
 
-/// Which way the trend went over the 7 days ending on a day.
+/// What weight change is called, so a different method is never mistaken for it.
+pub const CHANGE_METHOD: &str =
+    "the trend 14 days after less the trend 14 days before, a week at a time";
+
+/// The operator's aim in a cut, a week (2026-10-14, #252).
+pub const CUT_AIM_GRAMS_A_WEEK: i64 = -250;
+
+/// Which way a trend went: the other series' readings use it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     Rising,
@@ -61,13 +74,24 @@ pub enum Direction {
     Falling,
 }
 
-/// The trend on a day against the trend 7 days earlier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Change {
+/// How fast the trend moved around one day.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WeightChange {
+    /// The middle of the four weeks it measures.
     pub on: Date,
-    /// Positive when the trend rose.
-    pub grams: i64,
-    pub direction: Direction,
+    /// Kilograms a week, negative when the trend fell.
+    pub per_week: f64,
+    /// How far either side its 95% band runs, in kilograms a week.
+    pub margin: Option<f64>,
+}
+
+/// What the plan intended over one mesocycle, a week.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Aim {
+    pub span: Span,
+    pub phase: NutritionPhase,
+    /// Kilograms a week; `None` where the operator has stated none.
+    pub per_week: Option<f64>,
 }
 
 /// Body weight's trend on one day.
@@ -80,26 +104,26 @@ pub struct Trend {
     pub margin: Option<f64>,
 }
 
-/// Every weigh-in, the trend through them, and which way it went.
+/// Every weigh-in, the trend through them, and how fast it moved.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Series {
     /// Oldest first, as [`body_weight`] orders them.
     pub weigh_ins: Vec<Weighed>,
     /// As [`trend`] gives it.
     pub trend: Vec<Vec<Trend>>,
-    /// As [`changes`] gives them.
-    pub changes: Vec<Change>,
+    /// As [`weight_change`] gives it.
+    pub weight_change: Vec<Vec<WeightChange>>,
 }
 
 impl Series {
     pub fn of(weigh_ins: Vec<Weighed>) -> Self {
         let weigh_ins = body_weight(weigh_ins);
         let trend = trend(&weigh_ins);
-        let changes = changes(&trend);
+        let weight_change = weight_change(&trend);
         Self {
             weigh_ins,
             trend,
-            changes,
+            weight_change,
         }
     }
 }
@@ -137,11 +161,16 @@ impl Series {
                 })
                 .filter(|run| !run.is_empty())
                 .collect(),
-            changes: self
-                .changes
+            weight_change: self
+                .weight_change
                 .iter()
-                .filter(|change| inside(change.on))
-                .copied()
+                .map(|run| {
+                    run.iter()
+                        .filter(|day| inside(day.on))
+                        .copied()
+                        .collect::<Vec<_>>()
+                })
+                .filter(|run| !run.is_empty())
                 .collect(),
         }
     }
@@ -244,33 +273,91 @@ fn mean_of_week(by_day: &BTreeMap<Date, Vec<u64>>, on: Date) -> Option<Kg> {
     Some(Kg::from_grams((total + count / 2) / count))
 }
 
-/// Each day's trend against the trend 7 days earlier, oldest first, wherever
-/// both days have one.
-pub fn changes(trend: &[Vec<Trend>]) -> Vec<Change> {
-    let by_day: BTreeMap<Date, Kg> = trend
-        .iter()
-        .flatten()
-        .map(|day| (day.on, day.mass))
-        .collect();
-    by_day
-        .iter()
-        .filter_map(|(&on, &mass)| {
-            let before = on.checked_sub(jiff::Span::new().days(WINDOW_DAYS)).ok()?;
-            let earlier = by_day.get(&before)?;
-            let grams =
-                i64::try_from(mass.as_grams()).ok()? - i64::try_from(earlier.as_grams()).ok()?;
-            let direction = if grams > MAINTAINING_GRAMS {
-                Direction::Rising
-            } else if grams < -MAINTAINING_GRAMS {
-                Direction::Falling
-            } else {
-                Direction::Maintaining
-            };
-            Some(Change {
+/// Weight change, oldest first, as unbroken runs of consecutive days.
+///
+/// The trend is the mean of the week *ending* on a day, so the trend centred
+/// on a day is the one 3 days after it. A day has a weight change wherever
+/// the trends centred 14 days either side of it both exist; their bands are
+/// independent, 4 weeks apart, so they add in quadrature.
+pub fn weight_change(trend: &[Vec<Trend>]) -> Vec<Vec<WeightChange>> {
+    let by_day: BTreeMap<Date, Trend> = trend.iter().flatten().map(|day| (day.on, *day)).collect();
+    let centre = (WINDOW_DAYS - 1) / 2;
+    let weeks = f64::from(i32::try_from(2 * HALF_SPAN_DAYS).unwrap_or(28)) / 7.0;
+    let mut runs: Vec<Vec<WeightChange>> = Vec::new();
+    let mut run: Vec<WeightChange> = Vec::new();
+    for (&ending, after) in &by_day {
+        let read = || {
+            let on = ending
+                .checked_sub(jiff::Span::new().days(HALF_SPAN_DAYS + centre))
+                .ok()?;
+            let before = by_day.get(
+                &ending
+                    .checked_sub(jiff::Span::new().days(2 * HALF_SPAN_DAYS))
+                    .ok()?,
+            )?;
+            let grams = i64::try_from(after.mass.as_grams()).ok()?
+                - i64::try_from(before.mass.as_grams()).ok()?;
+            let kilograms = f64::from(i32::try_from(grams).ok()?) / 1_000.0;
+            Some(WeightChange {
                 on,
-                grams,
-                direction,
+                per_week: kilograms / weeks,
+                margin: after
+                    .margin
+                    .zip(before.margin)
+                    .map(|(after, before)| after.hypot(before) / weeks),
             })
+        };
+        match read() {
+            Some(change) => {
+                let follows = run
+                    .last()
+                    .is_none_or(|last| last.on.tomorrow().is_ok_and(|next| next == change.on));
+                if !follows {
+                    runs.push(std::mem::take(&mut run));
+                }
+                run.push(change);
+            }
+            None if run.is_empty() => {}
+            None => runs.push(std::mem::take(&mut run)),
+        }
+    }
+    if !run.is_empty() {
+        runs.push(run);
+    }
+    runs
+}
+
+/// What the plan intended over each of the macrocycle's mesocycles that has
+/// started by `today`, oldest first.
+///
+/// **A mesocycle's phase is the macrocycle's on its first day**, assumed as
+/// [`super::recomposition`] assumes it. A week no mesocycle covers has no aim.
+#[must_use]
+pub fn aims(macrocycle: Macrocycle, mesocycles: &[Span], today: Date) -> Vec<Aim> {
+    let started = macrocycle.start()..=macrocycle.last().min(today);
+    let mut spans: Vec<Span> = mesocycles
+        .iter()
+        .copied()
+        .filter(|span| started.contains(&span.start()))
+        .collect();
+    spans.sort_by_key(|span| (span.start(), span.end()));
+    spans.dedup();
+    spans
+        .into_iter()
+        .map(|span| {
+            let phase = NutritionPhase::assumed(macrocycle.phase(span.start(), Some(span)));
+            let per_week = match phase {
+                NutritionPhase::Cut => i32::try_from(CUT_AIM_GRAMS_A_WEEK)
+                    .ok()
+                    .map(|grams| f64::from(grams) / 1_000.0),
+                NutritionPhase::Maintenance => Some(0.0),
+                NutritionPhase::Bulk => None,
+            };
+            Aim {
+                span,
+                phase,
+                per_week,
+            }
         })
         .collect()
 }

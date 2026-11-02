@@ -387,10 +387,13 @@ async fn body_weight(
                 Err(error) => return weight::unreadable(&error.to_string()),
             };
             let series = configurator::body_weight::series(&store).await;
+            let aims = configurator::body_weight::aims(&store, &setting.zone).await;
             let ranges = configurator::ranges::today(&store, &setting.zone).await;
             store.close().await;
-            match series.and_then(|series| Ok((series, ranges?))) {
-                Ok((series, ranges)) => weight::page(&series, &ranges, over(&query), &run),
+            match series.and_then(|series| Ok((series, aims?, ranges?))) {
+                Ok((series, aims, ranges)) => {
+                    weight::page(&series, &aims, &ranges, over(&query), &run)
+                }
                 Err(error) => weight::unreadable(&error.to_string()),
             }
         },

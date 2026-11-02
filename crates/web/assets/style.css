@@ -116,6 +116,10 @@ svg.reference { margin-top: 12px; }
 .plotted .line { fill: none; stroke: var(--c); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
 .plotted .band { fill: var(--c); fill-opacity: 0.22; stroke: none; }
 .plotted .reference { fill: var(--ink); fill-opacity: 0.08; stroke: none; }
+.plotted .zero { stroke: var(--ink2); stroke-width: 1.5; }
+.plotted .below { fill: var(--c); fill-opacity: 0.45; stroke: none; }
+.plotted .above { fill: var(--c); fill-opacity: 0.2; stroke: none; }
+.plotted .aim { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 5 4; }
 .plotted .bar { stroke: var(--c); stroke-opacity: 0.7; stroke-linecap: butt; }
 .plotted .days { position: absolute; left: 0; right: 0; }
 .plotted .day { position: absolute; top: 0; bottom: 0; cursor: pointer; }
