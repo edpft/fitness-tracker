@@ -26,7 +26,7 @@ use domain::{
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
-use crate::detail::{self, Cell, Chart, Layer, Metric, Reading, Traced};
+use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced};
 
 const TITLE: &str = "Body weight";
 const HERE: &str = "/body-weight";
@@ -71,6 +71,7 @@ fn body(series: &Series, ranges: &Ranges, over: Over) -> Markup {
             title: TITLE,
             sub: weigh_ins(within.weigh_ins.len()),
             range,
+            axis: Axis::Figures,
             layers: vec![
                 Layer::Trend(within.trend.iter().map(|run| run.iter().map(traced).collect()).collect()),
                 Layer::Dots(within.weigh_ins.iter().map(|weighed| (weighed.at.day(), kilograms(weighed.mass))).collect()),
@@ -118,7 +119,7 @@ fn summary(series: &Series, today: Date) -> Markup {
             figure: tenths(latest.mass),
             unit: "kg",
             margin: latest.margin.map(|margin| format!("{margin:.1} kg")),
-            reading,
+            readings: vec![reading],
         }],
         &detail::day(latest.on, today),
     )

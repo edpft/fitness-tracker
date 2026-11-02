@@ -30,6 +30,8 @@ pub enum Metric {
     BodyWeight,
     Fat,
     FatFree,
+    Asleep,
+    Regularity,
 }
 
 impl Metric {
@@ -39,6 +41,8 @@ impl Metric {
             Self::BodyWeight => "weight",
             Self::Fat => "fat",
             Self::FatFree => "fat-free",
+            Self::Asleep => "sleep",
+            Self::Regularity => "sleep-regularity",
         }
     }
 }
@@ -74,7 +78,9 @@ pub struct Cell<'a> {
     pub unit: &'a str,
     /// Its ±, where it has one.
     pub margin: Option<String>,
-    pub reading: Reading,
+    /// Each way it is read, in turn: where it falls in its reference, and
+    /// which way it went.
+    pub readings: Vec<Reading>,
 }
 
 /// How the summary reads its figure.
@@ -128,7 +134,7 @@ pub fn summary(cells: &[Cell<'_>], asof: &str) -> Markup {
                     @if let Some(margin) = &cell.margin {
                         div.margin { "± " (margin) }
                     }
-                    (reading(&cell.reading))
+                    @for each in &cell.readings { (reading(each)) }
                 }
             }
             div.asof { (asof) }
@@ -212,15 +218,16 @@ fn position(segments: &[Segment], at: f64) -> Markup {
     let count = segments.len();
     html! {
         svg.reference viewBox=(format!("0 0 {GAUGE} 40")) aria-hidden="true" {
+            @let held = at.clamp(low, high);
             @for (index, segment) in segments.iter().enumerate() {
                 @let from = x(segment.from) + if index == 0 { 0.0 } else { 2.0 };
                 @let to = x(segment.to) - if index + 1 == count { 0.0 } else { 2.0 };
-                @let lit = segment.from <= at && at < segment.to;
+                @let lit = segment.from <= held && (held < segment.to || index + 1 == count);
                 rect class=(if lit { "segment lit" } else { "segment" })
                     x=(from) y="16" width=((to - from).max(0.0)) height="8" rx="4" {}
                 text.segment-name x=(f64::midpoint(from, to)) y="38" text-anchor="middle" { (segment.name) }
             }
-            path.pointer d=(format!("M{} 4 h12 l-6 8z", x(at.clamp(low, high)) - 6.0)) {}
+            path.pointer d=(format!("M{} 4 h12 l-6 8z", x(held) - 6.0)) {}
         }
     }
 }
@@ -234,13 +241,6 @@ pub struct Traced {
 }
 
 /// One kind of mark on a chart.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "reference regions are the template's, and the pages moving to it (#618 to #626) use them"
-    )
-)]
 pub enum Layer {
     /// Each observation, never joined to another.
     Dots(Vec<(Date, f64)>),
@@ -250,6 +250,8 @@ pub enum Layer {
     Trend(Vec<Vec<Traced>>),
     /// A reference region, from low to high on each day, in neutral grey.
     Reference(Vec<(Date, f64, f64)>),
+    /// Each observation's span, from low to high on its day, never joined.
+    Bars(Vec<(Date, f64, f64)>),
 }
 
 impl Layer {
@@ -264,12 +266,23 @@ impl Layer {
                     [day.value - margin, day.value + margin]
                 })
                 .collect(),
-            Self::Reference(days) => days
+            Self::Reference(days) | Self::Bars(days) => days
                 .iter()
                 .flat_map(|(_, low, high)| [*low, *high])
                 .collect(),
         }
     }
+}
+
+/// How a chart's value axis reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Axis {
+    /// Figures, rising up the chart.
+    Figures,
+    /// Hours from the morning's midnight, as a clock reads them, running down
+    /// the chart: the evening before is at the top, so a later night sits
+    /// lower.
+    Clock,
 }
 
 /// One chart card.
@@ -280,6 +293,7 @@ pub struct Chart<'a> {
     pub title: &'a str,
     pub sub: String,
     pub range: Range,
+    pub axis: Axis,
     pub layers: Vec<Layer>,
     /// What a tap on each day shows, oldest first.
     pub days: Vec<(Date, Markup)>,
@@ -296,6 +310,7 @@ const BOTTOM: f64 = 26.0;
 /// Where a day and a value fall on the chart.
 struct Frame {
     range: Range,
+    axis: Axis,
     days: i32,
     low: f64,
     high: f64,
@@ -310,7 +325,11 @@ impl Frame {
     }
 
     fn y(&self, value: f64) -> f64 {
-        (HEIGHT - TOP - BOTTOM).mul_add((self.high - value) / (self.high - self.low), TOP)
+        let down = match self.axis {
+            Axis::Figures => self.high - value,
+            Axis::Clock => value - self.low,
+        };
+        (HEIGHT - TOP - BOTTOM).mul_add(down / (self.high - self.low), TOP)
     }
 
     /// Every marked value, low to high.
@@ -357,14 +376,19 @@ pub fn choice(id: &str, metric: Metric, title: &str, options: &[(&str, Chart<'_>
 }
 
 /// A chart's line beneath its title and its plot, or what to say where the
-/// range holds nothing.
+/// range holds nothing: a reference alone is not something recorded.
 fn drawn(chart: &Chart<'_>) -> Markup {
+    let recorded = chart
+        .layers
+        .iter()
+        .filter(|layer| !matches!(layer, Layer::Reference(_)))
+        .any(|layer| !layer.values().is_empty());
     let values: Vec<f64> = chart.layers.iter().flat_map(Layer::values).collect();
-    let low = values.iter().copied().reduce(f64::min);
+    let low = values.iter().copied().reduce(f64::min).filter(|_| recorded);
     let high = values.iter().copied().reduce(f64::max);
     let body = low.zip(high).map_or_else(
         || html! { p.sub { "Nothing in this range." } },
-        |(low, high)| plotted(chart, &framed(chart.range, low, high)),
+        |(low, high)| plotted(chart, &framed(chart.range, chart.axis, low, high)),
     );
     html! {
         p.sub { (chart.sub) }
@@ -373,20 +397,28 @@ fn drawn(chart: &Chart<'_>) -> Markup {
 }
 
 /// The value axis's step, the fewest marks that still give it at least two
-/// intervals, and its ends on whole steps.
-fn framed(range: Range, low: f64, high: f64) -> Frame {
+/// intervals, and its ends on whole steps; a clock's steps are hours that
+/// divide its day.
+fn framed(range: Range, axis: Axis, low: f64, high: f64) -> Frame {
     const STEPS: [f64; 16] = [
         0.05, 0.1, 0.2, 0.25, 0.5, 1.0, 2.0, 2.5, 5.0, 10.0, 20.0, 25.0, 50.0, 100.0, 200.0, 500.0,
     ];
+    const HOURS: [f64; 5] = [1.0, 2.0, 3.0, 6.0, 12.0];
     let spread = high - low;
-    let step = STEPS
-        .into_iter()
+    let steps: &[f64] = match axis {
+        Axis::Figures => &STEPS,
+        Axis::Clock => &HOURS,
+    };
+    let step = steps
+        .iter()
+        .copied()
         .find(|step| spread / step <= 5.0)
         .unwrap_or(1000.0);
     let floor = (low / step).floor() * step;
     let ceiling = ((high / step).ceil() * step).max(floor + step);
     Frame {
         range,
+        axis,
         days: days_between(range.from, range.to),
         low: floor,
         high: ceiling,
@@ -402,7 +434,10 @@ fn plotted(chart: &Chart<'_>, frame: &Frame) -> Markup {
                 @for value in frame.marks() {
                     line.grid x1="0" x2=(WIDTH) y1=(frame.y(value)) y2=(frame.y(value)) {}
                     text.tick x=(WIDTH - 6.0) y=(frame.y(value) - 4.0) text-anchor="end" {
-                        (figure(value, frame.step))
+                        @match frame.axis {
+                            Axis::Figures => (figure(value, frame.step)),
+                            Axis::Clock => (clock(value)),
+                        }
                     }
                 }
                 @for (x, label) in ticks(frame) {
@@ -434,6 +469,13 @@ fn plotted(chart: &Chart<'_>, frame: &Frame) -> Markup {
                         Layer::Hollow(dots) => {
                             @for (on, value) in dots {
                                 circle.hollow cx=(format!("{:.1}", frame.x(*on))) cy=(format!("{:.1}", frame.y(*value))) r=(radius) {}
+                            }
+                        }
+                        Layer::Bars(bars) => {
+                            @for (on, low, high) in bars {
+                                @let x = format!("{:.1}", frame.x(*on));
+                                line.bar x1=(x) x2=(x) y1=(format!("{:.1}", frame.y(*low))) y2=(format!("{:.1}", frame.y(*high)))
+                                    stroke-width=(if frame.days > 400 { "1" } else { "2" }) {}
                             }
                         }
                         Layer::Reference(_) => {}
@@ -510,6 +552,12 @@ fn figure(value: f64, step: f64) -> String {
     }
 }
 
+/// Hours from midnight as a clock reads them, the evening before included.
+fn clock(hours: f64) -> String {
+    let minutes = (hours * 60.0).round().rem_euclid(24.0 * 60.0);
+    format!("{:02.0}:{:02.0}", (minutes / 60.0).floor(), minutes % 60.0)
+}
+
 /// The latest entries as a list, newest first.
 pub fn latest(title: &str, heading: &str, rows: &[(String, Markup)]) -> Markup {
     html! {
@@ -547,7 +595,7 @@ mod tests {
     use jiff::civil::date;
     use maud::html;
 
-    use super::{Cell, Chart, Layer, Metric, Reading, Segment, Traced, chart, summary};
+    use super::{Axis, Cell, Chart, Layer, Metric, Reading, Segment, Traced, chart, summary};
 
     fn range() -> Range {
         Range {
@@ -565,13 +613,13 @@ mod tests {
                 figure: "84.1".to_owned(),
                 unit: "kg",
                 margin: Some("0.3 kg".to_owned()),
-                reading: Reading::Change {
+                readings: vec![Reading::Change {
                     by: 0.21,
                     noise: 0.125,
                     direction: Direction::Rising,
                     said: "+0.21 kg".to_owned(),
                     over: "in 7 days".to_owned(),
-                },
+                }],
             }],
             "28 Oct",
         )
@@ -592,11 +640,11 @@ mod tests {
                 figure: "96.0".to_owned(),
                 unit: "kg",
                 margin: None,
-                reading: Reading::Direction {
+                readings: vec![Reading::Direction {
                     direction: Direction::Maintaining,
                     said: "+0.0 kg".to_owned(),
                     over: "a session".to_owned(),
-                },
+                }],
             }],
             "",
         )
@@ -616,7 +664,7 @@ mod tests {
                     figure: "7.1".to_owned(),
                     unit: "m/s",
                     margin: None,
-                    reading: Reading::Position {
+                    readings: vec![Reading::Position {
                         segments: vec![
                             Segment {
                                 from: 4.0,
@@ -630,7 +678,7 @@ mod tests {
                             },
                         ],
                         at: 7.1,
-                    },
+                    }],
                 },
                 Cell {
                     metric: Metric::BodyWeight,
@@ -638,7 +686,7 @@ mod tests {
                     figure: "–".to_owned(),
                     unit: "",
                     margin: None,
-                    reading: Reading::NoRule("Nothing predicts it yet".to_owned()),
+                    readings: vec![Reading::NoRule("Nothing predicts it yet".to_owned())],
                 },
             ],
             "",
@@ -666,6 +714,7 @@ mod tests {
             title: "Body weight",
             sub: "2 weigh-ins".to_owned(),
             range: range(),
+            axis: Axis::Figures,
             layers: vec![
                 Layer::Reference(vec![(date(2026, 10, 1), 80.0, 82.0)]),
                 Layer::Trend(vec![
@@ -690,6 +739,15 @@ mod tests {
     }
 
     #[test]
+    fn a_clock_runs_down_the_chart_and_reads_as_one() {
+        let frame = super::framed(range(), Axis::Clock, -1.5, 7.0);
+        assert!(frame.y(-2.0) < frame.y(7.0), "the evening is at the top");
+        assert!((frame.step - 2.0).abs() < f64::EPSILON, "{}", frame.step);
+        assert_eq!(super::clock(-2.0), "22:00");
+        assert_eq!(super::clock(6.5), "06:30");
+    }
+
+    #[test]
     fn a_range_holding_nothing_says_so() {
         let shown = chart(&Chart {
             id: "weight",
@@ -697,6 +755,7 @@ mod tests {
             title: "Body weight",
             sub: "0 weigh-ins".to_owned(),
             range: range(),
+            axis: Axis::Figures,
             layers: vec![Layer::Dots(Vec::new())],
             days: Vec::new(),
         })

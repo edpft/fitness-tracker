@@ -59,7 +59,7 @@ pub struct Night {
 pub const METHOD: &str = "mean of the 28 nights ending on the day, at least 12 of them recorded";
 
 /// The nights a trend is the mean of, the day itself included.
-const NIGHTS: i64 = 28;
+pub const NIGHTS: i64 = 28;
 const RECORDED: usize = 12;
 
 /// The NHS's 7 to 9 hours for adults, in minutes.
@@ -67,14 +67,14 @@ pub const NHS: (f64, f64) = (420.0, 540.0);
 
 /// The most time asleep may move in 28 days and still be maintaining
 /// (operator, 2026-10-28).
-const ASLEEP_MAINTAINING_MINUTES: f64 = 15.0;
+pub const ASLEEP_MAINTAINING_MINUTES: f64 = 15.0;
 
 /// The lower edge of each of Windred et al.'s fifths above the lowest.
 pub const WINDRED: [f64; 4] = [71.6, 78.6, 83.2, 87.3];
 
 /// The most the SRI may move in 28 days and still be maintaining: about half
 /// the width of Windred's middle fifths (operator, 2026-10-28).
-const REGULARITY_MAINTAINING: f64 = 2.0;
+pub const REGULARITY_MAINTAINING: f64 = 2.0;
 
 /// Which fifth of Windred et al.'s cohort an SRI falls in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
