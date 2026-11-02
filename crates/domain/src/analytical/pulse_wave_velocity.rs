@@ -4,10 +4,19 @@
 //! confounds it averages out** (operator, 2026-10-28). It follows blood
 //! pressure at the moment of measurement, about 1 m/s per 10 mmHg diastolic
 //! (Spronck et al. 2017), and on his record it swings 0.5 to 0.8 m/s over a few
-//! weeks with the standing heart rate the scale takes, where a training block
-//! moves it about 0.4 m/s (Ashor et al. 2014). So there is no direction: the
-//! line is resting heart rate's, the mean of the 90 days ending on a day, at
-//! least 39 of them recorded ([`super::resting`]).
+//! weeks with the standing heart rate the scale takes. The line is resting
+//! heart rate's, the mean of the 90 days ending on a day, at least 39 of them
+//! recorded ([`super::resting`]), and its band counts those swings.
+//!
+//! **Read as resting heart rate's is** (operator, 2026-11-02, #688): the line
+//! against itself 90 days before, falling or rising beyond the noise of the
+//! two and no clear change otherwise. Lower is better: each 1 m/s of aortic
+//! pulse wave velocity carries about 14% more cardiovascular events
+//! (Vlachopoulos et al. 2010). Aerobic training lowers it 0.4 to 0.6 m/s
+//! (Ashor et al. 2014), where two lines on his record differ by about ± 0.22
+//! m/s by chance, so a training-sized fall is beyond the noise. Whether the
+//! scale tracks one person's change is not validated (Collier et al. 2020
+//! compared it across 20 students only).
 //!
 //! **Vascular age is not drawn.** On his record it is 24.0 + 2.59 × pulse wave
 //! velocity + 0.98 × years elapsed, give or take 0.1 years: the same figure and
@@ -29,7 +38,12 @@ use std::collections::BTreeMap;
 
 use jiff::civil::Date;
 
-use super::{per_device::Reading, range::Range, range::runs_within, resting::slow_line};
+use super::{
+    per_device::Reading,
+    range::Range,
+    range::runs_within,
+    resting::{Change, LINE_DAYS, slow_line},
+};
 use crate::body::PulseWaveVelocity;
 
 /// What the line is.
@@ -63,6 +77,21 @@ pub struct Series {
 }
 
 impl Series {
+    /// The line's latest day against the line 90 days before it; `None`
+    /// where either has no line.
+    #[must_use]
+    pub fn change(&self) -> Option<Change> {
+        let mut days = self.line.iter().flatten();
+        let now = days.clone().next_back()?;
+        let before = now.on.checked_sub(jiff::Span::new().days(LINE_DAYS)).ok()?;
+        let then = days.find(|day| day.on == before)?;
+        Some(Change::of(
+            now.on,
+            (now.metres_per_second, now.margin),
+            (then.metres_per_second, then.margin),
+        ))
+    }
+
     /// Only `range`'s days. The line on each is the whole record's.
     #[must_use]
     pub fn within(&self, range: Range) -> Self {
@@ -141,7 +170,10 @@ mod tests {
     use jiff::civil::{Date, date};
 
     use super::{Measured, by_algorithm};
-    use crate::{analytical::range::Range, body::PulseWaveVelocity};
+    use crate::{
+        analytical::{body_weight::Direction, range::Range},
+        body::PulseWaveVelocity,
+    };
 
     fn measured(on: Date, algorithm: u64, millimetres: u32) -> Measured {
         Measured {
@@ -198,6 +230,33 @@ mod tests {
         );
         readings.retain(|one| one.on.day() % 2 == 0 || one.on.month() != 5);
         assert!(margin(&by_algorithm(&readings)) > wide);
+    }
+
+    #[test]
+    fn the_line_reads_falling_beyond_its_noise_and_no_clear_change_within_it() {
+        let steady = by_algorithm(&daily(200, 0));
+        let change = steady[0].change().expect("a line 90 days before");
+        assert_eq!(change.on, date(2026, 7, 19));
+        assert!(change.by.abs() < 0.01, "{change:?}");
+        assert_eq!(change.direction, None);
+
+        // A metre a second lower from 21 April: the line on 19 July is all
+        // of it, the line 90 days before none.
+        let fell: Vec<Measured> = daily(200, 0)
+            .into_iter()
+            .map(|one| {
+                if one.on >= date(2026, 4, 21) {
+                    measured(one.on, 0, one.velocity.as_millimetres_per_second() - 1_000)
+                } else {
+                    one
+                }
+            })
+            .collect();
+        let change = by_algorithm(&fell)[0].change().expect("a line");
+        assert!((change.by + 1.0).abs() < 0.01, "{change:?}");
+        assert_eq!(change.direction, Some(Direction::Falling));
+
+        assert_eq!(by_algorithm(&daily(100, 0))[0].change(), None);
     }
 
     #[test]
