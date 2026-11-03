@@ -39,6 +39,7 @@ pub async fn view(store: &Store, zone: &OperatorZone) -> Result<View, StoreError
         store.canonical_gym(),
         store.weigh_ins(),
         store.plans(zone),
+        store.prescriptions(zone),
     )
     .view(today)
     .await

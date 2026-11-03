@@ -16,8 +16,11 @@
 //! the table beneath is the same figures.
 
 use application::one_rep_max::{Lift, View};
-use domain::analytical::one_rep_max::{
-    Against, CONFIDENCE, Figure, Line, Point, Projection, Reading, Relative, Stretch,
+use domain::analytical::{
+    body_weight::Direction,
+    one_rep_max::{
+        Against, CONFIDENCE, Figure, Line, Point, Projection, Reading, Relative, Stretch, TestRead,
+    },
 };
 use maud::{DOCTYPE, Markup, html};
 
@@ -45,7 +48,8 @@ pub fn page(view: &View, run: &crate::run::View) -> Markup {
                     h1 { (TITLE) }
                     p.legend {
                         "estimator: " (view.estimator)
-                        " · points: each session's highest estimate · squares: tests, beneath a failed attempt"
+                        " · points: each session's highest estimate · squares: the tests the plan programmed, each its heaviest completed set"
+                        " · a test moves beyond the noise of two tests, about 9.7% of the earlier (a squat 1RM repeats to 3.5%, Seo et al.), against the test before or else the first since the last clear change"
                         " · line: least squares through the estimates, band " (CONFIDENCE)
                         " · whisker: where the test could fall, " (CONFIDENCE)
                         " · a ratio is over that day's weigh-in"
@@ -198,7 +202,7 @@ fn lift_section(lift: &Lift) -> Markup {
                     label for=(id) { "over " (against.name()) }
                 }
                 div.axis.kg {
-                    (chart_section(lift.lift.name(), "in kilograms", "no estimate", &lift.absolute))
+                    (chart_section(lift.lift.name(), "in kilograms", "no estimate", &lift.absolute, &lift.tests))
                 }
                 @for (against, stretches) in &lift.relative {
                     div class=(format!("axis {}", key(*against))) {
@@ -207,6 +211,7 @@ fn lift_section(lift: &Lift) -> Markup {
                             &format!("over {}", against.name()),
                             &format!("no {} that day", against.name()),
                             stretches,
+                            &[],
                         ))
                     }
                 }
@@ -224,17 +229,24 @@ const fn key(against: Against) -> &'static str {
 }
 
 /// One chart, its readings and its table. `missing` is what a test with no
-/// figure reads.
+/// figure reads; `moved` is each test against its noise, where it is read.
 fn chart_section<P: Shown>(
     lift: &str,
     over: &str,
     missing: &str,
     stretches: &[Stretch<P>],
+    moved: &[TestRead],
 ) -> Markup {
     html! {
         @for (index, stretch) in stretches.iter().enumerate() {
             div.(class(index, stretches.len())) {
-                p.reading { (opening(stretch, missing)) }
+                p.reading {
+                    (opening(stretch, missing))
+                    (moved
+                        .iter()
+                        .find(|read| read.on == stretch.from)
+                        .map_or_else(String::new, against_noise))
+                }
                 @if let Some(reading) = prediction(stretch, missing) {
                     p.reading { (reading) }
                 }
@@ -269,6 +281,33 @@ fn opening<P: Shown>(stretch: &Stretch<P>, missing: &str) -> String {
         .test
         .map_or_else(|| missing.to_owned(), |test| test_reading(&test));
     format!("test on {} · {test} · {estimates}{line}", stretch.from)
+}
+
+/// ` · +2.5kg, no clear change (noise ± 9.0kg)`, or
+/// ` · +2.5kg, rising, +10kg since 3 Jul 2026`: a test against the one before
+/// and the start of its run, beyond the noise of two tests. The first test
+/// has nothing to be read against.
+fn against_noise(read: &TestRead) -> String {
+    let Some(moved) = read.moved else {
+        return " · the first test, nothing to read it against".to_owned();
+    };
+    let kg = |by: i64| Scale::Kg.signed(i32::try_from(by).map_or(f64::MAX, f64::from));
+    let said = match moved.direction {
+        Some(Direction::Rising) => "rising".to_owned(),
+        Some(Direction::Falling) => "falling".to_owned(),
+        Some(Direction::Maintaining) | None => read.noise.map_or_else(
+            || "no clear change".to_owned(),
+            |noise| format!("no clear change (noise ± {})", Scale::Kg.show(noise)),
+        ),
+    };
+    let since = moved.since.map_or_else(String::new, |since| {
+        format!(
+            ", {} since {}",
+            kg(since.by),
+            since.on.strftime("%-d %b %Y")
+        )
+    });
+    format!(" · {}, {said}{since}", kg(moved.by))
 }
 
 /// A test's figure beside what it was read from, once each: a mass's reading
@@ -550,10 +589,13 @@ fn row<P: Shown>(stretch: &Stretch<P>, session: u32, point: &P) -> Markup {
 fn from(point: &Point) -> String {
     match point.reading {
         Reading::Estimated => point.estimate.to_string(),
-        Reading::Tested { failed } => format!(
-            "tested: {}kg × {}, {failed}kg failed",
-            point.estimate.load, point.estimate.reps
-        ),
+        Reading::Tested { failed } => {
+            let failed = failed.map_or_else(String::new, |failed| format!(", {failed}kg failed"));
+            format!(
+                "tested: {}kg × {}{failed}",
+                point.estimate.load, point.estimate.reps
+            )
+        }
     }
 }
 
@@ -580,7 +622,9 @@ mod tests {
     use domain::{
         analytical::{
             Estimate, RelativeStrength,
-            one_rep_max::{Against, LIFTS, NextTest, Point, Reading, Relative, stretches, tests},
+            one_rep_max::{
+                Against, LIFTS, NextTest, Point, Reading, Relative, read_tests, stretches, tests,
+            },
         },
         gym::Rir,
         measure::{Kg, RepCount},
@@ -612,7 +656,7 @@ mod tests {
                 rir: Rir::Zero,
             },
             reading: Reading::Tested {
-                failed: Kg::from_grams(95_000),
+                failed: Some(Kg::from_grams(95_000)),
             },
         })
     }
@@ -643,6 +687,7 @@ mod tests {
                 .map(|lift| Lift {
                     lift,
                     absolute: stretches(points, &tests, &days, next),
+                    tests: read_tests(points),
                     relative: Against::ALL
                         .into_iter()
                         .map(|against| {
@@ -677,6 +722,21 @@ mod tests {
         on: date(2026, 10, 23),
         sessions: 3,
     };
+
+    #[test]
+    fn a_test_reads_against_the_one_before_and_its_noise() {
+        let mut points = autumn().expect("points");
+        points.push(test_on(date(2026, 10, 23), 95_000).expect("a test"));
+        let page = page(&view(&points, None), &crate::run::View::default()).into_string();
+        assert!(
+            page.contains("the first test, nothing to read it against"),
+            "{page}"
+        );
+        assert!(
+            page.contains("+2.5kg, no clear change (noise ± 9.0kg)"),
+            "{page}"
+        );
+    }
 
     #[test]
     fn the_prediction_reads_as_a_mass_and_its_range() {

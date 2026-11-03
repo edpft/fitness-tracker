@@ -45,12 +45,13 @@
 
 use crate::{
     gym::exercise::Exercise,
+    measure::RepCount,
     planner::SessionRole,
     prescription::{
-        block::BlockPeriodisation,
+        block::{BlockPeriodisation, BlockWeek, WeekPlan},
         linear::{Linear, PrimaryPattern, SlotFills},
         sbs::{Sbs, chart},
-        schedule::{Calendar, WeekKind},
+        schedule::{Calendar, WeekIndex, WeekKind},
     },
     provider::ProvidedFrom,
 };
@@ -221,6 +222,42 @@ impl GymMesocycle {
             }
             (Self::Progression(Progression::Provided { .. }), WeekKind::Climbing(at)) => {
                 at.as_u32() == chart::WEEKS
+            }
+        }
+    }
+
+    /// How many repetitions the test it programmes in `week` is for, where
+    /// its essential session tests that week; `on` is the day, which tells a
+    /// block's entry test from its exit test.
+    ///
+    /// **A test's max is the heaviest completed set of this many** (operator,
+    /// 2026-10-30, #617): in a 3RM test, a later 2 × 95 kg above 3 × 92.5 kg
+    /// leaves 92.5 kg. An SBS cycle's test is always a single. A block's entry
+    /// test takes its first week, so any other test week is its exit test.
+    #[must_use]
+    pub fn tested_reps(&self, week: WeekKind, on: jiff::civil::Date) -> Option<RepCount> {
+        if !self.tests_in(week) {
+            return None;
+        }
+        match self {
+            Self::Test(test) => Some(test.reps()),
+            Self::Progression(Progression::Provided { .. }) => RepCount::new(1).ok(),
+            Self::Progression(Progression::Linear(_)) => None,
+            Self::Progression(Progression::BlockPeriodisation(block)) => {
+                let calendar = self.calendar();
+                let first_week = calendar
+                    .start()
+                    .checked_add(jiff::Span::new().days(7))
+                    .ok()?;
+                if let (Some(entry), true) = (block.entry_test(), on < first_week) {
+                    return Some(entry.reps());
+                }
+                let last = WeekIndex::new(calendar.duration_weeks()).ok()?;
+                match block.week(last)? {
+                    BlockWeek::Entry(entry) => Some(entry.reps()),
+                    BlockWeek::Planned(WeekPlan::ExitTest { reps, .. }) => Some(reps),
+                    BlockWeek::Planned(WeekPlan::Working { .. }) => None,
+                }
             }
         }
     }

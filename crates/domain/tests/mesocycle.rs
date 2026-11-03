@@ -20,7 +20,8 @@ use domain::{
     prescription::{
         Authored, AuthoringError, BlockPeriodisation, BlockWeek, ByIntensity, EntryTest, Fill,
         GymMesocycle, InconsistentMesocycle, Primary, PrimaryPattern, Progression, Skip, SlotFills,
-        StaticFill, Test, Tested, WeekIndex, authored::Shape as AuthoredShape, seed,
+        StaticFill, Test, Tested, WeekIndex, authored::Shape as AuthoredShape, schedule::WeekKind,
+        seed,
     },
 };
 use jiff::{civil::Date, tz::TimeZone};
@@ -381,5 +382,58 @@ fn a_test_gates_nothing_and_a_block_gates_a_role() {
     assert_eq!(
         mesocycle.gating_role(),
         Some(SessionRole::new(Relative::Higher, Relative::Lower))
+    );
+}
+
+/// What a test week tests for: a test's own count, a block's entry test in its
+/// first week and its exit test after, and nothing in a week that climbs
+/// (#617, #688).
+#[test]
+fn a_test_week_says_how_many_reps_it_tests() {
+    let Ok(weekdays) = weekdays() else {
+        panic!("the operator's week is a weekday map")
+    };
+    let Ok(Ok(test)) = test(
+        Fill::Same(Exercise::Reps(RepsExercise::FrontSquatBarbell)),
+        1,
+        weekdays,
+    ) else {
+        panic!("a front squat single on the heavy day is a test")
+    };
+    let (Ok(friday), Ok(late)) = (date(2026, 9, 18), date(2026, 9, 25)) else {
+        panic!("dates")
+    };
+    let mesocycle = GymMesocycle::Test(test);
+    assert_eq!(
+        mesocycle.tested_reps(WeekKind::Test, friday),
+        RepCount::new(1).ok()
+    );
+    // Done the week after its calendar's, as the entry test was.
+    assert_eq!(
+        mesocycle.tested_reps(WeekKind::Test, late),
+        RepCount::new(1).ok()
+    );
+
+    let Ok(Ok(block)) = block(entry_test().ok()) else {
+        panic!("a block with an entry test")
+    };
+    let mesocycle = GymMesocycle::Progression(Progression::BlockPeriodisation(block));
+    let (Ok(first), Ok(last), Ok(climbing)) =
+        (date(2026, 9, 25), date(2026, 11, 27), WeekIndex::new(2))
+    else {
+        panic!("dates")
+    };
+    assert_eq!(
+        mesocycle.tested_reps(WeekKind::Test, first),
+        RepCount::new(3).ok(),
+        "the entry test"
+    );
+    assert!(
+        mesocycle.tested_reps(WeekKind::Test, last).is_some(),
+        "the exit test"
+    );
+    assert_eq!(
+        mesocycle.tested_reps(WeekKind::Climbing(climbing), first),
+        None
     );
 }
