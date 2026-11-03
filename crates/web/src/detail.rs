@@ -37,6 +37,7 @@ pub enum Metric {
     Hrv,
     PulseWaveVelocity,
     Ftp,
+    OneRepMax,
 }
 
 impl Metric {
@@ -52,6 +53,7 @@ impl Metric {
             Self::Hrv => "hrv",
             Self::PulseWaveVelocity => "pulse-wave-velocity",
             Self::Ftp => "ftp",
+            Self::OneRepMax => "one-rep-max",
         }
     }
 }
@@ -93,13 +95,6 @@ pub struct Cell<'a> {
 }
 
 /// How the summary reads its figure.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the template offers all three, and the pages moving to it (#618 to #626) use them"
-    )
-)]
 pub enum Reading {
     /// Where the figure falls among reference ranges, the one holding it lit.
     Position { segments: Vec<Segment>, at: f64 },

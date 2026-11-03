@@ -260,3 +260,12 @@ details { max-width: 100%; }
 table.figures { display: block; max-width: 100%; overflow-x: auto; font-variant-numeric: tabular-nums; font-size: 0.9rem; }
 table.figures th { text-align: left; padding-right: 0.75rem; }
 table.figures td { padding-right: 0.75rem; }
+
+/* The estimated 1RM by session since the test (#626): tests are squares,
+   the projection a whisker, and earlier stretches grey. */
+.plotted .square { fill: var(--c); }
+.plotted .projected { stroke: var(--c); stroke-width: 2; stroke-dasharray: 4 4; }
+.plotted .whisker { stroke: var(--c); stroke-width: 1.5; }
+.plotted .predicted { fill: var(--card); stroke: var(--c); stroke-width: 2; }
+.plotted .earlier { --c: var(--muted); }
+.card.one-rep-max .toggle label { white-space: nowrap; }
