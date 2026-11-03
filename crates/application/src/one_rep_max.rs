@@ -11,8 +11,8 @@ use domain::{
     analytical::{
         OneRepMaxEstimator,
         one_rep_max::{
-            Against, LIFTS, Relative, Stretch, TestRead, next_test, planned_tests, points,
-            read_tests, relative, sessions_of, stretches, tests,
+            Against, LIFTS, Relative, Stretch, TestLine, TestRead, macrocycle_line, next_test,
+            planned_tests, points, read_tests, relative, sessions_of, stretches, tests,
         },
     },
     gym::exercise::RepsExercise,
@@ -43,6 +43,9 @@ pub struct Lift {
     /// Each test, oldest first, against the one before and the start of its
     /// run.
     pub tests: Vec<TestRead>,
+    /// The macrocycle holding the latest test, read by a line through its
+    /// tests.
+    pub macrocycle: Option<TestLine>,
     /// In [`Against::ALL`]'s order.
     pub relative: Vec<(Against, Vec<Stretch<Relative>>)>,
 }
@@ -121,6 +124,7 @@ where
                         lift,
                         absolute: stretches(&points, &tests, &days, next),
                         tests: read_tests(&points),
+                        macrocycle: macrocycle_line(&points, &plans),
                         relative: Against::ALL
                             .into_iter()
                             .map(|against| {

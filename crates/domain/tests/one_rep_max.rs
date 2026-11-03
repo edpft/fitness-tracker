@@ -464,3 +464,51 @@ fn a_test_moves_only_beyond_the_noise_of_two_tests() {
         "1.96 × √2 × 3.5% of 90 kg"
     );
 }
+
+/// Over a macrocycle, a line through all of its tests (operator, 2026-11-03).
+#[test]
+fn a_macrocycle_is_read_by_a_line_through_its_tests() {
+    use domain::{
+        analytical::{
+            body_weight::Direction,
+            one_rep_max::{line_through, macrocycle_line},
+        },
+        plan::Span,
+    };
+    let tests = |at: &[(Date, u64)]| -> Vec<Point> {
+        at.iter()
+            .map(|(on, grams)| test_on(*on, *grams).expect("a test"))
+            .collect()
+    };
+    let autumn = Span::new(date(2026, 9, 14), 14);
+    // Two tests give the noise of two tests, of their mean: ± 9.1 kg.
+    let two = tests(&[(date(2026, 9, 25), 92_500), (date(2026, 10, 23), 95_000)]);
+    let line = line_through(&two, autumn).expect("two tests");
+    assert_eq!((line.tests, line.direction), (2, None));
+    assert!((line.change - 2_500.0).abs() < 1.0);
+    assert!(
+        (line.margin - 9_095.0).abs() < 1.0,
+        "1.96 × √2 × 3.5% of 93.75 kg"
+    );
+    // A steady 2.5 kg a test over four tests four weeks apart: the line's
+    // margin, 9.2% of their mean (± 8.6 kg), is narrower than first against
+    // last (± 8.7 kg at 90 kg), and +7.5 kg is still within it.
+    let four = tests(&[
+        (date(2026, 9, 18), 90_000),
+        (date(2026, 10, 16), 92_500),
+        (date(2026, 11, 13), 95_000),
+        (date(2026, 12, 11), 97_500),
+    ]);
+    let line = line_through(&four, autumn).expect("four tests");
+    assert!((line.change - 7_500.0).abs() < 1.0);
+    assert!((line.margin - 8_628.0).abs() < 1.0, "{line:?}");
+    assert_eq!(line.direction, None);
+    // A test outside the span is not the macrocycle's.
+    let line = line_through(
+        &tests(&[(date(2026, 7, 3), 90_000), (date(2026, 9, 25), 92_500)]),
+        autumn,
+    );
+    assert_eq!(line, None);
+    assert_eq!(macrocycle_line(&two, &[]), None, "no plan holds them");
+    let _ = Direction::Rising;
+}

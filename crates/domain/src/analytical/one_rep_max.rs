@@ -37,7 +37,9 @@
 //! anchors on.
 //!
 //! **A test moves only beyond the noise of two tests** (the operator,
-//! 2026-11-03, #688), read as [`super::retest`] reads any test. A free-weight
+//! 2026-11-03, #688), against the test before ([`read_tests`]) and, over a
+//! macrocycle, along a line through all of its tests ([`macrocycle_line`]).
+//! A free-weight
 //! squat in trained men repeats to a CV of 3.5% (Seo et al., in Grgic et al.
 //! 2020, *Sports Medicine – Open*, full text read): the largest figure that
 //! applies, as the FTP test took 2.9% over 1.3%. Two tests then differ by
@@ -54,8 +56,7 @@
 use jiff::civil::Date;
 
 use super::{
-    Estimate, OneRepMaxEstimator, RelativeStrength, Weighed,
-    retest::{self, Moved},
+    Estimate, OneRepMaxEstimator, RelativeStrength, Weighed, body_weight::Direction, retest::Moved,
     session_estimate, weigh_in_for,
 };
 use crate::{
@@ -376,35 +377,147 @@ fn point<E: OneRepMaxEstimator>(
     }
 }
 
-/// Each test among `points`, oldest first, read against the one before and
-/// the start of its run beyond the noise of two tests, with that noise in
-/// grams, either side of the test before.
+/// Each test among `points`, oldest first, read against the one before beyond
+/// the noise of two tests, with that noise in grams, either side of the test
+/// before.
+///
+/// **Against the test before only** (operator, 2026-11-03). Over a
+/// macrocycle the tests are read by a line through all of them,
+/// [`macrocycle_line`], which replaced reading a test against the first since
+/// the last clear change.
 ///
 /// **In kilograms only.** The ruling is on the test's mass (#688); a ratio
 /// over a body mass carries the weigh-in's error too, and no ruling covers it.
 pub fn read_tests(points: &[Point]) -> Vec<TestRead> {
-    let tests: Vec<(Date, Option<u32>)> = points
-        .iter()
-        .filter(|point| matches!(point.reading, Reading::Tested { .. }))
-        .map(|point| {
-            (
-                point.on,
-                u32::try_from(point.estimate.one_rep_max.as_grams()).ok(),
-            )
-        })
-        .collect();
-    let read = retest::read(&tests, noise);
-    let before = std::iter::once(None).chain(tests.iter().map(|(_, grams)| *grams));
+    let tests: Vec<(Date, u32)> = tested_grams(points);
+    let before = std::iter::once(None).chain(tests.iter().map(|(_, grams)| Some(*grams)));
     tests
         .iter()
-        .zip(read)
         .zip(before)
-        .map(|((&(on, _), moved), before)| TestRead {
+        .map(|(&(on, now), before)| TestRead {
             on,
-            moved,
+            moved: before.map(|earlier| {
+                let by = i64::from(now) - i64::from(earlier);
+                let margin = noise(earlier);
+                let direction = if f64::from(now) - f64::from(earlier) > margin {
+                    Some(Direction::Rising)
+                } else if f64::from(earlier) - f64::from(now) > margin {
+                    Some(Direction::Falling)
+                } else {
+                    None
+                };
+                Moved {
+                    by,
+                    direction,
+                    since: None,
+                }
+            }),
             noise: before.map(noise),
         })
         .collect()
+}
+
+/// Each test among `points`, oldest first, in grams.
+fn tested_grams(points: &[Point]) -> Vec<(Date, u32)> {
+    points
+        .iter()
+        .filter(|point| matches!(point.reading, Reading::Tested { .. }))
+        .filter_map(|point| {
+            Some((
+                point.on,
+                u32::try_from(point.estimate.one_rep_max.as_grams()).ok()?,
+            ))
+        })
+        .collect()
+}
+
+/// The tests of a macrocycle, read by a line through all of them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TestLine {
+    pub from: Date,
+    pub to: Date,
+    pub tests: usize,
+    /// The change along the line from the first test to the last, in grams.
+    pub change: f64,
+    /// How far either side of `change` chance could put it, at 95%, in grams.
+    pub margin: f64,
+    /// Rising or falling where `change` is beyond `margin`; `None` is no
+    /// clear change.
+    pub direction: Option<Direction>,
+}
+
+/// The macrocycle holding the latest test, read by a least-squares line
+/// through every test in it, by day (operator, 2026-11-03).
+///
+/// **A line through all of them**, because it catches a real steady gain more
+/// often than first against last, or than requiring every test to rise, at
+/// the same 1 in 40 chance of a false reading (#688). Every change need not
+/// be above zero. Each test's noise is [`TEST_RETEST`] of the tests' mean, so
+/// two tests give the noise of two tests: 1.96 × √2 × 3.5% of their mean.
+///
+/// `None` with fewer than two tests in it, or where no plan holds the latest.
+pub fn macrocycle_line(points: &[Point], plans: &[Plan]) -> Option<TestLine> {
+    let last = tested_grams(points).last()?.0;
+    let span = plans
+        .iter()
+        .map(Plan::span)
+        .find(|span| span.start() <= last && last < span.end())?;
+    line_through(points, span)
+}
+
+/// The tests among `points` within `span`, read by a least-squares line
+/// through them by day: [`macrocycle_line`]'s reading over one span.
+pub fn line_through(points: &[Point], span: crate::plan::Span) -> Option<TestLine> {
+    let tests = tested_grams(points);
+    let held: Vec<(f64, f64)> = tests
+        .iter()
+        .filter(|(on, _)| *on >= span.start() && *on < span.end())
+        .map(|(on, grams)| {
+            let days = span.start().until(*on).map_or(0, |gap| gap.get_days());
+            (f64::from(days), f64::from(*grams))
+        })
+        .collect();
+    let within: Vec<Date> = tests
+        .iter()
+        .map(|(on, _)| *on)
+        .filter(|on| *on >= span.start() && *on < span.end())
+        .collect();
+    let (first_on, last) = (*within.first()?, *within.last()?);
+    let first_x = held.first().map(|(x, _)| *x)?;
+    if held.len() < 2 {
+        return None;
+    }
+    let count = f64::from(u32::try_from(held.len()).ok()?);
+    let mean_x = held.iter().map(|(x, _)| x).sum::<f64>() / count;
+    let mean_y = held.iter().map(|(_, y)| y).sum::<f64>() / count;
+    let spread: f64 = held.iter().map(|(x, _)| (x - mean_x).powi(2)).sum();
+    if spread <= 0.0 {
+        return None;
+    }
+    let slope = held
+        .iter()
+        .map(|(x, y)| (x - mean_x) * (y - mean_y))
+        .sum::<f64>()
+        / spread;
+    let last_x = held.last().map_or(first_x, |(x, _)| *x);
+    let along = last_x - first_x;
+    let change = slope * along;
+    let margin = 1.96 * TEST_RETEST * mean_y * along / spread.sqrt();
+    let direction = if change > margin {
+        Some(Direction::Rising)
+    } else if change < -margin {
+        Some(Direction::Falling)
+    } else {
+        None
+    };
+    Some(TestLine {
+        from: first_on,
+        to: last,
+        tests: held.len(),
+        change,
+        margin,
+        direction,
+    })
 }
 
 /// One test, read against its noise.

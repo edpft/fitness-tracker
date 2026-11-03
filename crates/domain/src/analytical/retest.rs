@@ -8,10 +8,9 @@
 //! without its tuning. A clear change starts a new run. Otherwise there is no
 //! clear change.
 //!
-//! **The order of a run adds nothing to it** (operator, 2026-11-03). Given
-//! that the latest test is beyond the noise of the first, chance puts a test
-//! between them 81% of the time and a real steady gain 85 to 91%, so a run
-//! that rose at every step is read no differently from one that did not.
+//! **The FTP test's reading** (2026-11-02). A 1RM test is read over its
+//! macrocycle by a line through all of its tests instead
+//! (`one_rep_max::macrocycle_line`, 2026-11-03).
 //!
 //! The noise is each test's own: its metric's test–retest variation.
 

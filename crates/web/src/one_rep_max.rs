@@ -23,7 +23,8 @@ use application::one_rep_max::{Lift, View};
 use domain::analytical::{
     body_weight::Direction,
     one_rep_max::{
-        Against, CONFIDENCE, Figure, Line, Point, Projection, Reading, Relative, Stretch, TestRead,
+        Against, CONFIDENCE, Figure, Line, Point, Projection, Reading, Relative, Stretch, TestLine,
+        TestRead,
     },
     range::{Over, Range, Ranges},
 };
@@ -197,7 +198,10 @@ fn summary(lift: &Lift, today: Date) -> Markup {
             from(test)
         )
     });
-    detail::summary(&cells, &format!("{}{test}", lift.lift.name()))
+    let line = lift
+        .macrocycle
+        .map_or_else(String::new, |line| over_the_macrocycle(&line));
+    detail::summary(&cells, &format!("{}{test}{line}", lift.lift.name()))
 }
 
 /// The line's slope, with a direction where it is clear of zero (#420).
@@ -263,9 +267,8 @@ fn next_test(projection: &Projection, test: Option<&Point>, today: Date) -> Cell
     }
 }
 
-/// ` · +2.5 kg, no clear change (noise ± 9.0 kg)`, or
-/// ` · +2.5 kg, rising, +10 kg since 3 Jul 2026`: a test against the one
-/// before and the start of its run, beyond the noise of two tests (#688).
+/// ` · +2.5 kg, no clear change (noise ± 9.0 kg)`: a test against the one
+/// before, beyond the noise of two tests (#688).
 fn against_noise(read: &TestRead) -> String {
     let Some(moved) = read.moved else {
         return " · the first test".to_owned();
@@ -279,14 +282,24 @@ fn against_noise(read: &TestRead) -> String {
             |noise| format!("no clear change (noise ± {})", show(noise)),
         ),
     };
-    let since = moved.since.map_or_else(String::new, |since| {
-        format!(
-            ", {} since {}",
-            by(since.by),
-            since.on.strftime("%-d %b %Y")
-        )
-    });
-    format!(" · {}, {said}{since}", by(moved.by))
+    format!(" · {} against the test before, {said}", by(moved.by))
+}
+
+/// ` · this macrocycle: +2.5 kg along the line through 2 tests, no clear
+/// change (± 9.1 kg)`: the macrocycle's tests read by a line through all of
+/// them (operator, 2026-11-03).
+fn over_the_macrocycle(line: &TestLine) -> String {
+    let said = match line.direction {
+        Some(Direction::Rising) => "rising",
+        Some(Direction::Falling) => "falling",
+        Some(Direction::Maintaining) | None => "no clear change",
+    };
+    format!(
+        " · this macrocycle: {} along the line through {} tests, {said} (± {})",
+        signed(line.change),
+        line.tests,
+        show(line.margin)
+    )
 }
 
 /// What a chart is drawn in.
@@ -778,6 +791,7 @@ mod tests {
                     lift,
                     absolute: stretches(points, &tests, &days, next),
                     tests: read_tests(points),
+                    macrocycle: None,
                     relative: Against::ALL
                         .into_iter()
                         .map(|against| {
@@ -875,7 +889,7 @@ mod tests {
         let page = drawn(&points, None, Over::Macrocycle);
         assert!(
             page.contains(
-                "tested 9 Oct: 95 kg × 1, 97.5 kg failed · +2.5 kg, no clear change (noise ± 9.0 kg)"
+                "tested 9 Oct: 95 kg × 1, 97.5 kg failed · +2.5 kg against the test before, no clear change (noise ± 9.0 kg)"
             ),
             "{page}"
         );
