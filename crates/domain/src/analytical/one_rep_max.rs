@@ -25,11 +25,28 @@
 //! programme progresses by session, and the next test is a session the plan
 //! names, so stretches stack by session whatever their dates.
 //!
-//! **A maximal attempt is a test** (the operator, 2026-10-14). A test records
-//! no reserve, so no estimate is read off it; but a completed set beneath a
-//! failed attempt at a heavier load had none left, and is read at
+//! **A test is a test because it is one** (the operator, 2026-11-03, #688),
+//! not because of the shape of its sets: it may end in a failed attempt or at
+//! 0 or 0–1 in reserve, with one attempt or several. A failed attempt in a
+//! linear progression is not a test. The plan says which sessions are
+//! ([`planned_tests`]); a prescription this system did not author is #704.
+//!
+//! **Its max is the heaviest completed set of the reps it tests**, whatever
+//! reserve was recorded on it (the operator, 2026-10-30, #617), read at
 //! [`Rir::Zero`] by the same estimator. It is the reading the prescriber
 //! anchors on.
+//!
+//! **A test moves only beyond the noise of two tests** (the operator,
+//! 2026-11-03, #688), against the test before ([`read_tests`]) and, over a
+//! macrocycle, along a line through all of its tests ([`macrocycle_line`]).
+//! A free-weight
+//! squat in trained men repeats to a CV of 3.5% (Seo et al., in Grgic et al.
+//! 2020, *Sports Medicine – Open*, full text read): the largest figure that
+//! applies, as the FTP test took 2.9% over 1.3%. Two tests then differ by
+//! chance within 1.96 × √2 × 3.5%, about 9.7% of the earlier: ± 9.0 kg at
+//! 92.5 kg. The noise does not shrink with level (Ribeiro et al., same
+//! review), so at an advanced level most gains are not told by the tests
+//! alone; the line through the estimates tells them.
 //!
 //! **The line comes with its uncertainty, and no verdict.** A band of
 //! [`CONFIDENCE`] shows where the line could lie, and the projection gives the
@@ -39,23 +56,36 @@
 use jiff::civil::Date;
 
 use super::{
-    Estimate, OneRepMaxEstimator, RelativeStrength, Weighed, session_estimate, weigh_in_for,
+    Estimate, OneRepMaxEstimator, RelativeStrength, Weighed, body_weight::Direction, retest::Moved,
+    session_estimate, weigh_in_for,
 };
 use crate::{
     canonical::Attributed,
+    gym::exercise::Exercise,
     gym::{
         CanonicalExercise, CanonicalGymSession, CanonicalSet, Identified, Load, Rir,
         exercise::RepsExercise,
     },
     measure::{Kg, RepCount},
     plan::{Occupies, Plan},
-    prescription::GymMesocycle,
+    planner::ESSENTIAL,
+    prescription::{GymMesocycle, PrescribedWorkout},
     sequence::NonEmpty,
 };
 
 /// The lifts shown, in order. Each joins once it has been the focus of a
 /// macrocycle (the operator, 2026-10-14).
 pub const LIFTS: [RepsExercise; 1] = [RepsExercise::FrontSquatBarbell];
+
+/// How far a 1RM test repeats, as a fraction: a free-weight squat's
+/// test–retest coefficient of variation in trained men (Seo et al., in
+/// Grgic et al. 2020).
+pub const TEST_RETEST: f64 = 0.035;
+
+/// How far either side of `earlier` grams two tests land by chance, at 95%.
+pub fn noise(earlier: u32) -> f64 {
+    1.96 * std::f64::consts::SQRT_2 * TEST_RETEST * f64::from(earlier)
+}
 
 /// How sure the band is that the line lies within it, and the projection
 /// that the test will.
@@ -81,8 +111,9 @@ pub struct Point {
 pub enum Reading {
     /// Off a set with its reserve recorded.
     Estimated,
-    /// Off a maximal attempt: the set beneath a failure at `failed`.
-    Tested { failed: Kg },
+    /// Off a test: its heaviest completed set, and the heaviest attempt
+    /// above it that failed, where one did.
+    Tested { failed: Option<Kg> },
 }
 
 /// A figure a stretch is drawn through: a session's estimate, or that
@@ -285,10 +316,11 @@ pub fn points<E: OneRepMaxEstimator>(
     estimator: &E,
     sessions: &[CanonicalGymSession],
     lift: RepsExercise,
+    tests: &[(Date, RepCount)],
 ) -> Vec<Point> {
     let mut points: Vec<Point> = sessions
         .iter()
-        .filter_map(|session| point(estimator, session, lift))
+        .filter_map(|session| point(estimator, session, lift, tests))
         .collect();
     points.sort_by_key(|point| point.on);
     points
@@ -301,13 +333,14 @@ pub fn relative<E: OneRepMaxEstimator>(
     estimator: &E,
     sessions: &[CanonicalGymSession],
     lift: RepsExercise,
+    tests: &[(Date, RepCount)],
     weigh_ins: &[Weighed],
     against: Against,
 ) -> Vec<Relative> {
     let mut relative: Vec<Relative> = sessions
         .iter()
         .filter_map(|session| {
-            let point = point(estimator, session, lift)?;
+            let point = point(estimator, session, lift, tests)?;
             let body = against.of(weigh_in_for(session, weigh_ins)?)?;
             let ratio = RelativeStrength::of(point.estimate.one_rep_max, body)?;
             Some(Relative { point, body, ratio })
@@ -318,31 +351,225 @@ pub fn relative<E: OneRepMaxEstimator>(
 }
 
 /// One session's point: [`points`]' rule.
+///
+/// **A test's session is its test**, whatever its sets estimate: a test is a
+/// measurement, and a test day's estimate is not one more.
 fn point<E: OneRepMaxEstimator>(
     estimator: &E,
     session: &CanonicalGymSession,
     lift: RepsExercise,
+    tests: &[(Date, RepCount)],
 ) -> Option<Point> {
     let on = session.occurred().day();
-    let estimated = session_estimate(estimator, session, lift).map(|estimate| Point {
-        on,
-        estimate,
-        reading: Reading::Estimated,
-    });
-    let tested = tested(estimator, session, lift).map(|(estimate, failed)| Point {
-        on,
-        estimate,
-        reading: Reading::Tested { failed },
-    });
-    match (estimated, tested) {
-        (Some(estimated), Some(tested))
-            if estimated.estimate.one_rep_max > tested.estimate.one_rep_max =>
-        {
-            Some(estimated)
+    match tests.iter().find(|(day, _)| *day == on) {
+        Some((_, reps)) => {
+            tested(estimator, session, lift, *reps).map(|(estimate, failed)| Point {
+                on,
+                estimate,
+                reading: Reading::Tested { failed },
+            })
         }
-        (_, Some(tested)) => Some(tested),
-        (estimated, None) => estimated,
+        None => session_estimate(estimator, session, lift).map(|estimate| Point {
+            on,
+            estimate,
+            reading: Reading::Estimated,
+        }),
     }
+}
+
+/// Each test among `points`, oldest first, read against the one before beyond
+/// the noise of two tests, with that noise in grams, either side of the test
+/// before.
+///
+/// **Against the test before only** (operator, 2026-11-03). Over a
+/// macrocycle the tests are read by a line through all of them,
+/// [`macrocycle_line`], which replaced reading a test against the first since
+/// the last clear change.
+///
+/// **In kilograms only.** The ruling is on the test's mass (#688); a ratio
+/// over a body mass carries the weigh-in's error too, and no ruling covers it.
+pub fn read_tests(points: &[Point]) -> Vec<TestRead> {
+    let tests: Vec<(Date, u32)> = tested_grams(points);
+    let before = std::iter::once(None).chain(tests.iter().map(|(_, grams)| Some(*grams)));
+    tests
+        .iter()
+        .zip(before)
+        .map(|(&(on, now), before)| TestRead {
+            on,
+            moved: before.map(|earlier| {
+                let by = i64::from(now) - i64::from(earlier);
+                let margin = noise(earlier);
+                let direction = if f64::from(now) - f64::from(earlier) > margin {
+                    Some(Direction::Rising)
+                } else if f64::from(earlier) - f64::from(now) > margin {
+                    Some(Direction::Falling)
+                } else {
+                    None
+                };
+                Moved {
+                    by,
+                    direction,
+                    since: None,
+                }
+            }),
+            noise: before.map(noise),
+        })
+        .collect()
+}
+
+/// Each test among `points`, oldest first, in grams.
+fn tested_grams(points: &[Point]) -> Vec<(Date, u32)> {
+    points
+        .iter()
+        .filter(|point| matches!(point.reading, Reading::Tested { .. }))
+        .filter_map(|point| {
+            Some((
+                point.on,
+                u32::try_from(point.estimate.one_rep_max.as_grams()).ok()?,
+            ))
+        })
+        .collect()
+}
+
+/// The tests of a macrocycle, read by a line through all of them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TestLine {
+    pub from: Date,
+    pub to: Date,
+    pub tests: usize,
+    /// The change along the line from the first test to the last, in grams.
+    pub change: f64,
+    /// How far either side of `change` chance could put it, at 95%, in grams.
+    pub margin: f64,
+    /// Rising or falling where `change` is beyond `margin`; `None` is no
+    /// clear change.
+    pub direction: Option<Direction>,
+}
+
+/// The macrocycle holding the latest test, read by a least-squares line
+/// through every test in it, by day (operator, 2026-11-03).
+///
+/// **A line through all of them**, because it catches a real steady gain more
+/// often than first against last, or than requiring every test to rise, at
+/// the same 1 in 40 chance of a false reading (#688). Every change need not
+/// be above zero. Each test's noise is [`TEST_RETEST`] of the tests' mean, so
+/// two tests give the noise of two tests: 1.96 × √2 × 3.5% of their mean.
+///
+/// `None` with fewer than two tests in it, or where no plan holds the latest.
+pub fn macrocycle_line(points: &[Point], plans: &[Plan]) -> Option<TestLine> {
+    let last = tested_grams(points).last()?.0;
+    let span = plans
+        .iter()
+        .map(Plan::span)
+        .find(|span| span.start() <= last && last < span.end())?;
+    line_through(points, span)
+}
+
+/// The tests among `points` within `span`, read by a least-squares line
+/// through them by day: [`macrocycle_line`]'s reading over one span.
+pub fn line_through(points: &[Point], span: crate::plan::Span) -> Option<TestLine> {
+    let tests = tested_grams(points);
+    let held: Vec<(f64, f64)> = tests
+        .iter()
+        .filter(|(on, _)| *on >= span.start() && *on < span.end())
+        .map(|(on, grams)| {
+            let days = span.start().until(*on).map_or(0, |gap| gap.get_days());
+            (f64::from(days), f64::from(*grams))
+        })
+        .collect();
+    let within: Vec<Date> = tests
+        .iter()
+        .map(|(on, _)| *on)
+        .filter(|on| *on >= span.start() && *on < span.end())
+        .collect();
+    let (first_on, last) = (*within.first()?, *within.last()?);
+    let first_x = held.first().map(|(x, _)| *x)?;
+    if held.len() < 2 {
+        return None;
+    }
+    let count = f64::from(u32::try_from(held.len()).ok()?);
+    let mean_x = held.iter().map(|(x, _)| x).sum::<f64>() / count;
+    let mean_y = held.iter().map(|(_, y)| y).sum::<f64>() / count;
+    let spread: f64 = held.iter().map(|(x, _)| (x - mean_x).powi(2)).sum();
+    if spread <= 0.0 {
+        return None;
+    }
+    let slope = held
+        .iter()
+        .map(|(x, y)| (x - mean_x) * (y - mean_y))
+        .sum::<f64>()
+        / spread;
+    let last_x = held.last().map_or(first_x, |(x, _)| *x);
+    let along = last_x - first_x;
+    let change = slope * along;
+    let margin = 1.96 * TEST_RETEST * mean_y * along / spread.sqrt();
+    let direction = if change > margin {
+        Some(Direction::Rising)
+    } else if change < -margin {
+        Some(Direction::Falling)
+    } else {
+        None
+    };
+    Some(TestLine {
+        from: first_on,
+        to: last,
+        tests: held.len(),
+        change,
+        margin,
+        direction,
+    })
+}
+
+/// One test, read against its noise.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TestRead {
+    pub on: Date,
+    /// `None` for the first test, which has nothing to be read against.
+    pub moved: Option<Moved>,
+    /// How far either side of the test before two tests land by chance, in
+    /// grams.
+    pub noise: Option<f64>,
+}
+
+/// The sessions prescribed as tests of `lift`, and the reps each tests:
+/// `prescribed` holds the prescription in force for each day it was
+/// performed.
+///
+/// **A session is a test where its prescription is the essential session of a
+/// week its mesocycle tests in**: SBS week 4's second session, a test week's
+/// heavy day, a block's entry or exit test. The prescription says which week
+/// it was, rather than the calendar: on 2026-09-25 the entry test was done
+/// after its calendar week, and its prescription still names it.
+///
+/// **The mesocycle is the latest of `lift`'s to have started by the day**, so
+/// a test done late, before the next mesocycle opens, is still its own.
+pub fn planned_tests(
+    plans: &[Plan],
+    prescribed: &[PrescribedWorkout],
+    lift: RepsExercise,
+) -> Vec<(Date, RepCount)> {
+    let mesocycles: Vec<&GymMesocycle> = plans
+        .iter()
+        .filter_map(Plan::gym)
+        .flat_map(crate::plan::Mesocycles::mesocycles)
+        .filter(|mesocycle| mesocycle.primary_exercise() == Exercise::Reps(lift))
+        .collect();
+    let mut tests: Vec<(Date, RepCount)> = prescribed
+        .iter()
+        .filter(|prescription| prescription.session_role() == ESSENTIAL)
+        .filter_map(|prescription| {
+            let on = prescription.issued_for();
+            let mesocycle = mesocycles
+                .iter()
+                .filter(|mesocycle| mesocycle.span().start() <= on)
+                .max_by_key(|mesocycle| mesocycle.span().start())?;
+            let reps = mesocycle.tested_reps(prescription.week(), on)?;
+            Some((on, reps))
+        })
+        .collect();
+    tests.sort_by_key(|(on, _)| *on);
+    tests.dedup_by_key(|(on, _)| *on);
+    tests
 }
 
 /// The days of every test among `points`, oldest first.
@@ -357,42 +584,36 @@ pub fn tests<P: Figure>(points: &[P]) -> Vec<Date> {
     days
 }
 
-/// A maximal attempt at `lift` in `session`, and the load that failed above it.
+/// A test of `lift` for `reps` in `session`: its max, and the heaviest
+/// attempt that failed above it, where one did.
 ///
-/// **The heaviest completed set beneath the heaviest failed one, where it has
-/// no reserve recorded**, read at none in reserve. On 2026-09-25 that is
-/// 92.5 kg × 1, with 95 kg failed twice. On 2026-07-03, 90 kg × 1 @ 1 sits
-/// beneath a failure at 95 kg: its reserve says it was not maximal, so a
-/// lighter warm-up is not read as the test either. A set whose reserve was
-/// recorded is already read by [`session_estimate`]; a set with a relative
-/// load, or one the record states no count for, gives nothing, as there.
+/// **The heaviest completed set of at least `reps`, whatever reserve was
+/// recorded on it**, read at none in reserve (the operator, 2026-10-30,
+/// #617). In a 1RM test of 95 kg × 1 @ 1 and 97.5 kg failed, it is 95 kg; in
+/// a 3RM test of 3 × 92.5 kg then 2 × 95 kg, it is 92.5 kg. A set with a
+/// relative load, or one the record states no count for, gives nothing, as
+/// in [`session_estimate`].
 pub fn tested<E: OneRepMaxEstimator>(
     estimator: &E,
     session: &CanonicalGymSession,
     lift: RepsExercise,
-) -> Option<(Estimate, Kg)> {
+    reps: RepCount,
+) -> Option<(Estimate, Option<Kg>)> {
     let sets = sets_of(session, lift);
+    let load = sets
+        .iter()
+        .filter_map(|set| {
+            let load = absolute(set)?;
+            let done = (*set.outcome.value().completed()?)?;
+            (done >= reps).then_some(load)
+        })
+        .max_by_key(|load| load.as_grams())?;
     let failed = sets
         .iter()
         .filter(|set| set.outcome.value().is_failed())
         .filter_map(|set| absolute(set))
-        .max_by_key(|load| load.as_grams())?;
-    let (load, reps, recorded) = sets
-        .iter()
-        .filter_map(|set| {
-            let load = absolute(set).filter(|load| load.as_grams() < failed.as_grams())?;
-            let reps = (*set.outcome.value().completed()?)?;
-            Some((load, reps, set.intensity.is_some()))
-        })
-        // The first of equal loads, as `session_estimate` keeps the first.
-        .fold(None, |best: Option<(Kg, RepCount, bool)>, set| match best {
-            Some(held) if held.0.as_grams() >= set.0.as_grams() => Some(held),
-            _ => Some(set),
-        })?;
-    // A reserve recorded on the set beneath the failure says it was not maximal.
-    if recorded {
-        return None;
-    }
+        .filter(|failed| failed.as_grams() > load.as_grams())
+        .max_by_key(|failed| failed.as_grams());
     let one_rep_max = estimator.estimate(load, reps, Rir::Zero)?;
     Some((
         Estimate {

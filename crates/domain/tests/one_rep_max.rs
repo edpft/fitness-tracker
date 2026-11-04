@@ -6,8 +6,8 @@ use domain::{
     analytical::{
         Estimate, Weighed,
         one_rep_max::{
-            Against, Line, NextTest, Point, Reading, points as read, relative, stretches, tested,
-            tests,
+            Against, Line, NextTest, Point, Reading, points as read, read_tests, relative,
+            stretches, tested, tests,
         },
     },
     canonical::{Attributed, NormalisedSessionId, Occurred},
@@ -62,7 +62,7 @@ fn test_on(on: Date, grams: u64) -> Option<Point> {
             rir: Rir::Zero,
         },
         reading: Reading::Tested {
-            failed: Kg::from_grams(grams + 2_500),
+            failed: Some(Kg::from_grams(grams + 2_500)),
         },
     })
 }
@@ -221,39 +221,59 @@ fn entry_test() -> Option<CanonicalGymSession> {
     )
 }
 
+/// The entry test's day, a 1RM test.
+fn declared() -> Option<Vec<(Date, RepCount)>> {
+    Some(vec![(date(2026, 9, 25), RepCount::new(1).ok()?)])
+}
+
 #[test]
-fn a_set_beneath_a_failed_attempt_is_tested_at_none_in_reserve() {
+fn a_test_is_its_heaviest_completed_set_at_none_in_reserve() {
     let session = entry_test().expect("a session");
+    let one = RepCount::new(1).expect("one rep");
     let (estimate, failed) =
-        tested(&Rts, &session, RepsExercise::FrontSquatBarbell).expect("a maximal attempt");
+        tested(&Rts, &session, RepsExercise::FrontSquatBarbell, one).expect("a test");
     assert_eq!(estimate.one_rep_max, Kg::from_grams(92_500));
-    assert_eq!(failed, Kg::from_grams(95_000));
-    let points = read(&Rts, &[session], RepsExercise::FrontSquatBarbell);
+    assert_eq!(failed, Some(Kg::from_grams(95_000)));
+    let points = read(
+        &Rts,
+        &[session],
+        RepsExercise::FrontSquatBarbell,
+        &declared().expect("the test day"),
+    );
     assert_eq!(
         points.first().map(|point| point.reading),
         Some(Reading::Tested {
-            failed: Kg::from_grams(95_000)
+            failed: Some(Kg::from_grams(95_000))
         })
     );
 }
 
 #[test]
-fn no_failure_is_no_test() {
+fn a_test_needs_no_failure() {
+    // The operator, 2026-11-03: a test may end at 0 or 0–1 in reserve.
     let session = front_squat(
         date(2026, 9, 25),
-        vec![set(900, Some(1), None), set(925, Some(1), None)],
+        vec![set(900, Some(1), None), set(925, Some(1), Some(Rir::Zero))],
     )
     .expect("a session");
-    assert_eq!(
-        tested(&Rts, &session, RepsExercise::FrontSquatBarbell),
-        None
+    let points = read(
+        &Rts,
+        &[session],
+        RepsExercise::FrontSquatBarbell,
+        &declared().expect("the test day"),
     );
-    assert!(read(&Rts, &[session], RepsExercise::FrontSquatBarbell).is_empty());
+    assert_eq!(
+        points
+            .first()
+            .map(|point| (point.estimate.one_rep_max, point.reading)),
+        Some((Kg::from_grams(92_500), Reading::Tested { failed: None }))
+    );
 }
 
 #[test]
-fn a_higher_estimate_in_the_same_session_is_the_point() {
-    // 80 kg × 5 @ 1 reads 94.1 kg; the failure at 85 makes 82.5 × 1 a 82.5 kg test.
+fn a_failed_attempt_on_a_day_not_prescribed_as_a_test_is_no_test() {
+    // A linear progression's miss (operator, 2026-11-03): 80 kg × 5 @ 1 reads
+    // 94.1 kg, and the failure at 85 is not a test.
     let session = front_squat(
         date(2026, 10, 9),
         vec![
@@ -263,32 +283,61 @@ fn a_higher_estimate_in_the_same_session_is_the_point() {
         ],
     )
     .expect("a session");
-    let points = read(&Rts, &[session], RepsExercise::FrontSquatBarbell);
-    assert_eq!(
-        points.first().map(|point| point.reading),
-        Some(Reading::Estimated)
+    let points = read(
+        &Rts,
+        &[session],
+        RepsExercise::FrontSquatBarbell,
+        &declared().expect("the test day"),
     );
     assert_eq!(
-        points.first().map(|point| point.estimate.one_rep_max),
-        Some(Kg::from_grams(94_117))
+        points
+            .first()
+            .map(|point| (point.reading, point.estimate.one_rep_max)),
+        Some((Reading::Estimated, Kg::from_grams(94_117)))
     );
 }
 
 #[test]
-fn a_reserve_recorded_beneath_the_failure_is_no_test() {
-    // 2026-07-03: a warm-up at 80, 90 × 1 @ 1, then 95 failed.
+fn a_reserve_recorded_on_the_heaviest_set_still_tests() {
+    // 2026-07-03, or 2026-10-23: 95 kg × 1 @ 0–1, then 100 kg failed (#617).
     let session = front_squat(
-        date(2026, 7, 3),
+        date(2026, 9, 25),
         vec![
             set(800, Some(1), None),
-            set(900, Some(1), Some(Rir::One)),
-            set(950, None, None),
+            set(950, Some(1), Some(Rir::One)),
+            set(1000, None, None),
         ],
     )
     .expect("a session");
+    let one = RepCount::new(1).expect("one rep");
     assert_eq!(
-        tested(&Rts, &session, RepsExercise::FrontSquatBarbell),
-        None
+        tested(&Rts, &session, RepsExercise::FrontSquatBarbell, one)
+            .map(|(estimate, failed)| (estimate.one_rep_max, failed)),
+        Some((Kg::from_grams(95_000), Some(Kg::from_grams(100_000))))
+    );
+}
+
+#[test]
+fn a_rep_max_test_takes_the_heaviest_set_of_its_reps() {
+    // The operator, 2026-10-30: 3 × 90 @ 1, 3 × 92.5 @ 0–1, 2 × 95 @ 0 is a
+    // 92.5 kg 3RM, whatever the 2 × 95 kg.
+    let session = front_squat(
+        date(2026, 9, 25),
+        vec![
+            set(900, Some(3), Some(Rir::One)),
+            set(925, Some(3), Some(Rir::Zero)),
+            set(950, Some(2), Some(Rir::Zero)),
+        ],
+    )
+    .expect("a session");
+    let three = RepCount::new(3).expect("three reps");
+    assert_eq!(
+        tested(&Rts, &session, RepsExercise::FrontSquatBarbell, three).map(|(estimate, failed)| (
+            estimate.load,
+            estimate.reps,
+            failed
+        )),
+        Some((Kg::from_grams(92_500), three, None))
     );
 }
 
@@ -318,7 +367,14 @@ fn a_ratio_is_read_against_that_days_weigh_in_and_a_day_without_one_is_a_gap() {
         weighed(date(2026, 10, 2), 84_248, None),
     ];
     let lift = RepsExercise::FrontSquatBarbell;
-    let body = relative(&Rts, &sessions, lift, &weigh_ins, Against::BodyWeight);
+    let body = relative(
+        &Rts,
+        &sessions,
+        lift,
+        &declared().expect("the test day"),
+        &weigh_ins,
+        Against::BodyWeight,
+    );
     let read: Vec<(Date, String)> = body
         .iter()
         .map(|one| (one.point.on, one.ratio.to_string()))
@@ -330,7 +386,14 @@ fn a_ratio_is_read_against_that_days_weigh_in_and_a_day_without_one_is_a_gap() {
             (date(2026, 10, 2), "1.14×".to_owned())
         ]
     );
-    let lean = relative(&Rts, &sessions, lift, &weigh_ins, Against::FatFreeMass);
+    let lean = relative(
+        &Rts,
+        &sessions,
+        lift,
+        &declared().expect("the test day"),
+        &weigh_ins,
+        Against::FatFreeMass,
+    );
     let read: Vec<(Date, String)> = lean
         .iter()
         .map(|one| (one.point.on, one.ratio.to_string()))
@@ -361,4 +424,91 @@ fn a_test_with_no_weigh_in_still_ends_a_stretch() {
         "still projected to it"
     );
     assert_eq!((second.from, second.test), (date(2026, 10, 23), None));
+}
+
+/// The front squat tests on a copy of the store, 2026-11-03: each against the
+/// one before, beyond 9.7% of it (#688).
+#[test]
+fn a_test_moves_only_beyond_the_noise_of_two_tests() {
+    let tests: Vec<Point> = [
+        (date(2026, 7, 3), 90_000),
+        (date(2026, 9, 25), 92_500),
+        (date(2026, 10, 23), 95_000),
+        (date(2026, 12, 18), 105_000),
+    ]
+    .into_iter()
+    .map(|(on, grams)| test_on(on, grams).expect("a test"))
+    .collect();
+    let read = read_tests(&tests);
+    let said: Vec<(Option<i64>, Option<bool>)> = read
+        .iter()
+        .map(|read| {
+            (
+                read.moved.map(|moved| moved.by),
+                read.moved.map(|moved| moved.direction.is_some()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        said,
+        [
+            (None, None),
+            (Some(2_500), Some(false)),
+            (Some(2_500), Some(false)),
+            (Some(10_000), Some(true)),
+        ]
+    );
+    assert_eq!(
+        read.get(1).and_then(|read| read.noise).map(f64::round),
+        Some(8_731.0),
+        "1.96 × √2 × 3.5% of 90 kg"
+    );
+}
+
+/// Over a macrocycle, a line through all of its tests (operator, 2026-11-03).
+#[test]
+fn a_macrocycle_is_read_by_a_line_through_its_tests() {
+    use domain::{
+        analytical::{
+            body_weight::Direction,
+            one_rep_max::{line_through, macrocycle_line},
+        },
+        plan::Span,
+    };
+    let tests = |at: &[(Date, u64)]| -> Vec<Point> {
+        at.iter()
+            .map(|(on, grams)| test_on(*on, *grams).expect("a test"))
+            .collect()
+    };
+    let autumn = Span::new(date(2026, 9, 14), 14);
+    // Two tests give the noise of two tests, of their mean: ± 9.1 kg.
+    let two = tests(&[(date(2026, 9, 25), 92_500), (date(2026, 10, 23), 95_000)]);
+    let line = line_through(&two, autumn).expect("two tests");
+    assert_eq!((line.tests, line.direction), (2, None));
+    assert!((line.change - 2_500.0).abs() < 1.0);
+    assert!(
+        (line.margin - 9_095.0).abs() < 1.0,
+        "1.96 × √2 × 3.5% of 93.75 kg"
+    );
+    // A steady 2.5 kg a test over four tests four weeks apart: the line's
+    // margin, 9.2% of their mean (± 8.6 kg), is narrower than first against
+    // last (± 8.7 kg at 90 kg), and +7.5 kg is still within it.
+    let four = tests(&[
+        (date(2026, 9, 18), 90_000),
+        (date(2026, 10, 16), 92_500),
+        (date(2026, 11, 13), 95_000),
+        (date(2026, 12, 11), 97_500),
+    ]);
+    let line = line_through(&four, autumn).expect("four tests");
+    assert!((line.change - 7_500.0).abs() < 1.0);
+    assert!((line.margin - 8_628.0).abs() < 1.0, "{line:?}");
+    assert_eq!(line.direction, None);
+    // A test outside the span is not the macrocycle's.
+    let line = line_through(
+        &tests(&[(date(2026, 7, 3), 90_000), (date(2026, 9, 25), 92_500)]),
+        autumn,
+    );
+    assert_eq!(line, None);
+    assert_eq!(macrocycle_line(&two, &[]), None, "no plan holds them");
+    let _ = Direction::Rising;
 }

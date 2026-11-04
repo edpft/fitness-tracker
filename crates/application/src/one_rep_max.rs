@@ -11,8 +11,8 @@ use domain::{
     analytical::{
         OneRepMaxEstimator,
         one_rep_max::{
-            Against, LIFTS, Relative, Stretch, next_test, points, relative, sessions_of, stretches,
-            tests,
+            Against, LIFTS, Relative, Stretch, TestLine, TestRead, macrocycle_line, next_test,
+            planned_tests, points, read_tests, relative, sessions_of, stretches, tests,
         },
     },
     gym::exercise::RepsExercise,
@@ -21,7 +21,7 @@ use jiff::civil::{Date, date};
 
 use crate::{
     error::StoreError,
-    ports::{PerformedGymSessions, PlanStore, WeighInHistory},
+    ports::{PerformedGymSessions, PlanStore, PrescribedWorkoutStore, WeighInHistory},
 };
 
 /// Before anything the record holds.
@@ -40,31 +40,40 @@ pub struct View {
 pub struct Lift {
     pub lift: RepsExercise,
     pub absolute: Vec<Stretch>,
+    /// Each test, oldest first, against the one before and the start of its
+    /// run.
+    pub tests: Vec<TestRead>,
+    /// The macrocycle holding the latest test, read by a line through its
+    /// tests.
+    pub macrocycle: Option<TestLine>,
     /// In [`Against::ALL`]'s order.
     pub relative: Vec<(Against, Vec<Stretch<Relative>>)>,
 }
 
 /// The use case.
-pub struct EstimatedOneRepMax<E, S, W, P> {
+pub struct EstimatedOneRepMax<E, S, W, P, R> {
     estimator: E,
     sessions: S,
     weigh_ins: W,
     plans: P,
+    prescribed: R,
 }
 
-impl<E, S, W, P> EstimatedOneRepMax<E, S, W, P>
+impl<E, S, W, P, R> EstimatedOneRepMax<E, S, W, P, R>
 where
     E: OneRepMaxEstimator + Sync,
     S: PerformedGymSessions + Sync,
     W: WeighInHistory + Sync,
     P: PlanStore + Sync,
+    R: PrescribedWorkoutStore + Sync,
 {
-    pub const fn new(estimator: E, sessions: S, weigh_ins: W, plans: P) -> Self {
+    pub const fn new(estimator: E, sessions: S, weigh_ins: W, plans: P, prescribed: R) -> Self {
         Self {
             estimator,
             sessions,
             weigh_ins,
             plans,
+            prescribed,
         }
     }
 
@@ -90,12 +99,23 @@ where
             }
         }
         let yesterday = today.yesterday().unwrap_or(today);
+        // The prescription in force on each day a lift was performed, which
+        // says whether that session was a test.
+        let mut prescribed = Vec::new();
+        for lift in LIFTS {
+            for day in sessions_of(&sessions, lift) {
+                if let Some((_, prescription)) = self.prescribed.issued_for(day).await? {
+                    prescribed.push(prescription);
+                }
+            }
+        }
         Ok(View {
             estimator: E::NAME,
             lifts: LIFTS
                 .into_iter()
                 .map(|lift| {
-                    let points = points(&self.estimator, &sessions, lift);
+                    let planned = planned_tests(&plans, &prescribed, lift);
+                    let points = points(&self.estimator, &sessions, lift, &planned);
                     let days = sessions_of(&sessions, lift);
                     let after = days.last().map_or(yesterday, |last| (*last).max(yesterday));
                     let next = next_test(&plans, after);
@@ -103,11 +123,19 @@ where
                     Lift {
                         lift,
                         absolute: stretches(&points, &tests, &days, next),
+                        tests: read_tests(&points),
+                        macrocycle: macrocycle_line(&points, &plans),
                         relative: Against::ALL
                             .into_iter()
                             .map(|against| {
-                                let relative =
-                                    relative(&self.estimator, &sessions, lift, &weigh_ins, against);
+                                let relative = relative(
+                                    &self.estimator,
+                                    &sessions,
+                                    lift,
+                                    &planned,
+                                    &weigh_ins,
+                                    against,
+                                );
                                 (against, stretches(&relative, &tests, &days, next))
                             })
                             .collect(),
