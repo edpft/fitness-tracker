@@ -582,36 +582,24 @@ async fn sleep_page(
     .await
 }
 
-/// Estimated 1RM from one test to the next over a range, read afresh from
-/// the store (#420, #626).
-async fn estimated_one_rep_max(
-    State(runs): State<Arc<Runs>>,
-    query: Query<HashMap<String, String>>,
-    headers: HeaderMap,
-) -> Markup {
+/// Estimated 1RM over the macrocycle, read afresh from the store (#420,
+/// #626).
+async fn estimated_one_rep_max(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
     let collects = configurator::one_rep_max::collects();
     let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(
-        &runs,
-        &collects,
-        one_rep_max::PATH,
-        Some(over(&query)),
-        &run,
-        async {
-            let setting = runs.setting();
-            let store = match configurator::store::Store::open(&setting.database).await {
-                Ok(store) => store,
-                Err(error) => return one_rep_max::unreadable(&error.to_string()),
-            };
-            let view = configurator::one_rep_max::view(&store, &setting.zone).await;
-            let ranges = configurator::ranges::today(&store, &setting.zone).await;
-            store.close().await;
-            match view.and_then(|view| Ok((view, ranges?))) {
-                Ok((view, ranges)) => one_rep_max::page(&view, &ranges, over(&query), &run),
-                Err(error) => one_rep_max::unreadable(&error.to_string()),
-            }
-        },
-    )
+    drawn(&runs, &collects, one_rep_max::PATH, None, &run, async {
+        let setting = runs.setting();
+        let store = match configurator::store::Store::open(&setting.database).await {
+            Ok(store) => store,
+            Err(error) => return one_rep_max::unreadable(&error.to_string()),
+        };
+        let view = configurator::one_rep_max::view(&store, &setting.zone).await;
+        store.close().await;
+        match view {
+            Ok(view) => one_rep_max::page(&view, &run),
+            Err(error) => one_rep_max::unreadable(&error.to_string()),
+        }
+    })
     .await
 }
 

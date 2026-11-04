@@ -44,7 +44,13 @@ pub fn page(
     over: Over,
     run: &crate::run::View,
 ) -> Markup {
-    detail::page(HERE, TITLE, over, run, &body(series, aims, ranges, over))
+    detail::page(
+        HERE,
+        TITLE,
+        Some(over),
+        run,
+        &body(series, aims, ranges, over),
+    )
 }
 
 /// The page when the store could not be read.

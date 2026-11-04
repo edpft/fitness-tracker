@@ -327,7 +327,7 @@ fn reading(device: &str, what: &str, period: &Period) -> String {
         Some(Direction::Falling) => "falling",
         Some(Direction::Maintaining) | None => "maintaining",
     };
-    let week = line.per_session() * 7.0;
+    let week = line.per_day() * 7.0;
     let sign = if week < -0.05 { "−" } else { "+" };
     format!(
         "{device} · {what} · {under}: {}, {:.0} to {:.0} bpm, {direction} ({sign}{:.1} ± {:.1} bpm a week)",

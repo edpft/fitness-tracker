@@ -58,8 +58,9 @@ impl Metric {
     }
 }
 
-/// The whole page: a back link and its name, the range, then `body`.
-pub fn page(here: &str, title: &str, over: Over, run: &View, body: &Markup) -> Markup {
+/// The whole page: a back link and its name, the range where the page offers
+/// a choice of one, then `body`.
+pub fn page(here: &str, title: &str, over: Option<Over>, run: &View, body: &Markup) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -72,7 +73,9 @@ pub fn page(here: &str, title: &str, over: Over, run: &View, body: &Markup) -> M
                         a href="/" aria-label="Home" { "‹" }
                         h1 { (title) }
                     }
-                    (crate::range::choices(here, over))
+                    @if let Some(over) = over {
+                        (crate::range::choices(here, over))
+                    }
                     (body)
                 }
             }
@@ -109,13 +112,6 @@ pub enum Reading {
         /// The change as it is written, signed.
         said: String,
         /// What it is a change over.
-        over: String,
-    },
-    /// A change with no noise to read it against: a test against the test
-    /// before, or a line through sessions.
-    Direction {
-        direction: Direction,
-        said: String,
         over: String,
     },
     /// There is no rule to read the figure by, and it says so.
@@ -164,16 +160,6 @@ fn reading(reading: &Reading) -> Markup {
                 }
                 div { b { (said) } span { (over) } }
                 (noise_bar(*by, *noise))
-            }
-        },
-        Reading::Direction {
-            direction,
-            said,
-            over,
-        } => html! {
-            div.change {
-                (badge(*direction))
-                div { b { (said) } span { (over) } }
             }
         },
         Reading::NoRule(said) => html! { div.none { (said) } },
@@ -747,29 +733,6 @@ mod tests {
         assert!(shown.contains(r#"class="badge""#), "{shown}");
         assert!(shown.contains(r#"class="noise""#), "the noise is shaded");
         assert!(shown.contains(r#"class="fell""#), "the change is a dot");
-    }
-
-    #[test]
-    fn a_change_with_no_noise_has_no_bar_and_maintaining_is_flat() {
-        let shown = summary(
-            &[Cell {
-                metric: Metric::BodyWeight,
-                label: "Now",
-                figure: "96.0".to_owned(),
-                unit: "kg",
-                margin: None,
-                readings: vec![Reading::Direction {
-                    direction: Direction::Maintaining,
-                    said: "+0.0 kg".to_owned(),
-                    over: "a session".to_owned(),
-                }],
-            }],
-            "",
-        )
-        .into_string();
-        assert!(shown.contains(r#"class="badge flat""#), "{shown}");
-        assert!(!shown.contains("svg class=\"gauge\""), "{shown}");
-        assert!(!shown.contains('±'), "{shown}");
     }
 
     #[test]

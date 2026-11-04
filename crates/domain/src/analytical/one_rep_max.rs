@@ -1,4 +1,5 @@
-//! Estimated one-rep maximum as a trend, from one test to the next (#420).
+//! Estimated one-rep maximum over the macrocycle, by one line through every
+//! session's estimate (#420, #688).
 //!
 //! **Absolute strength**: each session's estimate as [`session_estimate`]
 //! reads it, with no body weight in it (the operator, 2026-10-13).
@@ -6,24 +7,30 @@
 //! **And relative strength, drawn the same way** (#253, the operator,
 //! 2026-10-27): the same estimate over the body weight or the fat-free mass
 //! of the session's own weigh-in, as [`weigh_in_for`] finds it. A session
-//! with no weigh-in that day has no ratio, and is a gap rather than a point;
-//! the stretches are still the ones the tests mark, whether or not a test was
-//! weighed.
+//! with no weigh-in that day has no ratio, and is a gap rather than a point.
 //!
-//! **The question is how well the submaximal sets predict the test they lead
-//! up to** (the operator, 2026-10-14). So a stretch runs from one test to the
-//! next: a mesocycle under SBS, a whole macrocycle where nothing tests in
-//! between. Its line is fitted to the estimates alone and projected to the
-//! next planned test; once that test is performed, the gap between the two is
-//! the answer.
+//! **One line does both of its uses** (the operator, 2026-11-04, #688):
+//! whether underlying strength is rising across a macrocycle designed to raise
+//! the lift, and, extended to the next planned test, what that test should
+//! find. *"We're fitting a line, which can naturally be extended."* It
+//! replaced a line per stretch from one test to the next, which drew the tests
+//! as a different thing and dealt only in mesocycles.
 //!
-//! **A test is a measurement, not an estimate.** It is a point with no band
-//! and is never in a fit: a line forced through the tests would only join
-//! them.
+//! **Only estimates, every session's**, a test session's included through its
+//! best set with a reserve recorded, as any other (2026-11-04). The tests are
+//! a record of their own (#706), read by [`read_tests`] and
+//! [`macrocycle_line`].
 //!
-//! **Sessions across, not days**: the first session after a test is 1. A
-//! programme progresses by session, and the next test is a session the plan
-//! names, so stretches stack by session whatever their dates.
+//! **The macrocycle, by day**: the plan in force, as `range` reads it, from
+//! its first day. The macrocycle across all of the lift's history waits on
+//! the prescriptions from before plans were stored (#302, #303): a line through
+//! sessions the programming did not focus on would join unrelated blocks.
+//!
+//! **The uncertainty is drawn where it is read** ([`Trend`]): a band that
+//! narrows as sessions accrue, and the change along the line against its 95%
+//! margin. The extension carries no range: the line's own, that far ahead,
+//! overstated what the operator reads off it, and a single test's mixed the
+//! scatter of an estimate into it (2026-11-04).
 //!
 //! **A test is a test because it is one** (the operator, 2026-11-03, #688),
 //! not because of the shape of its sets: it may end in a failed attempt or at
@@ -47,11 +54,6 @@
 //! 92.5 kg. The noise does not shrink with level (Ribeiro et al., same
 //! review), so at an advanced level most gains are not told by the tests
 //! alone; the line through the estimates tells them.
-//!
-//! **The line comes with its uncertainty, and no verdict.** A band of
-//! [`CONFIDENCE`] shows where the line could lie, and the projection gives the
-//! range a single test could fall in. Fewer than three estimates give no
-//! line, since two fix a line exactly and leave nothing to say how sure it is.
 
 use jiff::civil::Date;
 
@@ -87,8 +89,8 @@ pub fn noise(earlier: u32) -> f64 {
     1.96 * std::f64::consts::SQRT_2 * TEST_RETEST * f64::from(earlier)
 }
 
-/// How sure the band is that the line lies within it, and the projection
-/// that the test will.
+/// How sure the band is that the line lies within it, and the change's
+/// margin that chance would not reach it.
 pub const CONFIDENCE: &str = "95%";
 
 /// Student's t at 95% two-sided, for 1 to 30 degrees of freedom.
@@ -190,8 +192,8 @@ impl Figure for Relative {
     }
 }
 
-/// The least-squares line through a stretch's estimates, in the figure's own
-/// unit against sessions since its test.
+/// A least-squares line through figures, in the figure's own unit against
+/// days.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Line {
     first: i32,
@@ -206,8 +208,9 @@ pub struct Line {
 }
 
 impl Line {
-    /// The line through `points`, each a session and a value; `None`
-    /// with fewer than three, or with all of them in one session.
+    /// The line through `points`, each a day and a value; `None` with fewer
+    /// than three, since two fix a line exactly and leave nothing to say how
+    /// sure it is, or with all of them on one day.
     pub fn through(points: &[(i32, f64)]) -> Option<Self> {
         let count = u32::try_from(points.len())
             .ok()
@@ -246,7 +249,7 @@ impl Line {
         })
     }
 
-    /// The first session the line runs through.
+    /// The first day the line runs through.
     pub const fn first(&self) -> i32 {
         self.first
     }
@@ -256,36 +259,26 @@ impl Line {
         self.last
     }
 
-    /// The line's value at a session.
+    /// The line's value on a day.
     pub fn at(&self, day: i32) -> f64 {
         self.slope.mul_add(f64::from(day), self.intercept)
     }
 
-    /// How far either side of [`Self::at`] the band runs at a session.
+    /// How far either side of [`Self::at`] the line could lie on a day, at
+    /// [`CONFIDENCE`].
     pub fn band(&self, day: i32) -> f64 {
-        self.spread(day, 0.0)
-    }
-
-    /// How far either side of [`Self::at`] a single test at a session could
-    /// fall: the band widened by the scatter of one reading.
-    pub fn predicts(&self, day: i32) -> f64 {
-        self.spread(day, 1.0)
-    }
-
-    fn spread(&self, day: i32, single: f64) -> f64 {
         let n = f64::from(self.sessions);
         self.margin
-            * ((f64::from(day) - self.mean_day).powi(2) / self.spread_of_days + n.recip() + single)
-                .sqrt()
+            * ((f64::from(day) - self.mean_day).powi(2) / self.spread_of_days + n.recip()).sqrt()
     }
 
-    /// The slope, a session.
-    pub const fn per_session(&self) -> f64 {
+    /// The slope, a day.
+    pub const fn per_day(&self) -> f64 {
         self.slope
     }
 
-    /// How far either side of [`Self::per_session`] the slope could lie, at
-    /// the band's confidence.
+    /// How far either side of [`Self::per_day`] the slope could lie, at
+    /// [`CONFIDENCE`].
     pub fn slope_margin(&self) -> f64 {
         self.margin / self.spread_of_days.sqrt()
     }
@@ -661,27 +654,17 @@ pub fn sessions_of(sessions: &[CanonicalGymSession], lift: RepsExercise) -> Vec<
     days
 }
 
-/// The next planned test, and how many planned sessions lead to it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NextTest {
-    pub on: Date,
-    /// Programmed days after the day counted from, the test's own included.
-    pub sessions: u32,
-}
-
-/// The first test any plan programmes after `after`, counting the programmed
-/// days on the way.
+/// The first test any plan programmes after `after`.
 ///
 /// **The test is the last programmed day of a week whose essential session
 /// tests**: SBS week 4's second session, or a test week's heavy day.
-pub fn next_test(plans: &[Plan], after: Date) -> Option<NextTest> {
+pub fn next_test(plans: &[Plan], after: Date) -> Option<Date> {
     let mut mesocycles: Vec<&GymMesocycle> = plans
         .iter()
         .filter_map(Plan::gym)
         .flat_map(crate::plan::Mesocycles::mesocycles)
         .collect();
     mesocycles.sort_by_key(|mesocycle| mesocycle.span().start());
-    let mut sessions = 0_u32;
     for mesocycle in mesocycles {
         let span = mesocycle.span();
         let first = after.tomorrow().ok()?.max(span.start());
@@ -692,9 +675,8 @@ pub fn next_test(plans: &[Plan], after: Date) -> Option<NextTest> {
             let Ok((week, _)) = mesocycle.calendar().place(on) else {
                 continue;
             };
-            sessions = sessions.saturating_add(1);
             if mesocycle.tests_in(week) && last_of_its_week(mesocycle, on) {
-                return Some(NextTest { on, sessions });
+                return Some(on);
             }
         }
     }
@@ -711,119 +693,136 @@ fn last_of_its_week(mesocycle: &GymMesocycle, on: Date) -> bool {
         .all(|day| mesocycle.calendar().place(day).is_err())
 }
 
-/// A stretch from one test to the next.
+/// A macrocycle's estimates, read by one line through them all.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Stretch<P = Point> {
-    /// The day of the test it starts from.
+pub struct Trend<P = Point> {
+    /// The macrocycle's first day. The line runs in days since it.
     pub from: Date,
-    /// That test, where it gives a figure: a ratio needs a weigh-in that day.
-    pub test: Option<P>,
-    /// Each estimate after it, and which session after the test it came in:
-    /// 1 is the first.
-    pub estimates: Vec<(u32, P)>,
+    /// Every session's figure in the macrocycle, oldest first.
+    pub figures: Vec<P>,
+    /// Through every one of them.
     pub line: Option<Line>,
-    /// The day of the test that ended it, once performed.
-    pub to: Option<Date>,
-    /// That test, and its session, where it gives a figure.
-    pub closed_by: Option<(u32, P)>,
-    /// Where the line puts the test that ends the stretch: the one performed,
-    /// or the next planned while it is still to come.
-    pub projection: Option<Projection>,
+    /// From the third figure, where the line through the figures up to each
+    /// one stood that day, and how far either side it could lie.
+    pub narrowing: Vec<Narrowing>,
+    /// From the first figure to the latest, along [`Self::line`].
+    pub change: Option<Change>,
+    /// The line carried on to the next planned test.
+    pub next: Option<Projected>,
 }
 
-/// The line's account of a test.
+/// What the line knew on one day.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Projection {
+pub struct Narrowing {
     pub on: Date,
-    pub session: u32,
     /// In the figure's own unit, as [`Figure::value`].
     pub value: f64,
-    /// The range a single test could fall in, lowest first.
-    pub low: f64,
-    pub high: f64,
+    /// How far either side of `value`, at [`CONFIDENCE`].
+    pub band: f64,
 }
 
-/// Every stretch, oldest first.
+/// The change along a line, read against its margin.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Change {
+    /// In the figure's own unit.
+    pub by: f64,
+    /// How far either side of `by` chance could put it, at [`CONFIDENCE`].
+    pub margin: f64,
+    /// Rising or falling where `by` is beyond `margin`; `None` is no clear
+    /// change.
+    pub direction: Option<Direction>,
+}
+
+/// Where the line puts a day still to come.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Projected {
+    pub on: Date,
+    pub value: f64,
+}
+
+impl<P: Figure> Trend<P> {
+    /// The line's value at the latest figure: the current estimate.
+    pub fn now(&self) -> Option<f64> {
+        self.line.map(|line| line.at(line.last()))
+    }
+
+    /// Days since [`Self::from`].
+    pub fn day(&self, on: Date) -> i32 {
+        self.from.until(on).map_or(0, |gap| gap.get_days())
+    }
+}
+
+/// The figures from `from`, read by a least-squares line through all of them
+/// by day, and carried on to `next` (the operator, 2026-11-04, #688).
 ///
-/// One from each of `tests`, through the next, over the figures and the days
-/// `lift` was performed; `next` is the next planned test, counted from the
-/// last of those days. A stretch is projected to the test that ended it, and
-/// the one still open to `next`.
+/// **The band narrows as figures accrue**, because each day's is the line
+/// through the figures up to that day, read that day. The line's own band is
+/// widest at its ends; the operator's reading of it was *"I would expect that
+/// our estimate would narrow with more information"*.
 ///
-/// **The tests mark the stretches, not the figures**, so a test with no
-/// figure of its own (a ratio's, with no weigh-in that day) still ends one
-/// stretch and starts the next.
-pub fn stretches<P: Figure>(
-    figures: &[P],
-    tests: &[Date],
-    days: &[Date],
-    next: Option<NextTest>,
-) -> Vec<Stretch<P>> {
-    let ordinal = |from: Date, to: Date| {
-        u32::try_from(
-            days.iter()
-                .filter(|day| **day > from && **day <= to)
-                .count(),
-        )
-        .unwrap_or(u32::MAX)
-    };
-    let test_on = |on: Date| {
-        figures
+/// **The change is read as the 1RM tests' macrocycle line is**: rising or
+/// falling where the change along the line, first figure to latest, is beyond
+/// its margin.
+pub fn trend<P: Figure>(figures: &[P], from: Date, next: Option<Date>) -> Trend<P> {
+    let mut trend = Trend {
+        from,
+        figures: figures
             .iter()
-            .find(|figure| figure.on() == on && matches!(figure.reading(), Reading::Tested { .. }))
+            .filter(|figure| figure.on() >= from)
             .copied()
+            .collect(),
+        line: None,
+        narrowing: Vec::new(),
+        change: None,
+        next: None,
     };
-    tests
+    let valued: Vec<(Date, i32, f64)> = trend
+        .figures
         .iter()
-        .enumerate()
-        .map(|(index, from)| {
-            let from = *from;
-            let closing = tests.get(index + 1).copied();
-            let estimates: Vec<(u32, P)> = figures
+        .filter_map(|figure| Some((figure.on(), trend.day(figure.on()), figure.value()?)))
+        .collect();
+    let through = |count: usize| {
+        Line::through(
+            &valued
                 .iter()
-                .filter(|figure| figure.reading() == Reading::Estimated)
-                .filter(|figure| figure.on() > from)
-                .filter(|figure| closing.is_none_or(|closing| figure.on() < closing))
-                .map(|figure| (ordinal(from, figure.on()), *figure))
-                .collect();
-            let line = Line::through(
-                &estimates
-                    .iter()
-                    .filter_map(|(session, figure)| {
-                        Some((i32::try_from(*session).ok()?, figure.value()?))
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let performed = days.last().map_or(0, |last| ordinal(from, *last));
-            // The test that closed the stretch, or the next one planned for
-            // the stretch still open.
-            let target = match (closing, next) {
-                (Some(closing), _) => Some((ordinal(from, closing), closing)),
-                (None, Some(next)) => Some((performed.saturating_add(next.sessions), next.on)),
-                (None, None) => None,
-            };
-            let projection = line.zip(target).and_then(|(line, (session, on))| {
-                let at = i32::try_from(session).ok()?;
-                Some(Projection {
-                    on,
-                    session,
-                    value: line.at(at),
-                    low: line.at(at) - line.predicts(at),
-                    high: line.at(at) + line.predicts(at),
-                })
-            });
-            Stretch {
-                from,
-                test: test_on(from),
-                estimates,
-                line,
-                to: closing,
-                closed_by: closing
-                    .and_then(|closing| Some((ordinal(from, closing), test_on(closing)?))),
-                projection,
-            }
+                .take(count)
+                .map(|(_, day, value)| (*day, *value))
+                .collect::<Vec<_>>(),
+        )
+    };
+    trend.narrowing = (1..=valued.len())
+        .filter_map(|count| {
+            let line = through(count)?;
+            let (on, day, _) = valued.get(count - 1)?;
+            Some(Narrowing {
+                on: *on,
+                value: line.at(*day),
+                band: line.band(*day),
+            })
         })
-        .collect()
+        .collect();
+    trend.line = through(valued.len());
+    trend.change = trend.line.map(|line| {
+        let along = f64::from(line.last() - line.first());
+        let by = line.per_day() * along;
+        let margin = line.slope_margin() * along;
+        Change {
+            by,
+            margin,
+            direction: if by > margin {
+                Some(Direction::Rising)
+            } else if by < -margin {
+                Some(Direction::Falling)
+            } else {
+                None
+            },
+        }
+    });
+    trend.next = trend.line.zip(next).map(|(line, on)| Projected {
+        on,
+        value: line.at(trend.day(on)),
+    });
+    trend
 }
 
 fn grams(grams: u64) -> Option<f64> {

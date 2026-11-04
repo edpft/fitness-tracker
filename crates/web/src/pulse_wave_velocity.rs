@@ -33,7 +33,7 @@ const TITLE: &str = "Pulse wave velocity";
 
 /// The page: the summary, then the chart over the range chosen.
 pub fn page(series: &[Series], ranges: &Ranges, over: Over, run: &View) -> Markup {
-    detail::page(PATH, TITLE, over, run, &body(series, ranges, over))
+    detail::page(PATH, TITLE, Some(over), run, &body(series, ranges, over))
 }
 
 /// The page when the store could not be read.

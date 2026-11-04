@@ -5,7 +5,7 @@
 
 use crate::support;
 
-use domain::analytical::one_rep_max::{NextTest, next_test};
+use domain::analytical::one_rep_max::next_test;
 use jiff::civil::date;
 use support::mesocycle::{entry_test_from, plan};
 
@@ -18,10 +18,7 @@ fn a_test_week_tests_on_its_last_programmed_day() {
     .expect("a plan");
     assert_eq!(
         next_test(&[plan], date(2026, 9, 13)),
-        Some(NextTest {
-            on: date(2026, 9, 18),
-            sessions: 2,
-        })
+        Some(date(2026, 9, 18))
     );
 }
 

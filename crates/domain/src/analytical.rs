@@ -77,26 +77,37 @@ pub trait OneRepMaxEstimator {
     fn estimate(&self, load: Kg, reps: RepCount, rir: Rir) -> Option<Kg>;
 }
 
-/// The Reactive Training Systems grid, in full.
+/// The Reactive Training Systems chart (Tuchscherer), in its own values
+/// (the operator, 2026-11-03, #688).
 ///
-/// ```text
-/// %1RM = 100 − 2.5 × (reps − 1) − 5 × RIR
-/// ```
+/// **The chart, not a formula fitted to it.** Until 2026-11-04 this was
+/// `100 − 2.5 × (reps − 1) − 5 × RIR`, which a repetition in reserve cost twice
+/// what a repetition did. In the chart a repetition in reserve costs exactly
+/// one repetition, and a step is 3 to 4.5% near the top: 82.5 kg × 5 @ 0 and
+/// 80 kg × 5 @ 1 both read 95.6 kg, where the straight line read 91.7 and
+/// 94.1 (#688).
 ///
-/// **Every column, not only `RIR = 0`.** Reading a recorded RIR is the point:
-/// without it, the heaviest set of *n* is taken to be an *n*-rep maximum. The
-/// 2026-08-18 removal of the RIR coefficient from [`crate::prescription::repmax`]
-/// was about a plan *stating* RIR, which this does not do.
+/// **One sequence along the diagonal.** Every cell is the share at its
+/// repetitions plus its reserve, so the chart is [`CHART`] read in half-steps:
+/// two to a repetition, one to each half a repetition in reserve. A range is
+/// a half-step (`1-2` is 1.5), so it needs no interpolation. The values are
+/// the chart as fitnessvolt.com reproduces it, 1 to 10 repetitions at RPE 10
+/// to 6.5 (/rpe-training/guides/tuchscherer-chart-explained, read 2026-11-04);
+/// RTS's own was not read.
 ///
-/// Counted in half-steps of reserve, each 250 basis points, the same as one
-/// repetition: a range is read at its midpoint (`1-2` is 1.5) and needs no
-/// fractions. `4+` gives no estimate (the operator's "no idea"), and neither
-/// does a set so long the share reaches zero.
+/// **Reading a recorded RIR is the point**: without it, the heaviest set of
+/// *n* is taken to be an *n*-rep maximum. `4+` gives no estimate, since it is
+/// not one value but four and beyond (the operator, 2026-11-04), and neither
+/// does a set past the chart's last cell.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Rts;
 
-/// What a repetition costs, and what half a repetition in reserve costs.
-const STEP_BASIS_POINTS: u64 = 250;
+/// The chart's shares in basis points, from one repetition at none in
+/// reserve, a half-step at a time.
+const CHART: [u64; 26] = [
+    10_000, 9_780, 9_550, 9_390, 9_220, 9_070, 8_920, 8_780, 8_630, 8_500, 8_370, 8_240, 8_110,
+    7_990, 7_860, 7_740, 7_620, 7_510, 7_390, 7_230, 7_070, 6_940, 6_800, 6_670, 6_530, 6_400,
+];
 const WHOLE_BASIS_POINTS: u64 = 10_000;
 
 impl Rts {
@@ -119,13 +130,11 @@ impl OneRepMaxEstimator for Rts {
     const NAME: &'static str = "rts";
 
     fn estimate(&self, load: Kg, reps: RepCount, rir: Rir) -> Option<Kg> {
-        let steps = u64::from(reps.as_u32())
+        let step = u64::from(reps.as_u32())
             .checked_sub(1)?
+            .checked_mul(2)?
             .checked_add(Self::half_steps(rir)?)?;
-        let share = WHOLE_BASIS_POINTS.checked_sub(steps.checked_mul(STEP_BASIS_POINTS)?)?;
-        if share == 0 {
-            return None;
-        }
+        let share = *CHART.get(usize::try_from(step).ok()?)?;
         // Grams, rounded down, as the wizard's own reading is.
         let grams = load.as_grams().checked_mul(WHOLE_BASIS_POINTS)? / share;
         Some(Kg::from_grams(grams))
@@ -364,39 +373,50 @@ mod tests {
     }
 
     #[test]
-    fn reserve_costs_what_a_repetition_costs_twice() {
-        // 5 reps @ 2 in reserve: 100 − 10 − 10 = 80%.
+    fn a_repetition_in_reserve_costs_one_repetition() {
+        // 5 @ 0 and 4 @ 1 are both 86.3%.
         assert_eq!(
-            Rts.estimate(kg(80_000), reps(5), Rir::Two),
+            Rts.estimate(kg(86_300), reps(5), Rir::Zero),
             Some(kg(100_000))
         );
-        // 3 reps @ 0: 95%.
         assert_eq!(
-            Rts.estimate(kg(95_000), reps(3), Rir::Zero),
+            Rts.estimate(kg(86_300), reps(4), Rir::One),
             Some(kg(100_000))
         );
     }
 
     #[test]
-    fn a_range_is_read_at_its_midpoint() {
-        // 1 rep @ 1-2: 100 − 7.5 = 92.5%.
+    fn the_chart_not_the_straight_line() {
+        // 2026-10-09: 82.5 kg × 5 @ 0 and 80 kg × 5 @ 1, both 95.6 kg (#688).
         assert_eq!(
-            Rts.estimate(kg(92_500), reps(1), Rir::OneOrTwo),
+            Rts.estimate(kg(82_500), reps(5), Rir::Zero),
+            Some(kg(95_596))
+        );
+        assert_eq!(
+            Rts.estimate(kg(80_000), reps(5), Rir::One),
+            Some(kg(95_579))
+        );
+    }
+
+    #[test]
+    fn a_range_is_its_half_step() {
+        // 1 @ 0-1 is RPE 9.5, 97.8%; 3 @ 2-3 is RPE 7.5, 85.0%.
+        assert_eq!(
+            Rts.estimate(kg(97_800), reps(1), Rir::ZeroOrOne),
             Some(kg(100_000))
         );
-        // 2 reps @ 0-1: 100 − 2.5 − 2.5 = 95%.
         assert_eq!(
-            Rts.estimate(kg(95_000), reps(2), Rir::ZeroOrOne),
+            Rts.estimate(kg(85_000), reps(3), Rir::TwoOrThree),
             Some(kg(100_000))
         );
     }
 
     #[test]
     fn grams_round_down() {
-        // 100kg @ 97.5%: 102.5641…kg.
+        // 100 kg @ 95.5%: 104.7120…kg.
         assert_eq!(
             Rts.estimate(kg(100_000), reps(2), Rir::Zero),
-            Some(kg(102_564))
+            Some(kg(104_712))
         );
     }
 
@@ -406,10 +426,12 @@ mod tests {
     }
 
     #[test]
-    fn a_set_long_enough_to_leave_the_grid_gives_nothing() {
-        assert!(Rts.estimate(kg(20_000), reps(40), Rir::Zero).is_some());
-        assert_eq!(Rts.estimate(kg(20_000), reps(41), Rir::Zero), None);
-        assert_eq!(Rts.estimate(kg(20_000), reps(35), Rir::Three), None);
+    fn a_set_past_the_charts_last_cell_gives_nothing() {
+        // 10 @ 3 is the last cell but one; 10 @ 3.5 would be the last.
+        assert!(Rts.estimate(kg(60_000), reps(10), Rir::Three).is_some());
+        assert!(Rts.estimate(kg(60_000), reps(13), Rir::Zero).is_some());
+        assert_eq!(Rts.estimate(kg(60_000), reps(14), Rir::Zero), None);
+        assert_eq!(Rts.estimate(kg(60_000), reps(11), Rir::Three), None);
     }
 
     fn at(timestamp: &str) -> Occurred {
