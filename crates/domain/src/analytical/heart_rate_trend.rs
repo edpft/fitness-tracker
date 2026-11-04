@@ -80,7 +80,7 @@ impl Period {
     #[must_use]
     pub fn direction(&self) -> Option<Direction> {
         let line = self.line?;
-        let (slope, margin) = (line.per_session(), line.slope_margin());
+        let (slope, margin) = (line.per_day(), line.slope_margin());
         Some(if slope - margin > 0.0 {
             Direction::Rising
         } else if slope + margin < 0.0 {

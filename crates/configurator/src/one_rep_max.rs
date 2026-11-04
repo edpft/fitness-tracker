@@ -27,7 +27,7 @@ pub fn collects() -> Result<Scope, WiringError> {
     ])
 }
 
-/// Each lift's stretches between tests, through today.
+/// Each lift over the macrocycle in force, through today.
 ///
 /// # Errors
 ///
@@ -39,7 +39,6 @@ pub async fn view(store: &Store, zone: &OperatorZone) -> Result<View, StoreError
         store.canonical_gym(),
         store.weigh_ins(),
         store.plans(zone),
-        store.prescriptions(zone),
     )
     .view(today)
     .await

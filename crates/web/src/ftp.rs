@@ -34,7 +34,7 @@ const TITLE: &str = "FTP tests";
 
 /// The page: the summary, then the chart over the range chosen.
 pub fn page(tests: &[Test], ranges: &Ranges, over: Over, run: &View) -> Markup {
-    detail::page(PATH, TITLE, over, run, &body(tests, ranges, over))
+    detail::page(PATH, TITLE, Some(over), run, &body(tests, ranges, over))
 }
 
 /// The page when the store could not be read.

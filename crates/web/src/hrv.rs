@@ -32,7 +32,7 @@ pub const TITLE: &str = "Overnight HRV";
 
 /// The page: the summary, then the chart over the range chosen.
 pub fn page(trended: &[Trended], ranges: &Ranges, over: Over, run: &View) -> Markup {
-    detail::page(PATH, TITLE, over, run, &body(trended, ranges, over))
+    detail::page(PATH, TITLE, Some(over), run, &body(trended, ranges, over))
 }
 
 /// The page when the store could not be read.

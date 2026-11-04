@@ -42,7 +42,7 @@ const HOUR: f64 = 3600.0;
 
 /// The page: the summary, then each chart over the range chosen.
 pub fn page(nights: &[Trended], ranges: &Ranges, over: Over, run: &View) -> Markup {
-    detail::page(PATH, TITLE, over, run, &body(nights, ranges, over))
+    detail::page(PATH, TITLE, Some(over), run, &body(nights, ranges, over))
 }
 
 /// The page when the store could not be read.

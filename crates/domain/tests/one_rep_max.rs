@@ -1,13 +1,12 @@
-//! Estimated 1RM as a trend, from one test to the next (#420), and over a
-//! body mass (#253).
+//! Estimated 1RM over the macrocycle, by one line through every session's
+//! estimate (#420, #688), and over a body mass (#253).
 
 use domain::{
     analytical::Rts,
     analytical::{
         Estimate, Weighed,
         one_rep_max::{
-            Against, Line, NextTest, Point, Reading, points as read, read_tests, relative,
-            stretches, tested, tests,
+            Against, Line, Point, Reading, points as read, read_tests, relative, tested, trend,
         },
     },
     canonical::{Attributed, NormalisedSessionId, Occurred},
@@ -38,38 +37,24 @@ fn points(days: &[(Date, u64)]) -> Option<Vec<Point>> {
         .collect()
 }
 
-/// The entry test on 2026-09-25, and the five sessions since, as a copy of the
-/// store had them on 2026-10-14.
+/// The autumn macrocycle's nine sessions on the RTS chart, as a copy of the
+/// store held them on 2026-11-04.
 fn autumn() -> Option<Vec<Point>> {
-    let mut points = points(&[
-        (date(2026, 9, 29), 90_625),
-        (date(2026, 10, 2), 96_774),
-        (date(2026, 10, 5), 94_117),
-        (date(2026, 10, 9), 94_117),
-        (date(2026, 10, 12), 94_594),
-    ])?;
-    points.insert(0, test_on(date(2026, 9, 25), 92_500)?);
-    Some(points)
+    points(&[
+        (date(2026, 9, 29), 89_395),
+        (date(2026, 10, 2), 98_425),
+        (date(2026, 10, 5), 92_699),
+        (date(2026, 10, 9), 95_596),
+        (date(2026, 10, 12), 93_184),
+        (date(2026, 10, 16), 97_613),
+        (date(2026, 10, 19), 89_605),
+        (date(2026, 10, 23), 97_137),
+        (date(2026, 10, 30), 96_899),
+    ])
 }
 
-fn test_on(on: Date, grams: u64) -> Option<Point> {
-    Some(Point {
-        on,
-        estimate: Estimate {
-            one_rep_max: Kg::from_grams(grams),
-            load: Kg::from_grams(grams),
-            reps: RepCount::new(1).ok()?,
-            rir: Rir::Zero,
-        },
-        reading: Reading::Tested {
-            failed: Some(Kg::from_grams(grams + 2_500)),
-        },
-    })
-}
-
-fn days(points: &[Point]) -> Vec<Date> {
-    points.iter().map(|point| point.on).collect()
-}
+const MACROCYCLE: Date = date(2026, 9, 14);
+const NEXT: Date = date(2026, 11, 20);
 
 fn near(actual: f64, expected: f64) {
     assert!(
@@ -78,84 +63,61 @@ fn near(actual: f64, expected: f64) {
     );
 }
 
-/// The next test three planned sessions after the last one performed.
-const NEXT: NextTest = NextTest {
-    on: date(2026, 10, 23),
-    sessions: 3,
-};
-
 #[test]
-fn a_stretch_runs_from_a_test_through_the_estimates_after_it() {
-    let points = autumn().expect("points");
-    let stretches = stretches(&points, &tests(&points), &days(&points), Some(NEXT));
-    let [stretch] = stretches.as_slice() else {
-        panic!("one stretch: {stretches:?}");
-    };
-    assert_eq!(stretch.from, date(2026, 9, 25));
-    assert_eq!(stretch.test.map(|test| test.on), Some(date(2026, 9, 25)));
-    let sessions: Vec<u32> = stretch.estimates.iter().map(|(at, _)| *at).collect();
-    assert_eq!(sessions, [1, 2, 3, 4, 5], "sessions since the test");
-    assert_eq!(stretch.closed_by, None);
+fn one_line_runs_through_every_session_by_day() {
+    let trend = trend(&autumn().expect("points"), MACROCYCLE, Some(NEXT));
+    let line = trend.line.expect("nine sessions give a line");
+    assert_eq!((line.first(), line.last()), (15, 46), "days since 14 Sep");
+    near(line.per_day(), 104.345);
+    near(trend.now().expect("a line"), 96_302.944);
 }
 
 #[test]
-fn the_line_is_the_estimates_alone_and_projects_to_the_next_test() {
-    let points = autumn().expect("points");
-    let stretches = stretches(&points, &tests(&points), &days(&points), Some(NEXT));
-    let stretch = stretches.first().expect("a stretch");
-    let line = stretch.line.expect("five estimates give a line");
-    near(line.per_session(), 528.1);
-    near(line.at(1), 92_989.2);
-    near(line.band(1), 5_809.519);
-    assert_eq!((line.first(), line.last()), (1, 5));
-    let projection = stretch.projection.expect("a test still to come");
-    assert_eq!((projection.on, projection.session), (date(2026, 10, 23), 8));
-    near(projection.value, 96_685.9);
-    near(projection.low, 82_259.254);
-    near(projection.high, 111_112.546);
+fn the_change_along_the_line_is_read_against_its_margin() {
+    let trend = trend(&autumn().expect("points"), MACROCYCLE, Some(NEXT));
+    let change = trend.change.expect("a line");
+    near(change.by, 3_234.699);
+    near(change.margin, 8_856.855);
+    assert_eq!(change.direction, None, "+3.2 kg against ± 8.9 kg");
 }
 
 #[test]
-fn a_test_performed_closes_its_stretch_and_starts_the_next() {
-    let mut points = autumn().expect("points");
-    points.push(test_on(date(2026, 10, 23), 97_500).expect("a test"));
-    let mut performed = days(&points);
-    performed.insert(6, date(2026, 10, 19));
-    let stretches = stretches(&points, &tests(&points), &performed, Some(NEXT));
-    let [first, second] = stretches.as_slice() else {
-        panic!("two stretches: {stretches:?}");
-    };
-    assert_eq!(
-        first.closed_by.map(|(at, point)| (at, point.on)),
-        Some((7, date(2026, 10, 23))),
-        "a session with no estimate still counts"
-    );
-    assert_eq!(
-        first
-            .projection
-            .map(|projection| (projection.session, projection.on)),
-        Some((7, date(2026, 10, 23))),
-        "projected to the test that ended it"
-    );
-    assert_eq!(second.from, date(2026, 10, 23));
-    assert!(second.estimates.is_empty() && second.line.is_none());
+fn the_band_narrows_as_sessions_accrue() {
+    let trend = trend(&autumn().expect("points"), MACROCYCLE, Some(NEXT));
+    assert_eq!(trend.narrowing.len(), 7, "from the third session");
+    let first = trend.narrowing.first().expect("a band");
+    assert_eq!(first.on, date(2026, 10, 5));
+    near(first.value, 95_158.333);
+    near(first.band, 69_873.299);
+    let last = trend.narrowing.last().expect("a band");
+    near(last.value, 96_302.944);
+    near(last.band, 5_634.984);
 }
 
 #[test]
-fn two_estimates_are_points_and_no_line() {
-    let points = autumn().expect("points");
-    let early: Vec<Point> = points.into_iter().take(3).collect();
-    let stretches = stretches(&early, &tests(&early), &days(&early), Some(NEXT));
-    let stretch = stretches.first().expect("a stretch");
-    assert_eq!(stretch.estimates.len(), 2);
-    assert_eq!(stretch.line, None);
-    assert_eq!(stretch.projection, None);
+fn the_line_is_carried_on_to_the_next_test_without_a_range() {
+    let trend = trend(&autumn().expect("points"), MACROCYCLE, Some(NEXT));
+    let next = trend.next.expect("a test still to come");
+    assert_eq!(next.on, NEXT);
+    near(next.value, 98_494.192);
 }
 
 #[test]
-fn no_test_is_no_stretch() {
-    let points = points(&[(date(2026, 9, 29), 90_625)]).expect("points");
-    assert!(stretches(&points, &tests(&points), &days(&points), Some(NEXT)).is_empty());
+fn sessions_before_the_macrocycle_are_not_in_it() {
+    let mut points = points(&[(date(2026, 9, 7), 80_000)]).expect("a point");
+    points.extend(autumn().expect("points"));
+    let trend = trend(&points, MACROCYCLE, Some(NEXT));
+    assert_eq!(trend.figures.len(), 9);
+}
+
+#[test]
+fn two_sessions_are_points_and_no_line() {
+    let early: Vec<Point> = autumn().expect("points").into_iter().take(2).collect();
+    let trend = trend(&early, MACROCYCLE, Some(NEXT));
+    assert_eq!(trend.figures.len(), 2);
+    assert_eq!(trend.line, None);
+    assert!(trend.narrowing.is_empty());
+    assert_eq!((trend.change, trend.next), (None, None));
 }
 
 #[test]
@@ -293,7 +255,8 @@ fn a_failed_attempt_on_a_day_not_prescribed_as_a_test_is_no_test() {
         points
             .first()
             .map(|point| (point.reading, point.estimate.one_rep_max)),
-        Some((Reading::Estimated, Kg::from_grams(94_117)))
+        // 80 kg × 5 @ 1 on the RTS chart, 83.7%.
+        Some((Reading::Estimated, Kg::from_grams(95_579)))
     );
 }
 
@@ -383,7 +346,8 @@ fn a_ratio_is_read_against_that_days_weigh_in_and_a_day_without_one_is_a_gap() {
         read,
         [
             (date(2026, 9, 25), "1.09×".to_owned()),
-            (date(2026, 10, 2), "1.14×".to_owned())
+            // 75 kg × 8 @ 1 on the RTS chart, 76.2%: 98.4 kg over 84.2 kg.
+            (date(2026, 10, 2), "1.16×".to_owned())
         ]
     );
     let lean = relative(
@@ -401,29 +365,21 @@ fn a_ratio_is_read_against_that_days_weigh_in_and_a_day_without_one_is_a_gap() {
     assert_eq!(read, [(date(2026, 9, 25), "1.40×".to_owned())]);
 }
 
-#[test]
-fn a_test_with_no_weigh_in_still_ends_a_stretch() {
-    let mut points = autumn().expect("points");
-    points.push(test_on(date(2026, 10, 23), 97_500).expect("a test"));
-    let marked = tests(&points);
-    // Every figure but the second test, as a ratio with no weigh-in that day.
-    let unweighed: Vec<Point> = points
-        .iter()
-        .filter(|point| point.on != date(2026, 10, 23))
-        .copied()
-        .collect();
-    let stretches = stretches(&unweighed, &marked, &days(&points), None);
-    let [first, second] = stretches.as_slice() else {
-        panic!("two stretches: {stretches:?}");
-    };
-    assert_eq!(first.to, Some(date(2026, 10, 23)));
-    assert_eq!(first.closed_by, None, "no figure for the test");
-    assert_eq!(
-        first.projection.map(|projection| projection.on),
-        Some(date(2026, 10, 23)),
-        "still projected to it"
-    );
-    assert_eq!((second.from, second.test), (date(2026, 10, 23), None));
+/// A test as `points` reads one: its heaviest completed single, and the
+/// attempt above it that failed.
+fn test_on(on: Date, grams: u64) -> Option<Point> {
+    Some(Point {
+        on,
+        estimate: Estimate {
+            one_rep_max: Kg::from_grams(grams),
+            load: Kg::from_grams(grams),
+            reps: RepCount::new(1).ok()?,
+            rir: Rir::Zero,
+        },
+        reading: Reading::Tested {
+            failed: Some(Kg::from_grams(grams + 2_500)),
+        },
+    })
 }
 
 /// The front squat tests on a copy of the store, 2026-11-03: each against the
