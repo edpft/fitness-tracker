@@ -39,11 +39,12 @@ pub enum Metric {
     PulseWaveVelocity,
     Ftp,
     OneRepMax,
+    TestHeartRate,
 }
 
 impl Metric {
     /// The stylesheet's class for it, which sets its colour.
-    const fn class(self) -> &'static str {
+    pub const fn class(self) -> &'static str {
         match self {
             Self::BodyWeight => "weight",
             Self::Fat => "fat",
@@ -56,6 +57,7 @@ impl Metric {
             Self::PulseWaveVelocity => "pulse-wave-velocity",
             Self::Ftp => "ftp",
             Self::OneRepMax => "one-rep-max",
+            Self::TestHeartRate => "test-heart-rate",
         }
     }
 }
@@ -242,6 +244,13 @@ pub enum Layer {
     Dots(Vec<(Date, f64)>),
     /// Each observation by a second method, hollow so the two are told apart.
     Hollow(Vec<(Date, f64)>),
+    /// Each observation of a third figure, solid where [`Self::Dots`] are
+    /// faint (#548).
+    Solid(Vec<(Date, f64)>),
+    /// Stretches of days grouped under a name, shaded behind the chart, every
+    /// other one, with the name above: the device a stretch was recorded by
+    /// (#548).
+    Spans(Vec<(Date, Date, String)>),
     /// Observations singled out, ringed around their dots.
     Rings(Vec<(Date, f64)>),
     /// The trend: one line per unbroken run, and its band where it has one.
@@ -263,9 +272,10 @@ pub enum Layer {
 impl Layer {
     fn values(&self) -> Vec<f64> {
         match self {
-            Self::Dots(dots) | Self::Hollow(dots) | Self::Rings(dots) => {
+            Self::Dots(dots) | Self::Hollow(dots) | Self::Rings(dots) | Self::Solid(dots) => {
                 dots.iter().map(|(_, value)| *value).collect()
             }
+            Self::Spans(_) => Vec::new(),
             Self::Trend(runs) => runs
                 .iter()
                 .flatten()
@@ -393,7 +403,7 @@ pub fn choice(id: &str, metric: Metric, title: &str, options: &[(&str, Chart<'_>
 
 /// A chart's line beneath its title and its plot, or what to say where the
 /// range holds nothing: a reference alone is not something recorded.
-fn drawn(chart: &Chart<'_>) -> Markup {
+pub fn drawn(chart: &Chart<'_>) -> Markup {
     let recorded = chart
         .layers
         .iter()
@@ -449,7 +459,7 @@ fn plotted(chart: &Chart<'_>, frame: &Frame) -> Markup {
         .layers
         .iter()
         .map(|layer| match layer {
-            Layer::Dots(dots) | Layer::Hollow(dots) => dots.len(),
+            Layer::Dots(dots) | Layer::Hollow(dots) | Layer::Solid(dots) => dots.len(),
             _ => 0,
         })
         .sum();
@@ -474,6 +484,9 @@ fn plotted(chart: &Chart<'_>, frame: &Frame) -> Markup {
                     text.tick x=(x) y=(HEIGHT - 6.0) text-anchor="middle" { (label) }
                 }
                 @for layer in &chart.layers {
+                    @if let Layer::Spans(spans) = layer { (shaded(spans, frame)) }
+                }
+                @for layer in &chart.layers {
                     @if let Layer::Reference(days) = layer {
                         polygon.reference points=(region(days.iter().map(|(on, low, high)| (*on, *low, *high)), frame)) {}
                     }
@@ -491,16 +504,9 @@ fn plotted(chart: &Chart<'_>, frame: &Frame) -> Markup {
                                 polyline.line points=(line(run, frame)) {}
                             }
                         }
-                        Layer::Dots(dots) => {
-                            @for (on, value) in dots {
-                                circle.dot cx=(format!("{:.1}", frame.x(*on))) cy=(format!("{:.1}", frame.y(*value))) r=(radius) {}
-                            }
-                        }
-                        Layer::Hollow(dots) => {
-                            @for (on, value) in dots {
-                                circle.hollow cx=(format!("{:.1}", frame.x(*on))) cy=(format!("{:.1}", frame.y(*value))) r=(radius) {}
-                            }
-                        }
+                        Layer::Dots(dots) => { (marks(dots, "dot", frame, radius)) }
+                        Layer::Hollow(dots) => { (marks(dots, "hollow", frame, radius)) }
+                        Layer::Solid(dots) => { (marks(dots, "solid", frame, radius)) }
                         Layer::Rings(dots) => {
                             @for (on, value) in dots {
                                 circle.ring cx=(format!("{:.1}", frame.x(*on))) cy=(format!("{:.1}", frame.y(*value))) r=(radius + 3.0) {}
@@ -536,13 +542,58 @@ fn plotted(chart: &Chart<'_>, frame: &Frame) -> Markup {
                                 polyline.aim points=(run.iter().map(|(on, value)| format!("{:.1},{:.1}", frame.x(*on), frame.y(*value))).collect::<Vec<_>>().join(" ")) {}
                             }
                         }
-                        Layer::Reference(_) => {}
+                        Layer::Reference(_) | Layer::Spans(_) => {}
                     }
                 }
             }
             (taps(chart, frame))
         }
     }
+}
+
+/// One circle per observation, of the stylesheet's `class`.
+fn marks(dots: &[(Date, f64)], class: &str, frame: &Frame, radius: f64) -> Markup {
+    html! {
+        @for (on, value) in dots {
+            circle class=(class) cx=(format!("{:.1}", frame.x(*on))) cy=(format!("{:.1}", frame.y(*value))) r=(radius) {}
+        }
+    }
+}
+
+/// Every other span shaded behind the chart, each named above it.
+fn shaded(spans: &[(Date, Date, String)], frame: &Frame) -> Markup {
+    html! {
+        @for (index, (from, to, _)) in spans.iter().enumerate() {
+            @let (left, right) = (frame.x(*from) - 7.0, frame.x(*to) + 7.0);
+            @if index % 2 == 0 {
+                rect.span x=(format!("{left:.1}")) y=(TOP) width=(format!("{:.1}", right - left)) height=(HEIGHT - TOP - BOTTOM) {}
+            }
+        }
+        @for (x, name) in span_names(spans, frame) {
+            text.tick x=(format!("{x:.1}")) y=(TOP - 6.0) text-anchor="middle" { (name) }
+        }
+    }
+}
+
+/// Where each span's name is centred: over its span, kept inside the chart,
+/// and pushed right of the name before it where two short spans sit close
+/// (TICKR and the next device in 2024, #548).
+fn span_names(spans: &[(Date, Date, String)], frame: &Frame) -> Vec<(f64, String)> {
+    // The tick face's width per character, near enough to keep names apart.
+    const CHARACTER: f64 = 6.0;
+    let mut placed = Vec::new();
+    let mut taken = f64::MIN;
+    for (from, to, name) in spans {
+        let half =
+            f64::from(u32::try_from(name.chars().count()).unwrap_or(u32::MAX)) * CHARACTER / 2.0;
+        let centre = f64::midpoint(frame.x(*from), frame.x(*to))
+            .max(taken + 8.0 + half)
+            .min(WIDTH - RIGHT - half)
+            .max(half);
+        taken = centre + half;
+        placed.push((centre, name.clone()));
+    }
+    placed
 }
 
 /// The date axis's labels, each kept inside the chart and none on top of

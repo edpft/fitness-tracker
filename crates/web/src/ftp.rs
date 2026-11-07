@@ -11,6 +11,12 @@
 //! since a test is a measurement and no line claims anything about the days
 //! between. A test with no weigh-in that day has no per-kilo dot.
 //!
+//! **Beneath it, the heart rate each test was ridden at** (operator,
+//! 2026-11-07, #548): its maximum as a ring, the mean of its last 5 minutes
+//! solid and its mean faint, nothing joining two tests, with each device's
+//! tests grouped under its name, so a test can be read as ridden as deep as
+//! the ones before it or not.
+//!
 //! **Opens on All** (operator, 2026-10-28): *"inherently, there won't be
 //! very many per macrocycle"*. The range only chooses which tests are shown;
 //! each is read against the whole record.
@@ -18,7 +24,7 @@
 use std::collections::BTreeMap;
 
 use domain::analytical::{
-    ftp_test::{Moved, Test, noise, within},
+    ftp_test::{Moved, Test, TestHeartRate, noise, within},
     range::{Over, Range, Ranges},
 };
 use jiff::civil::Date;
@@ -32,9 +38,21 @@ use crate::{
 pub const PATH: &str = "/ftp";
 const TITLE: &str = "FTP tests";
 
-/// The page: the summary, then the chart over the range chosen.
-pub fn page(tests: &[Test], ranges: &Ranges, over: Over, run: &View) -> Markup {
-    detail::page(PATH, TITLE, Some(over), run, &body(tests, ranges, over))
+/// The page: the summary, then the charts over the range chosen.
+pub fn page(
+    tests: &[Test],
+    heart_rates: &[TestHeartRate],
+    ranges: &Ranges,
+    over: Over,
+    run: &View,
+) -> Markup {
+    detail::page(
+        PATH,
+        TITLE,
+        Some(over),
+        run,
+        &body(tests, heart_rates, ranges, over),
+    )
 }
 
 /// The page when the store could not be read.
@@ -55,7 +73,7 @@ pub fn unreadable(error: &str) -> Markup {
 
 /// The summary, the chart over the range chosen and the latest tests, or why
 /// there is no range.
-fn body(tests: &[Test], ranges: &Ranges, over: Over) -> Markup {
+fn body(tests: &[Test], heart_rates: &[TestHeartRate], ranges: &Ranges, over: Over) -> Markup {
     let recorded = Range::spanning(tests.iter().map(Test::on));
     let range = match crate::range::chosen(ranges, over, recorded, "No FTP test has been recorded.")
     {
@@ -70,6 +88,7 @@ fn body(tests: &[Test], ranges: &Ranges, over: Over) -> Markup {
             ("W", chart(&shown, range, today, Unit::Watts)),
             ("W/kg", chart(&shown, range, today, Unit::PerKilo)),
         ]))
+        (heart_rate(heart_rates, range, today))
         (latest(tests, today))
         (detail::foot(
             "Dots: each FTP test; per kilo over that day's weigh-in. A change is clear beyond the noise of two tests, about 8% of the earlier (a 20-minute test repeats to 2.9%, Borszcz et al. 2020), against the test before or else the first test since the last clear change. Higher is better."
@@ -242,6 +261,72 @@ fn moved(moved: Option<Moved>, said: impl Fn(i64) -> String) -> String {
     })
 }
 
+/// The heart rate each test in `range` was ridden at: max, last 5 minutes and
+/// mean, each device's tests grouped under its name.
+fn heart_rate(rates: &[TestHeartRate], range: Range, today: Date) -> Markup {
+    if rates.is_empty() {
+        return html! {};
+    }
+    let shown: Vec<&TestHeartRate> = rates.iter().filter(|rate| range.covers(rate.on)).collect();
+    let figure = |of: fn(&TestHeartRate) -> u32| -> Vec<(Date, f64)> {
+        shown
+            .iter()
+            .map(|rate| (rate.on, f64::from(of(rate))))
+            .collect()
+    };
+    let mut spans: Vec<(Date, Date, String)> = Vec::new();
+    for rate in &shown {
+        let name = detail::name(&rate.sent_by);
+        match spans.last_mut() {
+            Some((_, to, last)) if *last == name => *to = rate.on,
+            _ => spans.push((rate.on, rate.on, name)),
+        }
+    }
+    let chart = Chart {
+        id: "ftp-heart-rate",
+        metric: Metric::TestHeartRate,
+        title: "Heart rate in the test",
+        sub: format!(
+            "{} · bpm over the twenty minutes",
+            counted(shown.len(), "test")
+        ),
+        range,
+        axis: Axis::Figures,
+        layers: vec![
+            Layer::Spans(spans),
+            Layer::Dots(figure(|rate| rate.mean.as_u32())),
+            Layer::Solid(figure(|rate| rate.last_five_minutes.as_u32())),
+            Layer::Hollow(figure(|rate| rate.max.as_u32())),
+        ],
+        days: shown
+            .iter()
+            .map(|rate| {
+                (
+                    rate.on,
+                    html! {
+                        span.on { (detail::day(rate.on, today)) }
+                        " · max " (rate.max.as_u32())
+                        " · last 5 min " (rate.last_five_minutes.as_u32())
+                        " · mean " (rate.mean.as_u32()) " bpm · "
+                        (detail::name(&rate.sent_by))
+                    },
+                )
+            })
+            .collect(),
+    };
+    html! {
+        section class=(format!("card {}", Metric::TestHeartRate.class())) {
+            h2 { (chart.title) }
+            (detail::drawn(&chart))
+            p.marks {
+                span { i.hollow {} "Max" }
+                span { i.solid {} "Last 5 min" }
+                span { i.dot {} "Mean" }
+            }
+        }
+    }
+}
+
 /// The latest seven tests, newest first, in watts and per kilo.
 fn latest(tests: &[Test], today: Date) -> Markup {
     let rows: Vec<(String, Markup)> = tests
@@ -298,12 +383,13 @@ mod tests {
     use domain::{
         analytical::{
             Weighed,
-            ftp_test::{Test, tests},
+            ftp_test::{Test, TestHeartRate, tests},
+            heart_rate::SentBy,
             range::{Over, Range, Ranges},
         },
         canonical::Occurred,
         cycling::{Ftp, FtpProvenance, Watts},
-        measure::Kg,
+        measure::{BeatsPerMinute, Kg},
         normalised::{OperatorZone, StartedAt},
     };
     use jiff::civil::{Date, date};
@@ -360,7 +446,7 @@ mod tests {
     }
 
     fn shown(tests: &[Test], over: Over) -> String {
-        page(tests, &ranges(), over, &crate::run::View::default()).into_string()
+        page(tests, &[], &ranges(), over, &crate::run::View::default()).into_string()
     }
 
     #[test]
@@ -443,9 +529,65 @@ mod tests {
         );
     }
 
+    fn ridden(on: Date, max: u32, last: u32, mean: u32) -> TestHeartRate {
+        let bpm = |beats| BeatsPerMinute::new(beats).expect("a heart rate");
+        TestHeartRate {
+            on,
+            max: bpm(max),
+            mean: bpm(mean),
+            last_five_minutes: bpm(last),
+            sent_by: SentBy::Unknown,
+        }
+    }
+
+    #[test]
+    fn each_test_s_heart_rate_is_a_ring_a_solid_dot_and_a_faint_one() {
+        let rates = [
+            ridden(date(2026, 9, 23), 187, 177, 165),
+            ridden(date(2026, 10, 25), 184, 177, 165),
+        ];
+        let page = page(
+            &autumn().expect("the tests"),
+            &rates,
+            &ranges(),
+            Over::Macrocycle,
+            &crate::run::View::default(),
+        )
+        .into_string();
+        assert!(page.contains("Heart rate in the test"), "{page}");
+        assert!(page.contains(r#"class="card test-heart-rate""#), "{page}");
+        assert_eq!(
+            page.matches(r#"<circle class="hollow""#).count(),
+            2,
+            "{page}"
+        );
+        assert_eq!(
+            page.matches(r#"<circle class="solid""#).count(),
+            2,
+            "{page}"
+        );
+        assert!(
+            page.contains(
+                "25 Oct</span> · max 184 · last 5 min 177 · mean 165 bpm · device unknown<"
+            ),
+            "{page}"
+        );
+        assert!(
+            page.contains("2 tests · bpm over the twenty minutes"),
+            "{page}"
+        );
+        assert!(!page.contains(r#"class="line""#), "nothing joins two tests");
+    }
+
+    #[test]
+    fn tests_without_heart_rate_draw_no_heart_rate_chart() {
+        let page = shown(&autumn().expect("the tests"), Over::Macrocycle);
+        assert!(!page.contains("Heart rate in the test"), "{page}");
+    }
+
     #[test]
     fn no_tests_is_said_rather_than_drawn() {
-        let page = page(&[], &ranges(), Over::All, &crate::run::View::default()).into_string();
+        let page = page(&[], &[], &ranges(), Over::All, &crate::run::View::default()).into_string();
         assert!(page.contains("No FTP test has been recorded."));
         assert!(!page.contains(r#"class="dot""#));
     }

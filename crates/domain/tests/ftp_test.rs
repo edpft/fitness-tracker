@@ -4,7 +4,7 @@ use domain::{
     analytical::{
         Weighed,
         body_weight::Direction,
-        ftp_test::{Moved, PowerToWeight, Since, Test, tests, within},
+        ftp_test::{Moved, PowerToWeight, Since, Test, figures, tests, within},
         range::Range,
     },
     canonical::Occurred,
@@ -248,4 +248,49 @@ fn a_range_keeps_the_reading_against_a_test_outside_it() {
 #[test]
 fn no_body_mass_gives_no_ratio() {
     assert_eq!(PowerToWeight::of(Watts::from_u32(182), Kg::NONE), None);
+}
+
+/// A test's heart rate (#548): the maximum, the mean, and the mean of the
+/// last 5 minutes, over the samples Peloton served, which skip seconds.
+#[test]
+fn a_tests_heart_rate_is_its_max_mean_and_last_five_minutes() {
+    // 140 bpm for the first 15 minutes, 180 for the last 5, a 186 spike at
+    // the end, and second 1000 skipped.
+    let samples: Vec<(u64, u32)> = (1..=1200)
+        .filter(|at| *at != 1000)
+        .map(|at| {
+            (
+                at,
+                if at == 1200 {
+                    186
+                } else if at > 900 {
+                    180
+                } else {
+                    140
+                },
+            )
+        })
+        .collect();
+    let (max, mean, last) = figures(&samples, 1200).expect("a series with samples has figures");
+    assert_eq!(max.as_u32(), 186);
+    // 900 × 140 + 298 × 180 + 186 over 1199 samples: 150.0 to the nearest beat.
+    assert_eq!(mean.as_u32(), 150);
+    // 298 × 180 + 186 over 299: 180.02.
+    assert_eq!(last.as_u32(), 180);
+}
+
+/// The closing stretch is the last 5 minutes of the ride's own length, so a
+/// test Peloton cut a second short is read over its own end.
+#[test]
+fn the_last_five_minutes_end_at_the_rides_end() {
+    let samples: Vec<(u64, u32)> = (1..=1199)
+        .map(|at| (at, if at > 899 { 170 } else { 150 }))
+        .collect();
+    let (_, _, last) = figures(&samples, 1199).expect("a series with samples has figures");
+    assert_eq!(last.as_u32(), 170);
+}
+
+#[test]
+fn no_samples_have_no_figures() {
+    assert!(figures(&[], 1200).is_none());
 }

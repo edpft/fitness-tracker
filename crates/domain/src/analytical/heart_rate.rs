@@ -143,17 +143,7 @@ pub fn heart_rate_by_zone(
         return None;
     };
     let started_at = main.started_at().value().clone();
-    let sent_by = main.heart_rate_device().map_or_else(
-        || match register.sent_by(Measurand::HeartRate, started_at.wall_clock().date()) {
-            InUse::One(device) => SentBy::Device(device.clone()),
-            InUse::Several(_) | InUse::Unknown => SentBy::Unknown,
-        },
-        |stated| {
-            register
-                .stated(stated.value())
-                .map_or(SentBy::Unknown, SentBy::Device)
-        },
-    );
+    let sent_by = sent_by(main, register);
     Some(RideHeartRate {
         venue: main.at().value().clone(),
         by_zone: by_zone(main, ftp),
@@ -163,6 +153,26 @@ pub fn heart_rate_by_zone(
         ftp,
         sent_by,
     })
+}
+
+/// The device that sent `ride`'s heart rate: the ride's own monitor where
+/// Peloton's account names one, and otherwise the one device the register
+/// shows in use that day.
+pub fn sent_by(ride: &CanonicalBikePlusRide, register: &Register) -> SentBy {
+    ride.heart_rate_device().map_or_else(
+        || {
+            let day = ride.started_at().value().wall_clock().date();
+            match register.sent_by(Measurand::HeartRate, day) {
+                InUse::One(device) => SentBy::Device(device.clone()),
+                InUse::Several(_) | InUse::Unknown => SentBy::Unknown,
+            }
+        },
+        |stated| {
+            register
+                .stated(stated.value())
+                .map_or(SentBy::Unknown, SentBy::Device)
+        },
+    )
 }
 
 fn by_zone(ride: &CanonicalBikePlusRide, ftp: Option<Ftp>) -> ByZone {

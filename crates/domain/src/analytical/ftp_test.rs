@@ -35,15 +35,22 @@ use std::fmt;
 use jiff::civil::Date;
 
 pub use super::retest::{Moved, Since};
-use super::{Weighed, nearest, range::Range, retest};
+use super::{
+    Weighed,
+    heart_rate::{SentBy, sent_by},
+    nearest,
+    range::Range,
+    retest,
+};
 
 /// How far a self-paced 20-minute test repeats, as a fraction: its test–retest
 /// coefficient of variation (Borszcz et al. 2020).
 pub const TEST_RETEST: f64 = 0.029;
 use crate::{
     canonical::Occurred,
-    cycling::{Ftp, FtpProvenance, Watts},
-    measure::Kg,
+    cycling::{CanonicalCyclingSession, Ftp, FtpProvenance, Watts},
+    device::Register,
+    measure::{BeatsPerMinute, Kg},
     normalised::StartedAt,
 };
 
@@ -141,6 +148,77 @@ pub fn tests(tested: &[(Ftp, StartedAt)], weigh_ins: &[Weighed]) -> Vec<Test> {
         test.per_kilo_moved = per_kilo;
     }
     tests
+}
+
+/// The heart rate a test was ridden at, over its twenty minutes (#548).
+///
+/// **Whether a test was ridden as deep as the ones before it** (operator,
+/// 2026-11-07): the maximum, the mean, and the mean of the last 5 minutes.
+/// Not the minimum, which is the heart rate coming out of the warm-up. Each
+/// test keeps the device that sent its heart rate, because a wrist sensor and
+/// a chest strap do not read alike (§ 6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestHeartRate {
+    pub on: Date,
+    pub max: BeatsPerMinute,
+    pub mean: BeatsPerMinute,
+    pub last_five_minutes: BeatsPerMinute,
+    pub sent_by: SentBy,
+}
+
+/// How long the closing stretch is.
+pub const LAST_SECONDS: u64 = 300;
+
+/// The heart rate of a test session's effort, the twenty minutes after its
+/// warm-up. `None` for a ride that is not a test, or an effort with no heart
+/// rate.
+pub fn heart_rate(session: &CanonicalCyclingSession, register: &Register) -> Option<TestHeartRate> {
+    let CanonicalCyclingSession::Test { effort, .. } = session else {
+        return None;
+    };
+    let samples: Vec<(u64, u32)> = effort
+        .heart_rate()?
+        .value()
+        .samples()
+        .iter()
+        .map(|sample| (sample.at.as_seconds(), sample.beats_per_minute.as_u32()))
+        .collect();
+    let (max, mean, last_five_minutes) = figures(&samples, effort.duration().value().as_seconds())?;
+    Some(TestHeartRate {
+        on: effort.started_at().value().wall_clock().date(),
+        max,
+        mean,
+        last_five_minutes,
+        sent_by: sent_by(effort, register),
+    })
+}
+
+/// A test's maximum, mean and closing mean.
+///
+/// Over a series of `(second, beats per minute)` from a ride of `duration`
+/// seconds; the closing mean is over its last [`LAST_SECONDS`]. Each mean is
+/// over the samples, to the nearest beat. `None` where either stretch has no
+/// sample.
+pub fn figures(
+    samples: &[(u64, u32)],
+    duration: u64,
+) -> Option<(BeatsPerMinute, BeatsPerMinute, BeatsPerMinute)> {
+    let from = duration.saturating_sub(LAST_SECONDS);
+    let last: Vec<u32> = samples
+        .iter()
+        .filter(|(at, _)| *at > from)
+        .map(|(_, beats)| *beats)
+        .collect();
+    let all: Vec<u32> = samples.iter().map(|(_, beats)| *beats).collect();
+    let max = BeatsPerMinute::new(*all.iter().max()?).ok()?;
+    Some((max, mean(&all)?, mean(&last)?))
+}
+
+fn mean(beats: &[u32]) -> Option<BeatsPerMinute> {
+    let count = u64::try_from(beats.len()).ok().filter(|count| *count > 0)?;
+    let total: u64 = beats.iter().map(|beats| u64::from(*beats)).sum();
+    let rounded = total.saturating_add(count / 2) / count;
+    BeatsPerMinute::new(u32::try_from(rounded).ok()?).ok()
 }
 
 /// Only the tests in `range`.
