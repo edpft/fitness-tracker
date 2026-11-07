@@ -5,13 +5,14 @@
 //! Nothing is written: every point re-derives from them exactly (§ 5).
 
 use domain::{
-    analytical::ftp_test::{Test, tests},
+    analytical::ftp_test::{Test, TestHeartRate, heart_rate, tests},
     cycling::CanonicalCyclingSession,
 };
 
 use crate::{
+    devices::DeviceRegister,
     error::StoreError,
-    ports::{FtpHistory, PerformedCyclingSessions, WeighInHistory},
+    ports::{FtpHistory, PerformedCyclingSessions, RecordedDevices, WearRecord, WeighInHistory},
 };
 
 /// The use case.
@@ -59,5 +60,40 @@ where
             }
         }
         Ok(tests(&tested, &self.weigh_ins.weigh_ins().await?))
+    }
+}
+
+/// The heart rate each test was ridden at (#548).
+pub struct TestHeartRates<S, R, W> {
+    sessions: S,
+    devices: DeviceRegister<R, W>,
+}
+
+impl<S, R, W> TestHeartRates<S, R, W>
+where
+    S: PerformedCyclingSessions + Sync,
+    R: RecordedDevices + Sync,
+    W: WearRecord + Sync,
+{
+    pub const fn new(sessions: S, devices: DeviceRegister<R, W>) -> Self {
+        Self { sessions, devices }
+    }
+
+    /// Every test with heart rate, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if any store is unavailable.
+    pub async fn heart_rates(&self) -> Result<Vec<TestHeartRate>, StoreError> {
+        let register = self.devices.register().await?;
+        let mut rates: Vec<TestHeartRate> = self
+            .sessions
+            .all()
+            .await?
+            .iter()
+            .filter_map(|session| heart_rate(session, &register))
+            .collect();
+        rates.sort_by_key(|rate| rate.on);
+        Ok(rates)
     }
 }

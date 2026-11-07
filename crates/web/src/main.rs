@@ -371,10 +371,13 @@ async fn ftp_tests(
                 Err(error) => return ftp::unreadable(&error.to_string()),
             };
             let tests = configurator::ftp_tests::tests(&store).await;
+            let heart_rates = configurator::ftp_tests::heart_rates(&store).await;
             let ranges = configurator::ranges::today(&store, &setting.zone).await;
             store.close().await;
-            match tests.and_then(|tests| Ok((tests, ranges?))) {
-                Ok((tests, ranges)) => ftp::page(&tests, &ranges, tests_over(&query), &run),
+            match tests.and_then(|tests| Ok((tests, heart_rates?, ranges?))) {
+                Ok((tests, heart_rates, ranges)) => {
+                    ftp::page(&tests, &heart_rates, &ranges, tests_over(&query), &run)
+                }
                 Err(error) => ftp::unreadable(&error.to_string()),
             }
         },
