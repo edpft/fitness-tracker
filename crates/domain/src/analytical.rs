@@ -24,6 +24,7 @@ pub mod composition;
 pub mod confidence;
 pub mod ftp_test;
 pub mod heart_rate;
+pub mod heart_rate_at_power;
 pub mod heart_rate_trend;
 pub mod hrv;
 pub mod one_rep_max;

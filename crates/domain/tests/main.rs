@@ -19,6 +19,7 @@ mod equipment;
 mod ftp_test;
 mod gym_entity;
 mod gym_value_types;
+mod heart_rate_at_power;
 mod heart_rate_per_zone;
 mod holidays;
 mod hrv;

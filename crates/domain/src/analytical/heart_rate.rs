@@ -34,6 +34,7 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
+use super::heart_rate_at_power::{AtPower, seconds};
 use crate::{
     cycling::{
         CanonicalBikePlusRide, CanonicalCyclingSession, CyclingSession, Ftp, PowerZone, Ride,
@@ -112,6 +113,8 @@ pub struct RideHeartRate {
     /// [`None`] where the class prescribes no such interval, the catalogue
     /// has not read the class, or no heart rate was recorded in them.
     pub in_intervals: Option<IntervalHeartRate>,
+    /// What the ride gives heart rate at a fixed power (#621).
+    pub at_power: AtPower,
 }
 
 impl RideHeartRate {
@@ -155,6 +158,7 @@ pub fn heart_rate_by_zone(
         venue: main.at().value().clone(),
         by_zone: by_zone(main, ftp),
         in_intervals: prescribed.and_then(|prescribed| in_intervals(main, prescribed)),
+        at_power: seconds(main, ftp),
         started_at,
         ftp,
         sent_by,
