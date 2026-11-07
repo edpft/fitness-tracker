@@ -1,7 +1,19 @@
 <!--
 Sync Impact Report
-- Version: 8.1.0, amended 2026-10-27. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 9.0.0, amended 2026-11-07. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 9.0.0 — § II.3's timestamps: a recorded moment is its instant and the offset in force where
+  it happened, not a named zone. MAJOR: "an offset is not a substitute" and the zone on every
+  timestamp are removed. The rule was drafted on 2026-08-09, before any source was built, for
+  times not yet happened; a recorded moment arrives with its own offset, and arithmetic between
+  two is on their instants. Garmin, Peloton and Withings state the offset; Hevy states only an
+  instant, so the canonical layer infers it. Travel is what the watch's offset already shows,
+  not an exception for the edit overlay. The operator, 2026-11-07: *"What I wanted was to be
+  able to keep the local time for display and arithmetic purposes"*; *"we don't need to change
+  the normalised data, just the canonical data, which is where merging and enriching is supposed
+  to happen"*; on clock changes, *"these are known events"*; and the edit overlay *"shouldn't be
+  the assumed route for things that could be inferred from data we already have, it's for
+  correcting genuine mistakes or filling genuine gaps."* No decision record: he stated the rule.
 - 8.1.0 — §§ 12.1, 14, 14.1: "programme" is not a noun in this model. What is authored is
   each workout and each primary progression, and a published programme's values are its own,
   with only what it leaves out authored for it: SBS's chart is not authored, its warm-up ramp
@@ -228,7 +240,7 @@ It models domain entities — a gym session of ordered exercises and sets; a cyc
 
 - **Provenance is mandatory:** the source that produced the observation, whatever version or algorithm identifier the source exposes, and the identifier by which the source names this record — which is what makes same-source supersession mechanically detectable at § 4. Provenance records what a source actually tells us; it is not inferred or invented.
 - **Units canonicalised** (kg, metres, seconds, bpm, watts).
-- **Timestamps carry an IANA timezone identifier and are never naive.** 8pm stays 8pm: wall-clock time is what is entered and what is displayed. Which physical encoding carries it — wall clock plus zone, or instant plus zone — is an implementation choice, because given the zone the two are losslessly interconvertible. An offset is not a substitute: it records the rule that applied at one instant, not the rule that applies across an interval. Arithmetic and calendar bucketing therefore resolve through the zone, and a system that assumes every local day is 24 hours long is wrong twice a year. Where a source supplies only a UTC instant, the zone is taken from declared operator configuration — a versioned input to deterministic translation (§ 9), not an inference about the source. Exceptions (e.g. travel) are corrected through the edit overlay.
+- **A recorded moment is its instant and the offset in force where it happened.** Wall-clock time is what is entered and what is displayed: the instant plus that offset. Arithmetic between moments is on their instants, so a night that crosses a clock change is as long as it was. The normalised layer carries the offset only where the source stated one. Where a source states only an instant, the canonical layer infers the offset from what else is held about where the operator was — the watch's offset for that day, or a place a source recorded — and failing that takes the declared home zone's. A clock change is a known event, and the declared home zone's rules say when it happened, so a source that stamps an interval with one offset across a change at home is corrected by them. The edit overlay is for genuine mistakes and genuine gaps, not for what the data already shows. A named zone is needed only for those rules and for times not yet happened, which the schedule projects forward.
 
 **4. Canonical layer.** A function of the normalised layer, deterministic matching, and the match overlay. Cross-source: one entry per real-world event, whatever number of sources recorded it, and whatever number of times each recorded it. This is the clean layer the analytical layer reads.
 
