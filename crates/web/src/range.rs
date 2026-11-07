@@ -71,13 +71,6 @@ pub fn chosen(
     })
 }
 
-/// A day's place on a date axis: its start, in UTC, so every day is the same
-/// width.
-pub fn seconds(on: Date) -> i64 {
-    on.to_zoned(jiff::tz::TimeZone::UTC)
-        .map_or(0, |zoned| zoned.timestamp().as_second())
-}
-
 /// Where the date axis is marked: every day across a week, every Monday
 /// across a few months, every month across a year or two, and every year
 /// beyond. Never on the range's last day, whose label would run off the

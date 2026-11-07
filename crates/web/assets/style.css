@@ -12,6 +12,7 @@
   /* One colour per metric. */
   --weight: #7aa2ff; --fat: #b99cff; --fat-free: #4fd8b8; --ftp: #ffc266;
   --one-rep-max: #ffc266; --hrv: #8fd3ff; --resting-heart-rate: #ff8fb1;
+  --heart-rate-at-power: #ff8fb1;
   --pulse-wave-velocity: #ff9f6b; --sleep: #9aa8ff; --sleep-regularity: #c6b4ff;
   /* One colour per power zone. */
   --z1: #7aa2ff; --z2: #4fd8b8; --z3: #ffc266; --z4: #ff7a6b; --z5: #6a5acd; --z6: #d95926; --z7: #e66767;
@@ -20,6 +21,7 @@
 .weight { --c: var(--weight); } .fat { --c: var(--fat); } .fat-free { --c: var(--fat-free); }
 .ftp { --c: var(--ftp); } .one-rep-max { --c: var(--one-rep-max); } .hrv { --c: var(--hrv); }
 .resting-heart-rate { --c: var(--resting-heart-rate); }
+.heart-rate-at-power { --c: var(--heart-rate-at-power); }
 .pulse-wave-velocity { --c: var(--pulse-wave-velocity); }
 .sleep { --c: var(--sleep); } .sleep-regularity { --c: var(--sleep-regularity); }
 

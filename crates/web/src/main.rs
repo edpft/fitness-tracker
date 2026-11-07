@@ -6,7 +6,7 @@
 //! configurator, so this crate requests, renders and interacts, and names no
 //! adapter.
 
-mod chart;
+mod at_power;
 mod composition;
 mod detail;
 mod equipment;
@@ -134,7 +134,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
     // **Only the chart pages are recorded** (#628): each is a page drawn from
     // the store, and how long that takes is what is in question.
     let charts = Router::new()
-        .route("/heart-rate", get(heart_rate))
+        .route(at_power::PATH, get(heart_rate))
         .route(ftp::PATH, get(ftp_tests))
         .route("/body-weight", get(body_weight))
         .route("/body-composition", get(body_composition))
@@ -311,8 +311,8 @@ fn tests_over(query: &Query<HashMap<String, String>>) -> domain::analytical::ran
         })
 }
 
-/// Every main ride's heart rate per power zone over a range, read afresh from
-/// the store.
+/// Heart rate at a fixed power over a range, read afresh from the store
+/// (#621). It opens on All, as #621 settled.
 async fn heart_rate(
     State(runs): State<Arc<Runs>>,
     query: Query<HashMap<String, String>>,
@@ -323,21 +323,26 @@ async fn heart_rate(
     drawn(
         &runs,
         &collects,
-        "/heart-rate",
-        Some(over(&query)),
+        at_power::PATH,
+        Some(tests_over(&query)),
         &run,
         async {
             let setting = runs.setting();
             let store = match configurator::store::Store::open(&setting.database).await {
                 Ok(store) => store,
-                Err(error) => return chart::unreadable(&error.to_string()),
+                Err(error) => return at_power::unreadable(&error.to_string()),
             };
             let rides = configurator::heart_rate::rides(&store).await;
             let ranges = configurator::ranges::today(&store, &setting.zone).await;
             store.close().await;
             match rides.and_then(|rides| Ok((rides, ranges?))) {
-                Ok((rides, ranges)) => chart::page(&rides, &ranges, over(&query), &run),
-                Err(error) => chart::unreadable(&error.to_string()),
+                Ok((rides, ranges)) => at_power::page(
+                    &domain::analytical::heart_rate_at_power::trended(&rides),
+                    &ranges,
+                    tests_over(&query),
+                    &run,
+                ),
+                Err(error) => at_power::unreadable(&error.to_string()),
             }
         },
     )
