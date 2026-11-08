@@ -130,3 +130,25 @@ fn a_cycle_states_no_anchor_and_round_trips_through_the_store() {
         })
         .expect("the round trip");
 }
+
+/// **An SBS week can be missed without being run again, except its test**
+/// (#732). Its essential session is a repetition-maximum day that sets the
+/// next week's training maximum, so the programme regulates itself; week 4's
+/// is the one-repetition maximum, which anchors what follows.
+#[test]
+fn the_cycle_regulates_itself_except_in_its_test_week() {
+    let mesocycle = cycle().expect("the answers author");
+    let calendar = mesocycle.calendar();
+
+    let regulates: Vec<bool> = [14, 21, 28]
+        .into_iter()
+        .map(|day| Date::new(2026, 9, day).expect("a date"))
+        .chain([Date::new(2026, 10, 5).expect("a date")])
+        .map(|monday| {
+            let week = calendar.place_week(monday).expect("a week of the cycle");
+            mesocycle.regulates_itself_in(week)
+        })
+        .collect();
+
+    assert_eq!(regulates, vec![true, true, true, false]);
+}

@@ -226,6 +226,22 @@ impl GymMesocycle {
         }
     }
 
+    /// Whether a week of this mesocycle can be missed without being run again.
+    ///
+    /// **Only where the programme regulates itself.** SBS's essential session
+    /// is a repetition-maximum day that sets the next week's training maximum
+    /// ([`chart::maximum_after`]), so a week without one programmes the next
+    /// from the maximum it already had (operator, 2026-11-08: *"it is
+    /// autoregulating"*). A linear or periodised block assumes the progress a
+    /// missed week did not make, and a test anchors what follows, so neither
+    /// can (#732).
+    #[must_use]
+    pub fn regulates_itself_in(&self, week: WeekKind) -> bool {
+        matches!(self, Self::Progression(Progression::Provided { .. }))
+            && week != WeekKind::Holding
+            && !self.tests_in(week)
+    }
+
     /// How many repetitions the test it programmes in `week` is for, where
     /// its essential session tests that week; `on` is the day, which tells a
     /// block's entry test from its exit test.

@@ -713,7 +713,8 @@ pub enum MicrocycleState {
     /// One discipline's essential session was performed and another's was not.
     ///
     /// What happens next is [`rerun`]'s: both re-run the microcycle, unless the
-    /// one that completed did so on a test, in which case it holds.
+    /// one that missed regulates itself, in which case both move on, or the one
+    /// that completed did so on a test, in which case it holds.
     ///
     /// **Two disciplines, which is what the tool runs.** A third makes this a
     /// pair of lists rather than a pair of names, and that is the edit to make
@@ -832,6 +833,21 @@ pub struct Rerun {
 /// What a microcycle that has ended costs the plan: nothing, or a week run
 /// again.
 ///
+/// **One programme, so one rerun.** The operator, 2026-11-08: *"The gym and
+/// cycling programmes must remain in sync though, because they must reach
+/// troughs or tests at the same time"*. The programme is hybrid, strength and
+/// cardiovascular fitness from two interventions, not two run side by side, so
+/// the whole microcycle re-runs or neither discipline does (#732).
+///
+/// **It re-runs when a discipline that missed its essential session cannot do
+/// without it.** A test anchors what follows, and a programme that assumes
+/// progress from week to week has not made it. `regulating` names the
+/// disciplines that can: SBS's essential session is a repetition-maximum day
+/// that sets the next week's training maximum, so a week it misses programmes
+/// the next from the maximum it already had
+/// ([`GymMesocycle::regulates_itself_in`]). A week whose every missing
+/// discipline regulates itself moves on.
+///
 /// **A discipline holds only where the microcycle it completed was a test.**
 /// The operator, 2026-09-25:
 ///
@@ -841,27 +857,43 @@ pub struct Rerun {
 /// > redo the 1RM test if I missed the FTP test.
 ///
 /// So the one that missed re-runs its test microcycle, and the one that
-/// completed rides a holding microcycle beside it — whichever mesocycle the
-/// test ended: the entry test, SBS week 4, Base 2, Build or Peak 2. Every other
-/// partially completed week re-runs for both, as an incomplete one does.
+/// completed rides a holding microcycle beside it: whichever mesocycle the
+/// test ended, the entry test, SBS week 4, Base 2, Build or Peak 2.
+///
+/// `lost` is as [`owed_by`] reads it.
+///
+/// [`GymMesocycle::regulates_itself_in`]: crate::prescription::mesocycle::GymMesocycle::regulates_itself_in
 #[must_use]
-pub fn rerun(monday: Date, state: MicrocycleState, sessions: &[Placed]) -> Option<Rerun> {
-    match state {
-        MicrocycleState::Running | MicrocycleState::Completed => None,
-        MicrocycleState::Incomplete => Some(Rerun {
-            monday,
-            holding: None,
-        }),
-        MicrocycleState::PartiallyCompleted { completed, .. } => {
-            let tested = sessions.iter().any(|session| {
-                session.discipline == completed && session.role == ESSENTIAL && session.test
-            });
-            Some(Rerun {
-                monday,
-                holding: tested.then_some(completed),
-            })
-        }
+pub fn rerun(
+    monday: Date,
+    state: MicrocycleState,
+    sessions: &[Placed],
+    lost: &[Discipline],
+    regulating: &[Discipline],
+) -> Option<Rerun> {
+    let completed = match state {
+        MicrocycleState::Running | MicrocycleState::Completed => return None,
+        MicrocycleState::Incomplete => None,
+        MicrocycleState::PartiallyCompleted { completed, .. } => Some(completed),
+    };
+
+    let tests = |discipline: Discipline| {
+        sessions.iter().any(|session| {
+            session.discipline == discipline && session.role == ESSENTIAL && session.test
+        })
+    };
+    let owes_it = Discipline::ALL.iter().copied().any(|discipline| {
+        owed_by(sessions, discipline, lost) == Owed::Lost
+            && (tests(discipline) || !regulating.contains(&discipline))
+    });
+    if !owes_it {
+        return None;
     }
+
+    Some(Rerun {
+        monday,
+        holding: completed.filter(|completed| tests(*completed)),
+    })
 }
 
 /// Which re-run of its microcycle a week is: the first re-run is 1.
