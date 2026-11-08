@@ -1077,11 +1077,7 @@ where
             standing = self.ports.microcycle.standing(now).await?;
         }
         let diary = self.ports.diary.diary().await?;
-        let reschedule = Reschedule::new(
-            standing.reruns.clone(),
-            diary.clone(),
-            standing.missed.clone(),
-        );
+        let reschedule = standing.reschedule(diary.clone());
         let plan = self.plan(now, holidays, &standing, &reschedule).await?;
 
         // 4. The first session that can still be performed, prescribed or not.

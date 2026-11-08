@@ -23,7 +23,7 @@ use domain::planner::Arrangement as _;
 use domain::{
     cycling::{CyclingMesocycle, CyclingMesocycleId},
     plan::{Mesocycles, Occupies, Plan, PlanId, PlanName, PlanWindow},
-    planner::{self, Missed, Rerun, RerunOrdinal},
+    planner::{self, Cut, Missed, Rerun, RerunOrdinal},
     planner::{Discipline, SessionRole},
     prescription::{GymMesocycle, MesocycleId},
     schedule::Diary,
@@ -39,15 +39,17 @@ use crate::{CyclingMesocycleStore, MesocycleInForce, MesocycleStore, PlanStore, 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Reschedule {
     reruns: Vec<Rerun>,
+    cuts: Vec<Cut>,
     diary: Diary,
     missed: Missed,
 }
 
 impl Reschedule {
     #[must_use]
-    pub const fn new(reruns: Vec<Rerun>, diary: Diary, missed: Missed) -> Self {
+    pub const fn new(reruns: Vec<Rerun>, cuts: Vec<Cut>, diary: Diary, missed: Missed) -> Self {
         Self {
             reruns,
+            cuts,
             diary,
             missed,
         }
@@ -73,8 +75,10 @@ impl Reschedule {
     }
 
     fn apply(&self, plan: &Plan) -> Result<Plan, StoreError> {
-        planner::rescheduled(plan, &self.reruns, &self.diary).map_err(|error| StoreError::Corrupt {
-            detail: format!("{} will not reschedule: {error}", plan.name()),
+        planner::rescheduled(plan, &self.reruns, &self.cuts, &self.diary).map_err(|error| {
+            StoreError::Corrupt {
+                detail: format!("{} will not reschedule: {error}", plan.name()),
+            }
         })
     }
 }

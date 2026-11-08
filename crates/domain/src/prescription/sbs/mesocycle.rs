@@ -75,9 +75,6 @@ impl Sbs {
 
         check_primary(pattern, exercise, &fills, GATING)?;
 
-        // The chart is four weeks. A calendar of any other length is not this
-        // programme run longer or shorter — it is a different programme, and
-        // there is no rule here for what its extra weeks would prescribe.
         // The chart is four weeks. A week it does not state is not this
         // programme run longer, and a week taken twice or out of order is not
         // a selection of it.

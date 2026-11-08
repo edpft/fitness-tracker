@@ -494,6 +494,31 @@ impl Macrocycle {
     }
 }
 
+impl Macrocycle {
+    /// Whether a running mesocycle that ends on `end` still leaves the term
+    /// room to end in a complete mesocycle and its tests (#732).
+    ///
+    /// **The question a boundary asks, asked early.** The operator,
+    /// 2026-11-08: *"we should always be trying to end in a complete
+    /// mesocycle, what should get sacrificed to make that happen is the
+    /// current mesocycle."* So it fits where it ends on the last day of term,
+    /// or where [`Self::next`] would follow it with a progressing mesocycle
+    /// rather than a hold. Past the transition it never fits.
+    ///
+    /// `current` is the running cycling mesocycle.
+    pub fn leaves_room(&self, chain: Chain, current: Cycling, end: Date) -> bool {
+        let transition = self.transition();
+        if end > transition {
+            return false;
+        }
+        if end == transition {
+            return true;
+        }
+        self.next(chain, Some(current), end)
+            .is_some_and(|next| next.gym() == Gym::Sbs)
+    }
+}
+
 /// Whole weeks from one Monday to another, `None` if `to` is before `from`.
 fn weeks_between(from: Date, to: Date) -> Option<u32> {
     let days = (to - from).get_days();

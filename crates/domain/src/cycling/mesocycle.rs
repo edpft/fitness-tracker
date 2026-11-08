@@ -50,7 +50,11 @@ use crate::{
     sequence::NonEmpty,
 };
 
-use super::{session::CyclingSession, venue::RideVenue};
+use super::{
+    session::CyclingSession,
+    shape::{PublishedProgramme, ZoneProfile},
+    venue::RideVenue,
+};
 
 /// Which session of a microcycle, counting from one.
 ///
@@ -624,6 +628,56 @@ impl CyclingMesocycle {
             lost,
             ..self.clone()
         }
+    }
+
+    /// The same mesocycle without some of its published microcycles (#732).
+    ///
+    /// The weeks it lost and held are kept: a cut drops weeks still to come,
+    /// and changes nothing that has happened. `None` for a microcycle it does
+    /// not ride, for a mesocycle nobody published, and for a cut that would
+    /// leave nothing.
+    #[must_use]
+    pub fn without(&self, dropped: &[u32]) -> Option<Self> {
+        let ridden: Vec<u32> = self.provided_from()?.microcycles().collect();
+        if dropped
+            .iter()
+            .any(|microcycle| !ridden.contains(microcycle))
+        {
+            return None;
+        }
+        let kept: Vec<CyclingMicrocycle> = self
+            .microcycles
+            .iter()
+            .filter(|microcycle| {
+                microcycle
+                    .published_ordinal()
+                    .is_some_and(|ordinal| !dropped.contains(&ordinal))
+            })
+            .cloned()
+            .collect();
+        Some(Self {
+            microcycles: NonEmpty::new(kept).ok()?,
+            ..self.clone()
+        })
+    }
+
+    /// Its rides as a grid of published cells, for asking what a shorter
+    /// selection of it would keep (#732).
+    ///
+    /// **The rides the operator rides, not the ones published**: the whole a
+    /// cut is compared against is this mesocycle as he rides it. Empty for one
+    /// nobody published.
+    #[must_use]
+    pub fn as_published(&self) -> PublishedProgramme {
+        PublishedProgramme::new(self.microcycles.iter().flat_map(|microcycle| {
+            microcycle.rides().values().filter_map(|ride| {
+                let at = ride.published()?;
+                Some((
+                    (at.microcycle(), at.session()),
+                    ZoneProfile::of([ride.session().ride()]),
+                ))
+            })
+        }))
     }
 
     /// The Mondays of the weeks this mesocycle lost.

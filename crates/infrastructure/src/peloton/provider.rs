@@ -232,7 +232,7 @@ impl PublishedProgrammes for PelotonProgrammes<'_> {
 }
 
 /// Which programme a provenance names, by the names Peloton gives them.
-fn identify(programme: &ExternalProgramme) -> Option<PublishedCycling> {
+pub fn identify(programme: &ExternalProgramme) -> Option<PublishedCycling> {
     if programme.provider().as_str() != PELOTON {
         return None;
     }

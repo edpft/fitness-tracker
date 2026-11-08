@@ -36,7 +36,7 @@ use crate::{
     holding::NoHoldingRide,
     microcycle::Standing,
     published::{self, BuildError, EASIER, HARDER},
-    reschedule::{Reschedule, ReschedulingPlans},
+    reschedule::ReschedulingPlans,
 };
 
 /// Microcycles and cycling sessions in a committed mesocycle: the shape the
@@ -140,14 +140,8 @@ where
         let Some(macrocycle) = Macrocycle::on(now.date, holidays) else {
             return Ok(None);
         };
-        let plans = ReschedulingPlans::new(
-            self.ports.plans.clone(),
-            Reschedule::new(
-                standing.reruns.clone(),
-                diary.clone(),
-                standing.missed.clone(),
-            ),
-        );
+        let plans =
+            ReschedulingPlans::new(self.ports.plans.clone(), standing.reschedule(diary.clone()));
         let Some(plan) = in_force(&plans, &macrocycle).await? else {
             return Ok(None);
         };
@@ -205,24 +199,9 @@ where
             .await?)
     }
 
-    /// Which cycling mesocycle a committed one is, from where it was taken.
-    ///
-    /// A mesocycle assembled here is a hold's holding weeks; the published test
-    /// week is a hold with nothing held.
+    /// Which cycling mesocycle a committed one is ([`cycling_kind`]).
     fn cycling_of(&self, mesocycle: &CyclingMesocycle) -> Option<Cycling> {
-        let Some(provided) = mesocycle.provided_from() else {
-            let holding = u32::try_from(mesocycle.duration_weeks()).ok()?;
-            return Some(Cycling::Hold { holding });
-        };
-        let second_half = provided.microcycles().next().is_some_and(|first| first > 4);
-        match self.ports.published.which(provided.programme())? {
-            PublishedCycling::Test => Some(Cycling::Hold { holding: 0 }),
-            PublishedCycling::Build => Some(Cycling::Build),
-            PublishedCycling::Base if second_half => Some(Cycling::Base2),
-            PublishedCycling::Base => Some(Cycling::Base1),
-            PublishedCycling::Peak if second_half => Some(Cycling::Peak2),
-            PublishedCycling::Peak => Some(Cycling::Peak1),
-        }
+        cycling_kind(mesocycle, |programme| self.ports.published.which(programme))
     }
 
     /// The gym's half: SBS, or a hold's linear holding weeks and its test week.
@@ -423,6 +402,30 @@ async fn in_force<P: PlanStore + Sync>(
         return Ok(None);
     };
     plans.named(window.name()).await
+}
+
+/// Which cycling mesocycle a committed one is, from where it was taken.
+///
+/// A mesocycle assembled here is a hold's holding weeks; the published test
+/// week is a hold with nothing held. `which` names the published programme a
+/// provenance points at.
+pub fn cycling_kind(
+    mesocycle: &CyclingMesocycle,
+    which: impl Fn(&ExternalProgramme) -> Option<PublishedCycling>,
+) -> Option<Cycling> {
+    let Some(provided) = mesocycle.provided_from() else {
+        let holding = u32::try_from(mesocycle.duration_weeks()).ok()?;
+        return Some(Cycling::Hold { holding });
+    };
+    let second_half = provided.microcycles().next().is_some_and(|first| first > 4);
+    match which(provided.programme())? {
+        PublishedCycling::Test => Some(Cycling::Hold { holding: 0 }),
+        PublishedCycling::Build => Some(Cycling::Build),
+        PublishedCycling::Base if second_half => Some(Cycling::Base2),
+        PublishedCycling::Base => Some(Cycling::Base1),
+        PublishedCycling::Peak if second_half => Some(Cycling::Peak2),
+        PublishedCycling::Peak => Some(Cycling::Peak1),
+    }
 }
 
 /// The published programme a gym mesocycle was taken from.

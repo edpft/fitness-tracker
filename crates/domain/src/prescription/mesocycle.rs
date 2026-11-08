@@ -245,6 +245,34 @@ impl GymMesocycle {
         from.microcycles().nth(index)
     }
 
+    /// The same mesocycle without some of its published weeks (#732).
+    ///
+    /// **A cut, and only a provided programme has one**: its weeks are a
+    /// selection of a published chart, so a shorter selection is still that
+    /// programme. `None` for any other mesocycle, for a week it does not run,
+    /// and for a cut that would leave nothing.
+    #[must_use]
+    pub fn without(&self, dropped: &[u32]) -> Option<Self> {
+        let Self::Progression(Progression::Provided { from, cycle }) = self else {
+            return None;
+        };
+        let weeks: Vec<u32> = from.microcycles().collect();
+        if dropped.iter().any(|week| !weeks.contains(week)) {
+            return None;
+        }
+        let kept: Vec<u32> = weeks
+            .into_iter()
+            .filter(|week| !dropped.contains(week))
+            .collect();
+        let duration = u32::try_from(kept.len()).ok()?;
+        let calendar = cycle.calendar().shortened(duration).ok()?;
+        let from = ProvidedFrom::new(from.programme().clone(), kept).ok()?;
+        Some(Self::Progression(Progression::Provided {
+            from,
+            cycle: cycle.recalendared(calendar),
+        }))
+    }
+
     /// Whether a week of this mesocycle can be missed without being run again.
     ///
     /// **Only where the programme regulates itself.** SBS's essential session

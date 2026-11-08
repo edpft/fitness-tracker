@@ -50,6 +50,7 @@ mod peloton_stack_contract;
 mod peloton_token_cache;
 mod prescription;
 mod progression;
+mod refit;
 mod refusals;
 mod resting_heart_rate;
 mod retraction;

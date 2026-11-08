@@ -283,3 +283,23 @@ fn every_mesocycle_committed_through_the_term_ends_by_the_transition() {
         }
     }
 }
+
+/// **Peak 1 ending on 22 November leaves room** (#732): Peak 2 runs from the
+/// 23rd and tests in the week of 14 December. A week later it does not, and
+/// a mesocycle reaching into Christmas never fits.
+#[test]
+fn a_running_peak_1_leaves_room_for_peak_2_only_by_22_november() {
+    let autumn = autumn_2026().expect("autumn 2026");
+    let chain = Chain::BuildThenPeak;
+    assert!(autumn.leaves_room(chain, Cycling::Peak1, date(2026, 11, 23)));
+    assert!(!autumn.leaves_room(chain, Cycling::Peak1, date(2026, 11, 30)));
+    assert!(!autumn.leaves_room(chain, Cycling::Peak2, date(2026, 12, 28)));
+}
+
+/// **The term's last mesocycle fits by ending on its last day**: nothing need
+/// follow it.
+#[test]
+fn a_mesocycle_ending_with_the_term_leaves_room() {
+    let autumn = autumn_2026().expect("autumn 2026");
+    assert!(autumn.leaves_room(Chain::BuildThenPeak, Cycling::Peak2, date(2026, 12, 21)));
+}
