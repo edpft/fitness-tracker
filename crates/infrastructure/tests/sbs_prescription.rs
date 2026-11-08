@@ -64,12 +64,17 @@ const fn week_two() -> Date {
 
 /// *Squat 2x Int*, published by Stronger By Science: the whole four-week chart.
 fn provided() -> Result<ProvidedFrom, Failure> {
+    taking(vec![1, 2, 3, 4])
+}
+
+/// The same chart, taking only the weeks given (#732).
+fn taking(weeks: Vec<u32>) -> Result<ProvidedFrom, Failure> {
     Ok(ProvidedFrom::new(
         ExternalProgramme::new(
             Provider::try_from("Stronger By Science".to_owned())?,
             ProgrammeName::try_from("Squat 2x Int".to_owned())?,
         ),
-        vec![1, 2, 3, 4],
+        weeks,
     )?)
 }
 
@@ -106,7 +111,11 @@ fn entry_test() -> Result<GymMesocycle, Failure> {
 }
 
 fn cycle() -> Result<GymMesocycle, Failure> {
-    let answers = mesocycle::authored(opens(), Shape::Provided { from: provided()? })?;
+    cycle_of(provided()?)
+}
+
+fn cycle_of(from: ProvidedFrom) -> Result<GymMesocycle, Failure> {
+    let answers = mesocycle::authored(opens(), Shape::Provided { from })?;
     Ok(mesocycle::authoring(answers, &[])??)
 }
 
@@ -169,6 +178,15 @@ type Prescriber = Prescribing<
 async fn ready(
     performed: &[(Date, &[(u64, u32)])],
 ) -> Result<(Prescriber, tempfile::TempDir, SqlitePool), Failure> {
+    let cycle = cycle()?;
+    ready_with(cycle, performed).await
+}
+
+/// As [`ready`], with the cycle given.
+async fn ready_with(
+    cycle: GymMesocycle,
+    performed: &[(Date, &[(u64, u32)])],
+) -> Result<(Prescriber, tempfile::TempDir, SqlitePool), Failure> {
     let (directory, pool) = support::store::derived_and_authored().await?;
     let zone = corpus::zone()?;
 
@@ -178,7 +196,7 @@ async fn ready(
     // **Built before the await, not inside it.** A `?` in an argument holds its
     // `Result` across the await, and a boxed error is not `Send` — which
     // `clippy::future_not_send` refuses rather than this reading better.
-    let plan = mesocycle::named_plan("2026-autumn", vec![entry_test()?, cycle()?])?;
+    let plan = mesocycle::named_plan("2026-autumn", vec![entry_test()?, cycle])?;
     mesocycle::design(&pool).await?;
     Authoring::new(SqlitePlanStore::new(pool.clone(), zone.clone()))
         .author(&plan)
@@ -336,6 +354,32 @@ fn the_primary_slot_is_the_front_squat() {
                 .as_deref(),
             Some("knee_dominant"),
         );
+    })
+    .expect("a runtime");
+}
+
+/// **A cycle cut to x-2-3-4 runs chart week 2 in its first week** (#732): four
+/// sets of three on the Monday, not week 1's five of five.
+#[test]
+fn a_cut_cycle_runs_the_charts_week_not_the_calendars() {
+    corpus::block_on(async {
+        let cut = cycle_of(taking(vec![2, 3, 4]).expect("a selection")).expect("the cut authors");
+        let (prescriber, _directory, _pool) = ready_with(cut, &[])
+            .await
+            .expect("a store holding the cut cycle");
+
+        let prescription = prescriber
+            .prescribe(opens())
+            .await
+            .expect("its first week derives");
+
+        let primary = primary_of(&prescription).expect("a primary exercise");
+        let reps: Vec<String> = working_sets(primary)
+            .expect("fixed sets at an absolute load")
+            .into_iter()
+            .map(|(_, reps)| reps)
+            .collect();
+        assert_eq!(reps, vec!["3".to_owned(); 4], "chart week 2 is 4 × 3");
     })
     .expect("a runtime");
 }

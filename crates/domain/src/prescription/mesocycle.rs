@@ -220,10 +220,29 @@ impl GymMesocycle {
             (Self::Progression(Progression::BlockPeriodisation(block)), WeekKind::Climbing(at)) => {
                 block.kind(at) == Some(WeekKind::Test)
             }
-            (Self::Progression(Progression::Provided { .. }), WeekKind::Climbing(at)) => {
-                at.as_u32() == chart::WEEKS
+            (Self::Progression(Progression::Provided { .. }), WeekKind::Climbing(_)) => {
+                self.published_week(week) == Some(chart::WEEKS)
             }
         }
+    }
+
+    /// Which week of the published chart a week of this mesocycle runs.
+    ///
+    /// **The published numbering, as [`ProvidedFrom`] keeps it.** A cycle cut
+    /// to x-2-3-4 runs chart week 2 in its first calendar week (#732), so the
+    /// calendar's index is not the chart's. `None` for a programme that was not
+    /// provided, and for a week that is not one of its climbing weeks.
+    ///
+    /// [`ProvidedFrom`]: crate::provider::ProvidedFrom
+    #[must_use]
+    pub fn published_week(&self, week: WeekKind) -> Option<u32> {
+        let (Self::Progression(Progression::Provided { from, .. }), WeekKind::Climbing(at)) =
+            (self, week)
+        else {
+            return None;
+        };
+        let index = usize::try_from(at.as_u32().checked_sub(1)?).ok()?;
+        from.microcycles().nth(index)
     }
 
     /// Whether a week of this mesocycle can be missed without being run again.
@@ -383,11 +402,10 @@ pub enum InconsistentMesocycle {
     )]
     GatingRoleNeverRuns { gating: SessionRole },
     #[error(
-        "the SBS chart states four weeks and this calendar runs {given} — a \
-         cycle of another length is a different programme, not this one \
-         stretched"
+        "an SBS cycle runs weeks of the chart's four in order, one to each of \
+         its {calendar} calendar weeks, and {weeks:?} is not that"
     )]
-    ChartIsFourWeeks { given: u32 },
+    NotTheChartsWeeks { weeks: Vec<u32>, calendar: u32 },
     #[error(
         "a test is taken on the {role} session and this one never runs it, \
          so the test would never be taken"

@@ -152,3 +152,70 @@ fn the_cycle_regulates_itself_except_in_its_test_week() {
 
     assert_eq!(regulates, vec![true, true, true, false]);
 }
+
+/// **A cycle cut to x-2-3-4** (#732): three calendar weeks running chart weeks
+/// 2, 3 and 4, its test still the last.
+#[test]
+fn a_cut_cycle_runs_the_weeks_it_took() {
+    let answers = mesocycle::authored(
+        Date::new(2026, 11, 16).expect("a date"),
+        Shape::Provided {
+            from: ProvidedFrom::new(
+                ExternalProgramme::new(
+                    Provider::try_from("Stronger By Science".to_owned()).expect("a provider"),
+                    ProgrammeName::try_from("Squat 2x Int".to_owned()).expect("a name"),
+                ),
+                vec![2, 3, 4],
+            )
+            .expect("a selection"),
+        },
+    )
+    .expect("answers");
+    let mesocycle = mesocycle::authoring(answers, &[])
+        .expect("authoring runs")
+        .expect("the cut authors");
+    let calendar = mesocycle.calendar();
+    assert_eq!(calendar.duration_weeks(), 3);
+
+    let weeks: Vec<(Option<u32>, bool)> = [16, 23, 30]
+        .into_iter()
+        .map(|day| {
+            let week = calendar
+                .place_week(Date::new(2026, 11, day).expect("a date"))
+                .expect("a week of the cycle");
+            (mesocycle.published_week(week), mesocycle.tests_in(week))
+        })
+        .collect();
+    assert_eq!(
+        weeks,
+        vec![(Some(2), false), (Some(3), false), (Some(4), true)]
+    );
+}
+
+/// **Only the chart's weeks, in its order.** A fifth week is not SBS run
+/// longer, and 3-2-4 is not a selection of it.
+#[test]
+fn a_selection_outside_the_chart_is_refused() {
+    for weeks in [vec![3, 2, 4], vec![2, 3, 4, 5]] {
+        let answers = mesocycle::authored(
+            Date::new(2026, 11, 16).expect("a date"),
+            Shape::Provided {
+                from: ProvidedFrom::new(
+                    ExternalProgramme::new(
+                        Provider::try_from("Stronger By Science".to_owned()).expect("a provider"),
+                        ProgrammeName::try_from("Squat 2x Int".to_owned()).expect("a name"),
+                    ),
+                    weeks.clone(),
+                )
+                .expect("a selection"),
+            },
+        )
+        .expect("answers");
+        assert!(
+            mesocycle::authoring(answers, &[])
+                .expect("authoring runs")
+                .is_err(),
+            "{weeks:?} is refused"
+        );
+    }
+}

@@ -152,17 +152,18 @@ impl Shape {
     /// being circular: the interruptions come from the window, so the window
     /// cannot come from the interruptions.
     #[must_use]
-    pub const fn calendar_weeks(&self) -> u32 {
+    pub fn calendar_weeks(&self) -> u32 {
         match self {
             Self::Test { .. } => Test::WEEKS,
-            Self::Provided { .. } => WEEKS,
+            // One calendar week to each chart week taken (#732).
+            Self::Provided { from } => u32::try_from(from.microcycles().count()).unwrap_or(WEEKS),
             Self::Linear { weeks, .. } => *weeks,
             // The entry test is a week in front of the phases rather than one of
             // them (decision 0013), so a nine-week block that measures its own
             // entry occupies ten.
             Self::Block {
                 weeks, entry_test, ..
-            } => weeks.saturating_add(if entry_test.is_some() { 1 } else { 0 }),
+            } => weeks.saturating_add(u32::from(entry_test.is_some())),
         }
     }
 }
@@ -281,10 +282,12 @@ pub fn mesocycle(
         }
         Shape::Provided { from } => {
             gates_on_a_session_the_week_offers(&week, sbs::GATING)?;
-            let calendar = Calendar::new(start, WEEKS, interruptions, week, zone)?;
+            let weeks: Vec<u32> = from.microcycles().collect();
+            let duration = u32::try_from(weeks.len()).unwrap_or(WEEKS);
+            let calendar = Calendar::new(start, duration, interruptions, week, zone)?;
             Ok(GymMesocycle::Progression(Progression::Provided {
+                cycle: Sbs::new(pattern, primary_exercise, fills, calendar, &weeks)?,
                 from,
-                cycle: Sbs::new(pattern, primary_exercise, fills, calendar)?,
             }))
         }
     }

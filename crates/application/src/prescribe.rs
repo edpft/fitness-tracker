@@ -606,9 +606,10 @@ where
         before: Date,
     ) -> Result<Option<Kg>, PrescriptionError> {
         match mesocycle {
-            GymMesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => {
-                Ok(Some(self.sbs_maximum(plan, sbs, consulted, before).await?))
-            }
+            GymMesocycle::Progression(Progression::Provided { cycle: sbs, .. }) => Ok(Some(
+                self.sbs_maximum(plan, mesocycle, sbs, consulted, before)
+                    .await?,
+            )),
             GymMesocycle::Progression(
                 Progression::Linear(_) | Progression::BlockPeriodisation(_),
             )
@@ -781,7 +782,8 @@ where
                     // one-repetition maximum — counts toward what it leaves.
                     let after = span.end().tomorrow().unwrap_or_else(|_| span.end());
                     Some((
-                        self.sbs_maximum(plan, before, consulted, after).await?,
+                        self.sbs_maximum(plan, mesocycle, before, consulted, after)
+                            .await?,
                         None,
                     ))
                 }
@@ -826,9 +828,12 @@ where
         )))
     }
 
+    /// `mesocycle` is the one `sbs` is the cycle of, which says which week of
+    /// the chart each of its calendar weeks runs (#732).
     async fn sbs_maximum(
         &self,
         plan: &PlanName,
+        mesocycle: &GymMesocycle,
         sbs: &Sbs,
         consulted: &Consulted<'_>,
         before: Date,
@@ -895,7 +900,10 @@ where
             if abandoned_at_the_top_set(performance) {
                 continue;
             }
-            performed.push((index.as_u32(), completed_sets_of(performance)));
+            let charted = mesocycle
+                .published_week(WeekKind::Climbing(index))
+                .unwrap_or_else(|| index.as_u32());
+            performed.push((charted, completed_sets_of(performance)));
         }
 
         maximum = sbs_maximum_after(consulted.chart, maximum, &performed, increment);
@@ -1541,7 +1549,13 @@ fn primary_slot_item(
             block_load(block, role, week, standing.opening, steps)
         }
         GymMesocycle::Progression(Progression::Provided { .. }) => {
-            sbs_load(consulted.chart, role, week, steps, maximum)
+            // The chart's week, not the calendar's: a cycle cut to x-2-3-4
+            // runs chart week 2 first (#732).
+            let charted = mesocycle
+                .published_week(week)
+                .and_then(|at| domain::prescription::WeekIndex::new(at).ok())
+                .map_or(week, WeekKind::Climbing);
+            sbs_load(consulted.chart, role, charted, steps, maximum)
         }
         GymMesocycle::Test(test) => test_load(test, consulted, role, inheritance, steps),
     };
