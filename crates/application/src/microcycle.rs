@@ -318,7 +318,8 @@ where
             let placed = placed(&week.sessions);
             let lost = lost_by(&plan, &diary, monday);
             let state = planner::microcycle_state(&placed, &lost);
-            if let Some(rerun) = planner::rerun(monday, state, &placed) {
+            let regulating = regulating(&plan, monday);
+            if let Some(rerun) = planner::rerun(monday, state, &placed, &lost, &regulating) {
                 reruns.push(rerun);
             }
             weeks.push((monday, state));
@@ -714,6 +715,27 @@ fn placed(sessions: &[Session]) -> Vec<Placed> {
 ///
 /// **Only the plan's**: a discipline it does not train that week has nothing
 /// to lose, and reading it as lost would re-run the other's microcycle for it.
+/// The disciplines whose week commencing `monday` can be missed without the
+/// microcycle running again: the gym, where its mesocycle regulates itself
+/// that week (#732). Cycling's programmes assume progress from week to week,
+/// so it never does.
+fn regulating(plan: &Plan, monday: Date) -> Vec<Discipline> {
+    let regulates = plan
+        .gym()
+        .and_then(|side| side.on(monday))
+        .is_some_and(|(_, mesocycle)| {
+            mesocycle
+                .calendar()
+                .place_week(monday)
+                .is_ok_and(|week| mesocycle.regulates_itself_in(week))
+        });
+    if regulates {
+        vec![Discipline::Gym]
+    } else {
+        Vec::new()
+    }
+}
+
 fn lost_by(plan: &Plan, diary: &Diary, monday: Date) -> Vec<Discipline> {
     let sunday = monday
         .checked_add(jiff::Span::new().days(6))
