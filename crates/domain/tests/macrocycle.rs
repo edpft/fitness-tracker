@@ -3,7 +3,7 @@
 use std::num::NonZeroU8;
 
 use domain::{
-    macrocycle::{Chain, Concurrent, Cycling, Macrocycle, Phase, Term},
+    macrocycle::{Chain, Concurrent, Cycling, Gym, Macrocycle, Phase, Term, Whole},
     plan::Span,
     schedule::{Holidays, PublicHoliday, SchoolHoliday, SchoolHolidayKind},
 };
@@ -284,22 +284,32 @@ fn every_mesocycle_committed_through_the_term_ends_by_the_transition() {
     }
 }
 
-/// **Peak 1 ending on 22 November leaves room** (#732): Peak 2 runs from the
-/// 23rd and tests in the week of 14 December. A week later it does not, and
-/// a mesocycle reaching into Christmas never fits.
+/// **A lost week in Peak 1 starts Peak again** (#732): from 9 November, the
+/// six weeks to the holiday are six of Peak's eight, beside SBS.
 #[test]
-fn a_running_peak_1_leaves_room_for_peak_2_only_by_22_november() {
+fn a_restart_in_peak_1_takes_the_weeks_left_from_the_whole_of_peak() {
     let autumn = autumn_2026().expect("autumn 2026");
-    let chain = Chain::BuildThenPeak;
-    assert!(autumn.leaves_room(chain, Cycling::Peak1, date(2026, 11, 23)));
-    assert!(!autumn.leaves_room(chain, Cycling::Peak1, date(2026, 11, 30)));
-    assert!(!autumn.leaves_room(chain, Cycling::Peak2, date(2026, 12, 28)));
+    let restarted = autumn
+        .restart(Cycling::Peak1, date(2026, 11, 9))
+        .expect("Peak starts again");
+    assert_eq!(
+        restarted.cycling(),
+        Cycling::Selection {
+            of: Whole::Peak,
+            weeks: 6
+        }
+    );
+    assert_eq!(restarted.gym(), Gym::Sbs);
+    assert_eq!(restarted.to_string(), "SBS + Peak, 6 weeks of its 8");
 }
 
-/// **The term's last mesocycle fits by ending on its last day**: nothing need
-/// follow it.
+/// **Only a programme we split starts again, and only into what it can
+/// fill**: Build is whole already, nine weeks are more than Peak publishes,
+/// and one is no mesocycle with a trough at its end.
 #[test]
-fn a_mesocycle_ending_with_the_term_leaves_room() {
+fn a_restart_fits_the_whole_it_was_split_from() {
     let autumn = autumn_2026().expect("autumn 2026");
-    assert!(autumn.leaves_room(Chain::BuildThenPeak, Cycling::Peak2, date(2026, 12, 21)));
+    assert!(autumn.restart(Cycling::Build, date(2026, 11, 9)).is_none());
+    assert!(autumn.restart(Cycling::Peak2, date(2026, 10, 19)).is_none());
+    assert!(autumn.restart(Cycling::Peak2, date(2026, 12, 14)).is_none());
 }

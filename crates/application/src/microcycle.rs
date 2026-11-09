@@ -17,7 +17,7 @@ use domain::{
     macrocycle::Macrocycle,
     plan::{Plan, Span},
     planner::{
-        self, Cut, Filled, MicrocycleState, Missed, Placed, Recorded, Rerun, SessionState,
+        self, Filled, MicrocycleState, Missed, Placed, Recorded, Rerun, Restart, SessionState,
         Unreschedulable,
     },
     planner::{Discipline, RecordedSession, ScheduledSlot, SessionRole, accounted},
@@ -70,9 +70,10 @@ pub struct Standing {
     /// hand it to [`planner::rescheduled`], or to the stores in
     /// [`crate::reschedule`].
     pub reruns: Vec<Rerun>,
-    /// The weeks a running mesocycle gave up so the term still ends in a
-    /// complete mesocycle (#732). Hand it on beside `reruns`.
-    pub cuts: Vec<Cut>,
+    /// The Mondays a lost progressive week started the programme again
+    /// (#732): the mesocycle in force ends the Sunday before, and the boundary
+    /// commits the weeks left in the term. Hand it on beside `reruns`.
+    pub restarts: Vec<Restart>,
     /// The essential sessions missed so far, each moved to a later slot of its
     /// discipline where the week had one. Hand it on beside `reruns`, so that
     /// prescribing reads each slot's role as this does.
@@ -85,12 +86,12 @@ pub struct Standing {
 
 impl Standing {
     /// What every other reader needs to see the plan as this walk left it: its
-    /// re-runs, its cuts and its missed sessions, read against `diary`.
+    /// re-runs, its restarts and its missed sessions, read against `diary`.
     #[must_use]
     pub fn reschedule(&self, diary: Diary) -> crate::reschedule::Reschedule {
         crate::reschedule::Reschedule::new(
             self.reruns.clone(),
-            self.cuts.clone(),
+            self.restarts.clone(),
             diary,
             self.missed.clone(),
         )
@@ -233,13 +234,13 @@ pub struct MicrocyclePorts<D, P, G, C, Y, L> {
     pub cycling_performed: L,
 }
 
-/// What the walk knows of the term, so that a mesocycle a re-run has pushed
-/// past it can be cut (#732).
+/// What the walk knows of the term, so that a lost progressive week can start
+/// the programme again over what is left of it (#732).
 ///
 /// **The holidays are a fact about the world**, read by the caller, and
 /// `identify` names the published programme a provenance points at, which is
-/// the source adapter's knowledge. Without a term nothing is cut, and a re-run
-/// lengthens its mesocycle as it did before.
+/// the source adapter's knowledge. Without a term nothing starts again, and a
+/// re-run lengthens its mesocycle as it did before.
 #[derive(Debug, Clone)]
 pub struct Term {
     pub holidays: Holidays,
@@ -282,7 +283,8 @@ where
         }
     }
 
-    /// The same walk, cutting a running mesocycle that no longer fits `term`.
+    /// The same walk, starting the programme again over what is left of
+    /// `term` where a progressive week is lost.
     #[must_use]
     pub fn within(self, term: Term) -> Self {
         Self {
@@ -326,11 +328,11 @@ where
         let mut monday = planner::commencing(authored.window().span().start());
         let mut opens: Option<Boundary> = None;
         let mut reruns: Vec<Rerun> = Vec::new();
-        let mut cuts: Vec<Cut> = Vec::new();
+        let mut restarts: Vec<Restart> = Vec::new();
         let mut weeks: Vec<(Date, MicrocycleState)> = Vec::new();
         let mut missed = Missed::none();
         loop {
-            let plan = rescheduled(&authored, &reruns, &cuts, &diary)?;
+            let plan = rescheduled(&authored, &reruns, &restarts, &diary)?;
             let week = self.week_of(&plan, &diary, monday, opens, now).await?;
             missed.extend(week.missed);
             // **An open illness stops the walk at the week now has reached**
@@ -353,7 +355,7 @@ where
                     sessions: week.sessions,
                     weeks,
                     reruns,
-                    cuts,
+                    restarts,
                     missed,
                     mesocycle,
                 });
@@ -369,9 +371,11 @@ where
                     detail: "a microcycle beyond the calendar".to_owned(),
                 })?;
             if let Some(rerun) = planner::rerun(monday, state, &placed, &lost, &regulating) {
-                reruns.push(rerun);
-                let cut = self.refit(&authored, &reruns, &cuts, &diary, next)?;
-                cuts.extend(cut);
+                if planner::progressive(&placed, &lost) && self.restarts(&plan, monday, next) {
+                    restarts.push(Restart { monday: next });
+                } else {
+                    reruns.push(rerun);
+                }
             }
             weeks.push((monday, state));
             opens = Some(ended);
@@ -379,48 +383,23 @@ where
         }
     }
 
-    /// The cut that lets the term still end in a complete mesocycle, now that a
-    /// re-run has lengthened the one in force on `from` (#732).
+    /// Whether the week lost on `monday` starts the programme again on
+    /// `next` rather than running again (#732).
     ///
-    /// **The fewest weeks that fit**, both disciplines giving up the same
-    /// number. Nothing where the mesocycle still fits, where there is no term
-    /// to fit or no chain to follow, or where no cut it can make would fit:
-    /// then it runs long as it did before, and the boundary chooses as ever.
-    fn refit(
-        &self,
-        authored: &Plan,
-        reruns: &[Rerun],
-        cuts: &[Cut],
-        diary: &Diary,
-        from: Date,
-    ) -> Result<Vec<Cut>, StoreError> {
-        let (Some(term), Some(chain)) = (&self.term, authored.chain()) else {
-            return Ok(Vec::new());
+    /// **Where the term says what is left, and the programme in force can be
+    /// chosen from again to fill it** ([`Macrocycle::restart`]). Without a term
+    /// nothing starts again, and the week runs again as it did before.
+    fn restarts(&self, plan: &Plan, monday: Date, next: Date) -> bool {
+        let Some(term) = &self.term else {
+            return false;
         };
-        let Some(macrocycle) = Macrocycle::on(from, &term.holidays) else {
-            return Ok(Vec::new());
+        let Some(macrocycle) = Macrocycle::on(next, &term.holidays) else {
+            return false;
         };
-        let fits = |plan: &Plan| -> Option<bool> {
-            let concurrent = plan.mesocycle_on(from)?;
-            let current = cycling_kind(concurrent.cycling()?, term.identify)?;
-            Some(macrocycle.leaves_room(chain, current, concurrent.span().end()))
-        };
-
-        let plan = rescheduled(authored, reruns, cuts, diary)?;
-        if fits(&plan) != Some(false) {
-            return Ok(Vec::new());
-        }
-        for weeks in 1.. {
-            let Some(cut) = planner::cutting(&plan, from, weeks) else {
-                break;
-            };
-            let mut trying = cuts.to_vec();
-            trying.extend(cut.iter().cloned());
-            if fits(&rescheduled(authored, reruns, &trying, diary)?) == Some(true) {
-                return Ok(cut);
-            }
-        }
-        Ok(Vec::new())
+        plan.mesocycle_on(monday)
+            .and_then(|concurrent| concurrent.cycling())
+            .and_then(|cycling| cycling_kind(cycling, term.identify))
+            .is_some_and(|current| macrocycle.restart(current, next).is_some())
     }
 
     /// Every session of the week commencing `monday`, with its state, against
@@ -751,10 +730,10 @@ fn ridden_as(week: &[planner::Planned<'_>], ridden: &crate::RiddenSession) -> Op
 fn rescheduled(
     plan: &Plan,
     reruns: &[Rerun],
-    cuts: &[Cut],
+    restarts: &[Restart],
     diary: &Diary,
 ) -> Result<Plan, StoreError> {
-    planner::rescheduled(plan, reruns, cuts, diary).map_err(|error: Unreschedulable| {
+    planner::rescheduled(plan, reruns, restarts, diary).map_err(|error: Unreschedulable| {
         StoreError::Corrupt {
             detail: format!("{} will not reschedule: {error}", plan.name()),
         }

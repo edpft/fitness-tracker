@@ -53,7 +53,7 @@ CREATE TABLE gym_mesocycle_rebuilt (
     CHECK ((template = 'test') = (test_reps IS NOT NULL)),
 
     CHECK (CASE template WHEN 'test'   THEN duration_weeks = 1
-                         WHEN 'sbs'    THEN duration_weeks BETWEEN 1 AND 4
+                         WHEN 'sbs'    THEN duration_weeks >= 1
                          WHEN 'linear' THEN duration_weeks >= 1
                          ELSE duration_weeks >= 2 END),
 
@@ -86,5 +86,20 @@ DROP TABLE gym_mesocycle;
 ALTER TABLE gym_mesocycle_rebuilt RENAME TO gym_mesocycle;
 
 CREATE INDEX gym_mesocycle_start ON gym_mesocycle(start_date);
+
+CREATE TABLE gym_microcycle_rebuilt (
+    mesocycle  INTEGER NOT NULL REFERENCES gym_mesocycle(id) ON DELETE CASCADE,
+    position   INTEGER NOT NULL CHECK (position >= 0),
+
+    microcycle INTEGER NOT NULL CHECK (microcycle > 0),
+
+    PRIMARY KEY (mesocycle, position)
+) STRICT, WITHOUT ROWID;
+
+INSERT INTO gym_microcycle_rebuilt (mesocycle, position, microcycle)
+SELECT mesocycle, position, microcycle FROM gym_microcycle;
+
+DROP TABLE gym_microcycle;
+ALTER TABLE gym_microcycle_rebuilt RENAME TO gym_microcycle;
 
 PRAGMA foreign_keys = ON;

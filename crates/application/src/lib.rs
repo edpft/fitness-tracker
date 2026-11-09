@@ -56,7 +56,7 @@ pub use ports::{
     ClassesListed, ClassesRead, Clock, CompositionHistory, CyclingDeliveryStore,
     CyclingMesocycleStore, Deliverable, Delivered, Delivery, DeliveryAttempt, DeliveryReference,
     DerivationLedger, DerivationStatus, DerivationStatusReporter, DerivedFrom, DestinationName,
-    DestinationReply, DiaryAuthor, DiaryStore, EquipmentStore, EventBatch, ExerciseHistory,
+    DestinationReply, DiaryAuthor, DiaryStore, Ending, EquipmentStore, EventBatch, ExerciseHistory,
     ExtractionRunLog, ExtractionStatusReporter, FetchLog, Fetched, FillChangeStore, FtpHistory,
     FulfilledSession, GenerationParameterStore, HoldingRides, HolidayCalendar, Issuance,
     LadderStanding, LandingStore, LastPerformance, Mark, MesocycleInForce, MesocycleStore,

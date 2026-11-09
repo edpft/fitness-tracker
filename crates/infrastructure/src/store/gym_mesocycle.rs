@@ -781,6 +781,57 @@ pub(super) async fn write(
     Ok(MesocycleId::new(id))
 }
 
+/// End the plan's mesocycle at `ordinal` early, as `ended` now runs (#732).
+///
+/// **In place, so it keeps its identity**: a prescription issued against it
+/// still names it. It runs as many weeks as `ended` does, and the weeks it
+/// took and skipped after its new end go; nothing before it changes. `ended`
+/// is read through the reschedule, so its own skips may be derived ones, and
+/// none of those is written.
+pub(super) async fn end(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    plan: i64,
+    ordinal: i64,
+    ended: &GymMesocycle,
+) -> Result<(), StoreError> {
+    let duration = i64::from(ended.calendar().duration_weeks());
+    let kept = i64::try_from(provided_of(ended).map_or(0, |from| from.microcycles().count()))
+        .map_err(|_| corrupt(&"more microcycles than the store can number"))?;
+    let end = domain::plan::Occupies::span(ended).end().to_string();
+    let id = sqlx::query_scalar!(
+        r#"
+        UPDATE gym_mesocycle SET duration_weeks = ?
+        WHERE plan = ? AND ordinal = ?
+        RETURNING id AS "id!: i64"
+        "#,
+        duration,
+        plan,
+        ordinal
+    )
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?
+    .ok_or_else(|| corrupt(&format!("the plan holds no gym mesocycle {ordinal} to end")))?;
+
+    sqlx::query!(
+        "DELETE FROM gym_microcycle WHERE mesocycle = ? AND position >= ?",
+        id,
+        kept
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    sqlx::query!(
+        "DELETE FROM gym_interruption WHERE mesocycle = ? AND start_date >= ?",
+        id,
+        end
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    Ok(())
+}
+
 /// Which of a published programme's microcycles this mesocycle took, in order.
 ///
 /// The position is the order they are ridden in, not the number they carry:

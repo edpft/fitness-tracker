@@ -192,11 +192,12 @@ fn a_cut_cycle_runs_the_weeks_it_took() {
     );
 }
 
-/// **Only the chart's weeks, in its order.** A fifth week is not SBS run
-/// longer, and 3-2-4 is not a selection of it.
+/// **Only the chart's weeks, but any of them, as often as wanted** (#732). A
+/// fifth week is not SBS run longer; six weeks from two cycles of the chart are
+/// a selection of it.
 #[test]
-fn a_selection_outside_the_chart_is_refused() {
-    for weeks in [vec![3, 2, 4], vec![2, 3, 4, 5]] {
+fn a_selection_outside_the_chart_is_refused_and_a_repeat_is_not() {
+    for (weeks, admitted) in [(vec![2, 3, 4, 5], false), (vec![1, 2, 3, 2, 3, 4], true)] {
         let answers = mesocycle::authored(
             Date::new(2026, 11, 16).expect("a date"),
             Shape::Provided {
@@ -211,11 +212,23 @@ fn a_selection_outside_the_chart_is_refused() {
             },
         )
         .expect("answers");
-        assert!(
-            mesocycle::authoring(answers, &[])
-                .expect("authoring runs")
-                .is_err(),
-            "{weeks:?} is refused"
-        );
+        let authored = mesocycle::authoring(answers, &[]).expect("authoring runs");
+        assert_eq!(authored.is_ok(), admitted, "{weeks:?}");
+        if let Ok(mesocycle) = authored {
+            let tests: Vec<bool> = (0..6)
+                .map(|weeks| {
+                    let monday = Date::new(2026, 11, 16)
+                        .expect("a date")
+                        .checked_add(jiff::Span::new().weeks(weeks))
+                        .expect("a later date");
+                    let week = mesocycle
+                        .calendar()
+                        .place_week(monday)
+                        .expect("a week of it");
+                    mesocycle.tests_in(week)
+                })
+                .collect();
+            assert_eq!(tests, vec![false, false, false, false, false, true]);
+        }
     }
 }

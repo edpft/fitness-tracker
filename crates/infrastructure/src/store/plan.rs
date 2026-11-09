@@ -177,6 +177,7 @@ impl PlanStore for SqlitePlanStore {
     async fn commit(
         &self,
         plan: &PlanName,
+        ending: Option<application::Ending<'_>>,
         gym: &[GymMesocycle],
         cycling: &[CyclingMesocycle],
     ) -> Result<(), StoreError> {
@@ -203,6 +204,11 @@ impl PlanStore for SqlitePlanStore {
         .await
         .map_err(|error| store_error(&error))?
         .ok_or_else(|| corrupt(&format!("no plan is authored under {plan}")))?;
+
+        if let Some(ending) = ending {
+            gym_mesocycle::end(&mut tx, found.id, found.gym, ending.gym).await?;
+            cycling_mesocycle::end(&mut tx, found.id, found.cycling, ending.cycling).await?;
+        }
 
         let mut ordinal = found.gym;
         for mesocycle in gym {

@@ -50,11 +50,7 @@ use crate::{
     sequence::NonEmpty,
 };
 
-use super::{
-    session::CyclingSession,
-    shape::{PublishedProgramme, ZoneProfile},
-    venue::RideVenue,
-};
+use super::{session::CyclingSession, venue::RideVenue};
 
 /// Which session of a microcycle, counting from one.
 ///
@@ -381,11 +377,10 @@ pub enum InvalidCyclingMesocycle {
         rode: String,
         expected: String,
     },
-    /// The published numbers are not a selection: one is taken twice.
+    /// The published numbers are not a selection.
     ///
     /// **Not reachable through [`CyclingMicrocycle::new`]**, which refuses a
-    /// zero on its own — this is the rule that spans the weeks rather than one
-    /// of them.
+    /// zero on its own.
     #[error(transparent)]
     NotASelection(#[from] InvalidProvision),
     /// The mesocycle and its weeks disagree about who published them.
@@ -498,10 +493,6 @@ impl CyclingMesocycle {
     /// all ride the same roles. That is the one thing the parts cannot
     /// guarantee between them, and leaving it unchecked would author a
     /// programme with a Sunday nothing answers for.
-    ///
-    /// [`InvalidCyclingMesocycle::NotASelection`] where two microcycles claim
-    /// the same published week. A selection takes each week once, and µ1-2-2-4
-    /// is not one anybody made.
     ///
     /// [`InvalidCyclingMesocycle::ProvenanceDiffers`] where the weeks and the
     /// mesocycle disagree about whether anybody published this.
@@ -630,54 +621,33 @@ impl CyclingMesocycle {
         }
     }
 
-    /// The same mesocycle without some of its published microcycles (#732).
-    ///
-    /// The weeks it lost and held are kept: a cut drops weeks still to come,
-    /// and changes nothing that has happened. `None` for a microcycle it does
-    /// not ride, for a mesocycle nobody published, and for a cut that would
-    /// leave nothing.
+    /// The same mesocycle, ended the Sunday before `monday` (#732): the
+    /// microcycles it rode before then, and the weeks it lost and held before
+    /// then. `None` where it rode none.
     #[must_use]
-    pub fn without(&self, dropped: &[u32]) -> Option<Self> {
-        let ridden: Vec<u32> = self.provided_from()?.microcycles().collect();
-        if dropped
-            .iter()
-            .any(|microcycle| !ridden.contains(microcycle))
-        {
-            return None;
+    pub fn ending(&self, monday: Date) -> Option<Self> {
+        let mut run = 0_usize;
+        let mut week = self.start;
+        while week < monday {
+            if self.microcycle_of(week).is_some() {
+                run = run.saturating_add(1);
+            }
+            week = week.checked_add(jiff::Span::new().weeks(1)).ok()?;
         }
-        let kept: Vec<CyclingMicrocycle> = self
-            .microcycles
-            .iter()
-            .filter(|microcycle| {
-                microcycle
-                    .published_ordinal()
-                    .is_some_and(|ordinal| !dropped.contains(&ordinal))
-            })
-            .cloned()
-            .collect();
+        let kept: Vec<CyclingMicrocycle> = self.microcycles.iter().take(run).cloned().collect();
+        let before = |dates: &[Date]| -> Vec<Date> {
+            dates
+                .iter()
+                .copied()
+                .filter(|date| *date < monday)
+                .collect()
+        };
         Some(Self {
             microcycles: NonEmpty::new(kept).ok()?,
+            lost: before(&self.lost),
+            holding: before(&self.holding),
             ..self.clone()
         })
-    }
-
-    /// Its rides as a grid of published cells, for asking what a shorter
-    /// selection of it would keep (#732).
-    ///
-    /// **The rides the operator rides, not the ones published**: the whole a
-    /// cut is compared against is this mesocycle as he rides it. Empty for one
-    /// nobody published.
-    #[must_use]
-    pub fn as_published(&self) -> PublishedProgramme {
-        PublishedProgramme::new(self.microcycles.iter().flat_map(|microcycle| {
-            microcycle.rides().values().filter_map(|ride| {
-                let at = ride.published()?;
-                Some((
-                    (at.microcycle(), at.session()),
-                    ZoneProfile::of([ride.session().ride()]),
-                ))
-            })
-        }))
     }
 
     /// The Mondays of the weeks this mesocycle lost.

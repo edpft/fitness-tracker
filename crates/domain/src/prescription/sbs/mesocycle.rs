@@ -62,8 +62,8 @@ impl Sbs {
     ///
     /// [`InconsistentMesocycle`] for a gating role the programme never runs, a
     /// primary not counted in repetitions, a primary exercise that does not fill
-    /// the slot named as primary, or `weeks` that are not the chart's weeks in
-    /// its order, one to a week of the calendar.
+    /// the slot named as primary, or `weeks` that are not the chart's weeks,
+    /// one to a week of the calendar.
     pub fn new(
         pattern: PrimaryPattern,
         exercise: Exercise,
@@ -75,16 +75,11 @@ impl Sbs {
 
         check_primary(pattern, exercise, &fills, GATING)?;
 
-        // The chart is four weeks. A week it does not state is not this
-        // programme run longer, and a week taken twice or out of order is not
-        // a selection of it.
-        let in_order = weeks.windows(2).all(|pair| match pair {
-            [earlier, later] => earlier < later,
-            _ => true,
-        });
+        // The chart is four weeks, so a week it does not state is not this
+        // programme run longer. A week may be taken more than once (#732).
         let charted = weeks.iter().all(|week| (1..=WEEKS).contains(week));
         let one_each = u32::try_from(weeks.len()).ok() == Some(calendar.duration_weeks());
-        if weeks.is_empty() || !in_order || !charted || !one_each {
+        if weeks.is_empty() || !charted || !one_each {
             return Err(InconsistentMesocycle::NotTheChartsWeeks {
                 weeks: weeks.to_vec(),
                 calendar: calendar.duration_weeks(),

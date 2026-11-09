@@ -896,161 +896,41 @@ pub fn rerun(
     })
 }
 
-/// Weeks a running mesocycle gives up, so that the term still ends in a
-/// complete mesocycle and its tests (#732).
+/// A lost progressive week that starts the programme again, rather than
+/// being run again (#732).
 ///
-/// **Derived when the plan is read, as a re-run is, and never stored.** A
-/// re-run lengthens the mesocycle in force; where that leaves no room for a
-/// complete mesocycle before the holiday, the mesocycle in force is what gets
-/// shorter. The operator, 2026-11-08: *"what should get sacrificed to make that
-/// happen is the current mesocycle."*
-///
-/// **One per discipline, the same number of weeks each**, since the gym and
-/// cycling must reach their troughs and tests together.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Cut {
-    pub discipline: Discipline,
-    /// Which of the discipline's mesocycles, in the plan's order from zero.
-    pub mesocycle: usize,
-    /// The published weeks it no longer runs.
-    pub dropped: Vec<u32>,
+/// **Derived when the plan is read, as a re-run is, and never stored.** The
+/// mesocycle in force ends the Sunday before `monday`, and the weeks left in
+/// the term are chosen again from the whole of its published programme when
+/// that Monday commits. The operator, 2026-11-09, after one partial week and
+/// one lost: a week off costs little fitness but a quarter of a four-week
+/// mesocycle, so treat what is left of the term as one mesocycle. A missed test
+/// still re-runs: it anchors what follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Restart {
+    /// The Monday the programme starts again.
+    pub monday: Date,
 }
 
-/// The cut that takes `weeks` from the mesocycles in force on `from`, the
-/// Monday of the first week not yet run.
-///
-/// **What each discipline gives up** (operator, 2026-11-08):
-///
-/// - **SBS, its earliest remaining weeks**, never its test: 1-2-3-4 cut by one
-///   from the start is x-2-3-4, and with week 1 done (1)-x-3-4.
-/// - **A published cycling mesocycle, the weeks furthest from the whole**, as
-///   a week's sessions are chosen ([`PublishedProgramme::answer`]), with the
-///   weeks already ridden kept. It never drops its deload or stops training a
-///   zone.
-///
-/// `None` where either cannot give up that many: a test, a hold, a programme
-/// that is not a selection of a published one, or too few weeks left to drop.
-///
-/// [`PublishedProgramme::answer`]: crate::cycling::PublishedProgramme::answer
+/// Whether a week [`rerun`] would run again is a progressive one, which
+/// starts the programme again instead: no discipline that lost its essential
+/// session was to test in it.
 #[must_use]
-pub fn cutting(plan: &Plan, from: Date, weeks: usize) -> Option<Vec<Cut>> {
-    if weeks == 0 {
-        return None;
-    }
-    Some(vec![
-        gym_cut(plan, from, weeks)?,
-        cycling_cut(plan, from, weeks)?,
-    ])
+pub fn progressive(sessions: &[Placed], lost: &[Discipline]) -> bool {
+    !Discipline::ALL.iter().copied().any(|discipline| {
+        owed_by(sessions, discipline, lost) == Owed::Lost
+            && sessions.iter().any(|session| {
+                session.discipline == discipline && session.role == ESSENTIAL && session.test
+            })
+    })
 }
 
-fn gym_cut(plan: &Plan, from: Date, weeks: usize) -> Option<Cut> {
-    let (index, mesocycle) = plan.gym()?.on(from)?;
-    let GymMesocycle::Progression(crate::prescription::Progression::Provided {
-        from: provided,
-        ..
-    }) = mesocycle
-    else {
-        return None;
-    };
-    let charted: Vec<u32> = provided.microcycles().collect();
-    let WeekKind::Climbing(at) = mesocycle.calendar().place_week(from).ok()? else {
-        return None;
-    };
-    let done = usize::try_from(at.as_u32().checked_sub(1)?).ok()?;
-    let droppable: Vec<u32> = charted
+/// The restart, if any, that falls inside `span` after its first week.
+fn restarting(span: crate::plan::Span, restarts: &[Restart]) -> Option<Date> {
+    restarts
         .iter()
-        .enumerate()
-        .skip(done)
-        .filter(|(position, _)| {
-            let week = u32::try_from(position.saturating_add(1))
-                .ok()
-                .and_then(|week| crate::prescription::WeekIndex::new(week).ok());
-            !week.is_some_and(|week| mesocycle.tests_in(WeekKind::Climbing(week)))
-        })
-        .map(|(_, week)| *week)
-        .collect();
-    let dropped: Vec<u32> = droppable.get(..weeks)?.to_vec();
-    Some(Cut {
-        discipline: Discipline::Gym,
-        mesocycle: index,
-        dropped,
-    })
-}
-
-fn cycling_cut(plan: &Plan, from: Date, weeks: usize) -> Option<Cut> {
-    let (index, mesocycle) = plan.cycling()?.on(from)?;
-    let ridden: Vec<u32> = mesocycle.provided_from()?.microcycles().collect();
-    let done = mesocycle.microcycle_of(from)?.checked_sub(1)?;
-    let fixed = ridden.get(..done)?;
-    let keep = ridden.len().checked_sub(weeks)?;
-    let published = mesocycle.as_published();
-    let sessions = published.sessions().len();
-    let chosen = published
-        .answer(&ridden, keep, sessions)
-        .into_iter()
-        .find(|answer| answer.microcycles.starts_with(fixed))?;
-    let dropped: Vec<u32> = ridden
-        .into_iter()
-        .filter(|microcycle| !chosen.microcycles.contains(microcycle))
-        .collect();
-    Some(Cut {
-        discipline: Discipline::Cycling,
-        mesocycle: index,
-        dropped,
-    })
-}
-
-/// The plan with its cuts made: each mesocycle named without the weeks it
-/// gave up.
-fn cut(plan: &Plan, cuts: &[Cut]) -> Result<Plan, Unreschedulable> {
-    if cuts.is_empty() {
-        return Ok(plan.clone());
-    }
-    let dropped = |discipline: Discipline, at: usize| -> Vec<u32> {
-        cuts.iter()
-            .filter(|cut| cut.discipline == discipline && cut.mesocycle == at)
-            .flat_map(|cut| cut.dropped.iter().copied())
-            .collect()
-    };
-    let gym = plan
-        .gym()
-        .map(|side| -> Result<_, Unreschedulable> {
-            let mut kept = Vec::new();
-            for (at, mesocycle) in side.mesocycles().enumerate() {
-                let dropping = dropped(Discipline::Gym, at);
-                kept.push(if dropping.is_empty() {
-                    mesocycle.clone()
-                } else {
-                    mesocycle
-                        .without(&dropping)
-                        .ok_or(Unreschedulable::Cut { mesocycle: at })?
-                });
-            }
-            Ok(crate::plan::Mesocycles::new(kept)?)
-        })
-        .transpose()?;
-    let cycling = plan
-        .cycling()
-        .map(|side| -> Result<_, Unreschedulable> {
-            let mut kept = Vec::new();
-            for (at, mesocycle) in side.mesocycles().enumerate() {
-                let dropping = dropped(Discipline::Cycling, at);
-                kept.push(if dropping.is_empty() {
-                    mesocycle.clone()
-                } else {
-                    mesocycle
-                        .without(&dropping)
-                        .ok_or(Unreschedulable::Cut { mesocycle: at })?
-                });
-            }
-            Ok(crate::plan::Mesocycles::new(kept)?)
-        })
-        .transpose()?;
-    let shortened = Plan::new(plan.name().clone(), plan.authored_at(), gym, cycling)?;
-    Ok(match plan.chain() {
-        Some(chain) => shortened.following(chain),
-        None => shortened,
-    })
+        .map(|restart| restart.monday)
+        .find(|monday| *monday > span.start() && *monday < span.end())
 }
 
 /// Which re-run of its microcycle a week is: the first re-run is 1.
@@ -1168,8 +1048,8 @@ pub enum Unreschedulable {
     Mesocycles(#[from] crate::plan::InvalidMesocycles),
     #[error(transparent)]
     Plan(#[from] crate::plan::EmptyPlan),
-    #[error("mesocycle {mesocycle} cannot give up the weeks its cut names")]
-    Cut { mesocycle: usize },
+    #[error("the mesocycle in force cannot end before {monday}")]
+    Restart { monday: Date },
 }
 
 /// The plan as it now stands, given the weeks the concurrent microcycle was
@@ -1199,21 +1079,20 @@ pub enum Unreschedulable {
 /// A shift that leaves a later mesocycle unable to complete is #201's, not
 /// this function's.
 ///
-/// **The cuts are made first** (#732), on the mesocycles as authored, so a
-/// mesocycle that gave up a week is shorter before anything moves.
+/// **A restart ends the mesocycle in force where it falls** (#732), once that
+/// mesocycle has moved, and before the one after it is placed.
 ///
 /// # Errors
 ///
 /// [`Unreschedulable`] where a moved calendar or the programme it belongs to
-/// will not build, or a cut names a week its mesocycle does not run.
+/// will not build, or a mesocycle a restart falls in cannot end there.
 pub fn rescheduled(
     plan: &Plan,
     reruns: &[Rerun],
-    cuts: &[Cut],
+    restarts: &[Restart],
     diary: &Diary,
 ) -> Result<Plan, Unreschedulable> {
-    let plan = &cut(plan, cuts)?;
-    if reruns.is_empty() {
+    if reruns.is_empty() && restarts.is_empty() {
         return Ok(plan.clone());
     }
     let gym_weeks = Weeks::of(reruns, Discipline::Gym);
@@ -1225,7 +1104,12 @@ pub fn rescheduled(
             let mut moved = Vec::new();
             let mut cursor: Option<Date> = None;
             for mesocycle in side.mesocycles() {
-                let next = gym_rescheduled(mesocycle, cursor, &gym_weeks, diary)?;
+                let mut next = gym_rescheduled(mesocycle, cursor, &gym_weeks, diary)?;
+                if let Some(monday) = restarting(crate::plan::Occupies::span(&next), restarts) {
+                    next = next
+                        .ending(monday)
+                        .ok_or(Unreschedulable::Restart { monday })?;
+                }
                 cursor = Some(crate::plan::Occupies::span(&next).end());
                 moved.push(next);
             }
@@ -1239,7 +1123,12 @@ pub fn rescheduled(
             let mut moved = Vec::new();
             let mut cursor: Option<Date> = None;
             for mesocycle in side.mesocycles() {
-                let next = cycling_rescheduled(mesocycle, cursor, &cycling_weeks);
+                let mut next = cycling_rescheduled(mesocycle, cursor, &cycling_weeks);
+                if let Some(monday) = restarting(crate::plan::Occupies::span(&next), restarts) {
+                    next = next
+                        .ending(monday)
+                        .ok_or(Unreschedulable::Restart { monday })?;
+                }
                 cursor = Some(crate::plan::Occupies::span(&next).end());
                 moved.push(next);
             }

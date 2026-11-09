@@ -13,11 +13,11 @@ use infrastructure::{BankHolidays, GOV_UK_BANK_HOLIDAYS, SchoolCalendar};
 /// set its own.
 const SCHOOL_CALENDAR: &str = "https://hemplandprimary.co.uk/?rhc_action=get_icalendar_events";
 
-/// What the walk through the plan cuts a mesocycle against (#732): the
-/// holidays as read now, and Peloton's names for its programmes.
+/// What the walk through the plan starts a programme again against (#732):
+/// the holidays as read now, and Peloton's names for its programmes.
 ///
-/// `None` where either calendar cannot be read. Nothing is cut then, and a
-/// re-run lengthens its mesocycle as it did before.
+/// `None` where either calendar cannot be read. Nothing starts again then, and
+/// a re-run lengthens its mesocycle as it did before.
 pub async fn term() -> Option<Term> {
     Some(Term {
         holidays: Calendars.holidays().await.ok()?,

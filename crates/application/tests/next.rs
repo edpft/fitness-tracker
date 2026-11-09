@@ -560,6 +560,7 @@ impl PlanStore for NoPlans {
     async fn commit(
         &self,
         _plan: &PlanName,
+        _ending: Option<application::Ending<'_>>,
         _gym: &[GymMesocycle],
         _cycling: &[CyclingMesocycle],
     ) -> Result<(), StoreError> {

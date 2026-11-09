@@ -245,31 +245,35 @@ impl GymMesocycle {
         from.microcycles().nth(index)
     }
 
-    /// The same mesocycle without some of its published weeks (#732).
+    /// The same mesocycle, ended the Sunday before `monday` (#732): the weeks
+    /// it ran before then, and none after.
     ///
-    /// **A cut, and only a provided programme has one**: its weeks are a
-    /// selection of a published chart, so a shorter selection is still that
-    /// programme. `None` for any other mesocycle, for a week it does not run,
-    /// and for a cut that would leave nothing.
+    /// **Only a provided programme ends early**: its weeks are a selection of a
+    /// published chart, so the weeks before `monday` are still that programme.
+    /// `None` for any other mesocycle, and where it ran no week before `monday`.
     #[must_use]
-    pub fn without(&self, dropped: &[u32]) -> Option<Self> {
+    pub fn ending(&self, monday: jiff::civil::Date) -> Option<Self> {
         let Self::Progression(Progression::Provided { from, cycle }) = self else {
             return None;
         };
-        let weeks: Vec<u32> = from.microcycles().collect();
-        if dropped.iter().any(|week| !weeks.contains(week)) {
-            return None;
+        let calendar = cycle.calendar();
+        let mut run = 0_u32;
+        let mut week = calendar.start();
+        while week < monday {
+            if matches!(calendar.place_week(week), Ok(WeekKind::Climbing(_))) {
+                run = run.saturating_add(1);
+            }
+            week = week.checked_add(jiff::Span::new().weeks(1)).ok()?;
         }
-        let kept: Vec<u32> = weeks
-            .into_iter()
-            .filter(|week| !dropped.contains(week))
+        let kept: Vec<u32> = from
+            .microcycles()
+            .take(usize::try_from(run).ok()?)
             .collect();
-        let duration = u32::try_from(kept.len()).ok()?;
-        let calendar = cycle.calendar().shortened(duration).ok()?;
+        let shortened = calendar.shortened(run).ok()?;
         let from = ProvidedFrom::new(from.programme().clone(), kept).ok()?;
         Some(Self::Progression(Progression::Provided {
             from,
-            cycle: cycle.recalendared(calendar),
+            cycle: cycle.recalendared(shortened),
         }))
     }
 

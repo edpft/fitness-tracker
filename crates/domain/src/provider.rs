@@ -241,9 +241,11 @@ impl fmt::Display for PublishedAt {
 /// is the way back to what was not chosen: a re-authoring that wants the week's
 /// third session knows which microcycle of which programme to ask for.
 ///
-/// **Ordered and without repeats**, because they are a selection from one
-/// programme rather than a sequence of arbitrary weeks. µ1-2-4-5 is a subset in
-/// its own order; µ1-1-2 is not a selection anybody made.
+/// **A week may be taken more than once.** The operator, 2026-11-09, on six
+/// weeks of the gym taken from two cycles of a four-week chart (#732): *"One of
+/// the key points of what we're trying to do is take published programmes and
+/// adapt them to my preferences and circumstances."* So 1-2-3-2-3-4 is a
+/// selection as much as 1-2-4-5 is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProvidedFrom {
     programme: ExternalProgramme,
@@ -256,8 +258,6 @@ pub enum InvalidProvision {
     NoMicrocycles,
     #[error("a published programme's microcycles count from one, so there is no microcycle 0")]
     ZeroMicrocycle,
-    #[error("microcycle {microcycle} is taken twice, and a selection takes each week once")]
-    RepeatedMicrocycle { microcycle: u32 },
 }
 
 impl From<TooShort> for InvalidProvision {
@@ -269,23 +269,13 @@ impl From<TooShort> for InvalidProvision {
 impl ProvidedFrom {
     /// # Errors
     ///
-    /// [`InvalidProvision`] for no microcycles, a microcycle numbered zero, or
-    /// one taken twice.
+    /// [`InvalidProvision`] for no microcycles, or a microcycle numbered zero.
     pub fn new(
         programme: ExternalProgramme,
         microcycles: Vec<u32>,
     ) -> Result<Self, InvalidProvision> {
-        let mut seen: Vec<u32> = Vec::with_capacity(microcycles.len());
-        for microcycle in &microcycles {
-            if *microcycle == 0 {
-                return Err(InvalidProvision::ZeroMicrocycle);
-            }
-            if seen.contains(microcycle) {
-                return Err(InvalidProvision::RepeatedMicrocycle {
-                    microcycle: *microcycle,
-                });
-            }
-            seen.push(*microcycle);
+        if microcycles.contains(&0) {
+            return Err(InvalidProvision::ZeroMicrocycle);
         }
         Ok(Self {
             programme,

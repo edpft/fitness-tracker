@@ -279,6 +279,40 @@ pub enum Cycling {
     Build,
     Peak1,
     Peak2,
+    /// `weeks` of a programme we split in two, chosen from the whole of it
+    /// after a lost week starts it again (#732): Peak, not Peak 1 or Peak 2.
+    ///
+    /// The operator, 2026-11-09: *"Peak 1 and Peak 2 don't really exist, the
+    /// published programme is Peak, which is 8 weeks, we've just split it
+    /// because our gym mesocycles are 4 weeks."* One mesocycle, with one
+    /// trough, at its end.
+    Selection {
+        of: Whole,
+        weeks: u32,
+    },
+}
+
+/// A published programme we split into two mesocycles, taken whole.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Whole {
+    Base,
+    Peak,
+}
+
+impl Whole {
+    /// How many microcycles it publishes.
+    pub const fn weeks(self) -> u32 {
+        8
+    }
+}
+
+impl fmt::Display for Whole {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Base => "Base",
+            Self::Peak => "Peak",
+        })
+    }
 }
 
 impl Cycling {
@@ -287,6 +321,7 @@ impl Cycling {
         match self {
             Self::Hold { holding } => holding.saturating_add(1),
             Self::Base1 | Self::Base2 | Self::Build | Self::Peak1 | Self::Peak2 => 4,
+            Self::Selection { weeks, .. } => weeks,
         }
     }
 
@@ -301,10 +336,11 @@ impl Cycling {
     /// across a long holiday.
     ///
     /// Base 1, Build and Peak 1 need an entry test; Base 2 needs Base 1 and
-    /// Peak 2 needs Peak 1. A hold needs nothing.
+    /// Peak 2 needs Peak 1. A hold needs nothing, and nor does a selection,
+    /// which keeps the entry test of the mesocycle it started again from.
     pub fn may_follow(self, previous: Option<Self>) -> bool {
         match self {
-            Self::Hold { .. } => true,
+            Self::Hold { .. } | Self::Selection { .. } => true,
             Self::Base1 | Self::Build | Self::Peak1 => previous.is_some_and(Self::ends_in_test),
             Self::Base2 => previous == Some(Self::Base1),
             Self::Peak2 => previous == Some(Self::Peak1),
@@ -315,7 +351,10 @@ impl Cycling {
     /// but is not one: the competitive phase is Build, or the second half of
     /// Base or Peak.
     pub const fn competitive(self) -> bool {
-        matches!(self, Self::Base2 | Self::Build | Self::Peak2)
+        matches!(
+            self,
+            Self::Base2 | Self::Build | Self::Peak2 | Self::Selection { .. }
+        )
     }
 }
 
@@ -331,6 +370,9 @@ impl fmt::Display for Cycling {
             Self::Build => formatter.write_str("Build"),
             Self::Peak1 => formatter.write_str("Peak 1"),
             Self::Peak2 => formatter.write_str("Peak 2"),
+            Self::Selection { of, weeks } => {
+                write!(formatter, "{of}, {} of its {}", Weeks(*weeks), of.weeks())
+            }
         }
     }
 }
@@ -495,27 +537,31 @@ impl Macrocycle {
 }
 
 impl Macrocycle {
-    /// Whether a running mesocycle that ends on `end` still leaves the term
-    /// room to end in a complete mesocycle and its tests (#732).
+    /// What a lost week commits on `start`, the Monday after it, where it
+    /// starts the programme again (#732): the weeks left in the term, chosen
+    /// from the whole of the programme `current` was split from.
     ///
-    /// **The question a boundary asks, asked early.** The operator,
-    /// 2026-11-08: *"we should always be trying to end in a complete
-    /// mesocycle, what should get sacrificed to make that happen is the
-    /// current mesocycle."* So it fits where it ends on the last day of term,
-    /// or where [`Self::next`] would follow it with a progressing mesocycle
-    /// rather than a hold. Past the transition it never fits.
-    ///
-    /// `current` is the running cycling mesocycle.
-    pub fn leaves_room(&self, chain: Chain, current: Cycling, end: Date) -> bool {
-        let transition = self.transition();
-        if end > transition {
-            return false;
-        }
-        if end == transition {
-            return true;
-        }
-        self.next(chain, Some(current), end)
-            .is_some_and(|next| next.gym() == Gym::Sbs)
+    /// `None` where `current` was not split from a whole, or the weeks left are
+    /// more than it publishes or fewer than a mesocycle with a trough at its
+    /// end: then the lost week is run again, as before.
+    pub fn restart(&self, current: Cycling, start: Date) -> Option<Concurrent> {
+        let of = match current {
+            Cycling::Base1
+            | Cycling::Base2
+            | Cycling::Selection {
+                of: Whole::Base, ..
+            } => Whole::Base,
+            Cycling::Peak1
+            | Cycling::Peak2
+            | Cycling::Selection {
+                of: Whole::Peak, ..
+            } => Whole::Peak,
+            Cycling::Hold { .. } | Cycling::Build => return None,
+        };
+        let weeks = weeks_between(start, self.transition())?;
+        (2..=of.weeks())
+            .contains(&weeks)
+            .then_some(Concurrent::progressing(Cycling::Selection { of, weeks }))
     }
 }
 
