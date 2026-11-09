@@ -7,6 +7,7 @@
 //! adapter.
 
 mod at_power;
+mod collected;
 mod composition;
 mod detail;
 mod equipment;

@@ -15,6 +15,7 @@
 
 pub mod body_weight;
 pub mod canonicalise;
+pub mod collected;
 pub mod commit;
 pub mod compare;
 pub mod composition;

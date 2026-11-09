@@ -26,7 +26,7 @@ use domain::{normalised::OperatorZone, schedule::DayPart};
 use maud::{Markup, PreEscaped, html};
 use tokio::sync::watch;
 
-use crate::report;
+use crate::{collected, report};
 
 /// What the operator configured, which every run reads.
 pub struct Setting {
@@ -63,34 +63,31 @@ pub struct View {
 #[derive(Clone)]
 struct Line {
     step: Step,
-    estimate: Option<String>,
     done: Option<Done>,
 }
 
 impl View {
+    /// The home page's cards: what is next once the run has said, then
+    /// whether what each page reads has been collected (#666).
+    ///
+    /// **Not the steps**: the operator, 2026-11-09, *"I just want to know, for
+    /// the high level metrics and prescriptions has the data been fetched and
+    /// normalised."* What each step found is in telemetry.
     pub fn render(&self) -> Markup {
+        let steps = self
+            .steps
+            .iter()
+            .map(|line| (&line.step, line.done.as_ref().map(|done| &done.outcome)));
         html! {
-            @if let Some(refused) = &self.refused { p.failed { (refused) } }
-            @if !self.steps.is_empty() {
-                ol.steps {
-                    @for line in &self.steps {
-                        li {
-                            span.step { (report::step(&line.step)) }
-                            " "
-                            @match &line.done {
-                                Some(done) => span.outcome.failed[done.outcome.is_err()] {
-                                    (report::outcome(done))
-                                },
-                                None => span.outcome { "…" },
-                            }
-                            @if let Some(estimate) = &line.estimate {
-                                div.estimate { (estimate) }
-                            }
-                        }
-                    }
-                }
+            @if let Some(refused) = &self.refused { section.card { p.failed { (refused) } } }
+            @match &self.ending {
+                Some(ending) => (ending),
+                None if self.going => section.card {
+                    p.collecting { "Collecting what this page shows…" }
+                },
+                None => {}
             }
-            @if let Some(ending) = &self.ending { (ending) }
+            (collected::matrix(&steps, self.going))
         }
     }
 
@@ -423,24 +420,14 @@ impl Progress for Following<'_> {
         self.0.send_modify(|view| {
             view.steps.push(Line {
                 step: step.clone(),
-                estimate: None,
                 done: None,
             });
         });
     }
 
-    fn estimated(&self, step: &Step, outstanding: u64, takes: std::time::Duration) {
-        self.0.send_modify(|view| {
-            if let Some(line) = view
-                .steps
-                .iter_mut()
-                .rev()
-                .find(|line| line.step == *step && line.done.is_none())
-            {
-                line.estimate = report::estimate(outstanding, takes);
-            }
-        });
-    }
+    /// **Not shown**: the home page shows no step (#666), and a chart's page
+    /// only which one the run is on.
+    fn estimated(&self, _step: &Step, _outstanding: u64, _takes: std::time::Duration) {}
 
     fn finished(&self, done: &Done) {
         self.0.send_modify(|view| {
@@ -454,7 +441,6 @@ impl Progress for Following<'_> {
                 // A step reported only as it ended, as a walk with no access is.
                 None => view.steps.push(Line {
                     step: done.step.clone(),
-                    estimate: None,
                     done: Some(done.clone()),
                 }),
             }
@@ -485,29 +471,24 @@ mod tests {
         view.borrow().render().into_string()
     }
 
-    /// **A step is shown as it starts**, so a long one says what it is doing
-    /// rather than looking hung, and its outcome replaces the ellipsis.
+    /// **A chart's page shows the step as it starts**, so a long one says
+    /// what it is doing rather than looking hung, and its outcome replaces the
+    /// ellipsis.
     #[test]
     fn a_step_is_shown_as_it_starts_and_finished_in_place() {
-        let view = watch::Sender::new(View::default());
+        let view = watch::Sender::new(View {
+            going: true,
+            ..View::default()
+        });
         let following = Following(&view);
 
         following.started(&Step::RefreshingClasses);
-        following.estimated(
-            &Step::RefreshingClasses,
-            412,
-            std::time::Duration::from_mins(10),
-        );
-        let started = shown(&view);
+        let started = view.borrow().step().into_string();
         assert!(
             started.contains("Refreshing Peloton's classes"),
             "{started}"
         );
         assert!(started.contains("…"), "{started}");
-        assert!(
-            started.contains("412 classes to read, about 10 minutes"),
-            "{started}"
-        );
 
         following.finished(&Done {
             step: Step::RefreshingClasses,
@@ -519,19 +500,20 @@ mod tests {
             }),
             took: std::time::Duration::from_secs(42),
         });
-        let finished = shown(&view);
+        let finished = view.borrow().step().into_string();
         assert!(
             finished.contains("done, 3 new classes (42.0 s)"),
             "{finished}"
         );
         assert!(!finished.contains("…"), "{finished}");
-        assert_eq!(finished.matches("<li>").count(), 1, "{finished}");
+        assert_eq!(view.borrow().steps.len(), 1);
     }
 
-    /// A step reported only as it ended, as a walk with no access is, is
-    /// still shown.
+    /// **The home page shows no step** (#666): a fetch that failed, reported
+    /// only as it ended as a walk with no access is, is a red dot on the rows
+    /// that read it, and its reason is not on the page.
     #[test]
-    fn a_step_reported_only_as_it_ended_is_shown() {
+    fn the_home_page_shows_a_failed_fetch_as_a_dot_and_not_its_reason() {
         let view = watch::Sender::new(View::default());
         let stream = LandingStream::try_from("hevy.workouts").expect("a stream");
 
@@ -543,8 +525,13 @@ mod tests {
             took: std::time::Duration::ZERO,
         });
         let shown = shown(&view);
-        assert!(shown.contains("Fetching hevy.workouts"), "{shown}");
-        assert!(shown.contains("failed: no hevy credential"), "{shown}");
+        assert!(!shown.contains("Fetching hevy.workouts"), "{shown}");
+        assert!(!shown.contains("no hevy credential"), "{shown}");
+        let gym = shown
+            .split(r#"<div class="row">"#)
+            .find(|row| row.starts_with("<span>Gym sessions</span>"))
+            .expect("the gym's row");
+        assert!(gym.contains(r#"<i class="dot failed""#), "{gym}");
     }
 
     /// **A page opened while a run covering it is going joins it**: nothing

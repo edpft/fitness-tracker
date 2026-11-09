@@ -21,7 +21,7 @@ pub fn index(view: &View) -> Markup {
             body {
                 main {
                     (menu("/"))
-                    div hx-ext="sse" sse-connect="/run/events" sse-swap="run" {
+                    div.home hx-ext="sse" sse-connect="/run/events" sse-swap="run" {
                         (view.render())
                     }
                 }
