@@ -174,9 +174,13 @@ pub fn week<'a>(
                 .entry(slot.discipline)
                 .and_modify(|seen| *seen = seen.saturating_add(1))
                 .or_insert(1);
+            let due = missed.carried_to(slot.discipline, slot.date);
             Planned {
                 number: *number,
-                session: fill(plan, slot),
+                session: fill(
+                    plan,
+                    due.map_or(slot, |date| ScheduledSlot { date, ..slot }),
+                ),
                 slot,
             }
         })
@@ -184,14 +188,27 @@ pub fn week<'a>(
 }
 
 /// The essential sessions whose window closed with nothing performed and
-/// nothing to explain it, each by its discipline and the day of its slot.
+/// nothing to explain it, each by its discipline and the day of its slot, and
+/// the tests carried past the week they were missed in.
 ///
 /// **Read off the week's states and handed back**, never stored: the
 /// application reads a week once as ordinary, finds the essential session it
 /// missed ([`state_of`]), and reads the week again with it, so a session
 /// performed late stops being missed on the next read.
+///
+/// **A missed test is carried to the next slot of its discipline** (#732),
+/// across the end of its week, and takes that slot's place. The operator,
+/// 2026-11-09: *"the programmer should always try to schedule a test because
+/// we want the performance data but, if it can't, it can't."* What it carries
+/// is the date the test was due, so the slot it lands in is filled from that
+/// week of the plan.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Missed(BTreeSet<(Discipline, Date)>);
+pub struct Missed {
+    essential: BTreeSet<(Discipline, Date)>,
+    /// Where a test landed, by discipline and slot date, and the date it was
+    /// due.
+    carried: BTreeMap<(Discipline, Date), Date>,
+}
 
 impl Missed {
     /// Nothing missed: every week reads as the diary holds it.
@@ -204,24 +221,47 @@ impl Missed {
     /// `date` was missed.
     #[must_use]
     pub fn contains(&self, discipline: Discipline, date: Date) -> bool {
-        self.0.contains(&(discipline, date))
+        self.essential.contains(&(discipline, date))
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.essential.is_empty() && self.carried.is_empty()
+    }
+
+    /// Carry the test of `discipline` due on `due` to its slot on `to`.
+    pub fn carry(&mut self, discipline: Discipline, due: Date, to: Date) {
+        self.carried.insert((discipline, to), due);
+    }
+
+    /// The date of the test that `discipline`'s slot on `date` now holds, where
+    /// one was carried there.
+    #[must_use]
+    pub fn carried_to(&self, discipline: Discipline, date: Date) -> Option<Date> {
+        self.carried.get(&(discipline, date)).copied()
+    }
+
+    /// The same, with the tests `other` carried as well.
+    #[must_use]
+    pub fn with_carried(mut self, other: &Self) -> Self {
+        self.carried
+            .extend(other.carried.iter().map(|(at, due)| (*at, *due)));
+        self
     }
 }
 
 impl FromIterator<(Discipline, Date)> for Missed {
     fn from_iter<I: IntoIterator<Item = (Discipline, Date)>>(iter: I) -> Self {
-        Self(iter.into_iter().collect())
+        Self {
+            essential: iter.into_iter().collect(),
+            carried: BTreeMap::new(),
+        }
     }
 }
 
 impl Extend<(Discipline, Date)> for Missed {
     fn extend<I: IntoIterator<Item = (Discipline, Date)>>(&mut self, iter: I) {
-        self.0.extend(iter);
+        self.essential.extend(iter);
     }
 }
 
@@ -229,8 +269,9 @@ impl IntoIterator for Missed {
     type Item = (Discipline, Date);
     type IntoIter = std::collections::btree_set::IntoIter<(Discipline, Date)>;
 
+    /// The essential sessions missed. The tests carried are not among them.
     fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+        self.essential.into_iter()
     }
 }
 
@@ -268,6 +309,11 @@ pub fn slots(diary: &Diary, containing: Date, missed: &Missed) -> Vec<ScheduledS
         .filter_map(|offset| monday.checked_add(jiff::Span::new().days(offset)).ok())
         .flat_map(|date| diary.planned_slots_of(date))
         .collect();
+    for slot in &mut slots {
+        if missed.carried_to(slot.discipline, slot.date).is_some() {
+            slot.role = Some(ESSENTIAL);
+        }
+    }
 
     let after = slots
         .last()
@@ -839,14 +885,14 @@ pub struct Rerun {
 /// cardiovascular fitness from two interventions, not two run side by side, so
 /// the whole microcycle re-runs or neither discipline does (#732).
 ///
-/// **It re-runs when a discipline that missed its essential session cannot do
-/// without it.** A test anchors what follows, and a programme that assumes
-/// progress from week to week has not made it. `regulating` names the
-/// disciplines that can: SBS's essential session is a repetition-maximum day
-/// that sets the next week's training maximum, so a week it misses programmes
-/// the next from the maximum it already had
-/// ([`GymMesocycle::regulates_itself_in`]). A week whose every missing
-/// discipline regulates itself moves on.
+/// **It re-runs only for an entry test that anchors a new lift** (#732). The
+/// operator, 2026-11-09, on the evidence that a disruption costs progress
+/// rather than fitness: *"we can just continue the programme as if it was
+/// completed as expected"*, and *"Entry tests are essential when starting a
+/// macrocycle for a new lift but less of a problem for cycling."* `anchoring`
+/// names the disciplines whose test this week is one. Any other missed
+/// session, test or not, lets the programme carry on; a missed test is carried
+/// to a later slot instead ([`Missed::carry`]).
 ///
 /// **A discipline holds only where the microcycle it completed was a test.**
 /// The operator, 2026-09-25:
@@ -861,15 +907,13 @@ pub struct Rerun {
 /// test ended, the entry test, SBS week 4, Base 2, Build or Peak 2.
 ///
 /// `lost` is as [`owed_by`] reads it.
-///
-/// [`GymMesocycle::regulates_itself_in`]: crate::prescription::mesocycle::GymMesocycle::regulates_itself_in
 #[must_use]
 pub fn rerun(
     monday: Date,
     state: MicrocycleState,
     sessions: &[Placed],
     lost: &[Discipline],
-    regulating: &[Discipline],
+    anchoring: &[Discipline],
 ) -> Option<Rerun> {
     let completed = match state {
         MicrocycleState::Running | MicrocycleState::Completed => return None,
@@ -884,7 +928,8 @@ pub fn rerun(
     };
     let owes_it = Discipline::ALL.iter().copied().any(|discipline| {
         owed_by(sessions, discipline, lost) == Owed::Lost
-            && (tests(discipline) || !regulating.contains(&discipline))
+            && tests(discipline)
+            && anchoring.contains(&discipline)
     });
     if !owes_it {
         return None;
@@ -894,43 +939,6 @@ pub fn rerun(
         monday,
         holding: completed.filter(|completed| tests(*completed)),
     })
-}
-
-/// A lost progressive week that starts the programme again, rather than
-/// being run again (#732).
-///
-/// **Derived when the plan is read, as a re-run is, and never stored.** The
-/// mesocycle in force ends the Sunday before `monday`, and the weeks left in
-/// the term are chosen again from the whole of its published programme when
-/// that Monday commits. The operator, 2026-11-09, after one partial week and
-/// one lost: a week off costs little fitness but a quarter of a four-week
-/// mesocycle, so treat what is left of the term as one mesocycle. A missed test
-/// still re-runs: it anchors what follows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Restart {
-    /// The Monday the programme starts again.
-    pub monday: Date,
-}
-
-/// Whether a week [`rerun`] would run again is a progressive one, which
-/// starts the programme again instead: no discipline that lost its essential
-/// session was to test in it.
-#[must_use]
-pub fn progressive(sessions: &[Placed], lost: &[Discipline]) -> bool {
-    !Discipline::ALL.iter().copied().any(|discipline| {
-        owed_by(sessions, discipline, lost) == Owed::Lost
-            && sessions.iter().any(|session| {
-                session.discipline == discipline && session.role == ESSENTIAL && session.test
-            })
-    })
-}
-
-/// The restart, if any, that falls inside `span` after its first week.
-fn restarting(span: crate::plan::Span, restarts: &[Restart]) -> Option<Date> {
-    restarts
-        .iter()
-        .map(|restart| restart.monday)
-        .find(|monday| *monday > span.start() && *monday < span.end())
 }
 
 /// Which re-run of its microcycle a week is: the first re-run is 1.
@@ -1048,8 +1056,6 @@ pub enum Unreschedulable {
     Mesocycles(#[from] crate::plan::InvalidMesocycles),
     #[error(transparent)]
     Plan(#[from] crate::plan::EmptyPlan),
-    #[error("the mesocycle in force cannot end before {monday}")]
-    Restart { monday: Date },
 }
 
 /// The plan as it now stands, given the weeks the concurrent microcycle was
@@ -1079,20 +1085,12 @@ pub enum Unreschedulable {
 /// A shift that leaves a later mesocycle unable to complete is #201's, not
 /// this function's.
 ///
-/// **A restart ends the mesocycle in force where it falls** (#732), once that
-/// mesocycle has moved, and before the one after it is placed.
-///
 /// # Errors
 ///
 /// [`Unreschedulable`] where a moved calendar or the programme it belongs to
-/// will not build, or a mesocycle a restart falls in cannot end there.
-pub fn rescheduled(
-    plan: &Plan,
-    reruns: &[Rerun],
-    restarts: &[Restart],
-    diary: &Diary,
-) -> Result<Plan, Unreschedulable> {
-    if reruns.is_empty() && restarts.is_empty() {
+/// will not build.
+pub fn rescheduled(plan: &Plan, reruns: &[Rerun], diary: &Diary) -> Result<Plan, Unreschedulable> {
+    if reruns.is_empty() {
         return Ok(plan.clone());
     }
     let gym_weeks = Weeks::of(reruns, Discipline::Gym);
@@ -1104,12 +1102,7 @@ pub fn rescheduled(
             let mut moved = Vec::new();
             let mut cursor: Option<Date> = None;
             for mesocycle in side.mesocycles() {
-                let mut next = gym_rescheduled(mesocycle, cursor, &gym_weeks, diary)?;
-                if let Some(monday) = restarting(crate::plan::Occupies::span(&next), restarts) {
-                    next = next
-                        .ending(monday)
-                        .ok_or(Unreschedulable::Restart { monday })?;
-                }
+                let next = gym_rescheduled(mesocycle, cursor, &gym_weeks, diary)?;
                 cursor = Some(crate::plan::Occupies::span(&next).end());
                 moved.push(next);
             }
@@ -1123,12 +1116,7 @@ pub fn rescheduled(
             let mut moved = Vec::new();
             let mut cursor: Option<Date> = None;
             for mesocycle in side.mesocycles() {
-                let mut next = cycling_rescheduled(mesocycle, cursor, &cycling_weeks);
-                if let Some(monday) = restarting(crate::plan::Occupies::span(&next), restarts) {
-                    next = next
-                        .ending(monday)
-                        .ok_or(Unreschedulable::Restart { monday })?;
-                }
+                let next = cycling_rescheduled(mesocycle, cursor, &cycling_weeks);
                 cursor = Some(crate::plan::Occupies::span(&next).end());
                 moved.push(next);
             }

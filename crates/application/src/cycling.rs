@@ -112,6 +112,54 @@ pub async fn next_ride<S: CyclingMesocycleStore + Sync>(
     diary: &Diary,
     missed: &planner::Missed,
 ) -> Result<(CyclingMesocycle, Due), PrescriptionError> {
+    let (mesocycle, found) = scheduled_ride(store, from, week, diary, missed).await?;
+    // **A missed test carried to this ride's slot is ridden here** (#732), as
+    // the test of the microcycle it was due in.
+    let carried = match &found {
+        Due::Ride(ride) => missed.carried_to(Discipline::Cycling, ride.date),
+        Due::Holding(day) => missed.carried_to(Discipline::Cycling, day.date),
+    };
+    let date = match &found {
+        Due::Ride(ride) => ride.date,
+        Due::Holding(day) => day.date,
+    };
+    if let Some(due) = carried
+        && let Some((id, _, source)) = store.on(due).await?
+        && let Some(test) = test_in(&source, id, due, date)
+    {
+        return Ok((source, test));
+    }
+    Ok((mesocycle, found))
+}
+
+/// The test of the microcycle `due` falls in, ridden on `date`.
+fn test_in(
+    mesocycle: &CyclingMesocycle,
+    id: CyclingMesocycleId,
+    due: Date,
+    date: Date,
+) -> Option<Due> {
+    let microcycle = mesocycle.microcycle_of(due)?;
+    let (session, ride) = mesocycle
+        .microcycle(microcycle)?
+        .for_role(planner::ESSENTIAL)?;
+    Some(Due::Ride(NextRide {
+        mesocycle: id,
+        date,
+        microcycle,
+        session,
+        ride: ride.clone(),
+    }))
+}
+
+/// The ride the plan schedules at or after `from`, before any carried test.
+async fn scheduled_ride<S: CyclingMesocycleStore + Sync>(
+    store: &S,
+    from: Date,
+    week: &TrainingWeek,
+    diary: &Diary,
+    missed: &planner::Missed,
+) -> Result<(CyclingMesocycle, Due), PrescriptionError> {
     let covering = store.on(from).await?;
     let covered = covering.is_some();
     // The programme covering the date answers first, and only a programme with

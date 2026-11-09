@@ -410,7 +410,10 @@ where
     /// store's contents; the caller decides whether what comes out is worth
     /// writing down.
     async fn derive(&self, date: Date) -> Result<Derivation, PrescriptionError> {
-        let Some(found) = self.ports.mesocycles.on(date).await? else {
+        // **A missed test carried to this slot is the test of the week it was
+        // due in** (#732), so the plan is read on that date.
+        let carried = self.ports.mesocycles.carried_to(date).await?;
+        let Some(found) = self.ports.mesocycles.on(carried.unwrap_or(date)).await? else {
             return Err(PrescriptionError::NoPlan { date });
         };
         // The fills as changed on the session's date, and what assists them
@@ -426,9 +429,13 @@ where
         // arranged (#673), and with a skipped essential session earlier in the
         // week moved here (#392); the calendar answers only for a date the
         // diary gives no slot.
-        let (week, role) = match self.ports.mesocycles.role_on(date).await? {
-            Some(role) => (mesocycle.calendar().place_week(date)?, role),
-            None => mesocycle.calendar().place(date)?,
+        let (week, role) = match (carried, self.ports.mesocycles.role_on(date).await?) {
+            (Some(due), _) => (
+                mesocycle.calendar().place_week(due)?,
+                domain::planner::ESSENTIAL,
+            ),
+            (None, Some(role)) => (mesocycle.calendar().place_week(date)?, role),
+            (None, None) => mesocycle.calendar().place(date)?,
         };
         let mut ladders = BTreeMap::new();
         for slot in SlotId::ALL {

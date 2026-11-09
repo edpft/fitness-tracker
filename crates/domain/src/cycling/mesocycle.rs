@@ -621,35 +621,6 @@ impl CyclingMesocycle {
         }
     }
 
-    /// The same mesocycle, ended the Sunday before `monday` (#732): the
-    /// microcycles it rode before then, and the weeks it lost and held before
-    /// then. `None` where it rode none.
-    #[must_use]
-    pub fn ending(&self, monday: Date) -> Option<Self> {
-        let mut run = 0_usize;
-        let mut week = self.start;
-        while week < monday {
-            if self.microcycle_of(week).is_some() {
-                run = run.saturating_add(1);
-            }
-            week = week.checked_add(jiff::Span::new().weeks(1)).ok()?;
-        }
-        let kept: Vec<CyclingMicrocycle> = self.microcycles.iter().take(run).cloned().collect();
-        let before = |dates: &[Date]| -> Vec<Date> {
-            dates
-                .iter()
-                .copied()
-                .filter(|date| *date < monday)
-                .collect()
-        };
-        Some(Self {
-            microcycles: NonEmpty::new(kept).ok()?,
-            lost: before(&self.lost),
-            holding: before(&self.holding),
-            ..self.clone()
-        })
-    }
-
     /// The Mondays of the weeks this mesocycle lost.
     #[must_use]
     pub fn lost(&self) -> &[Date] {

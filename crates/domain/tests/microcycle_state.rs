@@ -193,11 +193,11 @@ fn every_way_of_not_performing_the_essential_session_loses_it() {
     }
 }
 
-/// **The FTP test ridden and the 1RM test missed** (#190). The gym re-runs its
-/// test week; cycling holds, because it would otherwise have to ride the test
-/// again.
+/// **The FTP test ridden and the gym's entry test missed** (#190). The entry
+/// test anchors a new lift, so the gym re-runs its test week (#732); cycling
+/// holds, because it would otherwise have to ride the test again.
 #[test]
-fn a_test_completed_holds_while_the_test_missed_re_runs() {
+fn a_test_completed_holds_while_the_entry_test_missed_re_runs() {
     let week = [
         test(
             Discipline::Gym,
@@ -206,111 +206,6 @@ fn a_test_completed_holds_while_the_test_missed_re_runs() {
             },
         ),
         test(Discipline::Cycling, SessionState::Performed),
-    ];
-
-    assert_eq!(
-        rerun(MONDAY, microcycle_state(&week, &[]), &week, &[], &[]),
-        Some(Rerun {
-            monday: MONDAY,
-            holding: Some(Discipline::Cycling),
-        })
-    );
-}
-
-/// **And the other way round**: the 1RM test done and the FTP test missed.
-#[test]
-fn the_gym_holds_when_its_test_was_done_and_the_ride_was_not() {
-    let week = [
-        test(Discipline::Gym, SessionState::Performed),
-        test(Discipline::Cycling, SessionState::NotPrescribed),
-    ];
-
-    assert_eq!(
-        rerun(MONDAY, microcycle_state(&week, &[]), &week, &[], &[]),
-        Some(Rerun {
-            monday: MONDAY,
-            holding: Some(Discipline::Gym),
-        })
-    );
-}
-
-/// **A partially completed week that tested nothing re-runs for both.** The
-/// operator, 2026-09-25: *"if the partially completed microcycle is a non-test
-/// microcycle, we should just repeat the microcycle."*
-#[test]
-fn a_partially_completed_week_of_no_test_re_runs_for_both() {
-    let week = [
-        session(Discipline::Gym, ESSENTIAL, SessionState::Performed),
-        session(
-            Discipline::Cycling,
-            ESSENTIAL,
-            SessionState::NotPerformed { absence: None },
-        ),
-    ];
-
-    assert_eq!(
-        rerun(MONDAY, microcycle_state(&week, &[]), &week, &[], &[]),
-        Some(Rerun {
-            monday: MONDAY,
-            holding: None,
-        })
-    );
-}
-
-/// **The discipline that holds is the one that completed its test**, not any
-/// discipline that had one: a test missed is re-run, never held.
-#[test]
-fn a_test_missed_is_never_held() {
-    let week = [
-        test(Discipline::Gym, SessionState::NotPrescribed),
-        session(Discipline::Cycling, ESSENTIAL, SessionState::Performed),
-    ];
-
-    assert_eq!(
-        rerun(MONDAY, microcycle_state(&week, &[]), &week, &[], &[]),
-        Some(Rerun {
-            monday: MONDAY,
-            holding: None,
-        })
-    );
-}
-
-/// **A self-regulating gym week missed moves the hybrid microcycle on** (#732).
-/// The week of 2 November 2026 left one slot, Sunday evening, for Peak week 2's
-/// essential ride; the gym's had nowhere to go. SBS sets next week's training
-/// maximum from its repetition-maximum day, so the week is not run again.
-#[test]
-fn a_self_regulating_gym_week_missed_moves_on() {
-    let week = [session(
-        Discipline::Cycling,
-        ESSENTIAL,
-        SessionState::Performed,
-    )];
-    let lost = [Discipline::Gym];
-
-    assert_eq!(
-        rerun(
-            MONDAY,
-            microcycle_state(&week, &lost),
-            &week,
-            &lost,
-            &[Discipline::Gym]
-        ),
-        None
-    );
-}
-
-/// **The ride missed re-runs the week for both**, the gym included, though the
-/// gym regulates itself: the two must reach their troughs and tests together.
-#[test]
-fn a_ride_missed_re_runs_the_week_for_both() {
-    let week = [
-        session(Discipline::Gym, ESSENTIAL, SessionState::Performed),
-        session(
-            Discipline::Cycling,
-            ESSENTIAL,
-            SessionState::NotPerformed { absence: None },
-        ),
     ];
 
     assert_eq!(
@@ -323,19 +218,99 @@ fn a_ride_missed_re_runs_the_week_for_both() {
         ),
         Some(Rerun {
             monday: MONDAY,
-            holding: None,
+            holding: Some(Discipline::Cycling),
         })
     );
 }
 
-/// **A test missed re-runs, whatever the programme**: it anchors what follows.
+/// **A missed FTP test runs nothing again** (#732): the zones only go stale,
+/// and the test is carried to a later slot instead. The operator, 2026-11-09:
+/// *"The worst thing that can happen is that my zones are stale for a couple
+/// of weeks."*
 #[test]
-fn a_gym_test_missed_re_runs_though_the_programme_regulates_itself() {
+fn a_missed_ftp_test_runs_nothing_again() {
+    let week = [
+        test(Discipline::Gym, SessionState::Performed),
+        test(Discipline::Cycling, SessionState::NotPrescribed),
+    ];
+
+    assert_eq!(
+        rerun(
+            MONDAY,
+            microcycle_state(&week, &[]),
+            &week,
+            &[],
+            &[Discipline::Gym]
+        ),
+        None
+    );
+}
+
+/// **A missed gym test later in the term runs nothing again** (#732): it
+/// re-measures a lift already anchored, and is carried instead.
+#[test]
+fn a_later_gym_test_missed_runs_nothing_again() {
     let week = [
         test(
             Discipline::Gym,
             SessionState::NotPerformed { absence: None },
         ),
+        session(Discipline::Cycling, ESSENTIAL, SessionState::Performed),
+    ];
+
+    assert_eq!(
+        rerun(MONDAY, microcycle_state(&week, &[]), &week, &[], &[]),
+        None
+    );
+}
+
+/// **A week of no test carries on, however little of it was done** (#732).
+/// The operator, 2026-11-09: *"we can just continue the programme as if it was
+/// completed as expected."*
+#[test]
+fn a_week_of_no_test_carries_on() {
+    let ride_missed = [
+        session(Discipline::Gym, ESSENTIAL, SessionState::Performed),
+        session(
+            Discipline::Cycling,
+            ESSENTIAL,
+            SessionState::NotPerformed { absence: None },
+        ),
+    ];
+    let gym_lost = [session(
+        Discipline::Cycling,
+        ESSENTIAL,
+        SessionState::Performed,
+    )];
+
+    assert_eq!(
+        rerun(
+            MONDAY,
+            microcycle_state(&ride_missed, &[]),
+            &ride_missed,
+            &[],
+            &[Discipline::Gym]
+        ),
+        None
+    );
+    assert_eq!(
+        rerun(
+            MONDAY,
+            microcycle_state(&gym_lost, &[Discipline::Gym]),
+            &gym_lost,
+            &[Discipline::Gym],
+            &[Discipline::Gym]
+        ),
+        None
+    );
+}
+
+/// **The discipline that holds is the one that completed its test**, not any
+/// discipline that had one: an entry test missed is re-run, never held.
+#[test]
+fn an_entry_test_missed_is_never_held() {
+    let week = [
+        test(Discipline::Gym, SessionState::NotPrescribed),
         session(Discipline::Cycling, ESSENTIAL, SessionState::Performed),
     ];
 

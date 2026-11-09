@@ -17,7 +17,7 @@ use domain::{
     macrocycle::Macrocycle,
     plan::{Plan, Span},
     planner::{
-        self, Filled, MicrocycleState, Missed, Placed, Recorded, Rerun, Restart, SessionState,
+        self, Filled, MicrocycleState, Missed, Placed, Recorded, Rerun, SessionState,
         Unreschedulable,
     },
     planner::{Discipline, RecordedSession, ScheduledSlot, SessionRole, accounted},
@@ -29,7 +29,6 @@ use jiff::civil::{Date, DateTime};
 use crate::{
     CyclingDeliveryStore, DestinationName, DiaryStore, PerformedSessionLog, PlanStore,
     PrescriptionDeliveryStore, PublishedCycling, RiddenSessionLog, StoreError,
-    commit::cycling_kind,
 };
 
 /// One session of the microcycle, and where it stands.
@@ -70,13 +69,10 @@ pub struct Standing {
     /// hand it to [`planner::rescheduled`], or to the stores in
     /// [`crate::reschedule`].
     pub reruns: Vec<Rerun>,
-    /// The Mondays a lost progressive week started the programme again
-    /// (#732): the mesocycle in force ends the Sunday before, and the boundary
-    /// commits the weeks left in the term. Hand it on beside `reruns`.
-    pub restarts: Vec<Restart>,
     /// The essential sessions missed so far, each moved to a later slot of its
-    /// discipline where the week had one. Hand it on beside `reruns`, so that
-    /// prescribing reads each slot's role as this does.
+    /// discipline where the week had one, and the tests carried to a later
+    /// week. Hand it on beside `reruns`, so that prescribing reads each slot's
+    /// session as this does.
     pub missed: Missed,
     /// The days of the current microcycle's mesocycle, both disciplines' halves
     /// together, as the plan now stands: what says which phase of the
@@ -86,15 +82,10 @@ pub struct Standing {
 
 impl Standing {
     /// What every other reader needs to see the plan as this walk left it: its
-    /// re-runs, its restarts and its missed sessions, read against `diary`.
+    /// re-runs and its missed sessions, read against `diary`.
     #[must_use]
     pub fn reschedule(&self, diary: Diary) -> crate::reschedule::Reschedule {
-        crate::reschedule::Reschedule::new(
-            self.reruns.clone(),
-            self.restarts.clone(),
-            diary,
-            self.missed.clone(),
-        )
+        crate::reschedule::Reschedule::new(self.reruns.clone(), diary, self.missed.clone())
     }
 
     /// The session `fitness next` delivers: the first that can still be
@@ -328,12 +319,15 @@ where
         let mut monday = planner::commencing(authored.window().span().start());
         let mut opens: Option<Boundary> = None;
         let mut reruns: Vec<Rerun> = Vec::new();
-        let mut restarts: Vec<Restart> = Vec::new();
         let mut weeks: Vec<(Date, MicrocycleState)> = Vec::new();
         let mut missed = Missed::none();
+        // The tests carried past the week they were missed in (#732).
+        let mut carried = Missed::none();
         loop {
-            let plan = rescheduled(&authored, &reruns, &restarts, &diary)?;
-            let week = self.week_of(&plan, &diary, monday, opens, now).await?;
+            let plan = rescheduled(&authored, &reruns, &diary)?;
+            let week = self
+                .week_of(&plan, &diary, monday, opens, now, &carried)
+                .await?;
             missed.extend(week.missed);
             // **An open illness stops the walk at the week now has reached**
             // (#674). Every session after its start reads taken, so every week
@@ -355,8 +349,7 @@ where
                     sessions: week.sessions,
                     weeks,
                     reruns,
-                    restarts,
-                    missed,
+                    missed: missed.with_carried(&carried),
                     mesocycle,
                 });
             };
@@ -364,17 +357,22 @@ where
             let placed = placed(&week.sessions);
             let lost = lost_by(&plan, &diary, monday);
             let state = planner::microcycle_state(&placed, &lost);
-            let regulating = regulating(&plan, monday);
+            let anchoring = anchoring(&plan, monday);
             let next = monday
                 .checked_add(jiff::Span::new().weeks(1))
                 .map_err(|_| StoreError::Corrupt {
                     detail: "a microcycle beyond the calendar".to_owned(),
                 })?;
-            if let Some(rerun) = planner::rerun(monday, state, &placed, &lost, &regulating) {
-                if planner::progressive(&placed, &lost) && self.restarts(&plan, monday, next) {
-                    restarts.push(Restart { monday: next });
-                } else {
-                    reruns.push(rerun);
+            // **Only a new lift's entry test runs again; everything else
+            // carries on**, a missed test carried to the next slot of its
+            // discipline (#732).
+            if let Some(rerun) = planner::rerun(monday, state, &placed, &lost, &anchoring) {
+                reruns.push(rerun);
+            } else {
+                for (discipline, due) in tests_lost(&week.sessions, &placed, &lost, &carried) {
+                    if let Some(to) = self.next_slot(&diary, discipline, next) {
+                        carried.carry(discipline, due, to);
+                    }
                 }
             }
             weeks.push((monday, state));
@@ -383,23 +381,27 @@ where
         }
     }
 
-    /// Whether the week lost on `monday` starts the programme again on
-    /// `next` rather than running again (#732).
+    /// The date of the first slot of `discipline` from `from` until the term's
+    /// transition, where a missed test can still be taken (#732).
     ///
-    /// **Where the term says what is left, and the programme in force can be
-    /// chosen from again to fill it** ([`Macrocycle::restart`]). Without a term
-    /// nothing starts again, and the week runs again as it did before.
-    fn restarts(&self, plan: &Plan, monday: Date, next: Date) -> bool {
-        let Some(term) = &self.term else {
-            return false;
-        };
-        let Some(macrocycle) = Macrocycle::on(next, &term.holidays) else {
-            return false;
-        };
-        plan.mesocycle_on(monday)
-            .and_then(|concurrent| concurrent.cycling())
-            .and_then(|cycling| cycling_kind(cycling, term.identify))
-            .is_some_and(|current| macrocycle.restart(current, next).is_some())
+    /// The operator, 2026-11-09: *"Once we've crossed into a transition phase
+    /// or into a new macrocycle, we've lost the opportunity."* Without a term
+    /// there is no telling where that is, so nothing is carried.
+    fn next_slot(&self, diary: &Diary, discipline: Discipline, from: Date) -> Option<Date> {
+        let term = self.term.as_ref()?;
+        let transition = Macrocycle::on(from, &term.holidays)?.transition();
+        let mut date = from;
+        while date < transition {
+            if diary
+                .planned_slots_of(date)
+                .iter()
+                .any(|slot| slot.discipline == discipline)
+            {
+                return Some(date);
+            }
+            date = date.tomorrow().ok()?;
+        }
+        None
     }
 
     /// Every session of the week commencing `monday`, with its state, against
@@ -422,16 +424,24 @@ where
         monday: Date,
         opens: Option<Boundary>,
         now: DayPart,
+        carried: &Missed,
     ) -> Result<Week, StoreError> {
         let ordinary = self
-            .read_week(plan, diary, monday, opens, now, &Missed::none())
+            .read_week(plan, diary, monday, opens, now, carried)
             .await?;
         let missed = missed_in(&ordinary.sessions, diary);
         if missed.is_empty() {
             return Ok(ordinary);
         }
         let moved = self
-            .read_week(plan, diary, monday, opens, now, &missed)
+            .read_week(
+                plan,
+                diary,
+                monday,
+                opens,
+                now,
+                &missed.clone().with_carried(carried),
+            )
             .await?;
         Ok(Week { missed, ..moved })
     }
@@ -727,13 +737,8 @@ fn ridden_as(week: &[planner::Planned<'_>], ridden: &crate::RiddenSession) -> Op
 /// **A plan that authored should always reschedule** — moving a mesocycle later
 /// and skipping a week in it only ever give its calendar room — so a refusal is
 /// something in the store this program could not have meant.
-fn rescheduled(
-    plan: &Plan,
-    reruns: &[Rerun],
-    restarts: &[Restart],
-    diary: &Diary,
-) -> Result<Plan, StoreError> {
-    planner::rescheduled(plan, reruns, restarts, diary).map_err(|error: Unreschedulable| {
+fn rescheduled(plan: &Plan, reruns: &[Rerun], diary: &Diary) -> Result<Plan, StoreError> {
+    planner::rescheduled(plan, reruns, diary).map_err(|error: Unreschedulable| {
         StoreError::Corrupt {
             detail: format!("{} will not reschedule: {error}", plan.name()),
         }
@@ -785,25 +790,56 @@ fn placed(sessions: &[Session]) -> Vec<Placed> {
         .collect()
 }
 
-/// The disciplines whose week commencing `monday` can be missed without the
-/// microcycle running again: the gym, where its mesocycle regulates itself
-/// that week (#732). Cycling's programmes assume progress from week to week,
-/// so it never does.
-fn regulating(plan: &Plan, monday: Date) -> Vec<Discipline> {
-    let regulates = plan
-        .gym()
-        .and_then(|side| side.on(monday))
-        .is_some_and(|(_, mesocycle)| {
-            mesocycle
-                .calendar()
-                .place_week(monday)
-                .is_ok_and(|week| mesocycle.regulates_itself_in(week))
-        });
-    if regulates {
+/// The disciplines whose test in the week commencing `monday` anchors a new
+/// lift, and so runs again until it is performed (#732): the gym, where its
+/// mesocycle that week is the plan's entry test.
+///
+/// **The entry test stands for a new lift.** Each term's plan starts its gym
+/// with the test that anchors the lift it trains; a test later in the term
+/// re-measures a lift already anchored, and a missed one is carried instead.
+/// Cycling's zones only go stale (operator, 2026-11-09), so it is never here.
+fn anchoring(plan: &Plan, monday: Date) -> Vec<Discipline> {
+    let entry = plan.gym().is_some_and(|side| {
+        side.on(monday).is_some_and(|(at, mesocycle)| {
+            at == 0 && matches!(mesocycle, domain::prescription::GymMesocycle::Test(_))
+        })
+    });
+    if entry {
         vec![Discipline::Gym]
     } else {
         Vec::new()
     }
+}
+
+/// The tests a week that ended lost, each by its discipline and the date it
+/// was due: an essential session that was a test, owed and not performed.
+///
+/// **A test carried here and lost again keeps the date it was first due**, so
+/// it is carried on as the same test.
+fn tests_lost(
+    sessions: &[Session],
+    placed: &[Placed],
+    lost: &[Discipline],
+    carried: &Missed,
+) -> Vec<(Discipline, Date)> {
+    Discipline::ALL
+        .iter()
+        .copied()
+        .filter(|discipline| planner::owed_by(placed, *discipline, lost) == planner::Owed::Lost)
+        .filter_map(|discipline| {
+            let test = sessions.iter().find(|session| {
+                session.programmed
+                    && session.test
+                    && session.slot.discipline == discipline
+                    && session.slot.role == Some(planner::ESSENTIAL)
+            })?;
+            let date = test.slot.date;
+            Some((
+                discipline,
+                carried.carried_to(discipline, date).unwrap_or(date),
+            ))
+        })
+        .collect()
 }
 
 /// The disciplines the plan programmes in a week that the rearranged week left

@@ -462,44 +462,6 @@ impl Calendar {
         )
     }
 
-    /// This calendar from the same start, running `duration_weeks` training
-    /// weeks (#732).
-    ///
-    /// **What cutting a mesocycle asks of its calendar.** A skip that a
-    /// shorter block no longer reaches is dropped rather than refused: it fell
-    /// inside the block as authored, and the block now ends before it.
-    ///
-    /// # Errors
-    ///
-    /// [`InvalidCalendar`] as [`Self::new`] gives it, other than for a skip
-    /// past the new end.
-    pub fn shortened(&self, duration_weeks: u32) -> Result<Self, InvalidCalendar> {
-        let mut skips: Vec<Skip> = self.interruptions.iter().collect();
-        loop {
-            match Self::holding_on(
-                self.start,
-                duration_weeks,
-                &skips,
-                &self.holding,
-                self.week.clone(),
-                self.zone.clone(),
-            ) {
-                Err(InvalidCalendar::InterruptionPastEnd { skip, .. }) => {
-                    let before = skips.len();
-                    skips.retain(|kept| *kept != skip);
-                    if skips.len() == before {
-                        return Err(InvalidCalendar::InterruptionPastEnd {
-                            skip,
-                            start: self.start,
-                            duration: duration_weeks,
-                        });
-                    }
-                }
-                built => return built,
-            }
-        }
-    }
-
     /// The first days of the weeks this block holds, ascending.
     pub fn holding(&self) -> &[Date] {
         &self.holding
