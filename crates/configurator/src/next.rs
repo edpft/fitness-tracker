@@ -107,6 +107,9 @@ pub async fn run(
     )
     .instrument(spanned.run.clone())
     .await;
+    if let Ok(Answered::Report(report)) = &answered {
+        telemetry::delivered(&spanned.run, &report.next);
+    }
     telemetry::run_ended(&spanned.run, &answered);
     match answered? {
         Answered::Report(report) => Ok(*report),
