@@ -536,35 +536,6 @@ impl Macrocycle {
     }
 }
 
-impl Macrocycle {
-    /// What a lost week commits on `start`, the Monday after it, where it
-    /// starts the programme again (#732): the weeks left in the term, chosen
-    /// from the whole of the programme `current` was split from.
-    ///
-    /// `None` where `current` was not split from a whole, or the weeks left are
-    /// more than it publishes or fewer than a mesocycle with a trough at its
-    /// end: then the lost week is run again, as before.
-    pub fn restart(&self, current: Cycling, start: Date) -> Option<Concurrent> {
-        let of = match current {
-            Cycling::Base1
-            | Cycling::Base2
-            | Cycling::Selection {
-                of: Whole::Base, ..
-            } => Whole::Base,
-            Cycling::Peak1
-            | Cycling::Peak2
-            | Cycling::Selection {
-                of: Whole::Peak, ..
-            } => Whole::Peak,
-            Cycling::Hold { .. } | Cycling::Build => return None,
-        };
-        let weeks = weeks_between(start, self.transition())?;
-        (2..=of.weeks())
-            .contains(&weeks)
-            .then_some(Concurrent::progressing(Cycling::Selection { of, weeks }))
-    }
-}
-
 /// Whole weeks from one Monday to another, `None` if `to` is before `from`.
 fn weeks_between(from: Date, to: Date) -> Option<u32> {
     let days = (to - from).get_days();

@@ -31,7 +31,7 @@ use domain::{
 use jiff::civil::{Date, Weekday};
 
 use crate::{
-    Ending, GenerationParameterStore, HoldingRides, PlanStore, ProgressionStore, PublishedCycling,
+    GenerationParameterStore, HoldingRides, PlanStore, ProgressionStore, PublishedCycling,
     PublishedProgrammes, RiddenVenues, SourceError, StoreError,
     holding::NoHoldingRide,
     microcycle::Standing,
@@ -88,9 +88,6 @@ fn unbuildable(error: &impl std::fmt::Display) -> CommitError {
 pub struct Due {
     plan: Plan,
     diary: Diary,
-    /// Whether a lost week ended the plan's last mesocycles early (#732), so
-    /// that the store ends them too before anything is added after them.
-    ended_early: bool,
     pub concurrent: Concurrent,
     pub span: Span,
 }
@@ -170,27 +167,14 @@ where
             .and_then(|side| side.mesocycles().last())
             .filter(|last| last.start() >= macrocycle.start())
             .and_then(|last| self.cycling_of(last));
-        // **A lost week that started the programme again commits what is left
-        // of the term** (#732), chosen from the whole of it, where the boundary
-        // would otherwise choose what comes next.
-        let restarted_on = |monday: Date| {
-            standing
-                .restarts
-                .iter()
-                .any(|restart| restart.monday == monday)
-        };
-        let ended_early = restarted_on(end);
-        let chosen = previous
-            .filter(|_| restarted_on(start))
-            .and_then(|current| macrocycle.restart(current, start))
-            .or_else(|| macrocycle.next(chain, previous, start));
-        Ok(chosen.map(|concurrent| Due {
-            ended_early,
-            plan,
-            diary: diary.clone(),
-            concurrent,
-            span: Span::new(start, concurrent.weeks()),
-        }))
+        Ok(macrocycle
+            .next(chain, previous, start)
+            .map(|concurrent| Due {
+                plan,
+                diary: diary.clone(),
+                concurrent,
+                span: Span::new(start, concurrent.weeks()),
+            }))
     }
 
     /// Build what is due and add it to the plan.
@@ -224,19 +208,10 @@ where
                 positions.as_deref(),
             )
             .await?;
-        let ending = due
-            .ended_early
-            .then(|| {
-                Some(Ending {
-                    gym: due.plan.gym()?.mesocycles().last()?,
-                    cycling: due.plan.cycling()?.mesocycles().last()?,
-                })
-            })
-            .flatten();
         Ok(self
             .ports
             .plans
-            .commit(due.plan.name(), ending, &gym, &cycling)
+            .commit(due.plan.name(), &gym, &cycling)
             .await?)
     }
 

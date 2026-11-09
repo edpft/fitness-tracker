@@ -2091,6 +2091,25 @@ pub trait MesocycleStore {
         date: Date,
     ) -> impl Future<Output = Result<Option<SessionRole>, StoreError>> + Send;
 
+    /// The date of the test the gym's slot on `date` holds, where a missed test
+    /// was carried there (#732): the slot is prescribed from that week of the
+    /// plan, not its own.
+    ///
+    /// **Here for the reason [`Self::rerun_on`] is.** `None` where the slot
+    /// holds its own session, which is all a store that knows nothing of what
+    /// happened can say.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn carried_to(
+        &self,
+        date: Date,
+    ) -> impl Future<Output = Result<Option<Date>, StoreError>> + Send {
+        let _ = date;
+        std::future::ready(Ok(None))
+    }
+
     /// Whether the store holds the mesocycle of this identity, in any
     /// authoring of its plan.
     ///
@@ -2154,11 +2173,6 @@ pub trait PlanStore {
     /// side of each discipline is one mesocycle or two, since a hold is its
     /// holding weeks and then a test week.
     ///
-    /// `ending`, where a lost week started the programme again (#732), is each
-    /// discipline's last mesocycle as it now ends, shorter than it was
-    /// authored: it is ended in place, in the same write, so the plan never
-    /// holds two mesocycles of one discipline on one day.
-    ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable, or nothing is authored under
@@ -2166,18 +2180,9 @@ pub trait PlanStore {
     fn commit(
         &self,
         plan: &PlanName,
-        ending: Option<Ending<'_>>,
         gym: &[GymMesocycle],
         cycling: &[CyclingMesocycle],
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
-}
-
-/// Each discipline's last mesocycle, ended early because a lost week started
-/// the programme again (#732).
-#[derive(Debug, Clone, Copy)]
-pub struct Ending<'a> {
-    pub gym: &'a GymMesocycle,
-    pub cycling: &'a CyclingMesocycle,
 }
 
 /// The FTP series, read by the date a value was in force.
