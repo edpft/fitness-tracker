@@ -1,26 +1,23 @@
-//! What a run of `next` did, where the plan stands, and what is next, as a page.
+//! What a run of `next` did, and what is next, as a page.
 //!
-//! **The terminal's words, not its layout.** Every phrase here is the one
-//! `fitness next` prints, so the two frontends say the same thing; the columns
-//! the terminal pads with spaces are lists and tables, because a phone is
-//! narrower than any terminal.
+//! **The terminal's words, not its layout**, the columns the terminal pads
+//! with spaces being lists and tables, because a phone is narrower than any
+//! terminal. **Except where a session went**, which is one line here (#666):
+//! the terminal says what was replaced and what the stack holds.
 
 use std::fmt::Write as _;
 
 use application::{
-    Delivery, Placed, Prescription, RidesPlaced, Unexpressed,
+    Delivery, Prescription, Unexpressed,
     cycling::PrescribedRide,
     microcycle::Session,
-    next::{
-        CyclingPrescribed, Done, Found, GymPrescribed, MacrocycleStanding, PlanStanding,
-        Prescribed, Report, Step, Undelivered, WeekPosition, WhatIsNext,
-    },
+    next::{CyclingPrescribed, Done, Found, GymPrescribed, Prescribed, Report, Step, WhatIsNext},
 };
 use domain::{
     cycling::{CyclingMicrocycle, Ride, clock},
     gym::Load,
     measure::{PositiveDuration, Spans},
-    planner::ScheduledSlot,
+    planner::{Discipline, ScheduledSlot},
     prescription::{Prescribed as Set, PrescribedExercise, PrescribedSet},
     schedule::DayPart,
 };
@@ -128,88 +125,24 @@ fn ended(done: &Done) -> String {
     format!("done, {what}")
 }
 
-/// How long a step will take, where that is worth saying (#369).
-pub fn estimate(outstanding: u64, takes: std::time::Duration) -> Option<String> {
-    (takes >= WORTH_ANNOUNCING)
-        .then(|| format!("{outstanding} classes to read, about {}", roughly(takes)))
-}
-
-/// The first refresh against an empty catalogue is ten minutes and has to say
-/// so. The weekly one is three classes and two seconds, and announcing that
-/// would be commentary.
-const WORTH_ANNOUNCING: std::time::Duration = std::time::Duration::from_secs(30);
-
-/// A duration as the operator would say it.
-fn roughly(takes: std::time::Duration) -> String {
-    let seconds = takes.as_secs();
-    if seconds < 90 {
-        return format!("{seconds} seconds");
-    }
-    let minutes = (seconds + 30) / 60;
-    format!("{minutes} minutes")
-}
-
-/// Where the plan stands, and what is next.
+/// What is next, then this microcycle's sessions (#666).
+///
+/// **Not where each discipline stands in its mesocycle**: the operator,
+/// 2026-11-09, *"isn't very meaningful"*. The curves that replace it are #742.
 pub fn report(report: &Report) -> Markup {
     html! {
-        (plan_standing(&report.plan))
-        section.next { (what_is_next(&report.next)) }
-    }
-}
-
-fn plan_standing(plan: &PlanStanding) -> Markup {
-    let macrocycle = match &plan.macrocycle {
-        MacrocycleStanding::Week {
-            macrocycle,
-            week,
-            of,
-        } => format!(
-            "{} macrocycle, week {week} of {of}",
-            capitalised(&macrocycle.to_string())
-        ),
-        // **Said even when it cannot be known**: past the school calendar's
-        // reach there is no data, which is not the same as no term.
-        MacrocycleStanding::Unknown { published_to } => format!(
-            "Macrocycle unknown: the school calendar is published to {}",
-            published_to.map_or_else(|| "nowhere".to_owned(), |to| to.to_string())
-        ),
-        MacrocycleStanding::Unreadable(error) => {
-            format!("Macrocycle unknown: the school calendar could not be read ({error})")
+        section.card.next {
+            p.label { "Next" }
+            (what_is_next(&report.next))
         }
-    };
-    html! {
-        section.plan {
-            p { (macrocycle) }
-            ul.disciplines {
-                @for (discipline, position) in &plan.disciplines {
-                    li {
-                        span.name { (capitalised(discipline.as_str())) }
-                        " "
-                        @match position {
-                            None => "no mesocycle this microcycle",
-                            Some(position) => {
-                                "mesocycle " (position.mesocycle) ", "
-                                @match position.week {
-                                    WeekPosition::Microcycle { number, of, rerun } => {
-                                        "microcycle " (number) " of " (of)
-                                        @if let Some(rerun) = rerun { ", rerun " (rerun) }
-                                    }
-                                    WeekPosition::Holding => "holding",
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            @if let Some((monday, sessions)) = &plan.microcycle {
-                p { "This microcycle, from " (monday.strftime("%A %-d %B")) }
-                table.microcycle {
-                    @for session in sessions {
-                        tr {
-                            td { (named(session)) }
-                            td { (session.slot.date.strftime("%a")) " " (session.slot.slot.part) }
-                            td { (session.state) }
-                        }
+        @if let Some((_, sessions)) = &report.plan.microcycle {
+            section.card.microcycle {
+                h2 { "This microcycle" }
+                @for session in sessions {
+                    div.row {
+                        span { (named(session)) }
+                        span.on { (session.slot.date.strftime("%a")) " " (session.slot.slot.part) }
+                        span.state { (session.state) }
                     }
                 }
             }
@@ -241,13 +174,14 @@ fn what_is_next(next: &WhatIsNext) -> Markup {
             };
         }
     };
+    // **Not "until midnight"**, which adds nothing (#666).
     let until = match session.closes {
-        _ if session.closes_at_midnight() => ", until midnight".to_owned(),
+        _ if session.closes_at_midnight() => String::new(),
         Some(closes) => format!(", until {}", when(closes)),
         None => String::new(),
     };
     html! {
-        p.session { "Next: " (named(session)) ", " (when(session.at())) (until) }
+        p.session { (named(session)) ", " (when(session.at())) (until) }
         @match prescribed {
             Prescribed::Gym(Err(error)) => p.failed { "not prescribed: " (error) },
             Prescribed::Gym(Ok(GymPrescribed::NothingPlanned { from, last })) => {
@@ -268,8 +202,7 @@ fn what_is_next(next: &WhatIsNext) -> Markup {
                 (gym_session(issued))
                 @match delivery {
                     Ok(delivered) => (gym_delivery(delivered)),
-                    Err(Undelivered::NoAccess(why)) => (not_delivered(&why.detail)),
-                    Err(Undelivered::Failed(error)) => (not_delivered(&error.to_string())),
+                    Err(_) => (not_delivered(Discipline::Gym)),
                 }
             }
             Prescribed::Cycling(Err(error)) => p.failed { "not prescribed: " (error) },
@@ -295,8 +228,19 @@ fn complete(after: Option<ScheduledSlot>) -> String {
     )
 }
 
-fn not_delivered(why: &str) -> Markup {
-    html! { p.failed { "not delivered: " (why) } }
+/// A session that did not reach its destination, in one line. Why is in
+/// telemetry (#741): the operator, 2026-11-09, *"I just need to know that it
+/// didn't work and that why is stored somewhere."*
+fn not_delivered(discipline: Discipline) -> Markup {
+    html! { p.status { i.dot.failed {} "Not in " (destination(discipline)) } }
+}
+
+/// Where a discipline's sessions go, as a name to read.
+fn destination(discipline: Discipline) -> String {
+    configurator::next::destination(discipline).map_or_else(
+        |_| capitalised(discipline.as_str()),
+        |name| capitalised(name.as_str()),
+    )
 }
 
 /// The session itself: its blocks, its exercises and their sets, and any slot
@@ -414,26 +358,12 @@ fn weight(load: Load) -> String {
     }
 }
 
-/// What a delivery amounted to.
+/// Where the session went, in one line, and what it could not say there.
 fn gym_delivery(delivered: &Delivery) -> Markup {
-    let lead = match delivered.placed {
-        Placed::Created => "delivered to",
-        Placed::Replaced { .. } => "replaced at",
-        Placed::Unchanged => "already delivered to",
-    };
     html! {
-        p.delivered {
-            (lead) " " (delivered.destination) " as session " (delivered.ordinal)
-            " (" (delivered.reference) ")"
-            @match delivered.placed {
-                Placed::Replaced { superseding: Some(previous) } => {
-                    br; "in place of prescription " (previous) ", which it supersedes"
-                }
-                Placed::Replaced { superseding: None } => {
-                    br; "the same session, as this build renders it"
-                }
-                Placed::Created | Placed::Unchanged => {}
-            }
+        p.status {
+            i.dot.done {} "In " (capitalised(delivered.destination.as_str()))
+            ", session " (delivered.ordinal)
         }
         (unexpressed(&delivered.unexpressed))
     }
@@ -458,9 +388,8 @@ fn cycling_session(prescribed: &CyclingPrescribed) -> Markup {
         p { (heading(ride)) }
         (cycling_ride(ride))
         @match &prescribed.delivery {
-            Ok(placed) => (cycling_delivery(ride, placed)),
-            Err(Undelivered::NoAccess(why)) => (not_delivered(&why.detail)),
-            Err(Undelivered::Failed(error)) => (not_delivered(&error.to_string())),
+            Ok(_) => p.status { i.dot.done {} "In " (destination(Discipline::Cycling)) },
+            Err(_) => (not_delivered(Discipline::Cycling)),
         }
     }
 }
@@ -555,30 +484,6 @@ fn cycling_ride(ride: &PrescribedRide) -> Markup {
                 "No FTP test precedes this session, so the zones print without watts. \
                  Ride one and collect it, or pass --ftp."
             },
-        }
-    }
-}
-
-/// What went to the stack, and what it now holds.
-fn cycling_delivery(ride: &PrescribedRide, placed: &RidesPlaced) -> Markup {
-    html! {
-        ul.delivered {
-            @if placed.replaced > 0 {
-                li { "replaced the " (placed.replaced) " class(es) that were in the stack" }
-            }
-            @for venue in ride.next.ride.at().iter() { li { "delivered " (venue) } }
-            li {
-                "delivered " (placed.cool_down.called()) " — "
-                (placed.taught_by.as_deref().unwrap_or(
-                    "instructor unknown, so this is the one every session falls back to"
-                ))
-            }
-        }
-        p {
-            @match placed.total {
-                Some(total) => { (placed.holds) " classes in the stack, " (clock(total)) }
-                None => { (placed.holds) " classes in the stack, and Peloton gives it no total" }
-            }
         }
     }
 }

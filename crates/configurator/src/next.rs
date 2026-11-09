@@ -395,6 +395,22 @@ pub fn scope(reads: impl IntoIterator<Item = Reads>) -> Result<Scope, WiringErro
     Ok(Scope::new(parts))
 }
 
+/// What a discipline's next session is prescribed from (#666).
+///
+/// The canonical layer of its sessions, which the gym's exercise history and
+/// cycling's ridden classes and FTP read, and everything that layer is built
+/// from.
+///
+/// # Errors
+///
+/// [`WiringError`] if a name read is not a stream's.
+pub fn prescribed_from(discipline: Discipline) -> Result<Scope, WiringError> {
+    scope([Reads::Canonical(match discipline {
+        Discipline::Gym => CanonicalLayer::Gym,
+        Discipline::Cycling => CanonicalLayer::Cycling,
+    })])
+}
+
 /// The walks `next` lands a normalised layer's records by. None for a stream
 /// read from a folder, which `next` derives but does not fetch.
 ///

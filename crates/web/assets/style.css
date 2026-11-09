@@ -285,3 +285,43 @@ table.figures td { padding-right: 0.75rem; }
 .plotted .predicted { fill: var(--card); stroke: var(--c); stroke-width: 2; }
 .plotted .earlier { --c: var(--muted); }
 .card.one-rep-max .toggle label { white-space: nowrap; }
+
+/* The home page (#666): what is next, this microcycle, and whether what each
+   page reads has been collected, a dot per stage. */
+.card.next .label {
+  font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--ink2); margin: 0;
+}
+.card.next p.session { font-size: 24px; font-weight: 650; margin: 2px 0 6px; }
+.card.next h3 { font-size: 13px; font-weight: 600; color: var(--ink2); margin: 14px 0 0; }
+.card.next ul { padding-left: 0; list-style: none; }
+.card.next ul.exercises li { padding: 8px 0; border-top: 1px solid var(--grid); margin: 0; font-size: 15px; }
+.card.next table { font-size: 15px; }
+.card.next p.status { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink2); margin: 12px 0 0; }
+.card.microcycle .row {
+  display: grid; grid-template-columns: 4.5rem auto 1fr; gap: 8px; padding: 11px 0;
+  font-size: 15px; border-top: 1px solid var(--grid);
+}
+.card.microcycle h2 + .row { border-top: 0; }
+.card.microcycle .on { color: var(--ink2); white-space: nowrap; }
+.card.microcycle .state { color: var(--muted); font-size: 14px; text-align: right; }
+.card.collected .row {
+  display: grid; grid-template-columns: minmax(0, 1fr) 3rem 4.4rem 4.6rem; align-items: center;
+  padding: 9px 0; font-size: 15px; border-top: 1px solid var(--grid);
+}
+.card.collected .row > :not(:first-child) { justify-self: center; }
+.card.collected .row.head {
+  border-top: 0; padding-top: 0; font-size: 11px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.04em; text-align: center;
+}
+.card.collected .row a { text-decoration: none; overflow-wrap: normal; }
+.card.collected .row .unread { grid-column: 2 / -1; font-size: 13px; justify-self: start; }
+i.dot { display: inline-block; flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); }
+i.dot.done { background: var(--good); }
+i.dot.failed { background: var(--failed); }
+i.dot.unfinished { background: var(--ink2); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.25; transform: scale(0.7); } }
+@media (prefers-reduced-motion: reduce) { i.dot.unfinished { animation: none; opacity: 0.5; } }
+.card.collected p.key { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--ink2); margin: 10px 0 0; }
+.card.collected p.key i.dot { width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px; }
+.home { padding-top: 14px; }
