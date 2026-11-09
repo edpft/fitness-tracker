@@ -125,10 +125,11 @@ fn ended(done: &Done) -> String {
     format!("done, {what}")
 }
 
-/// What is next, then this microcycle's sessions (#666).
+/// What is next, then this microcycle's sessions (#666), then the curves.
 ///
 /// **Not where each discipline stands in its mesocycle**: the operator,
-/// 2026-11-09, *"isn't very meaningful"*. The curves that replace it are #742.
+/// 2026-11-09, *"isn't very meaningful"*. The volume and intensity curves
+/// replace it (#742).
 pub fn report(report: &Report) -> Markup {
     html! {
         section.card.next {
@@ -147,6 +148,7 @@ pub fn report(report: &Report) -> Markup {
                 }
             }
         }
+        (crate::curves::card(&report.plan.macrocycle, &report.plan.curves))
     }
 }
 

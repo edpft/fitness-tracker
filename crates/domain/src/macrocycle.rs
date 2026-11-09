@@ -479,7 +479,9 @@ impl Macrocycle {
     ///
     /// **One, never a sequence** (#222): each is chosen when the one before it
     /// ends, because only then is its entry test known. What follows it is
-    /// only ever checked for, never written down.
+    /// only ever checked for, never written down. Called again from the end of
+    /// what it chose, it says what the rest of the term is expected to be
+    /// (#742), which is written nowhere either.
     ///
     /// `previous` is the last cycling mesocycle of this macrocycle, `None` at
     /// its start. In order:

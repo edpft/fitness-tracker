@@ -92,6 +92,49 @@ pub struct Due {
     pub span: Span,
 }
 
+/// The plan in force, as it is expected to run to the end of its macrocycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Expected {
+    pub macrocycle: Macrocycle,
+    /// What is committed, then what the macrocycle would choose after it.
+    pub plan: Plan,
+    /// The first day no committed mesocycle covers.
+    pub committed_until: Date,
+}
+
+/// `plan` with `gym` and `cycling` after what it holds.
+fn extended(
+    plan: &Plan,
+    chain: domain::macrocycle::Chain,
+    gym: Vec<GymMesocycle>,
+    cycling: Vec<CyclingMesocycle>,
+) -> Result<Plan, CommitError> {
+    fn after<M: Clone + domain::plan::Occupies>(
+        held: Option<&domain::plan::Mesocycles<M>>,
+        more: Vec<M>,
+    ) -> Result<Option<domain::plan::Mesocycles<M>>, CommitError> {
+        let all: Vec<M> = held
+            .into_iter()
+            .flat_map(|side| side.mesocycles().cloned())
+            .chain(more)
+            .collect();
+        if all.is_empty() {
+            return Ok(None);
+        }
+        domain::plan::Mesocycles::new(all)
+            .map(Some)
+            .map_err(|error| unbuildable(&error))
+    }
+    Plan::new(
+        plan.name().clone(),
+        plan.authored_at(),
+        after(plan.gym(), gym)?,
+        after(plan.cycling(), cycling)?,
+    )
+    .map(|extended| extended.following(chain))
+    .map_err(|error| unbuildable(&error))
+}
+
 /// Everything committing reads and writes.
 pub struct CommitPorts<P, G, H, R, B> {
     pub plans: P,
@@ -185,14 +228,88 @@ where
     /// if what the macrocycle chose will not build. Nothing is written unless
     /// both halves built.
     pub async fn commit(&self, due: &Due) -> Result<(), CommitError> {
-        let start = due.span.start();
+        let (gym, cycling) = self
+            .build(&due.plan, &due.diary, due.concurrent, due.span.start())
+            .await?;
+        Ok(self
+            .ports
+            .plans
+            .commit(due.plan.name(), &gym, &cycling)
+            .await?)
+    }
+
+    /// The plan in force as it is expected to run to the end of the term
+    /// (#742): what is committed, then every mesocycle the macrocycle would
+    /// choose after it, built as committing builds them and written nowhere.
+    ///
+    /// **What it should be as of now, not what it will be.** A mesocycle is
+    /// still committed only when the one before it is finished, and a missed
+    /// test moved into the next week shortens the one after it (operator,
+    /// 2026-11-09).
+    ///
+    /// `None` where no plan following a chain is in force this macrocycle.
+    ///
+    /// # Errors
+    ///
+    /// [`CommitError`] if the plan cannot be read, or a mesocycle the
+    /// macrocycle would choose will not build.
+    pub async fn expected(
+        &self,
+        now: DayPart,
+        holidays: &Holidays,
+        standing: &Standing,
+        diary: &Diary,
+    ) -> Result<Option<Expected>, CommitError> {
+        let Some(macrocycle) = Macrocycle::on(now.date, holidays) else {
+            return Ok(None);
+        };
+        let plans =
+            ReschedulingPlans::new(self.ports.plans.clone(), standing.reschedule(diary.clone()));
+        let Some(mut plan) = in_force(&plans, &macrocycle).await? else {
+            return Ok(None);
+        };
+        let Some(chain) = plan.chain() else {
+            return Ok(None);
+        };
+        let monday = standing
+            .commencing
+            .unwrap_or_else(|| planner::commencing(now.date));
+        let committed_until = plan.span().end();
+        let mut start = committed_until.max(monday);
+        let mut previous = plan
+            .cycling()
+            .and_then(|side| side.mesocycles().last())
+            .filter(|last| last.start() >= macrocycle.start())
+            .and_then(|last| self.cycling_of(last));
+        while let Some(concurrent) = macrocycle.next(chain, previous, start) {
+            let (gym, cycling) = self.build(&plan, diary, concurrent, start).await?;
+            plan = extended(&plan, chain, gym, cycling)?;
+            previous = Some(concurrent.cycling());
+            start = weeks_after(start, concurrent.weeks())?;
+        }
+        Ok(Some(Expected {
+            macrocycle,
+            plan,
+            committed_until,
+        }))
+    }
+
+    /// Both halves of a concurrent mesocycle starting on `start`, built after
+    /// `plan` and written nowhere.
+    async fn build(
+        &self,
+        plan: &Plan,
+        diary: &Diary,
+        concurrent: Concurrent,
+        start: Date,
+    ) -> Result<(Vec<GymMesocycle>, Vec<CyclingMesocycle>), CommitError> {
         let cycling = self
-            .cycling_side(&due.diary, due.concurrent.cycling(), start)
+            .cycling_side(diary, concurrent.cycling(), start)
             .await?;
         // **The gym runs the same weeks as the bike** (#732): a selection's
         // positions in the whole programme, each the week of the chart it falls
         // on, so the two reach their troughs together.
-        let positions = match due.concurrent.cycling() {
+        let positions = match concurrent.cycling() {
             Cycling::Selection { .. } => cycling
                 .first()
                 .and_then(CyclingMesocycle::provided_from)
@@ -200,19 +317,9 @@ where
             _ => None,
         };
         let gym = self
-            .gym_side(
-                &due.plan,
-                &due.diary,
-                due.concurrent.gym(),
-                start,
-                positions.as_deref(),
-            )
+            .gym_side(plan, diary, concurrent.gym(), start, positions.as_deref())
             .await?;
-        Ok(self
-            .ports
-            .plans
-            .commit(due.plan.name(), &gym, &cycling)
-            .await?)
+        Ok((gym, cycling))
     }
 
     /// Which cycling mesocycle a committed one is ([`cycling_kind`]).

@@ -11,6 +11,7 @@
 pub mod analytical;
 pub mod body;
 pub mod canonical;
+pub mod curve;
 pub mod cycling;
 pub mod device;
 pub mod gym;
