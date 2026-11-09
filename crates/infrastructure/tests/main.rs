@@ -51,6 +51,7 @@ mod peloton_token_cache;
 mod prescription;
 mod progression;
 mod refusals;
+mod restart;
 mod resting_heart_rate;
 mod retraction;
 mod round_trip;

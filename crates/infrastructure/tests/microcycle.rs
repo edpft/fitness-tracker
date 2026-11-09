@@ -24,7 +24,7 @@ use application::{
     StoreError,
     microcycle::{Microcycle, MicrocyclePorts},
     prescribe::Authoring,
-    reschedule::{Reschedule, Rescheduled},
+    reschedule::Rescheduled,
 };
 use domain::{
     canonical::Occurred,
@@ -977,7 +977,7 @@ fn a_week_that_lost_both_essential_sessions_runs_again() {
         .await?;
 
         let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
-        let reschedule = Reschedule::new(standing.reruns.clone(), diary, standing.missed.clone());
+        let reschedule = standing.reschedule(diary);
         let gym = Rescheduled::new(
             SqliteGymMesocycleStore::new(pool.clone(), corpus::zone()?),
             SqlitePlanStore::new(pool.clone(), corpus::zone()?),
@@ -1141,11 +1141,7 @@ async fn after(
     .await?;
 
     let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
-    let reschedule = Reschedule::new(
-        standing.reruns.clone(),
-        diary.clone(),
-        standing.missed.clone(),
-    );
+    let reschedule = standing.reschedule(diary.clone());
     let gym = Rescheduled::new(
         SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
         SqlitePlanStore::new(pool.clone(), zone.clone()),
@@ -1722,11 +1718,7 @@ fn a_missed_essential_ride_is_ridden_on_the_sunday_instead() {
         let bike = Rescheduled::new(
             SqliteCyclingMesocycleStore::new(pool.clone()),
             SqlitePlanStore::new(pool.clone(), corpus::zone()?),
-            Reschedule::new(
-                on_thursday.reruns.clone(),
-                diary.clone(),
-                on_thursday.missed.clone(),
-            ),
+            on_thursday.reschedule(diary.clone()),
         );
         let riding_week = diary
             .training_week(thursday.date, Discipline::Cycling)

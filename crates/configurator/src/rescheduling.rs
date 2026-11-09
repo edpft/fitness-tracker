@@ -29,7 +29,7 @@ pub async fn standing(
     zone: &OperatorZone,
     now: DayPart,
 ) -> Result<Standing, NextFailure> {
-    Ok(Microcycle::new(
+    let walk = Microcycle::new(
         MicrocyclePorts {
             diary: store.diary(),
             plans: store.plans(zone),
@@ -40,9 +40,12 @@ pub async fn standing(
         },
         destination(domain::planner::Discipline::Gym)?,
         destination(domain::planner::Discipline::Cycling)?,
-    )
-    .standing(now)
-    .await?)
+    );
+    let walk = match crate::holidays::term().await {
+        Some(term) => walk.within(term),
+        None => walk,
+    };
+    Ok(walk.standing(now).await?)
 }
 
 /// Which weeks were lost, as of now in the operator's zone.
@@ -58,7 +61,7 @@ pub async fn reschedule(store: &Store, zone: &OperatorZone) -> Result<Reschedule
     let here = jiff::Timestamp::now().to_zoned(zone.as_time_zone());
     let standing = standing(store, zone, DayPart::containing(here.datetime())).await?;
     let diary = store.diary().diary().await?;
-    Ok(Reschedule::new(standing.reruns, diary, standing.missed))
+    Ok(standing.reschedule(diary))
 }
 
 /// The gym's mesocycles, as the plan now stands.

@@ -2154,6 +2154,11 @@ pub trait PlanStore {
     /// side of each discipline is one mesocycle or two, since a hold is its
     /// holding weeks and then a test week.
     ///
+    /// `ending`, where a lost week started the programme again (#732), is each
+    /// discipline's last mesocycle as it now ends, shorter than it was
+    /// authored: it is ended in place, in the same write, so the plan never
+    /// holds two mesocycles of one discipline on one day.
+    ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable, or nothing is authored under
@@ -2161,9 +2166,18 @@ pub trait PlanStore {
     fn commit(
         &self,
         plan: &PlanName,
+        ending: Option<Ending<'_>>,
         gym: &[GymMesocycle],
         cycling: &[CyclingMesocycle],
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
+}
+
+/// Each discipline's last mesocycle, ended early because a lost week started
+/// the programme again (#732).
+#[derive(Debug, Clone, Copy)]
+pub struct Ending<'a> {
+    pub gym: &'a GymMesocycle,
+    pub cycling: &'a CyclingMesocycle,
 }
 
 /// The FTP series, read by the date a value was in force.

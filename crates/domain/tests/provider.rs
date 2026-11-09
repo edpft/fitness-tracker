@@ -89,9 +89,9 @@ fn one_week_is_singular() {
     assert_eq!(entry.to_string(), "micro 5");
 }
 
-/// µ1-1-2 is not a selection anybody made.
+/// A week may be taken twice (#732), and there is no microcycle 0.
 #[test]
-fn a_week_is_taken_once() {
+fn a_week_may_be_taken_twice_but_not_numbered_zero() {
     let Ok(programme) = (|| -> Result<ExternalProgramme, Box<dyn std::error::Error>> {
         Ok(ExternalProgramme::new(
             provider("Peloton")?,
@@ -100,10 +100,7 @@ fn a_week_is_taken_once() {
     })() else {
         panic!("the programme is valid")
     };
-    assert_eq!(
-        ProvidedFrom::new(programme.clone(), vec![1, 1, 2]),
-        Err(InvalidProvision::RepeatedMicrocycle { microcycle: 1 })
-    );
+    assert!(ProvidedFrom::new(programme.clone(), vec![1, 1, 2]).is_ok());
     assert_eq!(
         ProvidedFrom::new(programme.clone(), vec![0]),
         Err(InvalidProvision::ZeroMicrocycle)

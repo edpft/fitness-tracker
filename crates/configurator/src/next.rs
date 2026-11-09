@@ -300,7 +300,7 @@ async fn over(
         holidays: Calendars,
         diary: SqliteDiaryStore::new(pool.clone()),
         plans: plans.clone(),
-        microcycle: microcycle(&pool, &plans, &deliveries)?,
+        microcycle: microcycle(&pool, &plans, &deliveries, crate::holidays::term().await)?,
         committing: Committing::new(
             CommitPorts {
                 plans: plans.clone(),
@@ -485,6 +485,7 @@ fn microcycle(
     pool: &infrastructure::SqlitePool,
     plans: &SqlitePlanStore,
     deliveries: &SqlitePrescriptionDeliveryStore,
+    term: Option<application::microcycle::Term>,
 ) -> Result<
     Microcycle<
         SqliteDiaryStore,
@@ -496,7 +497,7 @@ fn microcycle(
     >,
     NextFailure,
 > {
-    Ok(Microcycle::new(
+    let walk = Microcycle::new(
         MicrocyclePorts {
             diary: SqliteDiaryStore::new(pool.clone()),
             plans: plans.clone(),
@@ -507,7 +508,11 @@ fn microcycle(
         },
         destination(Discipline::Gym)?,
         destination(Discipline::Cycling)?,
-    ))
+    );
+    Ok(match term {
+        Some(term) => walk.within(term),
+        None => walk,
+    })
 }
 
 /// The extraction run log, read for when each stream was last fetched, and

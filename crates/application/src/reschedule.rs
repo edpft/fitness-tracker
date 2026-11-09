@@ -23,7 +23,7 @@ use domain::planner::Arrangement as _;
 use domain::{
     cycling::{CyclingMesocycle, CyclingMesocycleId},
     plan::{Mesocycles, Occupies, Plan, PlanId, PlanName, PlanWindow},
-    planner::{self, Missed, Rerun, RerunOrdinal},
+    planner::{self, Missed, Rerun, RerunOrdinal, Restart},
     planner::{Discipline, SessionRole},
     prescription::{GymMesocycle, MesocycleId},
     schedule::Diary,
@@ -39,15 +39,22 @@ use crate::{CyclingMesocycleStore, MesocycleInForce, MesocycleStore, PlanStore, 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Reschedule {
     reruns: Vec<Rerun>,
+    restarts: Vec<Restart>,
     diary: Diary,
     missed: Missed,
 }
 
 impl Reschedule {
     #[must_use]
-    pub const fn new(reruns: Vec<Rerun>, diary: Diary, missed: Missed) -> Self {
+    pub const fn new(
+        reruns: Vec<Rerun>,
+        restarts: Vec<Restart>,
+        diary: Diary,
+        missed: Missed,
+    ) -> Self {
         Self {
             reruns,
+            restarts,
             diary,
             missed,
         }
@@ -73,8 +80,10 @@ impl Reschedule {
     }
 
     fn apply(&self, plan: &Plan) -> Result<Plan, StoreError> {
-        planner::rescheduled(plan, &self.reruns, &self.diary).map_err(|error| StoreError::Corrupt {
-            detail: format!("{} will not reschedule: {error}", plan.name()),
+        planner::rescheduled(plan, &self.reruns, &self.restarts, &self.diary).map_err(|error| {
+            StoreError::Corrupt {
+                detail: format!("{} will not reschedule: {error}", plan.name()),
+            }
         })
     }
 }
@@ -313,9 +322,10 @@ impl<P: PlanStore + Sync> PlanStore for ReschedulingPlans<P> {
     async fn commit(
         &self,
         plan: &PlanName,
+        ending: Option<crate::Ending<'_>>,
         gym: &[GymMesocycle],
         cycling: &[CyclingMesocycle],
     ) -> Result<(), StoreError> {
-        self.plans.commit(plan, gym, cycling).await
+        self.plans.commit(plan, ending, gym, cycling).await
     }
 }

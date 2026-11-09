@@ -220,10 +220,61 @@ impl GymMesocycle {
             (Self::Progression(Progression::BlockPeriodisation(block)), WeekKind::Climbing(at)) => {
                 block.kind(at) == Some(WeekKind::Test)
             }
-            (Self::Progression(Progression::Provided { .. }), WeekKind::Climbing(at)) => {
-                at.as_u32() == chart::WEEKS
+            (Self::Progression(Progression::Provided { .. }), WeekKind::Climbing(_)) => {
+                self.published_week(week) == Some(chart::WEEKS)
             }
         }
+    }
+
+    /// Which week of the published chart a week of this mesocycle runs.
+    ///
+    /// **The published numbering, as [`ProvidedFrom`] keeps it.** A cycle cut
+    /// to x-2-3-4 runs chart week 2 in its first calendar week (#732), so the
+    /// calendar's index is not the chart's. `None` for a programme that was not
+    /// provided, and for a week that is not one of its climbing weeks.
+    ///
+    /// [`ProvidedFrom`]: crate::provider::ProvidedFrom
+    #[must_use]
+    pub fn published_week(&self, week: WeekKind) -> Option<u32> {
+        let (Self::Progression(Progression::Provided { from, .. }), WeekKind::Climbing(at)) =
+            (self, week)
+        else {
+            return None;
+        };
+        let index = usize::try_from(at.as_u32().checked_sub(1)?).ok()?;
+        from.microcycles().nth(index)
+    }
+
+    /// The same mesocycle, ended the Sunday before `monday` (#732): the weeks
+    /// it ran before then, and none after.
+    ///
+    /// **Only a provided programme ends early**: its weeks are a selection of a
+    /// published chart, so the weeks before `monday` are still that programme.
+    /// `None` for any other mesocycle, and where it ran no week before `monday`.
+    #[must_use]
+    pub fn ending(&self, monday: jiff::civil::Date) -> Option<Self> {
+        let Self::Progression(Progression::Provided { from, cycle }) = self else {
+            return None;
+        };
+        let calendar = cycle.calendar();
+        let mut run = 0_u32;
+        let mut week = calendar.start();
+        while week < monday {
+            if matches!(calendar.place_week(week), Ok(WeekKind::Climbing(_))) {
+                run = run.saturating_add(1);
+            }
+            week = week.checked_add(jiff::Span::new().weeks(1)).ok()?;
+        }
+        let kept: Vec<u32> = from
+            .microcycles()
+            .take(usize::try_from(run).ok()?)
+            .collect();
+        let shortened = calendar.shortened(run).ok()?;
+        let from = ProvidedFrom::new(from.programme().clone(), kept).ok()?;
+        Some(Self::Progression(Progression::Provided {
+            from,
+            cycle: cycle.recalendared(shortened),
+        }))
     }
 
     /// Whether a week of this mesocycle can be missed without being run again.
@@ -383,11 +434,10 @@ pub enum InconsistentMesocycle {
     )]
     GatingRoleNeverRuns { gating: SessionRole },
     #[error(
-        "the SBS chart states four weeks and this calendar runs {given} — a \
-         cycle of another length is a different programme, not this one \
-         stretched"
+        "an SBS cycle runs weeks of the chart's four in order, one to each of \
+         its {calendar} calendar weeks, and {weeks:?} is not that"
     )]
-    ChartIsFourWeeks { given: u32 },
+    NotTheChartsWeeks { weeks: Vec<u32>, calendar: u32 },
     #[error(
         "a test is taken on the {role} session and this one never runs it, \
          so the test would never be taken"

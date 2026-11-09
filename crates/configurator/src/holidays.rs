@@ -4,7 +4,7 @@
 //! school and by the government, so they are asked each time and nothing is
 //! stored.
 
-use application::{HolidayCalendar, SourceError};
+use application::{HolidayCalendar, SourceError, microcycle::Term};
 use domain::schedule::Holidays;
 use infrastructure::{BankHolidays, GOV_UK_BANK_HOLIDAYS, SchoolCalendar};
 
@@ -12,6 +12,18 @@ use infrastructure::{BankHolidays, GOV_UK_BANK_HOLIDAYS, SchoolCalendar};
 /// publishes. Its term dates, not the council's recommended ones: a school may
 /// set its own.
 const SCHOOL_CALENDAR: &str = "https://hemplandprimary.co.uk/?rhc_action=get_icalendar_events";
+
+/// What the walk through the plan starts a programme again against (#732):
+/// the holidays as read now, and Peloton's names for its programmes.
+///
+/// `None` where either calendar cannot be read. Nothing starts again then, and
+/// a re-run lengthens its mesocycle as it did before.
+pub async fn term() -> Option<Term> {
+    Some(Term {
+        holidays: Calendars.holidays().await.ok()?,
+        identify: infrastructure::peloton::provider::identify,
+    })
+}
 
 /// Both calendars, as one: what a macrocycle is read against.
 pub struct Calendars;

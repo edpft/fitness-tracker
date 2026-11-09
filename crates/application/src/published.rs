@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use domain::{
     cycling::{
         Answer, CyclingMesocycle, CyclingMicrocycle, CyclingProvenance, PlannedRide,
-        SessionPosition,
+        SessionPosition, shape::partition,
     },
     planner::{Relative, SessionRole},
     provider::PublishedAt,
@@ -75,6 +75,34 @@ pub fn mesocycles_of(read: &PublishedRead, microcycles: usize, sessions: usize) 
                 .next(),
         })
         .collect()
+}
+
+/// `microcycles` of the whole programme, as one mesocycle (#732).
+///
+/// **Chosen across the programme's own mesocycles**, where
+/// [`mesocycles_of`] asks each separately: after a lost week starts it again,
+/// the weeks left in the term are more than one of its halves holds. The
+/// operator, 2026-11-09, on six weeks of Peak's eight with one trough rather
+/// than two: what is chosen must split as one mesocycle, so the trough between
+/// the halves goes and only the last remains.
+#[must_use]
+pub fn selection_of(read: &PublishedRead, microcycles: usize, sessions: usize) -> Option<Answer> {
+    let whole = read.programme.microcycles();
+    read.programme
+        .answer(&whole, microcycles, sessions)
+        .into_iter()
+        .find(|answer| {
+            let scores: Vec<f64> = answer
+                .microcycles
+                .iter()
+                .map(|microcycle| {
+                    read.programme
+                        .profile(&[*microcycle], &answer.sessions)
+                        .tss()
+                })
+                .collect();
+            matches!(partition(&scores).as_slice(), [one] if *one == (0..scores.len()))
+        })
 }
 
 /// Whether any session ridden in this microcycle measures FTP.

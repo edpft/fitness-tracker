@@ -328,6 +328,34 @@ impl CyclingMesocycleStore for SqliteCyclingMesocycleStore {
 /// **Not a port method**, for the reason `gym_mesocycle::write` gives: the plan
 /// is what is authored, and a half-written one is not a state the store should
 /// be able to hold.
+/// End the plan's mesocycle at `ordinal` early, as `ended` now runs (#732):
+/// the microcycles after its last are removed, and their rides with them.
+///
+/// **In place, so it keeps its identity**, as the gym's does.
+pub(super) async fn end(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    plan: i64,
+    ordinal: i64,
+    ended: &CyclingMesocycle,
+) -> Result<(), StoreError> {
+    let kept = i64::try_from(ended.duration_weeks())
+        .map_err(|_| corrupt(&"more microcycles than the store can number"))?;
+    sqlx::query!(
+        r"
+        DELETE FROM cycling_microcycle
+        WHERE ordinal > ?
+          AND mesocycle = (SELECT id FROM cycling_mesocycle WHERE plan = ? AND ordinal = ?)
+        ",
+        kept,
+        plan,
+        ordinal
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    Ok(())
+}
+
 pub(super) async fn write(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     plan: i64,

@@ -15,7 +15,7 @@ use std::num::NonZeroU32;
 
 use domain::{
     cycling::CyclingMesocycle,
-    macrocycle::{Concurrent, Cycling, Gym, Macrocycle},
+    macrocycle::{Concurrent, Cycling, Gym, Macrocycle, Whole},
     normalised::OperatorZone,
     plan::{Plan, Span},
     planner,
@@ -31,12 +31,12 @@ use domain::{
 use jiff::civil::{Date, Weekday};
 
 use crate::{
-    GenerationParameterStore, HoldingRides, PlanStore, ProgressionStore, PublishedCycling,
+    Ending, GenerationParameterStore, HoldingRides, PlanStore, ProgressionStore, PublishedCycling,
     PublishedProgrammes, RiddenVenues, SourceError, StoreError,
     holding::NoHoldingRide,
     microcycle::Standing,
     published::{self, BuildError, EASIER, HARDER},
-    reschedule::{Reschedule, ReschedulingPlans},
+    reschedule::ReschedulingPlans,
 };
 
 /// Microcycles and cycling sessions in a committed mesocycle: the shape the
@@ -88,6 +88,9 @@ fn unbuildable(error: &impl std::fmt::Display) -> CommitError {
 pub struct Due {
     plan: Plan,
     diary: Diary,
+    /// Whether a lost week ended the plan's last mesocycles early (#732), so
+    /// that the store ends them too before anything is added after them.
+    ended_early: bool,
     pub concurrent: Concurrent,
     pub span: Span,
 }
@@ -140,14 +143,8 @@ where
         let Some(macrocycle) = Macrocycle::on(now.date, holidays) else {
             return Ok(None);
         };
-        let plans = ReschedulingPlans::new(
-            self.ports.plans.clone(),
-            Reschedule::new(
-                standing.reruns.clone(),
-                diary.clone(),
-                standing.missed.clone(),
-            ),
-        );
+        let plans =
+            ReschedulingPlans::new(self.ports.plans.clone(), standing.reschedule(diary.clone()));
         let Some(plan) = in_force(&plans, &macrocycle).await? else {
             return Ok(None);
         };
@@ -173,14 +170,27 @@ where
             .and_then(|side| side.mesocycles().last())
             .filter(|last| last.start() >= macrocycle.start())
             .and_then(|last| self.cycling_of(last));
-        Ok(macrocycle
-            .next(chain, previous, start)
-            .map(|concurrent| Due {
-                plan,
-                diary: diary.clone(),
-                concurrent,
-                span: Span::new(start, concurrent.weeks()),
-            }))
+        // **A lost week that started the programme again commits what is left
+        // of the term** (#732), chosen from the whole of it, where the boundary
+        // would otherwise choose what comes next.
+        let restarted_on = |monday: Date| {
+            standing
+                .restarts
+                .iter()
+                .any(|restart| restart.monday == monday)
+        };
+        let ended_early = restarted_on(end);
+        let chosen = previous
+            .filter(|_| restarted_on(start))
+            .and_then(|current| macrocycle.restart(current, start))
+            .or_else(|| macrocycle.next(chain, previous, start));
+        Ok(chosen.map(|concurrent| Due {
+            ended_early,
+            plan,
+            diary: diary.clone(),
+            concurrent,
+            span: Span::new(start, concurrent.weeks()),
+        }))
     }
 
     /// Build what is due and add it to the plan.
@@ -192,37 +202,47 @@ where
     /// both halves built.
     pub async fn commit(&self, due: &Due) -> Result<(), CommitError> {
         let start = due.span.start();
-        let gym = self
-            .gym_side(&due.plan, &due.diary, due.concurrent.gym(), start)
-            .await?;
         let cycling = self
             .cycling_side(&due.diary, due.concurrent.cycling(), start)
             .await?;
+        // **The gym runs the same weeks as the bike** (#732): a selection's
+        // positions in the whole programme, each the week of the chart it falls
+        // on, so the two reach their troughs together.
+        let positions = match due.concurrent.cycling() {
+            Cycling::Selection { .. } => cycling
+                .first()
+                .and_then(CyclingMesocycle::provided_from)
+                .map(|provided| provided.microcycles().collect::<Vec<u32>>()),
+            _ => None,
+        };
+        let gym = self
+            .gym_side(
+                &due.plan,
+                &due.diary,
+                due.concurrent.gym(),
+                start,
+                positions.as_deref(),
+            )
+            .await?;
+        let ending = due
+            .ended_early
+            .then(|| {
+                Some(Ending {
+                    gym: due.plan.gym()?.mesocycles().last()?,
+                    cycling: due.plan.cycling()?.mesocycles().last()?,
+                })
+            })
+            .flatten();
         Ok(self
             .ports
             .plans
-            .commit(due.plan.name(), &gym, &cycling)
+            .commit(due.plan.name(), ending, &gym, &cycling)
             .await?)
     }
 
-    /// Which cycling mesocycle a committed one is, from where it was taken.
-    ///
-    /// A mesocycle assembled here is a hold's holding weeks; the published test
-    /// week is a hold with nothing held.
+    /// Which cycling mesocycle a committed one is ([`cycling_kind`]).
     fn cycling_of(&self, mesocycle: &CyclingMesocycle) -> Option<Cycling> {
-        let Some(provided) = mesocycle.provided_from() else {
-            let holding = u32::try_from(mesocycle.duration_weeks()).ok()?;
-            return Some(Cycling::Hold { holding });
-        };
-        let second_half = provided.microcycles().next().is_some_and(|first| first > 4);
-        match self.ports.published.which(provided.programme())? {
-            PublishedCycling::Test => Some(Cycling::Hold { holding: 0 }),
-            PublishedCycling::Build => Some(Cycling::Build),
-            PublishedCycling::Base if second_half => Some(Cycling::Base2),
-            PublishedCycling::Base => Some(Cycling::Base1),
-            PublishedCycling::Peak if second_half => Some(Cycling::Peak2),
-            PublishedCycling::Peak => Some(Cycling::Peak1),
-        }
+        cycling_kind(mesocycle, |programme| self.ports.published.which(programme))
     }
 
     /// The gym's half: SBS, or a hold's linear holding weeks and its test week.
@@ -230,12 +250,16 @@ where
     /// **What does not change is carried from the mesocycle before**: the lift,
     /// its slot, the accessories filling the rest, and the published programme.
     /// The plan was stated once; nothing here asks again.
+    ///
+    /// `positions` are the weeks a selection runs, counted through cycles of
+    /// the chart taken end to end: 1-2-3-6-7-8 runs chart weeks 1-2-3-2-3-4.
     async fn gym_side(
         &self,
         plan: &Plan,
         diary: &Diary,
         gym: Gym,
         start: Date,
+        positions: Option<&[u32]>,
     ) -> Result<Vec<GymMesocycle>, CommitError> {
         let before = plan
             .gym()
@@ -266,7 +290,17 @@ where
             Gym::Sbs => vec![(
                 start,
                 Shape::Provided {
-                    from: provided((1..=sbs).collect())?,
+                    from: provided(positions.map_or_else(
+                        || (1..=sbs).collect(),
+                        |positions| {
+                            positions
+                                .iter()
+                                .map(|position| {
+                                    position.saturating_sub(1).checked_rem(sbs).unwrap_or(0) + 1
+                                })
+                                .collect()
+                        },
+                    ))?,
                 },
             )],
             Gym::Hold { holding } => {
@@ -370,6 +404,34 @@ where
                 )?);
                 return Ok(built);
             }
+            Cycling::Selection { of, weeks } => {
+                let which = match of {
+                    Whole::Base => PublishedCycling::Base,
+                    Whole::Peak => PublishedCycling::Peak,
+                };
+                let read = published.read(which).await?;
+                let wanted = usize::try_from(weeks).map_err(|error| unbuildable(&error))?;
+                let answer = published::selection_of(&read, wanted, SESSIONS).ok_or_else(|| {
+                    CommitError::Source(SourceError::Malformed {
+                        detail: format!(
+                            "{} offers no {weeks} weeks with one trough",
+                            read.from.name()
+                        ),
+                    })
+                })?;
+                let built = published::build(
+                    start,
+                    &read,
+                    &answer.microcycles,
+                    &answer.sessions,
+                    &riding_days,
+                )?;
+                if of == Whole::Base {
+                    let testing = published.read(PublishedCycling::Test).await?;
+                    return Ok(vec![published::ending_in_a_test(&built, &testing)?]);
+                }
+                return Ok(vec![built]);
+            }
             Cycling::Base1 => (PublishedCycling::Base, 0),
             Cycling::Base2 => (PublishedCycling::Base, 1),
             Cycling::Build => (PublishedCycling::Build, 0),
@@ -423,6 +485,43 @@ async fn in_force<P: PlanStore + Sync>(
         return Ok(None);
     };
     plans.named(window.name()).await
+}
+
+/// Which cycling mesocycle a committed one is, from where it was taken.
+///
+/// A mesocycle assembled here is a hold's holding weeks; the published test
+/// week is a hold with nothing held. `which` names the published programme a
+/// provenance points at.
+pub fn cycling_kind(
+    mesocycle: &CyclingMesocycle,
+    which: impl Fn(&ExternalProgramme) -> Option<PublishedCycling>,
+) -> Option<Cycling> {
+    let Some(provided) = mesocycle.provided_from() else {
+        let holding = u32::try_from(mesocycle.duration_weeks()).ok()?;
+        return Some(Cycling::Hold { holding });
+    };
+    let microcycles: Vec<u32> = provided.microcycles().collect();
+    let second_half = microcycles.first().is_some_and(|first| *first > 4);
+    // Weeks from both halves are a selection of the whole (#732).
+    let whole =
+        microcycles.iter().any(|week| *week <= 4) && microcycles.iter().any(|week| *week > 4);
+    let weeks = u32::try_from(microcycles.len()).ok()?;
+    match which(provided.programme())? {
+        PublishedCycling::Base if whole => Some(Cycling::Selection {
+            of: Whole::Base,
+            weeks,
+        }),
+        PublishedCycling::Peak if whole => Some(Cycling::Selection {
+            of: Whole::Peak,
+            weeks,
+        }),
+        PublishedCycling::Test => Some(Cycling::Hold { holding: 0 }),
+        PublishedCycling::Build => Some(Cycling::Build),
+        PublishedCycling::Base if second_half => Some(Cycling::Base2),
+        PublishedCycling::Base => Some(Cycling::Base1),
+        PublishedCycling::Peak if second_half => Some(Cycling::Peak2),
+        PublishedCycling::Peak => Some(Cycling::Peak1),
+    }
 }
 
 /// The published programme a gym mesocycle was taken from.

@@ -668,6 +668,7 @@ async fn held_after_the_test()
             monday: Date::constant(2026, 6, 29),
             holding: Some(domain::planner::Discipline::Gym),
         }],
+        Vec::new(),
         diary,
         domain::planner::Missed::none(),
     );

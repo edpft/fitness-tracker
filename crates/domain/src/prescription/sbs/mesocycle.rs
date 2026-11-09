@@ -8,8 +8,9 @@
 //! ([`chart`](super::chart)). What an operator supplies is which lift, which
 //! days, what the opening maximum is, and what fills the other slots.
 //!
-//! **The duration is not an input either.** A cycle is four weeks because the
-//! chart is four weeks. Offering a duration would invite a five-week SBS cycle,
+//! **The duration is not an input either.** A cycle is the chart's weeks it
+//! runs: all four, or fewer where the term has no room for them (#732), in the
+//! chart's own order. Offering a duration would invite a five-week SBS cycle,
 //! which is not a thing that exists.
 
 use crate::{
@@ -61,23 +62,27 @@ impl Sbs {
     ///
     /// [`InconsistentMesocycle`] for a gating role the programme never runs, a
     /// primary not counted in repetitions, a primary exercise that does not fill
-    /// the slot named as primary, or a calendar that is not four weeks.
+    /// the slot named as primary, or `weeks` that are not the chart's weeks,
+    /// one to a week of the calendar.
     pub fn new(
         pattern: PrimaryPattern,
         exercise: Exercise,
         fills: SlotFills,
         calendar: Calendar,
+        weeks: &[u32],
     ) -> Result<Self, InconsistentMesocycle> {
         let primary = Primary::new(pattern, exercise, GATING);
 
         check_primary(pattern, exercise, &fills, GATING)?;
 
-        // The chart is four weeks. A calendar of any other length is not this
-        // programme run longer or shorter — it is a different programme, and
-        // there is no rule here for what its extra weeks would prescribe.
-        if calendar.duration_weeks() != WEEKS {
-            return Err(InconsistentMesocycle::ChartIsFourWeeks {
-                given: calendar.duration_weeks(),
+        // The chart is four weeks, so a week it does not state is not this
+        // programme run longer. A week may be taken more than once (#732).
+        let charted = weeks.iter().all(|week| (1..=WEEKS).contains(week));
+        let one_each = u32::try_from(weeks.len()).ok() == Some(calendar.duration_weeks());
+        if weeks.is_empty() || !charted || !one_each {
+            return Err(InconsistentMesocycle::NotTheChartsWeeks {
+                weeks: weeks.to_vec(),
+                calendar: calendar.duration_weeks(),
             });
         }
 

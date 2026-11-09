@@ -377,11 +377,10 @@ pub enum InvalidCyclingMesocycle {
         rode: String,
         expected: String,
     },
-    /// The published numbers are not a selection: one is taken twice.
+    /// The published numbers are not a selection.
     ///
     /// **Not reachable through [`CyclingMicrocycle::new`]**, which refuses a
-    /// zero on its own — this is the rule that spans the weeks rather than one
-    /// of them.
+    /// zero on its own.
     #[error(transparent)]
     NotASelection(#[from] InvalidProvision),
     /// The mesocycle and its weeks disagree about who published them.
@@ -494,10 +493,6 @@ impl CyclingMesocycle {
     /// all ride the same roles. That is the one thing the parts cannot
     /// guarantee between them, and leaving it unchecked would author a
     /// programme with a Sunday nothing answers for.
-    ///
-    /// [`InvalidCyclingMesocycle::NotASelection`] where two microcycles claim
-    /// the same published week. A selection takes each week once, and µ1-2-2-4
-    /// is not one anybody made.
     ///
     /// [`InvalidCyclingMesocycle::ProvenanceDiffers`] where the weeks and the
     /// mesocycle disagree about whether anybody published this.
@@ -624,6 +619,35 @@ impl CyclingMesocycle {
             lost,
             ..self.clone()
         }
+    }
+
+    /// The same mesocycle, ended the Sunday before `monday` (#732): the
+    /// microcycles it rode before then, and the weeks it lost and held before
+    /// then. `None` where it rode none.
+    #[must_use]
+    pub fn ending(&self, monday: Date) -> Option<Self> {
+        let mut run = 0_usize;
+        let mut week = self.start;
+        while week < monday {
+            if self.microcycle_of(week).is_some() {
+                run = run.saturating_add(1);
+            }
+            week = week.checked_add(jiff::Span::new().weeks(1)).ok()?;
+        }
+        let kept: Vec<CyclingMicrocycle> = self.microcycles.iter().take(run).cloned().collect();
+        let before = |dates: &[Date]| -> Vec<Date> {
+            dates
+                .iter()
+                .copied()
+                .filter(|date| *date < monday)
+                .collect()
+        };
+        Some(Self {
+            microcycles: NonEmpty::new(kept).ok()?,
+            lost: before(&self.lost),
+            holding: before(&self.holding),
+            ..self.clone()
+        })
     }
 
     /// The Mondays of the weeks this mesocycle lost.
