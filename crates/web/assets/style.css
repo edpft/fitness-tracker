@@ -293,10 +293,25 @@ table.figures td { padding-right: 0.75rem; }
   color: var(--ink2); margin: 0;
 }
 .card.next p.session { font-size: 24px; font-weight: 650; margin: 2px 0 6px; }
-.card.next h3 { font-size: 13px; font-weight: 600; color: var(--ink2); margin: 14px 0 0; }
+.card.next h3 {
+  font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--muted); margin: 22px 0 0; padding-top: 12px; border-top: 1px solid var(--grid);
+}
 .card.next ul { padding-left: 0; list-style: none; }
-.card.next ul.exercises li { padding: 8px 0; border-top: 1px solid var(--grid); margin: 0; font-size: 15px; }
 .card.next table { font-size: 15px; }
+/* An exercise: its name, then a line per kind of set. */
+.card.next .exercise { margin-top: 16px; }
+.card.next .exercise p { margin: 2px 0 0; }
+.card.next .exercise p.name { font-size: 17px; font-weight: 600; margin: 0; }
+.card.next .exercise p.note, .card.next .exercise p.warmup { font-size: 13px; color: var(--ink2); }
+.card.next .exercise p.sets { font-size: 15px; font-variant-numeric: tabular-nums; }
+.card.next .superset { border-left: 3px solid var(--fat); padding-left: 10px; margin-top: 16px; }
+.card.next .superset p.badge {
+  display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--fat); margin: 0;
+}
+.card.next .superset .exercise { margin-top: 6px; }
+.card.next .superset .exercise + .exercise { margin-top: 14px; }
 .card.next p.status { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink2); margin: 12px 0 0; }
 .card.microcycle .row {
   display: grid; grid-template-columns: 4.5rem auto 1fr; gap: 8px; padding: 11px 0;

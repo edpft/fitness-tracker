@@ -16,9 +16,9 @@ use application::{
 use domain::{
     cycling::{CyclingMicrocycle, Ride, clock},
     gym::Load,
-    measure::{PositiveDuration, Spans},
+    measure::{Duration, PositiveDuration, Spans},
     planner::{Discipline, ScheduledSlot},
-    prescription::{Prescribed as Set, PrescribedExercise, PrescribedSet},
+    prescription::{Prescribed as Set, PrescribedExercise, PrescribedSet, Target},
     schedule::DayPart,
 };
 use maud::{Markup, html};
@@ -243,10 +243,11 @@ fn destination(discipline: Discipline) -> String {
     )
 }
 
-/// The session itself: its blocks, its exercises and their sets, and any slot
-/// that could not be derived.
+/// The session itself, drawn as Hevy draws a routine (#666): its blocks, then
+/// each exercise with a row per set, the members of a superset boxed together,
+/// and any slot that could not be derived.
 fn gym_session(issued: &Prescription) -> Markup {
-    let mut blocks: Vec<(String, Vec<Vec<String>>)> = Vec::new();
+    let mut blocks: Vec<(String, Vec<Vec<&PrescribedExercise>>)> = Vec::new();
     for item in issued.workout.shape().items().iter() {
         let Some(slot) = item.slots().next() else {
             continue;
@@ -256,18 +257,20 @@ fn gym_session(issued: &Prescription) -> Markup {
             blocks.push((block, Vec::new()));
         }
         if let Some((_, items)) = blocks.last_mut() {
-            items.push(item.exercises().map(describe).collect());
+            items.push(item.exercises().collect());
         }
     }
     html! {
         @for (block, items) in &blocks {
             h3 { (block) }
-            ul.exercises {
-                @for members in items {
-                    // Exercises performed back to back are one item.
-                    li.paired[members.len() > 1] {
-                        @for member in members { div { (member) } }
+            @for members in items {
+                @if members.len() > 1 {
+                    div.superset {
+                        p.badge { "Superset" }
+                        @for member in members { (exercise(member)) }
                     }
+                } @else {
+                    @for member in members { (exercise(member)) }
                 }
             }
         }
@@ -281,24 +284,73 @@ fn gym_session(issued: &Prescription) -> Markup {
     }
 }
 
-/// One exercise's line: its name, then its sets collapsed where they repeat.
-fn describe(exercise: &PrescribedExercise) -> String {
-    let lines: Vec<String> = match exercise {
-        PrescribedExercise::ForReps { sets, .. } => sets.iter().map(set_line).collect(),
-        PrescribedExercise::ForDuration { sets, .. } => sets.iter().map(set_line).collect(),
-        PrescribedExercise::ForDistance { sets, .. } => sets.iter().map(set_line).collect(),
+/// One exercise: its name, the bands that assist it, and its sets.
+fn exercise(prescribed: &PrescribedExercise) -> Markup {
+    let (sets, bands) = match prescribed {
+        PrescribedExercise::ForReps { sets, assisted, .. } => (
+            set_lines(sets.iter()),
+            assisted.as_ref().map(ToString::to_string),
+        ),
+        PrescribedExercise::ForDuration { sets, .. } => (set_lines(sets.iter()), None),
+        PrescribedExercise::ForDistance { sets, .. } => (set_lines(sets.iter()), None),
     };
-
-    let mut collapsed: Vec<(String, usize)> = Vec::new();
-    for line in lines {
-        match collapsed.last_mut() {
-            Some((last, count)) if *last == line => *count += 1,
-            _ => collapsed.push((line, 1)),
+    html! {
+        div.exercise {
+            p.name { (prescribed.exercise().name()) }
+            @if let Some(bands) = bands { p.note { (bands) } }
+            (sets)
         }
     }
+}
 
-    let sets = collapsed
-        .into_iter()
+/// An exercise's sets as lines, repeats collapsed to `3 × 10`: the warm-ups on
+/// one quiet line, then the working sets. The operator, 2026-11-09: *"we
+/// don't need a row for each, 3x 10 etc is enough."* A rest every working set
+/// shares is said once, above them.
+fn set_lines<'a, M>(sets: impl Iterator<Item = &'a PrescribedSet<M>>) -> Markup
+where
+    M: Spans + std::fmt::Display + 'a,
+{
+    let (warmups, working): (Vec<&PrescribedSet<M>>, Vec<&PrescribedSet<M>>) =
+        sets.partition(|set| set.warmup);
+    let rests: Vec<Option<&Target<Duration>>> = working.iter().map(|set| rest(set)).collect();
+    let shared = match rests.first() {
+        Some(Some(first)) if rests.iter().all(|rest| *rest == Some(*first)) => Some(*first),
+        _ => None,
+    };
+    let warmups = collapsed(warmups.iter().map(|set| set_line(set)));
+    let working = collapsed(working.iter().map(|set| {
+        let line = set_line(set);
+        match rest(set) {
+            Some(rest) if shared.is_none() => format!("{line}, rest {rest}"),
+            _ => line,
+        }
+    }));
+    html! {
+        @if let Some(rest) = shared { p.note { "Rest " (rest) } }
+        @if !warmups.is_empty() { p.warmup { "Warm-up " (warmups.join(", ")) } }
+        @for line in &working { p.sets { (line) } }
+    }
+}
+
+/// The rest after a set, unless it is none, which is how a superset's members
+/// follow one another.
+fn rest<M: Spans>(set: &PrescribedSet<M>) -> Option<&Target<Duration>> {
+    set.rest_after
+        .as_ref()
+        .filter(|rest| rest.maximum() != Duration::ZERO)
+}
+
+/// Lines in order, a run of the same line written once with its count.
+fn collapsed(lines: impl Iterator<Item = String>) -> Vec<String> {
+    let mut runs: Vec<(String, usize)> = Vec::new();
+    for line in lines {
+        match runs.last_mut() {
+            Some((last, count)) if *last == line => *count += 1,
+            _ => runs.push((line, 1)),
+        }
+    }
+    runs.into_iter()
         .map(|(line, count)| {
             if count == 1 {
                 line
@@ -306,56 +358,44 @@ fn describe(exercise: &PrescribedExercise) -> String {
                 format!("{count} × {line}")
             }
         })
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    format!("{} {sets}", exercise.exercise().name())
+        .collect()
 }
 
-/// One set: the measure, then the load, then whatever qualifies it.
-fn set_line<M: std::fmt::Display + Spans>(set: &PrescribedSet<M>) -> String {
-    let mut line = match &set.prescription {
-        Set::Fixed {
-            load,
-            measure,
-            effort,
-        } if unloaded(*load) => effort.as_ref().map_or_else(
-            || format!("{measure}"),
-            |effort| format!("{measure}, {effort} in reserve"),
-        ),
-        Set::Fixed {
-            load,
-            measure,
-            effort,
-        } => effort.as_ref().map_or_else(
-            || format!("{measure} @ {}", weight(*load)),
-            |effort| format!("{measure} @ {}, {effort} in reserve", weight(*load)),
-        ),
-        Set::ToEffort { load, effort, .. } => {
-            format!("as many as @ {}, {effort} in reserve", weight(*load))
-        }
+/// One set: what it asks for, the load where there is one, and the effort.
+fn set_line<M: Spans + std::fmt::Display>(set: &PrescribedSet<M>) -> String {
+    let asked = match &set.prescription {
+        Set::Fixed { measure, .. } => measure.to_string(),
+        Set::ToEffort {
+            predicted: Some(predicted),
+            ..
+        } => format!("as many as ({predicted})"),
+        Set::ToEffort { .. } => "as many as".to_owned(),
     };
-    if set.warmup {
-        line.push_str(" (warm-up)");
+    let loaded = match weight(set.prescription.load()) {
+        Some(weight) => format!("{asked} @ {weight}"),
+        None => asked,
+    };
+    match set.prescription.effort() {
+        Some(effort) => format!("{loaded}, {effort} in reserve"),
+        None => loaded,
     }
-    line
+}
+
+/// A load, written the short way, or nothing for a set without one: plain
+/// bodyweight is no load to write.
+fn weight(load: Load) -> Option<String> {
+    match load {
+        _ if unloaded(load) || load == Load::BODYWEIGHT => None,
+        Load::Absolute(mass) => Some(format!("{mass}kg")),
+        Load::Relative(delta) if delta.as_grams() < 0 => Some(format!("bodyweight {delta}kg")),
+        Load::Relative(delta) => Some(format!("bodyweight +{delta}kg")),
+    }
 }
 
 /// External load that is simply absent, as against bodyweight on an axis where
 /// assistance is conventional.
 const fn unloaded(load: Load) -> bool {
     matches!(load, Load::Absolute(mass) if mass.is_none())
-}
-
-/// A load, written the short way.
-fn weight(load: Load) -> String {
-    match load {
-        Load::Absolute(mass) if mass.is_none() => "bodyweight".to_owned(),
-        Load::Absolute(mass) => format!("{mass}kg"),
-        Load::Relative(delta) if delta.as_grams() == 0 => "bodyweight".to_owned(),
-        Load::Relative(delta) if delta.as_grams() < 0 => format!("bodyweight {delta}kg"),
-        Load::Relative(delta) => format!("bodyweight +{delta}kg"),
-    }
 }
 
 /// Where the session went, in one line, and what it could not say there.
