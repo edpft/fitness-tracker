@@ -265,6 +265,86 @@ pub(crate) fn run_ended<T>(span: &Span, done: &Result<T, crate::next::NextFailur
     span.record(OUTCOME, outcome.as_str());
 }
 
+/// Where the session a run of `next` prescribed went, or why it went nowhere,
+/// as a `delivering` step under the run (#741): delivering is a part of the
+/// run like any other (#559), and recording it as a step needs no span name of
+/// its own.
+///
+/// **Kept here because the page keeps it nowhere.** The operator, 2026-11-09:
+/// *"I just need to know that it didn't work and that why is stored
+/// somewhere."* The page says whether it arrived and this says why not; a
+/// session that could not be prescribed is recorded the same way, since it
+/// was not delivered either.
+pub(crate) fn delivered(run: &Span, next: &application::next::WhatIsNext) {
+    if let Some(delivery) = Delivered::of(next) {
+        delivery.record(run);
+    }
+}
+
+/// What [`delivered`] records: the discipline, and where the session went or
+/// why it did not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Delivered {
+    discipline: &'static str,
+    went: Result<Option<String>, String>,
+}
+
+impl Delivered {
+    /// `None` where the run reached no session to deliver.
+    fn of(next: &application::next::WhatIsNext) -> Option<Self> {
+        use application::next::{GymPrescribed, Prescribed, WhatIsNext};
+        let WhatIsNext::Session {
+            session,
+            prescribed,
+        } = next
+        else {
+            return None;
+        };
+        let went = match prescribed {
+            Prescribed::Gym(Err(error)) => Err(format!("not prescribed: {error}")),
+            Prescribed::Gym(Ok(GymPrescribed::NothingPlanned { .. })) => Ok(None),
+            Prescribed::Gym(Ok(GymPrescribed::Issued { delivery, .. })) => delivery
+                .as_ref()
+                .map(|delivered| Some(delivered.destination.to_string()))
+                .map_err(ToString::to_string),
+            Prescribed::Cycling(Err(error)) => Err(format!("not prescribed: {error}")),
+            Prescribed::Cycling(Ok(prescribed)) => prescribed
+                .delivery
+                .as_ref()
+                .map(|_| Some("peloton stack".to_owned()))
+                .map_err(ToString::to_string),
+        };
+        Some(Self {
+            discipline: session.slot.discipline.as_str(),
+            went,
+        })
+    }
+
+    fn record(&self, run: &Span) {
+        let span = tracing::info_span!(
+            parent: run,
+            "step",
+            step = "delivering",
+            discipline = self.discipline,
+            destination = Empty,
+            failure = Empty,
+            outcome = Empty,
+        );
+        let outcome = match &self.went {
+            Ok(Some(destination)) => {
+                span.record("destination", destination.as_str());
+                Outcome::Succeeded
+            }
+            Ok(None) => Outcome::Skipped,
+            Err(failure) => {
+                span.record("failure", failure.as_str());
+                Outcome::Failed
+            }
+        };
+        span.record(OUTCOME, outcome.as_str());
+    }
+}
+
 /// What a run covered: everything, or the parts a page collects.
 fn covered(parts: &std::collections::BTreeSet<application::Part>) -> String {
     use application::Part;
@@ -658,6 +738,50 @@ mod tests {
 
         let heard = heard.0.into_inner().expect("unpoisoned");
         assert_eq!(heard.len(), 7, "{heard:?}");
+    }
+
+    /// **A delivery is a `delivering` step under its run**, with where it went,
+    /// or why it went nowhere (#741).
+    #[test]
+    fn a_delivery_is_a_span_under_its_run_with_why_it_failed() {
+        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let database = directory.path().join("telemetry.db");
+
+        let (recorder, recording) = ::telemetry::record(&database, None);
+        tracing::subscriber::with_default(tracing_subscriber::registry().with(recorder), || {
+            let run = Run::everything(Frontend::Web).span;
+            super::Delivered {
+                discipline: "gym",
+                went: Err("no hevy credential".to_owned()),
+            }
+            .record(&run);
+            super::Delivered {
+                discipline: "cycling",
+                went: Ok(Some("peloton stack".to_owned())),
+            }
+            .record(&run);
+        });
+        drop(recording);
+
+        let rows = spans(&database).expect("telemetry.db reads");
+        let run = rows
+            .iter()
+            .find(|row| row.name == "run")
+            .expect("a run span");
+        let delivery = |discipline: &str| {
+            rows.iter()
+                .find(|row| {
+                    row.fields["step"] == "delivering" && row.fields["discipline"] == discipline
+                })
+                .unwrap_or_else(|| panic!("a {discipline} delivery"))
+        };
+        let gym = delivery("gym");
+        assert_eq!(gym.parent, Some(run.id));
+        assert_eq!(gym.outcome.as_deref(), Some("failed"));
+        assert_eq!(gym.fields["failure"], "no hevy credential");
+        let cycling = delivery("cycling");
+        assert_eq!(cycling.outcome.as_deref(), Some("succeeded"));
+        assert_eq!(cycling.fields["destination"], "peloton stack");
     }
 
     /// **A run a page load starts is that load's child, and the load ends as
