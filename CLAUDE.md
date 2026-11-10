@@ -20,9 +20,9 @@ Read these before planning anything. None of them is mentioned by the
 constitution, and a session that skips them re-derives decisions that were
 already settled — or worse, quietly contradicts one.
 
-**Four places, and which one a thing goes in is not a matter of taste.** The
-operator, 2026-09-09: *"the place for recording tasks or progress is the GitHub
-issues, the place for recording open questions is the GitHub discussions."*
+**Three places, and which one a thing goes in is not a matter of taste.** GitHub
+discussions were a fourth, for open questions and ideas, until 2026-11-10. The
+operator retired them that day: *"we haven't gone back to them."*
 
 - **GitHub issues** — tasks and progress. What is to be done, what was done, and
   what a change turned out to cost. Comment on the issue as the work lands
@@ -41,12 +41,12 @@ issues, the place for recording open questions is the GitHub discussions."*
   follow-up inherits its parent's milestone. **Effort is the other axis for
   anything low priority**: cheap, and it is done; expensive, and it is a
   candidate for closing.
-- **GitHub discussions** — open questions. A question does not go in the
-  milestone, in a decision record or in a comment in the code; it goes here, where
-  the operator can answer it and where the answer is findable afterwards.
-  **Ideas** go here too, in the Ideas category: something the operator is not
-  after as a capability but does not rule out (operator, 2026-09-26). An idea
-  is not an issue in the backlog.
+
+  **An open question goes on the issue it blocks**, as a comment the operator
+  can answer. It does not go in the milestone, in a decision record or in a
+  comment in the code. **An idea is not an issue in the backlog.** It becomes a
+  milestone once the operator says what he wants from it, and until then it is
+  not written down.
 - **Milestones** — the order of work, and why it is that order. The sequence
   *within* a milestone is issue dependencies (`gh issue edit N --add-blocked-by
   M`), not prose. An issue in no milestone is backlog.
@@ -76,14 +76,14 @@ issues, the place for recording open questions is the GitHub discussions."*
   Both belong in a commit message, or for the constitution in its amendment log,
   rather than in a numbered record.
 
-  **The same test governs open questions**, which live in the discussions: a
+  **The same test governs open questions**, which go on the issue they block: a
   question is only open if resolving it unblocks something. A thing nobody needs an answer
   to before shipping is not an open question, and a choice that is the operator's
   to make whenever he likes is not one either — it is a programming choice.
 
 **Write things down as they are settled, not at the end.** A long session holds
 a great deal of reasoning that exists nowhere else, and the remedy is not a
-better memory — it is a commit, an issue comment or a discussion. If something
+better memory — it is a commit or an issue comment. If something
 was decided in conversation and is not in one of the places above or in the
 code, it will be lost.
 
@@ -94,7 +94,7 @@ code, it will be lost.
 reason. Both
 were agent-authored prose the operator never read and a later session cited back
 at him as though it constrained him. Before adding a document, find which of the
-four places above it belongs in. `docs/` keeps the constitution, the decision
+three places above it belongs in. `docs/` keeps the constitution, the decision
 records, and reference material the *operator* asked for.
 
 **What does not belong here**: anything about how a particular person likes to
@@ -128,7 +128,7 @@ work. That is not a fact about the project.
   prose that the operator has never read, cited back at him as though it
   constrained him. Everything load-bearing in it is in the code (630fa02 moved
   the seed, the candidates and the vocabulary into `domain`). What governs is
-  the constitution, `docs/decisions/`, the issues and discussions, and the code.
+  the constitution, `docs/decisions/`, the issues, and the code.
 
   **Deleted on 2026-09-01**, along with `.specify/` and the `speckit-*` skills;
   the constitution moved to `docs/constitution.md` on its way out. All of it is
