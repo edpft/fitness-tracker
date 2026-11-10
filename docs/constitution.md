@@ -8,8 +8,11 @@ Sync Impact Report
   2026-11-10: *"things slip, agents write loads of text, and the immediate concerns of this
   feature or that bug replace the overall vision"*; on planning, *"this isn't a post hoc review
   by an LLM it's about encoding the principles of concurrent training so that that alignment
-  happens by default"*, and *"the only real signal is what works for me."* The footer's version
-  line, left at 8.0.0 by the 9.0.0 amendment, is brought up to date.
+  happens by default"*, and *"the only real signal is what works for me"*; on the knowledge the
+  system carries, *"doctors, trainers, physios have some sort of algorithm that they're doing in
+  their heads, if this then this, I know I do that when planning my training, and I want this
+  tool to do that for me."* The footer's version line, left at 8.0.0 by the 9.0.0 amendment, is
+  brought up to date.
 - 9.0.0 — § II.3's timestamps: a recorded moment is its instant and the offset in force where
   it happened, not a named zone. MAJOR: "an offset is not a substitute" and the zone on every
   timestamp are removed. The rule was drafted on 2026-08-09, before any source was built, for
@@ -209,6 +212,8 @@ The operator trains for two things. The first is better body composition: losing
 The analytical layer is deliberately open-ended: the system's job is to make future analysis possible, not to serve a fixed set of metrics. Work aims at named capabilities, but a source is worth ingesting before anything reads it, because extracting it is often how we find out what it links to and what can be derived from it.
 
 Analysis combines what platforms that do not interact each recorded. What it finds drives the adapting above. It is also an end in itself: understanding what the data shows about the operator's fitness, and what a measurement can and cannot say. What was recorded wrongly, he can correct (§ II.2).
+
+**In all three, the system carries the knowledge.** Much of what a trainer, a physiotherapist or the operator himself does when planning is mechanical: if this, then this. Those rules are encoded here, whether they come from his head or from research he would otherwise repeat, so that the right thing happens by default.
 
 **In use**, the system is easy, fast and intuitive.
 
