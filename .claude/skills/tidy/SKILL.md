@@ -1,13 +1,13 @@
 ---
 name: tidy
-description: Project hygiene across GitHub issues, dependencies, milestones and discussions — close what is done or no longer relevant, fix what is wrong, and report. Use at the end of every issue (/start calls it), or when the operator says /tidy or asks for issues, dependencies or milestones to be brought up to date.
+description: Project hygiene across GitHub issues, dependencies and milestones — close what is done or no longer relevant, fix what is wrong, and report. Use at the end of every issue (/start calls it), or when the operator says /tidy or asks for issues, dependencies or milestones to be brought up to date.
 ---
 
 # /tidy
 
 The operator's closing prompt used to be "ensure that all issues, dependencies
 and milestones are up to date and still relevant". This skill is that prompt.
-What goes where (issues, discussions, milestones) is set out in CLAUDE.md.
+What goes where (issues, milestones) is set out in CLAUDE.md.
 This skill keeps each of those places accurate.
 
 **Act, then report.** Close what is done or no longer relevant, each with a
@@ -61,24 +61,12 @@ To read an issue whole: `gh issue view <n> --json title,body,milestone,comments`
 - **Accurate**: the description passes the rule in CLAUDE.md's milestones
   bullet.
 
-## Discussions — every open one
-
-A discussion is only open if answering it unblocks something.
-
-- **Answered**: write the answer where it now lives (in an issue, the code or a
-  decision record), comment with a link, and close as resolved.
-- **Overtaken, or never blocking anything**: comment why and close as outdated.
-
-Discussions have no `gh` subcommand. Use GraphQL: `addDiscussionComment`, then
-`closeDiscussion` with `reason: RESOLVED | OUTDATED | DUPLICATE`.
-
 ## Report
 
 A short list, one line per change, grouped by what was done:
 
 ```
 closed   #<n>   landed in #<pr>
-closed   D#<n>  overtaken: <what overtook it>
 moved    #<n>   → backlog; <milestone> does not need it
 blocked  #<n>   by #<m>: <why it must land first>
 ```

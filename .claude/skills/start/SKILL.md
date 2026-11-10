@@ -50,7 +50,7 @@ This skill is that prompt. `$ARGUMENTS` is the issue number or URL.
 - `gh issue view <n> --comments`: the body, the "done when", and every comment.
 - What blocks it: `gh api repos/edpft/fitness-tracker/issues/<n>/dependencies/blocked_by`.
   If an open issue still blocks it, stop and name that issue. Do not start around it.
-- Its milestone, and any discussion it links to.
+- Its milestone.
 
 ## 3. Branch
 
