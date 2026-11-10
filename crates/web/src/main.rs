@@ -9,6 +9,7 @@
 mod at_power;
 mod collected;
 mod composition;
+mod curves;
 mod detail;
 mod equipment;
 mod fills;

@@ -627,6 +627,16 @@ impl MesocycleCommitter for Committer {
     async fn commit(&self, _due: &Due) -> Result<(), CommitError> {
         Ok(())
     }
+
+    async fn expected(
+        &self,
+        _now: DayPart,
+        _holidays: &Holidays,
+        _standing: &Standing,
+        _diary: &Diary,
+    ) -> Result<Option<application::commit::Expected>, CommitError> {
+        Ok(None)
+    }
 }
 
 /// A gym with nothing planned at or after the slot.

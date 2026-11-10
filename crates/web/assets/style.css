@@ -11,6 +11,7 @@
   --surface: var(--card); --axis: var(--muted); --mark: #7aa2ff; --trend: var(--ink);
   /* One colour per metric. */
   --weight: #7aa2ff; --fat: #b99cff; --fat-free: #4fd8b8; --ftp: #ffc266;
+  --gym: #ffc266; --cycling: #7aa2ff;
   --one-rep-max: #ffc266; --hrv: #8fd3ff; --resting-heart-rate: #ff8fb1;
   --heart-rate-at-power: #ff8fb1; --test-heart-rate: #ff8fb1;
   --pulse-wave-velocity: #ff9f6b; --sleep: #9aa8ff; --sleep-regularity: #c6b4ff;
@@ -340,3 +341,27 @@ i.dot.unfinished { background: var(--ink2); animation: pulse 1.2s ease-in-out in
 .card.collected p.key { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--ink2); margin: 10px 0 0; }
 .card.collected p.key i.dot { width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px; }
 .home { padding-top: 14px; }
+/* Where the plan stands on the volume and intensity curves (#742). */
+.card.curves h3 { font-size: 15px; font-weight: 600; margin: 16px 0 0; }
+.card.curves .gym { --c: var(--gym); }
+.card.curves .cycling { --c: var(--cycling); }
+svg.curves { display: block; width: 100%; height: auto; margin-top: 6px; }
+svg.curves .current { fill: var(--ink); fill-opacity: 0.05; }
+svg.curves .grid { stroke: var(--grid); }
+svg.curves .tick, svg.curves .week { fill: var(--muted); font-size: 10px; }
+svg.curves .week.current { fill: var(--ink); font-weight: 700; }
+svg.curves .volume { fill: var(--c); fill-opacity: 0.28; }
+svg.curves .volume.expected { fill-opacity: 0.06; stroke: var(--c); stroke-width: 1; stroke-dasharray: 2 2; }
+svg.curves .intensity { stroke: var(--c); stroke-width: 2.5; stroke-linecap: round; }
+svg.curves .intensity.expected { stroke-dasharray: 4 4; stroke-width: 2; }
+svg.curves .dot { fill: var(--c); }
+svg.curves .dot.expected { fill: var(--card); stroke: var(--c); stroke-width: 2; }
+svg.curves .lost { fill: none; stroke: var(--muted); stroke-dasharray: 3 3; }
+svg.curves .test { fill: var(--ink2); font-size: 11px; font-weight: 700; }
+svg.curves .today { stroke: var(--ink); stroke-width: 1.5; }
+.card.curves p.key { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--ink2); margin: 10px 0 0; }
+.card.curves p.key i { display: inline-block; width: 12px; height: 10px; margin-right: 5px; vertical-align: -1px; border-radius: 2px; }
+.card.curves p.key i.volume { background: var(--ink2); opacity: 0.5; }
+.card.curves p.key i.intensity { height: 3px; vertical-align: 3px; background: var(--ink2); }
+.card.curves p.key i.expected { border: 1px dashed var(--ink2); }
+.card.curves p.key i.lost { border: 1px dashed var(--muted); }
