@@ -1,7 +1,18 @@
 <!--
 Sync Impact Report
-- Version: 9.0.0, amended 2026-11-07. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 9.1.0, amended 2026-11-10. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 9.1.0 — § I states what the system is for, not only what it keeps: the operator's goals, then
+  planning, adapting, and keeping and understanding the data, and how it is in use. MINOR: no
+  rule removed. § I had described a data store, which is the third of the three. The operator,
+  2026-11-10: *"things slip, agents write loads of text, and the immediate concerns of this
+  feature or that bug replace the overall vision"*; on planning, *"this isn't a post hoc review
+  by an LLM it's about encoding the principles of concurrent training so that that alignment
+  happens by default"*, and *"the only real signal is what works for me"*; on the knowledge the
+  system carries, *"doctors, trainers, physios have some sort of algorithm that they're doing in
+  their heads, if this then this, I know I do that when planning my training, and I want this
+  tool to do that for me."* The footer's version line, left at 8.0.0 by the 9.0.0 amendment, is
+  brought up to date.
 - 9.0.0 — § II.3's timestamps: a recorded moment is its instant and the offset in force where
   it happened, not a named zone. MAJOR: "an offset is not a substitute" and the zone on every
   timestamp are removed. The rule was drafted on 2026-08-09, before any source was built, for
@@ -186,9 +197,25 @@ How each rule is enforced is a question for § X, and is not recorded rule by ru
 
 ## I. Purpose
 
-One place for the operator's health and fitness data: ingesting it from every platform he uses or has used, storing it, and viewing and analysing it. It is his data, and keeping it is a purpose in itself. It must outlive any platform that recorded it, and the platforms in use are meant to become input vectors for this one, and perhaps one day to be unnecessary.
+The operator trains for two things. The first is better body composition: losing fat while building or keeping muscle. The second is a long and active life: strength, athleticism, mobility, and general health and fitness. This system serves those goals in three ways.
+
+**Planning.** One place to plan strength training, cardio, mobility work and nutrition phases together, so that they are aligned by construction. The principles of concurrent training are encoded in what can be planned, and are not a review applied afterwards. They are the default and not the authority: what the record shows works for the operator outranks them. Planning a nutrition phase means stating it here. The calorie targets that deliver it stay with the platform that sets them.
+
+**Adapting.** There are three kinds, and the second matters most.
+
+- *A published programme is fitted to the operator.* For example, he has four sessions a week and weights strength and cardio equally, so a programme written for three sessions a week gives two.
+- *The training changes when his life does*: his availability, his access to equipment or to a training platform, injury and illness.
+- *The training changes with him*: readiness and past performance change the next session, and what the record shows over months changes how the next block is planned.
+
+**Keeping and understanding the data.** One place for the operator's health and fitness data: ingesting it from every platform he uses or has used, storing it, and viewing and analysing it. It is his data, and keeping it is a purpose in itself. It must outlive any platform that recorded it, and the platforms in use are meant to become input vectors for this one, and perhaps one day to be unnecessary.
 
 The analytical layer is deliberately open-ended: the system's job is to make future analysis possible, not to serve a fixed set of metrics. Work aims at named capabilities, but a source is worth ingesting before anything reads it, because extracting it is often how we find out what it links to and what can be derived from it.
+
+Analysis combines what platforms that do not interact each recorded. What it finds drives the adapting above. It is also an end in itself: understanding what the data shows about the operator's fitness, and what a measurement can and cannot say. What was recorded wrongly, he can correct (§ II.2).
+
+**In all three, the system carries the knowledge.** Much of what a trainer, a physiotherapist or the operator himself does when planning is mechanical: if this, then this. Those rules are encoded here, whether they come from his head or from research he would otherwise repeat, so that the right thing happens by default.
+
+**In use**, the system is easy, fast and intuitive.
 
 Single user, single operator. No multi-tenancy; no auth model beyond credential handling (§ VIII).
 
@@ -404,4 +431,4 @@ Dependency updates were already exempt, and remain so for their own reason: what
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 8.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-10-26
+**Version**: 9.1.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-11-10
