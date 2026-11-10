@@ -196,7 +196,7 @@ How each rule is enforced is a question for § X, and is not recorded rule by ru
 
 The operator trains for two things. The first is better body composition: losing fat while building or keeping muscle. The second is a long and active life: strength, athleticism, mobility, and general health and fitness. This system serves those goals in three ways.
 
-**Planning.** One place to plan strength training, cardio and nutrition phases together, so that they are aligned by construction. The principles of concurrent training are encoded in what can be planned, and are not a review applied afterwards. They are the default and not the authority: what the record shows works for the operator outranks them. Planning a nutrition phase means stating it here. The calorie targets that deliver it stay with the platform that sets them.
+**Planning.** One place to plan strength training, cardio, mobility work and nutrition phases together, so that they are aligned by construction. The principles of concurrent training are encoded in what can be planned, and are not a review applied afterwards. They are the default and not the authority: what the record shows works for the operator outranks them. Planning a nutrition phase means stating it here. The calorie targets that deliver it stay with the platform that sets them.
 
 **Adapting.** There are three kinds, and the second matters most.
 
