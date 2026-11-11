@@ -636,8 +636,9 @@ async fn is_it_working(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Mar
     .await
 }
 
-/// The equipment, read afresh from the store, with what the last post came to.
-async fn equipment_shown(runs: &Runs, said: Option<&str>) -> Markup {
+/// The equipment, read afresh from the store, with the last post if it was
+/// refused.
+async fn equipment_shown(runs: &Runs, refused: Option<&equipment::Refused<'_>>) -> Markup {
     let store = match configurator::store::Store::open(&runs.setting().database).await {
         Ok(store) => store,
         Err(error) => return equipment::unreadable(&error.to_string()),
@@ -648,7 +649,7 @@ async fn equipment_shown(runs: &Runs, said: Option<&str>) -> Markup {
         Ok(facts) => equipment::page(
             &facts,
             configurator::equipment::today(&runs.setting().zone),
-            said,
+            refused,
         ),
         Err(error) => equipment::unreadable(&error.to_string()),
     }
@@ -660,15 +661,15 @@ async fn equipment_page(State(runs): State<Arc<Runs>>) -> Markup {
 
 /// Declare, change or correct a fact, then show the page again: redirected on
 /// success, so a reload does not post it twice, and rendered with the reason on
-/// a refusal, so what was typed is not the thing lost.
+/// a refusal, as typed and with the reason beside the field it is about.
 async fn equipment_post(
     State(runs): State<Arc<Runs>>,
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
-    let refused = match equipment::asked(&equipment::Fields::new(form)) {
-        Err(refused) => Some(refused),
+    let refusal = match equipment::asked(&form) {
+        Err(refusal) => Some(refusal),
         Ok(asked) => match configurator::store::Store::open(&runs.setting().database).await {
-            Err(error) => Some(error.to_string()),
+            Err(error) => Some(input::Refusal::whole(error.to_string())),
             Ok(store) => {
                 let done = match asked {
                     equipment::Asked::Declare(statement, from) => {
@@ -679,13 +680,21 @@ async fn equipment_post(
                     }
                 };
                 store.close().await;
-                done.err().map(|error| error.to_string())
+                done.err().map(|error| equipment::refusal(&error))
             }
         },
     };
-    match refused {
+    match refusal {
         None => Redirect::to("/equipment").into_response(),
-        Some(refused) => equipment_shown(&runs, Some(&refused)).await.into_response(),
+        Some(refusal) => equipment_shown(
+            &runs,
+            Some(&equipment::Refused {
+                typed: &form,
+                refusal: &refusal,
+            }),
+        )
+        .await
+        .into_response(),
     }
 }
 
