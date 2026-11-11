@@ -17,6 +17,10 @@
 //! band, and the expected result as a dashed line, with the mesocycles marked
 //! behind.
 //!
+//! **The mesocycles are numbered from 0** (operator, 2026-11-11): the entry
+//! tests are Mesocycle 0, so *"the first non-test mesocycle would be
+//! Mesocycle 1"*, which is what he calls it.
+//!
 //! **Has this macrocycle improved on the last?** With one macrocycle on
 //! record it says this is the first.
 
@@ -313,7 +317,7 @@ fn each_week(macrocycle: &Macrocycle, today: Date) -> Markup {
     let mesocycles: Vec<(Date, Date, String)> = macrocycle
         .mesocycles
         .iter()
-        .zip(1..)
+        .zip(0..)
         .filter(|(span, _)| span.start() <= today)
         .filter_map(|(span, number): (_, u32)| {
             let last = span.end().yesterday().ok()?.min(today);
@@ -560,7 +564,14 @@ mod tests {
             "{page}"
         );
         assert_eq!(page.matches("polyline class=\"aim\"").count(), 3, "{page}");
-        assert_eq!(page.matches(">Mesocycle 3<").count(), 3, "{page}");
+        for (name, drawn) in [
+            (">Mesocycle 0<", 3),
+            (">Mesocycle 1<", 3),
+            (">Mesocycle 2<", 3),
+            (">Mesocycle 3<", 0),
+        ] {
+            assert_eq!(page.matches(name).count(), drawn, "{name}: {page}");
+        }
         assert!(page.contains("week to 20 Sep"), "{page}");
         assert!(
             page.contains("52.2 bpm ± 2.1 · expected 49.5 bpm"),
