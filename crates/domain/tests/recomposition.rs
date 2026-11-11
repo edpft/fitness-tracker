@@ -50,14 +50,14 @@ fn autumn() -> Option<Macrocycle> {
 }
 
 #[test]
-fn preparatory_is_a_cut_and_the_rest_maintenance() {
+fn the_term_is_a_cut_and_the_transition_maintenance() {
     assert_eq!(
         NutritionPhase::assumed(Phase::Preparatory),
         NutritionPhase::Cut
     );
     assert_eq!(
         NutritionPhase::assumed(Phase::Competitive),
-        NutritionPhase::Maintenance
+        NutritionPhase::Cut
     );
     assert_eq!(
         NutritionPhase::assumed(Phase::Transition),
@@ -169,9 +169,10 @@ fn each_mesocycle_is_a_point_in_the_cut() {
     );
 }
 
-/// **The competitive mesocycle and the transition are maintenance.**
+/// **The competitive mesocycle is a cut, and only the transition is
+/// maintenance** (operator, 2026-11-11).
 #[test]
-fn the_competitive_mesocycle_is_maintenance() {
+fn the_competitive_mesocycle_is_a_cut() {
     let autumn = autumn().expect("a macrocycle");
     let mut planned = planned().to_vec();
     planned.push(Span::new(date(2026, 10, 26), 4));
@@ -186,7 +187,7 @@ fn the_competitive_mesocycle_is_maintenance() {
             NutritionPhase::Cut,
             NutritionPhase::Cut,
             NutritionPhase::Cut,
-            NutritionPhase::Maintenance,
+            NutritionPhase::Cut,
             NutritionPhase::Maintenance,
         ]
     );

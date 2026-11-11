@@ -19,9 +19,11 @@
 //! the goal but outside its phase's region is progress made by the wrong
 //! means, as a cut that gains fat more slowly than fat-free mass.
 //!
-//! **The phase is assumed from the macrocycle** until one is planned (#258): a
-//! cut in the preparatory phase, maintenance in the competitive and transition
-//! phases (operator, 2026-10-19).
+//! **The phase is assumed from the macrocycle** (#258): a cut for the whole
+//! term, maintenance in the transition (operator, 2026-11-11). He sets the
+//! goal up by hand in the platform that logs his calories, and nothing here
+//! reads it. The competitive phase was maintenance from 2026-10-19 only in
+//! the hope of reaching his target before it.
 //!
 //! **A mesocycle's change is its last trend against its first**, each the
 //! 7-day trend of [`super::composition`], the first whose 7 days all fall in
@@ -58,11 +60,11 @@ pub enum NutritionPhase {
 pub const GOAL: [(f64, f64); 3] = [(-1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)];
 
 impl NutritionPhase {
-    /// The phase assumed for a macrocycle's phase, until one is planned.
+    /// The phase assumed for a macrocycle's phase.
     pub const fn assumed(phase: Phase) -> Self {
         match phase {
-            Phase::Preparatory => Self::Cut,
-            Phase::Competitive | Phase::Transition => Self::Maintenance,
+            Phase::Preparatory | Phase::Competitive => Self::Cut,
+            Phase::Transition => Self::Maintenance,
         }
     }
 
