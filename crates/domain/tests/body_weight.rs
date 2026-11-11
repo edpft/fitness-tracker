@@ -235,6 +235,30 @@ fn the_aim_is_the_cut_s_where_a_plan_says_cut() {
     );
 }
 
+/// **The cut runs to the end of term** (operator, 2026-11-11): the
+/// competitive mesocycle keeps the cut's aim, and the transition aims at no
+/// change.
+#[test]
+fn the_cut_s_aim_runs_to_the_transition() {
+    let autumn = autumn().expect("the macrocycle");
+    let mesocycles = [
+        Span::new(date(2026, 10, 26), 4),
+        Span::new(date(2026, 11, 23), 4),
+        Span::new(date(2026, 12, 21), 2),
+    ];
+    let aims = aims(autumn, &mesocycles, date(2027, 1, 1));
+    assert_eq!(
+        aims.iter()
+            .map(|aim| (aim.span.start(), aim.phase, aim.per_week))
+            .collect::<Vec<_>>(),
+        vec![
+            (date(2026, 10, 26), NutritionPhase::Cut, Some(-0.25)),
+            (date(2026, 11, 23), NutritionPhase::Cut, Some(-0.25)),
+            (date(2026, 12, 21), NutritionPhase::Maintenance, Some(0.0)),
+        ]
+    );
+}
+
 fn holiday(first: Date, last: Date) -> Option<SchoolHoliday> {
     let days = (last - first).get_days().checked_add(1)?;
     Some(SchoolHoliday::new(

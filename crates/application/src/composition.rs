@@ -70,8 +70,7 @@ where
     }
 
     /// The current macrocycle's periods as they stand on `today`. Every
-    /// plan's mesocycles are read, since the competitive one starts
-    /// maintenance.
+    /// plan's mesocycles are read.
     ///
     /// # Errors
     ///
