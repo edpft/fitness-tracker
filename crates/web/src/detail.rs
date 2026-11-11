@@ -40,6 +40,7 @@ pub enum Metric {
     Ftp,
     OneRepMax,
     TestHeartRate,
+    Stress,
 }
 
 impl Metric {
@@ -58,6 +59,7 @@ impl Metric {
             Self::Ftp => "ftp",
             Self::OneRepMax => "one-rep-max",
             Self::TestHeartRate => "test-heart-rate",
+            Self::Stress => "stress",
         }
     }
 }
@@ -163,7 +165,7 @@ fn reading(reading: &Reading) -> Markup {
                     (badge(*direction))
                 }
                 div { b { (said) } span { (over) } }
-                (noise_bar(*by, *noise))
+                (gauge(*by, *noise, None))
             }
         },
         Reading::NoRule(said) => html! { div.none { (said) } },
@@ -188,10 +190,17 @@ fn badge(direction: Direction) -> Markup {
 const GAUGE: f64 = 200.0;
 
 /// A bar centred on zero, the noise either side shaded, and a dot where the
-/// change fell; a change past the bar's end sits at the end.
-fn noise_bar(by: f64, noise: f64) -> Markup {
+/// change fell; a change past the bar's end sits at the end. `aim` is where
+/// the change was expected to fall, marked with a dashed line (#517).
+pub fn gauge(by: f64, noise: f64, aim: Option<f64>) -> Markup {
     let middle = GAUGE / 2.0;
-    let span = by.abs().max(noise).max(by.abs() * 1.2).max(f64::EPSILON) * 1.25;
+    let span = by
+        .abs()
+        .max(noise)
+        .max(by.abs() * 1.2)
+        .max(aim.map_or(0.0, f64::abs))
+        .max(f64::EPSILON)
+        * 1.25;
     let x = |value: f64| (middle - 8.0).mul_add((value / span).clamp(-1.0, 1.0), middle);
     html! {
         svg.gauge viewBox=(format!("0 0 {GAUGE} 24")) aria-hidden="true" {
@@ -200,6 +209,9 @@ fn noise_bar(by: f64, noise: f64) -> Markup {
                 rect.noise x=(x(-noise)) y="6" width=(x(noise) - x(-noise)) height="12" rx="6" {}
             }
             line.zero x1=(middle) x2=(middle) y1="2" y2="22" {}
+            @if let Some(aim) = aim {
+                line.aim x1=(x(aim)) x2=(x(aim)) y1="1" y2="23" {}
+            }
             circle.fell cx=(x(by)) cy="12" r="6" {}
         }
     }

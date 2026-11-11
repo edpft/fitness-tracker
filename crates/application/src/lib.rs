@@ -45,6 +45,7 @@ pub mod schedule;
 pub mod sleep;
 pub mod status;
 pub mod strength;
+pub mod working;
 
 pub use error::{
     ComparisonError, DeliveryError, DesignError, EquipmentError, ExtractionError, FillChangeError,
@@ -72,8 +73,8 @@ pub use ports::{
     RecordedDevices, Rederivation, RefusalReport, RefusalReporter, RefusalStore, RenderingDigest,
     ReplyStatus, RestingHeartRateHistory, ResumptionPointResetter, ResumptionPointStore,
     RiddenSession, RiddenSessionLog, RiddenVenues, RideDestination, RidesPlaced, RunLock,
-    RunSummary, SessionOrdinal, SleepHistory, SourceAccount, SourceEvent, StreamStatus, Taken,
-    Terms, Translation, Translator, UnderivableReason, UnderivableSlot, Unexpressed, WearRecord,
-    WeighInHistory, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber,
-    WorkoutStore,
+    RunSummary, SessionOrdinal, SleepHistory, SourceAccount, SourceEvent, StreamStatus,
+    StressHistory, Taken, Terms, TrainingDone, Translation, Translator, UnderivableReason,
+    UnderivableSlot, Unexpressed, WearRecord, WeighInHistory, WorkoutEventSource, WorkoutExtractor,
+    WorkoutNormaliser, WorkoutPrescriber, WorkoutStore,
 };

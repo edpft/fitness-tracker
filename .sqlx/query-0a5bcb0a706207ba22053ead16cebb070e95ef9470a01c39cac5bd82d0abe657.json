@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM padel_game",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "0a5bcb0a706207ba22053ead16cebb070e95ef9470a01c39cac5bd82d0abe657"
+}

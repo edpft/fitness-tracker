@@ -31,6 +31,11 @@ const PINNED: &[(&str, u32, &str)] = &[
         "51a5e3f5a0762d0e7f1bca36d2b916b9f67b1567678f94808fcf7990e0271643",
     ),
     (
+        "GarminActivityTranslator",
+        2,
+        "709ee19ac63e0dae297ac985dbb9ea620e6c7f3d76c61c996e10970a9b57e8ed",
+    ),
+    (
         "GarminDailyHeartRateTranslator",
         1,
         "89bf67ba268f1a421ac7968131fa630e76fe1130047177170067d67fc536d2e7",
@@ -54,6 +59,11 @@ const PINNED: &[(&str, u32, &str)] = &[
         "GarminSleepTranslator",
         1,
         "9bf8a3e96639ec3c1024aa3de4ae9a325f679826240a70ddba1a51734d9d126f",
+    ),
+    (
+        "GarminStressTranslator",
+        1,
+        "e384dcb96ac54bc0343dbc5e9645a489f5fc1a3bc3990a23dd180498e3401665",
     ),
     (
         "HevySessionTranslator",

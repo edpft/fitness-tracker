@@ -15,6 +15,7 @@
   --one-rep-max: #ffc266; --hrv: #8fd3ff; --resting-heart-rate: #ff8fb1;
   --heart-rate-at-power: #ff8fb1; --test-heart-rate: #ff8fb1;
   --pulse-wave-velocity: #ff9f6b; --sleep: #9aa8ff; --sleep-regularity: #c6b4ff;
+  --stress: #a8d672;
   /* One colour per power zone. */
   --z1: #7aa2ff; --z2: #4fd8b8; --z3: #ffc266; --z4: #ff7a6b; --z5: #6a5acd; --z6: #d95926; --z7: #e66767;
 }
@@ -22,6 +23,7 @@
 .weight { --c: var(--weight); } .fat { --c: var(--fat); } .fat-free { --c: var(--fat-free); }
 .ftp { --c: var(--ftp); } .one-rep-max { --c: var(--one-rep-max); } .hrv { --c: var(--hrv); }
 .resting-heart-rate { --c: var(--resting-heart-rate); }
+.stress { --c: var(--stress); }
 .heart-rate-at-power { --c: var(--heart-rate-at-power); }
 .test-heart-rate { --c: var(--test-heart-rate); }
 .pulse-wave-velocity { --c: var(--pulse-wave-velocity); }
@@ -165,6 +167,21 @@ p.marks i { display: inline-block; width: 10px; height: 10px; border-radius: 50%
 p.marks i.dot { background: var(--c); opacity: 0.45; }
 p.marks i.solid { background: var(--c); }
 p.marks i.hollow { border: 1.25px solid var(--c); }
+p.marks i.read { border-radius: 3px; background: var(--ink2); }
+p.marks i.dash { width: 14px; height: 0; border-radius: 0; border-top: 2px dashed var(--ink); vertical-align: 3px; }
+.card.working > h2, .card.weeks > h2 { font-size: 17px; line-height: 1.3; margin: 0 0 6px; }
+.card.working > p.sub { margin: 0 0 6px; }
+.card.working .asof { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.reading { padding: 12px 0 6px; }
+.reading + .reading { border-top: 1px solid var(--grid); }
+.reading .name { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
+.reading .name em { margin-left: auto; font-style: normal; font-weight: 400; color: var(--ink2); font-variant-numeric: tabular-nums; }
+.reading .change { margin-top: 4px; }
+.reading .none { margin-top: 4px; font-size: 13px; color: var(--ink2); }
+.gauge .aim { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 3 3; }
+.change span.aimed { margin-left: 14px; white-space: nowrap; }
+.change span.aimed i { display: inline-block; width: 14px; margin-right: 6px; vertical-align: middle; border-top: 2px dashed var(--ink); }
+.card.weeks .sub { margin-top: 10px; }
 
 /* Observations singled out, ringed. */
 .plotted .ring { fill: none; stroke: var(--ink); stroke-width: 1.5; }

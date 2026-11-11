@@ -4,6 +4,9 @@
 //! **Written by `garmin.activities` and `garmin.daily_heart_rate`**, each
 //! beside what it already derived: an activity's gym session and its devices
 //! are one derivation, as a day's resting heart rate and its wear are.
+//!
+//! **A padel game is written here too** (#517), for the same reason: it is
+//! what an activity derives where it is not a gym session.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -13,6 +16,7 @@ use domain::{
     gym::MeasuredGymSession,
     landing::{InvalidStream, LandingRecordId, LandingStream},
     normalised::{NormalisationRunId, OperatorZone, StartedAt, WorkoutCount},
+    padel::PadelGame,
 };
 use jiff::{Timestamp, civil::Date};
 use sqlx::{Sqlite, SqlitePool, Transaction};
@@ -66,7 +70,7 @@ impl NormalisedEntityStore for SqliteGarminActivityStore {
         let run_id = normalisation_run_for_storage(run)?;
         let stream = self.stream.to_string();
 
-        let (sessions, devices) = split(entities);
+        let (sessions, games, devices) = split(entities);
 
         let mut tx = super::writing(&self.pool)
             .await
@@ -74,6 +78,13 @@ impl NormalisedEntityStore for SqliteGarminActivityStore {
         clear_stream(&mut tx, &stream).await?;
         for session in &sessions {
             write_session(&mut tx, run_id, &stream, session).await?;
+        }
+        sqlx::query!("DELETE FROM padel_game")
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| store_error(&error))?;
+        for game in &games {
+            write_game(&mut tx, run_id, game).await?;
         }
         sqlx::query!("DELETE FROM device_sighting WHERE stream = ?", stream)
             .execute(&mut *tx)
@@ -94,7 +105,7 @@ impl NormalisedEntityStore for SqliteGarminActivityStore {
     ) -> Result<WorkoutCount, StoreError> {
         let run_id = normalisation_run_for_storage(run)?;
         let stream = self.stream.to_string();
-        let (sessions, devices) = split(entities);
+        let (sessions, games, devices) = split(entities);
 
         let mut tx = super::writing(&self.pool)
             .await
@@ -105,6 +116,16 @@ impl NormalisedEntityStore for SqliteGarminActivityStore {
         }
         super::normalised::written(&mut tx, &stream, run_id).await?;
         let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
+        sqlx::query!(
+            "DELETE FROM padel_game WHERE landing_record_id IN (SELECT value FROM json_each(?))",
+            removed
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+        for game in &games {
+            write_game(&mut tx, run_id, game).await?;
+        }
         sqlx::query!(
             "DELETE FROM device_sighting \
              WHERE stream = ? AND landing_record_id IN (SELECT value FROM json_each(?))",
@@ -134,17 +155,72 @@ impl NormalisedEntityStore for SqliteGarminActivityStore {
     }
 }
 
-/// An activity's gym session and its devices, apart.
-fn split(entities: Vec<GarminActivityEntity>) -> (Vec<MeasuredGymSession>, Vec<ActivityDevices>) {
+/// What the activities derived, each kind apart.
+fn split(
+    entities: Vec<GarminActivityEntity>,
+) -> (
+    Vec<MeasuredGymSession>,
+    Vec<PadelGame>,
+    Vec<ActivityDevices>,
+) {
     let mut sessions: Vec<MeasuredGymSession> = Vec::new();
+    let mut games: Vec<PadelGame> = Vec::new();
     let mut devices: Vec<ActivityDevices> = Vec::new();
     for entity in entities {
         match entity {
             GarminActivityEntity::GymSession(session) => sessions.push(*session),
+            GarminActivityEntity::PadelGame(game) => games.push(*game),
             GarminActivityEntity::Devices(found) => devices.push(*found),
         }
     }
-    (sessions, devices)
+    (sessions, games, devices)
+}
+
+/// One game of padel.
+async fn write_game(
+    tx: &mut Transaction<'_, Sqlite>,
+    run_id: i64,
+    game: &PadelGame,
+) -> Result<(), StoreError> {
+    let id = game.landed_as().as_i64();
+    let source_record_id = game.source_record_id().as_str().to_owned();
+    let started_at = game.started_at().instant().to_string();
+    let zone = game.started_at().zone().id().to_owned();
+    let duration = i64::try_from(game.duration().as_seconds()).map_err(|error| corrupt(&error))?;
+    let average = game
+        .heart_rate()
+        .map(|summary| i64::from(summary.average().as_u32()));
+    let highest = game
+        .heart_rate()
+        .map(|summary| i64::from(summary.highest().as_u32()));
+    let event = super::served_by_a_feed(game.provenance())?;
+    let endpoint = event.endpoint().as_str().to_owned();
+    let event_kind = event.kind().as_str().to_owned();
+    let event_time = event.occurred_at().map(|at| at.as_timestamp().to_string());
+    sqlx::query!(
+        r#"
+        INSERT INTO padel_game (
+            landing_record_id, source_record_id, started_at_utc, zone, duration_seconds,
+            average_bpm, highest_bpm, endpoint, event_kind, event_time, run_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+        id,
+        source_record_id,
+        started_at,
+        zone,
+        duration,
+        average,
+        highest,
+        endpoint,
+        event_kind,
+        event_time,
+        run_id,
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| store_error(&error))?;
+    Ok(())
 }
 
 /// One activity's devices, in the order its recording names them.

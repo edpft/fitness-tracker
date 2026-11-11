@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM stress",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "fb279b1f3d0bf6c938f3fc6deae0d0cc71ce699305e867047b10faaeebf12bcf"
+}

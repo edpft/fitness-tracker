@@ -20,6 +20,7 @@ pub mod macrocycle;
 pub mod measure;
 mod newtype;
 pub mod normalised;
+pub mod padel;
 pub mod plan;
 pub mod planner;
 pub mod prescription;

@@ -4,7 +4,7 @@
 use application::{
     CanonicalLayer, StoreError,
     next::Scope,
-    one_rep_max::{EstimatedOneRepMax, View},
+    one_rep_max::{EstimatedOneRepMax, OneRepMaxTests, Tests, View},
 };
 use domain::{analytical::Rts, normalised::OperatorZone};
 
@@ -41,5 +41,22 @@ pub async fn view(store: &Store, zone: &OperatorZone) -> Result<View, StoreError
         store.plans(zone),
     )
     .view(today)
+    .await
+}
+
+/// Each lift's 1RM tests, through today (#517).
+///
+/// # Errors
+///
+/// [`StoreError`] if the store cannot be read.
+pub async fn tests(store: &Store, zone: &OperatorZone) -> Result<Vec<Tests>, StoreError> {
+    let today = jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date();
+    OneRepMaxTests::new(
+        Rts,
+        store.canonical_gym(),
+        store.plans(zone),
+        store.prescriptions(zone),
+    )
+    .tests(today)
     .await
 }

@@ -10,7 +10,8 @@ use domain::{
     analytical::{
         OneRepMaxEstimator,
         one_rep_max::{
-            Against, LIFTS, Point, Relative, Trend, next_test, points, relative, sessions_of, trend,
+            Against, LIFTS, Point, Reading, Relative, Trend, next_test, planned_tests, points,
+            relative, sessions_of, trend,
         },
     },
     gym::exercise::RepsExercise,
@@ -20,7 +21,7 @@ use jiff::civil::{Date, date};
 
 use crate::{
     error::StoreError,
-    ports::{PerformedGymSessions, PlanStore, WeighInHistory},
+    ports::{PerformedGymSessions, PlanStore, PrescribedWorkoutStore, WeighInHistory},
 };
 
 /// Before anything the record holds.
@@ -153,5 +154,90 @@ where
                 })
                 .collect(),
         })
+    }
+}
+
+/// One lift's 1RM tests, oldest first, each as the day it was performed on
+/// and its max in grams.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tests {
+    pub lift: RepsExercise,
+    pub tests: Vec<(Date, u32)>,
+}
+
+/// The 1RM tests each lift's record holds (#517).
+///
+/// **A session is a test where its prescription names it as one**
+/// ([`planned_tests`]), read from what was performed: the plan's own table
+/// does not name a mesocycle's exit test, and dated autumn 2026's entry test
+/// eleven days before it was done.
+///
+/// **Only tests of one rep**: tests of different n are never compared with
+/// each other (#706).
+pub struct OneRepMaxTests<E, S, P, R> {
+    estimator: E,
+    sessions: S,
+    plans: P,
+    prescribed: R,
+}
+
+impl<E, S, P, R> OneRepMaxTests<E, S, P, R>
+where
+    E: OneRepMaxEstimator + Sync,
+    S: PerformedGymSessions + Sync,
+    P: PlanStore + Sync,
+    R: PrescribedWorkoutStore + Sync,
+{
+    pub const fn new(estimator: E, sessions: S, plans: P, prescribed: R) -> Self {
+        Self {
+            estimator,
+            sessions,
+            plans,
+            prescribed,
+        }
+    }
+
+    /// Every lift's 1RM tests through `today`.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    pub async fn tests(&self, today: Date) -> Result<Vec<Tests>, StoreError> {
+        let sessions = self.sessions.between(EARLIEST, today).await?;
+        let mut plans = Vec::new();
+        for window in self.plans.windows().await? {
+            if let Some(plan) = self.plans.named(window.name()).await?
+                && !plans.contains(&plan)
+            {
+                plans.push(plan);
+            }
+        }
+        let mut read = Vec::new();
+        for lift in LIFTS {
+            // The prescription in force on each day the lift was performed,
+            // which says whether that session was a test.
+            let mut prescribed = Vec::new();
+            for day in sessions_of(&sessions, lift) {
+                if let Some((_, prescription)) = self.prescribed.issued_for(day).await? {
+                    prescribed.push(prescription);
+                }
+            }
+            let planned: Vec<_> = planned_tests(&plans, &prescribed, lift)
+                .into_iter()
+                .filter(|(_, reps)| reps.as_u32() == 1)
+                .collect();
+            let tests = points(&self.estimator, &sessions, lift, &planned)
+                .into_iter()
+                .filter(|point| matches!(point.reading, Reading::Tested { .. }))
+                .filter_map(|point| {
+                    Some((
+                        point.on,
+                        u32::try_from(point.estimate.one_rep_max.as_grams()).ok()?,
+                    ))
+                })
+                .collect();
+            read.push(Tests { lift, tests });
+        }
+        Ok(read)
     }
 }

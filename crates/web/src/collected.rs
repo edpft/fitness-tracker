@@ -25,6 +25,7 @@ struct Row {
 /// chart.
 fn chart(path: &str) -> Option<Result<Scope, WiringError>> {
     Some(match path {
+        "/working" => configurator::working::collects(),
         "/heart-rate" => configurator::heart_rate::collects(),
         "/ftp" => configurator::ftp_tests::collects(),
         "/body-weight" => configurator::body_weight::collects(),
@@ -137,7 +138,7 @@ mod tests {
                 .filter(|(path, _)| chart(path).is_some())
                 .count()
         );
-        assert_eq!(rows.len(), 11, "{names:?}");
+        assert_eq!(rows.len(), 12, "{names:?}");
         for row in &rows {
             assert!(row.reads.is_ok(), "{}", row.name);
         }
@@ -159,7 +160,7 @@ mod tests {
         let shown = matrix(&steps.iter().copied(), true).into_string();
 
         let rows: Vec<&str> = shown.split(r#"<div class="row">"#).skip(1).collect();
-        assert_eq!(rows.len(), 11, "{shown}");
+        assert_eq!(rows.len(), 12, "{shown}");
         for row in &rows {
             let dots: Vec<&str> = row.split(r#"<i class="dot "#).skip(1).collect();
             assert!(dots[0].starts_with("failed"), "{row}");

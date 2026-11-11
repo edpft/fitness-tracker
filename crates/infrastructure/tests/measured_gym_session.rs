@@ -28,10 +28,11 @@ use domain::{
 };
 use infrastructure::{
     GarminActivityFileLandingStore, GarminActivityLandingStore, GarminExerciseSetLandingStore,
-    GarminGymAccountReader, SqliteExtractionRunLog, SqliteMeasuredGymSessionStore,
-    SqliteNormalisationRunLog, SqliteRefusalStore, connect,
+    GarminGymAccountReader, SqliteExtractionRunLog, SqliteGarminActivityStore,
+    SqliteMeasuredGymSessionStore, SqliteNormalisationRunLog, SqliteRefusalStore,
+    SqliteTrainingDone, connect,
     garmin::{
-        ActivityAccount, GarminGymTranslator, account::activities,
+        ActivityAccount, GarminActivityEntity, GarminGymTranslator, account::activities,
         activity::GarminActivityTranslator,
     },
 };
@@ -1678,8 +1679,22 @@ fn its_version_names_what_it_translates() {
 #[test]
 fn the_activity_version_names_what_it_translates() {
     let zones = StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("zone"));
-    let translations: Vec<_> = suite()
-        .expect("the accounts")
+    let mut accounts = suite().expect("the accounts");
+    accounts.push(account(&padel("2026-07-04 23:30:00"), None, None).expect("a game"));
+    accounts.push(
+        account(
+            &activity(
+                PADEL,
+                "paddelball",
+                "2026-07-04 23:30:00",
+                &[("duration", json!(0.0))],
+            ),
+            None,
+            None,
+        )
+        .expect("a game"),
+    );
+    let translations: Vec<_> = accounts
         .iter()
         .map(|account| {
             GarminActivityTranslator::default()
@@ -1691,4 +1706,134 @@ fn the_activity_version_names_what_it_translates() {
     if let Err(unpinned) = versions::pinned::<GarminActivityTranslator>(&translations) {
         panic!("{unpinned}");
     }
+}
+
+const PADEL: &str = "20871245560";
+
+/// A game of padel as the watch's Padel profile files one: 118 minutes.
+fn padel(started: &str) -> Value {
+    activity(
+        PADEL,
+        "paddelball",
+        started,
+        &[
+            ("activityName", json!("Padel")),
+            ("duration", json!(7_080.412)),
+            ("averageHR", json!(121.0)),
+            ("maxHR", json!(168.0)),
+        ],
+    )
+}
+
+fn activity_entities(activity: &Value) -> Result<Translation<GarminActivityEntity>, Failure> {
+    Ok(GarminActivityTranslator::default().translate(
+        &account(activity, None, None)?,
+        &StatedZones::throughout(OperatorZone::try_from("Europe/London")?),
+    )?)
+}
+
+/// **A padel game is a padel game** (operator, 2026-11-11), where it was
+/// refused as an activity this layer does not model (#517).
+#[test]
+fn a_padel_game_is_a_padel_game() {
+    let translated = activity_entities(&padel("2026-10-11 17:07:00")).expect("translated");
+    let Translation::Entities { entities, refusals } = translated else {
+        panic!("no game: {translated:?}");
+    };
+    assert!(refusals.is_empty(), "{refusals:?}");
+    let GarminActivityEntity::PadelGame(game) = entities.first() else {
+        panic!("not a game: {entities:?}");
+    };
+    assert_eq!(
+        game.started_at().wall_clock().datetime(),
+        jiff::civil::date(2026, 10, 11).at(18, 7, 0, 0)
+    );
+    assert_eq!(game.duration().as_seconds(), 7_080);
+    assert_eq!(
+        game.heart_rate()
+            .map(|summary| (summary.average().as_u32(), summary.highest().as_u32())),
+        Some((121, 168))
+    );
+}
+
+#[test]
+fn a_game_the_watch_gave_no_length_is_nothing_happening() {
+    let stated = activity(
+        PADEL,
+        "paddelball",
+        "2026-10-11 17:07:00",
+        &[("duration", json!(0.0))],
+    );
+    let translated = activity_entities(&stated).expect("translated");
+    let Translation::Refused(refusals) = translated else {
+        panic!("not refused: {translated:?}");
+    };
+    assert_eq!(refusals.first().reason, RefusalReason::NothingHappened);
+}
+
+/// A game reaches the store and is read back as training done, on the day it
+/// started in the zone it was played in: half past midnight, not the evening
+/// before.
+#[test]
+fn a_padel_game_is_training_done_on_the_day_it_was_played() {
+    use application::TrainingDone as _;
+    use domain::analytical::training_done::{Kind, Session};
+
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let directory = tempfile::tempdir().expect("a directory");
+        let pool = connect(&directory.path().join("test.db"))
+            .await
+            .expect("a store");
+        let runs = SqliteExtractionRunLog::new(pool.clone());
+        append(
+            &GarminActivityLandingStore::new(pool.clone()).expect("a store"),
+            &runs,
+            record(
+                1,
+                PADEL,
+                "garmin.activities",
+                "/activitylist-service/activities/search/activities",
+                &padel("2026-07-04 23:30:00"),
+            )
+            .expect("a record"),
+        )
+        .await
+        .expect("landed");
+
+        Normalisation::new(
+            NormalisationPorts {
+                raw: GarminGymAccountReader::new(pool.clone()).expect("a reader"),
+                translator: GarminActivityTranslator::default(),
+                workouts: SqliteGarminActivityStore::new(pool.clone()).expect("a store"),
+                refusals: SqliteRefusalStore::new(pool.clone(), "garmin.activities")
+                    .expect("refusals"),
+                runs: SqliteNormalisationRunLog::new(pool.clone()),
+                clock: FixedClock,
+            },
+            StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("a zone")),
+        )
+        .normalise(application::Rederivation::Whole)
+        .await
+        .expect("normalised");
+
+        let sessions = SqliteTrainingDone::new(pool.clone())
+            .sessions()
+            .await
+            .expect("sessions");
+        assert_eq!(
+            sessions,
+            vec![Session {
+                on: jiff::civil::date(2026, 7, 5),
+                kind: Kind::Padel,
+                length: domain::measure::PositiveDuration::from_seconds(7_080).expect("a duration"),
+            }]
+        );
+        let refused =
+            sqlx::query_scalar!(r#"SELECT COUNT(*) AS "count!: i64" FROM normalisation_refusal"#)
+                .fetch_one(&pool)
+                .await
+                .expect("a count");
+        assert_eq!(refused, 0);
+    });
 }

@@ -37,6 +37,7 @@ pub mod store;
 pub mod telemetry;
 pub mod templates;
 pub mod wiring;
+pub mod working;
 
 /// What the operator stored, as a frontend passes it to a run.
 pub use infrastructure::Credentials;
