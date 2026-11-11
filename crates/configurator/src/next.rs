@@ -29,18 +29,18 @@ use domain::{
 };
 use infrastructure::{
     BtwbExportLandingStore, FileRunLock, GarminActivityFileLandingStore,
-    GarminActivityLandingStore, GarminDailyHeartRateLandingStore, GarminExerciseSetLandingStore,
-    GarminHrvLandingStore, GarminSleepLandingStore, HevyWorkoutLandingStore,
-    MyFitnessPalExportLandingStore, PelotonAccountLandingStore, PelotonRideDetailLandingStore,
-    PelotonRideLandingStore, PelotonRideSampleLandingStore, SpreadsheetFileLandingStore,
-    SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
-    SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
-    SqliteDerivationLedger, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
-    SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
-    SqliteNormalisedCyclingSessionReader, SqliteNormalisedGymSessionReader,
-    SqliteNormalisedWeighInReader, SqlitePelotonClassStore, SqlitePlanStore,
-    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, WithingsMeasurementLandingStore,
-    connect,
+    GarminActivityLandingStore, GarminDailyHeartRateLandingStore, GarminDailySummaryLandingStore,
+    GarminExerciseSetLandingStore, GarminHrvLandingStore, GarminSleepLandingStore,
+    HevyWorkoutLandingStore, MyFitnessPalExportLandingStore, PelotonAccountLandingStore,
+    PelotonRideDetailLandingStore, PelotonRideLandingStore, PelotonRideSampleLandingStore,
+    SpreadsheetFileLandingStore, SqliteCanonicalCyclingSessionStore,
+    SqliteCanonicalGymSessionStore, SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore,
+    SqliteCyclingMesocycleStore, SqliteDerivationLedger, SqliteDiaryStore, SqliteExerciseHistory,
+    SqliteExtractionRunLog, SqliteFtpHistory, SqliteGenerationParameterStore,
+    SqliteGymMesocycleStore, SqliteNormalisedCyclingSessionReader,
+    SqliteNormalisedGymSessionReader, SqliteNormalisedWeighInReader, SqlitePelotonClassStore,
+    SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
+    WithingsMeasurementLandingStore, connect,
     peloton::{
         PelotonClassSource, PelotonHoldingRides, PelotonProgrammes, PelotonRideDestination,
         catalogue::ClassCatalogue,
@@ -440,6 +440,10 @@ fn landed_from(normalised: &str) -> &'static [&'static str] {
             GarminSleepLandingStore::STREAM,
         ],
         GarminSleepLandingStore::STREAM => &[GarminSleepLandingStore::STREAM],
+        GarminDailySummaryLandingStore::STREAM => &[
+            GarminDailySummaryLandingStore::STREAM,
+            GarminSleepLandingStore::STREAM,
+        ],
         _ => &[],
     }
 }

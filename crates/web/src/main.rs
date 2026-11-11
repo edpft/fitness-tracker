@@ -26,6 +26,7 @@ mod run;
 mod schedule;
 mod sleep;
 mod weight;
+mod working;
 mod workouts;
 
 use std::{collections::HashMap, convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc};
@@ -145,6 +146,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route(resting::PATH, get(resting_heart_rate))
         .route("/sleep", get(sleep_page))
         .route(one_rep_max::PATH, get(estimated_one_rep_max))
+        .route(working::PATH, get(is_it_working))
         .route_layer(middleware::from_fn(recorded));
     let app = Router::new()
         .route("/", get(index))
@@ -608,6 +610,27 @@ async fn estimated_one_rep_max(State(runs): State<Arc<Runs>>, headers: HeaderMap
         match view {
             Ok(view) => one_rep_max::page(&view, &run),
             Err(error) => one_rep_max::unreadable(&error.to_string()),
+        }
+    })
+    .await
+}
+
+/// Is what I'm doing working?, for the macrocycle in force, read afresh from
+/// the store (#517).
+async fn is_it_working(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
+    let collects = configurator::working::collects();
+    let run = opened(&runs, &headers, only(&collects)).await;
+    drawn(&runs, &collects, working::PATH, None, &run, async {
+        let setting = runs.setting();
+        let store = match configurator::store::Store::open(&setting.database).await {
+            Ok(store) => store,
+            Err(error) => return working::unreadable(&error.to_string()),
+        };
+        let view = configurator::working::view(&store, &setting.zone).await;
+        store.close().await;
+        match view {
+            Ok(view) => working::page(&view, &run),
+            Err(error) => working::unreadable(&error.to_string()),
         }
     })
     .await

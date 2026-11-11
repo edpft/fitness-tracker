@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO stress (\n            landing_record_id, source_record_id, day, average_level,\n            measured_seconds, recorded_by, endpoint, event_kind, event_time, run_id\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "75db61e3efb862d5ae2475b55938c2fb0828ee23c6e9b221498716bfc600759b"
+}

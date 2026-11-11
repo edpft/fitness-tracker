@@ -73,12 +73,12 @@ const UNKNOWN: &str = "UNKNOWN";
 /// here rounds a quantity or truncates one through an `f64` on its way into a
 /// type that could not have held it.
 #[derive(Debug, Deserialize)]
-struct Activity {
+pub(super) struct Activity {
     #[serde(rename = "activityType")]
-    kind: ActivityType,
+    pub(super) kind: ActivityType,
     #[serde(rename = "startTimeGMT")]
-    started_at: Option<String>,
-    duration: Option<Box<RawValue>>,
+    pub(super) started_at: Option<String>,
+    pub(super) duration: Option<Box<RawValue>>,
     #[serde(rename = "averageHR")]
     average_heart_rate: Option<Box<RawValue>>,
     #[serde(rename = "maxHR")]
@@ -89,9 +89,9 @@ struct Activity {
 }
 
 #[derive(Debug, Deserialize)]
-struct ActivityType {
+pub(super) struct ActivityType {
     #[serde(rename = "typeKey")]
-    key: String,
+    pub(super) key: String,
 }
 
 /// One activity's sets, as the second endpoint serves them.
@@ -295,7 +295,7 @@ fn synced_from_peloton(activity: &Activity) -> Option<&'static str> {
 /// data and a hole: a session recorded with no strap on is a session with no
 /// heart rate, and 19 of the operator's carry a zero, which is a sensor saying
 /// nothing rather than a heart that stopped.
-fn heart_rate(activity: &Activity) -> Option<HeartRateSummary> {
+pub(super) fn heart_rate(activity: &Activity) -> Option<HeartRateSummary> {
     let beats = |stated: Option<&RawValue>| {
         whole(stated)
             .map(ToOwned::to_owned)
@@ -676,7 +676,7 @@ const fn load(grams: i64, reading: LoadReading) -> Load {
 ///
 /// Three answers rather than two, because a stated zero is a statement and the
 /// caller refuses it differently from silence.
-enum Stated {
+pub(super) enum Stated {
     Length(PositiveDuration),
     /// The source stated a duration of zero.
     NoLength,
@@ -685,7 +685,7 @@ enum Stated {
 }
 
 /// A duration in whole seconds, from the fractional seconds Garmin serves.
-fn seconds(stated: Option<&RawValue>) -> Stated {
+pub(super) fn seconds(stated: Option<&RawValue>) -> Stated {
     let Some(seconds) = whole(stated)
         .map(ToOwned::to_owned)
         .and_then(|seconds| seconds.parse::<u64>().ok())

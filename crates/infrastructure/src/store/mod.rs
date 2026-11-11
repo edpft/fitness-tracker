@@ -59,6 +59,8 @@ pub mod settings;
 pub mod sleep;
 pub mod spreadsheet_file_landing;
 pub mod spreadsheet_normalised;
+pub mod stress;
+pub mod training_done;
 pub mod wahoo_file_landing;
 pub mod weigh_in;
 pub mod withings_landing;
@@ -134,6 +136,8 @@ pub use settings::SqliteOperatorSettingsStore;
 pub use sleep::{GarminSleepAccountReader, SqliteSleepHistory, SqliteSleepStore};
 pub use spreadsheet_file_landing::SpreadsheetFileLandingStore;
 pub use spreadsheet_normalised::SqliteSpreadsheetStore;
+pub use stress::{GarminDailySummaryAccountReader, SqliteStressHistory, SqliteStressStore};
+pub use training_done::SqliteTrainingDone;
 pub use wahoo_file_landing::WahooFileLandingStore;
 pub use weigh_in::SpreadsheetFileAccountReader;
 pub use withings_landing::{

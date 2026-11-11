@@ -63,6 +63,7 @@ mod sleep;
 mod spreadsheet_files;
 mod standalone_test;
 mod store;
+mod stress;
 mod support;
 mod unexpected_responses;
 mod wahoo_files;

@@ -1685,6 +1685,35 @@ pub trait RestingHeartRateHistory {
     > + Send;
 }
 
+/// Every day's stress (#517), normalised for [`OvernightHrvHistory`]'s reason.
+pub trait StressHistory {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn days(
+        &self,
+    ) -> impl Future<
+        Output = Result<
+            Vec<domain::analytical::per_device::Recorded<domain::analytical::stress::Measured>>,
+            StoreError,
+        >,
+    > + Send;
+}
+
+/// Every session of training done (#517): the gym and cycling sessions the
+/// canonical layers hold and the padel games the normalised does, each as the
+/// day it was performed on and how long it took.
+pub trait TrainingDone {
+    /// Oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn sessions(
+        &self,
+    ) -> impl Future<Output = Result<Vec<domain::analytical::training_done::Session>, StoreError>> + Send;
+}
+
 /// Every night's sleep (#255), by the morning it is reported under, normalised
 /// for [`OvernightHrvHistory`]'s reason.
 pub trait SleepHistory {

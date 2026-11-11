@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO padel_game (\n            landing_record_id, source_record_id, started_at_utc, zone, duration_seconds,\n            average_bpm, highest_bpm, endpoint, event_kind, event_time, run_id\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "b2274a4568a67cd1c207c9d7d6a1a7e75327ac264d4952b025f40d52f44343d9"
+}

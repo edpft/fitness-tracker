@@ -28,8 +28,10 @@ pub mod hrv;
 pub mod latest;
 pub mod mapping;
 pub mod months;
+pub mod padel;
 pub mod resting;
 pub mod sleep;
+pub mod stress;
 pub mod translate;
 pub mod wear;
 
@@ -44,6 +46,7 @@ pub use gym::GarminGymTranslator;
 pub use hrv::{GarminHrv, HrvWalk};
 pub use resting::GarminRestingHeartRateTranslator;
 pub use sleep::GarminSleepTranslator;
+pub use stress::GarminStressTranslator;
 pub use translate::GarminHrvTranslator;
 pub use wear::{GarminDailyHeartRateTranslator, GarminDayEntity, WearDay};
 

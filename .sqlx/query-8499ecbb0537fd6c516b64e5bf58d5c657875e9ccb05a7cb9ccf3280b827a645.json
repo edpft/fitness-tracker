@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT day AS \"day!: String\",\n                   average_level AS \"average!: i64\",\n                   measured_seconds AS \"measured!: i64\",\n                   recorded_by\n            FROM stress\n            ORDER BY day ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "day!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "stress",
+            "name": "day"
+          }
+        }
+      },
+      {
+        "name": "average!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "stress",
+            "name": "average_level"
+          }
+        }
+      },
+      {
+        "name": "measured!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "stress",
+            "name": "measured_seconds"
+          }
+        }
+      },
+      {
+        "name": "recorded_by",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "stress",
+            "name": "recorded_by"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "8499ecbb0537fd6c516b64e5bf58d5c657875e9ccb05a7cb9ccf3280b827a645"
+}

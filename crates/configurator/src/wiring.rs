@@ -33,28 +33,30 @@ use infrastructure::{
     GarminActivityFileLandingStore, GarminActivityLandingStore, GarminActivityTranslator,
     GarminAuth, GarminBodyBatteryEventLandingStore, GarminBodyBatteryLandingStore,
     GarminCredentials, GarminDailyHeartRateAccountReader, GarminDailyHeartRateLandingStore,
-    GarminDailyHeartRateTranslator, GarminDailySummaryLandingStore, GarminDetectedMoveLandingStore,
-    GarminExerciseSetLandingStore, GarminFitnessAgeLandingStore, GarminFloorsLandingStore,
-    GarminGymAccountReader, GarminGymRawExtent, GarminGymTranslator,
-    GarminHealthSnapshotLandingStore, GarminHrv, GarminHrvAccountReader, GarminHrvLandingStore,
-    GarminHrvTranslator, GarminIntensityMinutesLandingStore, GarminPersonalRecordLandingStore,
+    GarminDailyHeartRateTranslator, GarminDailySummaryAccountReader,
+    GarminDailySummaryLandingStore, GarminDetectedMoveLandingStore, GarminExerciseSetLandingStore,
+    GarminFitnessAgeLandingStore, GarminFloorsLandingStore, GarminGymAccountReader,
+    GarminGymRawExtent, GarminGymTranslator, GarminHealthSnapshotLandingStore, GarminHrv,
+    GarminHrvAccountReader, GarminHrvLandingStore, GarminHrvTranslator,
+    GarminIntensityMinutesLandingStore, GarminPersonalRecordLandingStore,
     GarminRacePredictionLandingStore, GarminRespirationLandingStore, GarminSleepAccountReader,
     GarminSleepLandingStore, GarminSleepTranslator, GarminSpo2LandingStore,
-    GarminStepsLandingStore, GarminStressLandingStore, GarminVo2MaxLandingStore,
-    HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents, HevyWorkoutLandingStore,
-    MyFitnessPalExportAccountReader, MyFitnessPalExportLandingStore, MyFitnessPalWeighInTranslator,
-    PelotonAccountLandingStore, PelotonRawExtent, PelotonRideDetailLandingStore,
-    PelotonRideLandingStore, PelotonRideSampleLandingStore, PelotonSessionAccountReader,
-    PelotonWorkoutSamples, PelotonWorkouts, SpreadsheetFileAccountReader,
-    SpreadsheetFileLandingStore, SpreadsheetTranslator, SqliteBtwbStore, SqliteCyclingSessionStore,
-    SqliteDailyHeartRateStore, SqliteEditOverlayStore, SqliteExtractionRunLog,
-    SqliteGarminActivityStore, SqliteGymSessionStore, SqliteMeasuredGymSessionStore,
-    SqliteMyFitnessPalStore, SqliteNormalisationRunLog, SqliteOvernightHrvStore, SqlitePool,
-    SqliteRefusalStore, SqliteRestingHeartRateStore, SqliteResumptionPointStore, SqliteSleepStore,
-    SqliteSpreadsheetStore, SqliteWeighInStore, TokenFile, WahooFileLandingStore, WithingsAuth,
-    WithingsClient, WithingsEcgLandingStore, WithingsEcgSignalLandingStore, WithingsEcgSignals,
-    WithingsEcgs, WithingsMeasurementLandingStore, WithingsMeasurements,
-    WithingsWeighInAccountReader, WithingsWeighInTranslator, connect, garmin,
+    GarminStepsLandingStore, GarminStressLandingStore, GarminStressTranslator,
+    GarminVo2MaxLandingStore, HevySessionAccountReader, HevySessionTranslator, HevyWorkoutEvents,
+    HevyWorkoutLandingStore, MyFitnessPalExportAccountReader, MyFitnessPalExportLandingStore,
+    MyFitnessPalWeighInTranslator, PelotonAccountLandingStore, PelotonRawExtent,
+    PelotonRideDetailLandingStore, PelotonRideLandingStore, PelotonRideSampleLandingStore,
+    PelotonSessionAccountReader, PelotonWorkoutSamples, PelotonWorkouts,
+    SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetTranslator,
+    SqliteBtwbStore, SqliteCyclingSessionStore, SqliteDailyHeartRateStore, SqliteEditOverlayStore,
+    SqliteExtractionRunLog, SqliteGarminActivityStore, SqliteGymSessionStore,
+    SqliteMeasuredGymSessionStore, SqliteMyFitnessPalStore, SqliteNormalisationRunLog,
+    SqliteOvernightHrvStore, SqlitePool, SqliteRefusalStore, SqliteRestingHeartRateStore,
+    SqliteResumptionPointStore, SqliteSleepStore, SqliteSpreadsheetStore, SqliteStressStore,
+    SqliteWeighInStore, TokenFile, WahooFileLandingStore, WithingsAuth, WithingsClient,
+    WithingsEcgLandingStore, WithingsEcgSignalLandingStore, WithingsEcgSignals, WithingsEcgs,
+    WithingsMeasurementLandingStore, WithingsMeasurements, WithingsWeighInAccountReader,
+    WithingsWeighInTranslator, connect, garmin,
     garmin::{days::GarminDay, latest::GarminLatest, months::GarminMonth},
     peloton::{
         PelotonSessionTranslator, PelotonWorkoutDetails,
@@ -241,6 +243,7 @@ pub async fn run(
             garmin_daily_heart_rate(command, database).await
         }
         GarminSleepLandingStore::STREAM => garmin_sleep(command, database).await,
+        GarminDailySummaryLandingStore::STREAM => garmin_daily_summary(command, database).await,
         SpreadsheetFileLandingStore::STREAM => spreadsheet_files(command, database).await,
         BtwbExportLandingStore::STREAM => btwb_exports(command, database).await,
         MyFitnessPalExportLandingStore::STREAM => myfitnesspal_exports(command, database).await,
@@ -301,11 +304,7 @@ pub async fn inputs(
         ),
         // The sleep record as well, which names each night's watch (#569).
         GarminHrvLandingStore::STREAM => (
-            with_sleep(
-                GarminHrvLandingStore::new(pool.clone())?.records().await?,
-                &pool,
-            )
-            .await?,
+            with_sleep(&GarminHrvLandingStore::new(pool.clone())?, &pool).await?,
             None,
             GarminHrvTranslator::VERSION,
         ),
@@ -321,13 +320,7 @@ pub async fn inputs(
             GarminActivityTranslator::VERSION,
         ),
         GarminDailyHeartRateLandingStore::STREAM => (
-            with_sleep(
-                GarminDailyHeartRateLandingStore::new(pool.clone())?
-                    .records()
-                    .await?,
-                &pool,
-            )
-            .await?,
+            with_sleep(&GarminDailyHeartRateLandingStore::new(pool.clone())?, &pool).await?,
             None,
             GarminDailyHeartRateTranslator::VERSION,
         ),
@@ -337,6 +330,12 @@ pub async fn inputs(
                 .await?,
             None,
             GarminSleepTranslator::VERSION,
+        ),
+        // The sleep record as well, which names each day's watch (#569).
+        GarminDailySummaryLandingStore::STREAM => (
+            with_sleep(&GarminDailySummaryLandingStore::new(pool.clone())?, &pool).await?,
+            None,
+            GarminStressTranslator::VERSION,
         ),
         SpreadsheetFileLandingStore::STREAM => (
             SpreadsheetFileLandingStore::new(pool.clone())?
@@ -445,10 +444,14 @@ async fn peloton_rides_read(pool: &SqlitePool) -> Result<RecordCount, WiringErro
     ))
 }
 
-/// `records` and Garmin's sleep records, counted as one.
-async fn with_sleep(records: RecordCount, pool: &SqlitePool) -> Result<RecordCount, WiringError> {
+/// `landing`'s records and Garmin's sleep records, counted as one.
+async fn with_sleep(
+    landing: &(impl application::RawExtent + Sync),
+    pool: &SqlitePool,
+) -> Result<RecordCount, WiringError> {
     use application::RawExtent as _;
 
+    let records = landing.records().await?;
     let sleep = GarminSleepLandingStore::new(pool.clone())?
         .records()
         .await?;
@@ -583,6 +586,77 @@ async fn garmin_sleep(command: Command, database: &Path) -> Result<Outcome, Wiri
             let derivation = DerivationStanding::new(
                 GarminSleepLandingStore::new(pool.clone())?,
                 SqliteSleepStore::new(pool.clone())?,
+                SqliteRefusalStore::new(pool.clone(), stream)?,
+                SqliteNormalisationRunLog::new(pool),
+            )
+            .derivation_status()
+            .await?;
+
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            Ok(Outcome::Reported {
+                extraction: Box::new(reader.status().await?),
+                derivation: Some(Box::new(derivation)),
+            })
+        }
+        Command::Reset => {
+            let previous = resumption.read(landing.stream()).await?;
+            let reader = ExtractionStatus::new(landing, resumption, runs);
+            reader.reset().await?;
+            Ok(Outcome::Reset { previous })
+        }
+    }
+}
+
+/// Garmin's summary of a day, of which a day's stress is derived (#517).
+///
+/// **Collected two ways**, for the reason the wrist's day is: with the
+/// activities, and here on its own. Both walks keep one resumption point.
+async fn garmin_daily_summary(command: Command, database: &Path) -> Result<Outcome, WiringError> {
+    let pool = connect(database).await?;
+    let landing = GarminDailySummaryLandingStore::new(pool.clone())?;
+    let resumption = SqliteResumptionPointStore::new(pool.clone());
+    let runs = SqliteExtractionRunLog::new(pool.clone());
+    let stream = GarminDailySummaryLandingStore::STREAM;
+
+    match command {
+        Command::ExtractFolder(_) => Err(WiringError::NotAFolder { stream }),
+        Command::Extract(access) => {
+            let walk = Garmin::signed_in(access, stream, &pool, database)?
+                .day(GarminDay::DailySummary, landing);
+            Ok(Outcome::Extracted(Box::new(
+                walk.extraction.extract().await?,
+            )))
+        }
+        Command::Normalise(declared, rederivation) => {
+            let zones = stated_zones(&pool, &declared).await?;
+            let terms = terms(&pool, &zones, None, GarminStressTranslator::VERSION).await?;
+            let normalisation = Normalisation::new(
+                NormalisationPorts {
+                    raw: GarminDailySummaryAccountReader::new(pool.clone())?,
+                    translator: GarminStressTranslator,
+                    workouts: SqliteStressStore::new(pool.clone())?,
+                    refusals: SqliteRefusalStore::new(pool.clone(), stream)?,
+                    runs: SqliteNormalisationRunLog::new(pool),
+                    clock: SystemClock,
+                },
+                zones,
+            )
+            .under(terms);
+            Ok(Outcome::Derived(Box::new(
+                normalisation.normalise(rederivation).await?,
+            )))
+        }
+        Command::Refusals => {
+            let reporter = Refusals::new(
+                SqliteRefusalStore::new(pool.clone(), stream)?,
+                SqliteNormalisationRunLog::new(pool),
+            );
+            Ok(Outcome::Refused(Box::new(reporter.refusals().await?)))
+        }
+        Command::Status => {
+            let derivation = DerivationStanding::new(
+                GarminDailySummaryLandingStore::new(pool.clone())?,
+                SqliteStressStore::new(pool.clone())?,
                 SqliteRefusalStore::new(pool.clone(), stream)?,
                 SqliteNormalisationRunLog::new(pool),
             )
@@ -2482,7 +2556,6 @@ mod tests {
             GarminSpo2LandingStore::STREAM,
             GarminIntensityMinutesLandingStore::STREAM,
             GarminFloorsLandingStore::STREAM,
-            GarminDailySummaryLandingStore::STREAM,
             GarminStepsLandingStore::STREAM,
             GarminDetectedMoveLandingStore::STREAM,
             GarminVo2MaxLandingStore::STREAM,

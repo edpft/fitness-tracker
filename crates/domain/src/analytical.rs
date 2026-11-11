@@ -32,9 +32,13 @@ pub mod per_device;
 pub mod pulse_wave_velocity;
 pub mod range;
 pub mod recomposition;
+pub mod response;
 pub mod resting;
 pub mod retest;
+pub mod since_entry;
 pub mod sleep;
+pub mod stress;
+pub mod training_done;
 
 use std::fmt;
 
