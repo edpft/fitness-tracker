@@ -249,6 +249,11 @@ form.input button { border: 0; border-radius: 999px; font-size: 16px; padding: 1
 .card > h3 { margin-top: 18px; }
 .card .held { font-size: 19px; font-weight: 600; margin: 4px 0 0; }
 .card .held .from, .card .held.from { font-size: 14px; font-weight: 400; color: var(--muted); }
+/* A range of bands as the ladder a prescription steps through (#667): each
+   step's bands, and their load. */
+.card > h2.small .period { font-weight: 400; color: var(--muted); }
+.ladder { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; margin-top: 8px; font-size: 16px; }
+.ladder .kg { color: var(--ink2); font-variant-numeric: tabular-nums; text-align: right; }
 /* A field of several rows (#667): the equipment's increments, bands and
    steps, a row added or removed without a post. */
 fieldset.field { border: 0; padding: 0; margin: 0; }

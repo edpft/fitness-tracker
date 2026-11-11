@@ -9,8 +9,8 @@
 use application::EquipmentError;
 use domain::gym::{
     equipment::{
-        Band, BandName, BandRange, Combination, EquipmentFacts, Fact, FactId, InvalidSettings,
-        Maker, Model, Specific, Stack, Statement,
+        Band, BandLadder, BandName, BandRange, Combination, EquipmentFacts, Fact, FactId,
+        InvalidSettings, Maker, Model, Specific, Stack, Statement,
     },
     exercise::Implement,
 };
@@ -223,11 +223,22 @@ pub fn page(facts: &EquipmentFacts, today: Date, refused: Option<&Refused<'_>>) 
             (new_machine(today, refused))
             h2 { "Bands" }
             @for (specific, timeline) in &facts.bands {
+                @let single = timeline.iter().count() == 1;
                 section.card {
-                    h2.small { (specific) }
+                    h2.small {
+                        (specific)
+                        @if single {
+                            @for fact in timeline.iter() { " " span.period { "· " (period(fact.from)) } }
+                        }
+                    }
                     @for fact in timeline.iter() {
                         @let which = Which::Fact(fact.id);
-                        (held(fact))
+                        @if !single { p.held.from { (period(fact.from)) } }
+                        div.ladder {
+                            @for (load, step) in BandLadder::of(specific, &fact.value).rungs() {
+                                span { (step) } span.kg { (load) "kg" }
+                            }
+                        }
                         (change(fact.id, &shown(which, refused, || Shown {
                             maker: specific.maker.to_string(),
                             model: specific.model.to_string(),
@@ -256,18 +267,15 @@ pub fn unreadable(error: &str) -> Markup {
     input::unreadable(HERE, TITLE, error)
 }
 
+/// From when a fact is true.
+fn period(from: Option<Date>) -> String {
+    from.map_or_else(|| "always".to_owned(), |date| format!("from {date}"))
+}
+
 /// What one fact says, and from when.
 fn held<T: std::fmt::Display>(fact: &Fact<T>) -> Markup {
     html! {
-        p.held {
-            (fact.value) " "
-            span.from {
-                @match fact.from {
-                    Some(date) => { "from " (date) }
-                    None => "always",
-                }
-            }
-        }
+        p.held { (fact.value) " " span.from { (period(fact.from)) } }
     }
 }
 

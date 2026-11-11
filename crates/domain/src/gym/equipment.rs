@@ -338,6 +338,12 @@ impl BandLadder {
         }
     }
 
+    /// Each step with its nominal load, most assistance first.
+    #[must_use]
+    pub fn rungs(&self) -> &[(Kg, Combination)] {
+        &self.rungs
+    }
+
     fn setting(&self, index: usize) -> Option<BandSetting> {
         self.rungs.get(index).map(|(nominal, bands)| BandSetting {
             specific: self.specific.clone(),
