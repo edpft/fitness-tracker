@@ -7,7 +7,9 @@ use application::{
     next::Scope,
 };
 use domain::normalised::OperatorZone;
-use infrastructure::SqliteCanonicalCyclingSessionStore;
+use infrastructure::{
+    GarminActivityLandingStore, SqliteCanonicalCyclingSessionStore, SqlitePadelGames,
+};
 use jiff::civil::Date;
 
 use crate::{
@@ -16,7 +18,8 @@ use crate::{
     wiring::WiringError,
 };
 
-/// What History reads: the canonical gym sessions and rides.
+/// What History reads: the canonical gym and cycling sessions, and the padel
+/// games Garmin's activities give.
 ///
 /// # Errors
 ///
@@ -25,6 +28,7 @@ pub fn collects() -> Result<Scope, WiringError> {
     next::scope([
         Reads::Canonical(CanonicalLayer::Gym),
         Reads::Canonical(CanonicalLayer::Cycling),
+        Reads::Normalised(GarminActivityLandingStore::STREAM),
     ])
 }
 
@@ -56,9 +60,11 @@ fn history(
 ) -> History<
     impl application::PerformedGymSessions + Send + Sync + use<>,
     SqliteCanonicalCyclingSessionStore,
+    SqlitePadelGames,
 > {
     History::new(
         store.canonical_gym(),
         SqliteCanonicalCyclingSessionStore::new(store.pool().clone()),
+        SqlitePadelGames::new(store.pool().clone()),
     )
 }

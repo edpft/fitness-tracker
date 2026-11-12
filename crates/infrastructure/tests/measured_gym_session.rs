@@ -29,7 +29,7 @@ use domain::{
 use infrastructure::{
     GarminActivityFileLandingStore, GarminActivityLandingStore, GarminExerciseSetLandingStore,
     GarminGymAccountReader, SqliteExtractionRunLog, SqliteGarminActivityStore,
-    SqliteMeasuredGymSessionStore, SqliteNormalisationRunLog, SqliteRefusalStore,
+    SqliteMeasuredGymSessionStore, SqliteNormalisationRunLog, SqlitePadelGames, SqliteRefusalStore,
     SqliteTrainingDone, connect,
     garmin::{
         ActivityAccount, GarminActivityEntity, GarminGymTranslator, account::activities,
@@ -1773,10 +1773,11 @@ fn a_game_the_watch_gave_no_length_is_nothing_happening() {
 
 /// A game reaches the store and is read back as training done, on the day it
 /// started in the zone it was played in: half past midnight, not the evening
-/// before.
+/// before. **And as History reads it** (#772), with its time and the heart
+/// rate the watch stated.
 #[test]
 fn a_padel_game_is_training_done_on_the_day_it_was_played() {
-    use application::TrainingDone as _;
+    use application::{PlayedPadelGames as _, TrainingDone as _};
     use domain::analytical::training_done::{Kind, Session};
 
     let runtime = runtime().expect("a runtime");
@@ -1828,6 +1829,29 @@ fn a_padel_game_is_training_done_on_the_day_it_was_played() {
                 kind: Kind::Padel,
                 length: domain::measure::PositiveDuration::from_seconds(7_080).expect("a duration"),
             }]
+        );
+        let games = SqlitePadelGames::new(pool.clone())
+            .all()
+            .await
+            .expect("games");
+        let read: Vec<_> = games
+            .iter()
+            .map(|game| {
+                (
+                    game.started_at.wall_clock().datetime(),
+                    game.duration.as_seconds(),
+                    game.heart_rate
+                        .map(|summary| (summary.average().as_u32(), summary.highest().as_u32())),
+                )
+            })
+            .collect();
+        assert_eq!(
+            read,
+            vec![(
+                jiff::civil::date(2026, 7, 5).at(0, 30, 0, 0),
+                7_080,
+                Some((121, 168))
+            )]
         );
         let refused =
             sqlx::query_scalar!(r#"SELECT COUNT(*) AS "count!: i64" FROM normalisation_refusal"#)

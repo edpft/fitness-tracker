@@ -1,10 +1,11 @@
 //! The sessions he has done, newest first and by day, and one of them opened
 //! (#772).
 //!
-//! **Gym sessions and rides, and nothing measured**: the operator, 2026-11-10
-//! (#749), *"Only sessions for now."* Each is the canonical session, so a ride's
-//! warm-up and cool-down are already parts of it rather than sessions of their
-//! own. Nothing is written.
+//! **Gym sessions, cycling sessions and padel games, and nothing measured**:
+//! the operator, 2026-11-10 (#749), *"Only sessions for now."* A gym or
+//! cycling session is the canonical one, so a ride's warm-up and cool-down are
+//! already parts of it rather than sessions of their own; a padel game is the
+//! normalised one, which only the watch records. Nothing is written.
 
 use domain::{canonical::Occurred, cycling::CanonicalCyclingSession, gym::CanonicalGymSession};
 use jiff::{
@@ -14,7 +15,7 @@ use jiff::{
 
 use crate::{
     error::StoreError,
-    ports::{PerformedCyclingSessions, PerformedGymSessions},
+    ports::{PerformedCyclingSessions, PerformedGymSessions, PlayedPadelGame, PlayedPadelGames},
 };
 
 /// Before anything the record holds.
@@ -22,12 +23,14 @@ const EARLIEST: Date = date(2000, 1, 1);
 
 /// One session done.
 ///
-/// **Both boxed**: a ride holds three rides inline and a gym session its
-/// clock and heart rate, and the feed moves them by the hundred.
+/// **The canonical ones boxed**: a cycling session holds three rides inline
+/// and a gym session its clock and heart rate, and the feed moves them by the
+/// hundred.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Session {
     Gym(Box<CanonicalGymSession>),
     Cycling(Box<CanonicalCyclingSession>),
+    Padel(PlayedPadelGame),
 }
 
 impl Session {
@@ -36,6 +39,7 @@ impl Session {
         match self {
             Self::Gym(session) => session.occurred().day(),
             Self::Cycling(session) => session.started_at().wall_clock().date(),
+            Self::Padel(game) => game.started_at.wall_clock().date(),
         }
     }
 
@@ -47,6 +51,7 @@ impl Session {
                 Occurred::On(_) => None,
             },
             Self::Cycling(session) => Some(session.started_at().instant()),
+            Self::Padel(game) => Some(game.started_at.instant()),
         }
     }
 }
@@ -89,18 +94,24 @@ impl TryFrom<usize> for Number {
 pub struct NoSuchNumber;
 
 /// The use case.
-pub struct History<G, C> {
+pub struct History<G, C, P> {
     gym: G,
     cycling: C,
+    padel: P,
 }
 
-impl<G, C> History<G, C>
+impl<G, C, P> History<G, C, P>
 where
     G: PerformedGymSessions + Sync,
     C: PerformedCyclingSessions + Sync,
+    P: PlayedPadelGames + Sync,
 {
-    pub const fn new(gym: G, cycling: C) -> Self {
-        Self { gym, cycling }
+    pub const fn new(gym: G, cycling: C, padel: P) -> Self {
+        Self {
+            gym,
+            cycling,
+            padel,
+        }
     }
 
     /// Every day through `today` that holds a session, newest first.
@@ -109,22 +120,7 @@ where
     ///
     /// [`StoreError`] if the store is unavailable.
     pub async fn days(&self, today: Date) -> Result<Vec<Day>, StoreError> {
-        let mut sessions: Vec<Session> = self
-            .gym
-            .between(EARLIEST, today)
-            .await?
-            .into_iter()
-            .map(|session| Session::Gym(Box::new(session)))
-            .collect();
-        sessions.extend(
-            self.cycling
-                .all()
-                .await?
-                .into_iter()
-                .map(|session| Session::Cycling(Box::new(session)))
-                .filter(|session| session.on() <= today),
-        );
-        Ok(days(sessions))
+        Ok(days(self.between(EARLIEST, today).await?))
     }
 
     /// The session `number` of those done `on`, where there is one.
@@ -133,9 +129,18 @@ where
     ///
     /// [`StoreError`] if the store is unavailable.
     pub async fn session(&self, on: Date, number: Number) -> Result<Option<Session>, StoreError> {
+        Ok(days(self.between(on, on).await?)
+            .into_iter()
+            .flat_map(|day| day.sessions)
+            .find(|(numbered, _)| *numbered == number)
+            .map(|(_, session)| session))
+    }
+
+    /// Every session done between the two days, both included.
+    async fn between(&self, from: Date, to: Date) -> Result<Vec<Session>, StoreError> {
         let mut sessions: Vec<Session> = self
             .gym
-            .between(on, on)
+            .between(from, to)
             .await?
             .into_iter()
             .map(|session| Session::Gym(Box::new(session)))
@@ -145,14 +150,11 @@ where
                 .all()
                 .await?
                 .into_iter()
-                .map(|session| Session::Cycling(Box::new(session)))
-                .filter(|session| session.on() == on),
+                .map(|session| Session::Cycling(Box::new(session))),
         );
-        Ok(days(sessions)
-            .into_iter()
-            .flat_map(|day| day.sessions)
-            .find(|(numbered, _)| *numbered == number)
-            .map(|(_, session)| session))
+        sessions.extend(self.padel.all().await?.into_iter().map(Session::Padel));
+        sessions.retain(|session| (from..=to).contains(&session.on()));
+        Ok(sessions)
     }
 }
 
@@ -197,7 +199,7 @@ mod tests {
             CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Identified,
             Performed, exercise::RepsExercise,
         },
-        measure::{Duration, Metres, RepCount},
+        measure::{Duration, Metres, PositiveDuration, RepCount},
         normalised::{OperatorZone, StartedAt},
         prescription::DeliveryReference,
         sequence::NonEmpty,
@@ -208,7 +210,9 @@ mod tests {
     use crate::{
         PrescribedWorkoutId,
         error::StoreError,
-        ports::{PerformedCyclingSessions, PerformedGymSessions},
+        ports::{
+            PerformedCyclingSessions, PerformedGymSessions, PlayedPadelGame, PlayedPadelGames,
+        },
     };
 
     type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
@@ -243,6 +247,14 @@ mod tests {
 
     impl PerformedCyclingSessions for Rides {
         async fn all(&self) -> Result<Vec<CanonicalCyclingSession>, StoreError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    struct Padel(Vec<PlayedPadelGame>);
+
+    impl PlayedPadelGames for Padel {
+        async fn all(&self) -> Result<Vec<PlayedPadelGame>, StoreError> {
             Ok(self.0.clone())
         }
     }
@@ -302,10 +314,10 @@ mod tests {
         }))
     }
 
-    /// His autumn: the FTP test on Sunday 25 October, the gym on Friday 30th at
-    /// 19:30, and on Sunday 1 November a gym session dated only to the day and
-    /// a ride that evening.
-    fn autumn() -> Fallible<History<Gym, Rides>> {
+    /// His autumn: the FTP test on Sunday 25 October, padel on Tuesday 27th,
+    /// the gym on Friday 30th at 19:30, and on Sunday 1 November a gym session
+    /// dated only to the day and a ride that evening.
+    fn autumn() -> Fallible<History<Gym, Rides, Padel>> {
         let test = CanonicalCyclingSession::Test {
             warm_up: ride(date(2026, 10, 25), 11, "10 min FTP Warm Up Ride")?,
             effort: ride(date(2026, 10, 25), 12, "20 min FTP Test Ride")?,
@@ -321,6 +333,11 @@ mod tests {
                 gym(Occurred::On(date(2026, 11, 1)))?,
             ]),
             Rides(vec![test, sunday]),
+            Padel(vec![PlayedPadelGame {
+                started_at: started(date(2026, 10, 27), 20, 0)?,
+                duration: PositiveDuration::from_seconds(5_400)?,
+                heart_rate: None,
+            }]),
         ))
     }
 
@@ -328,7 +345,8 @@ mod tests {
         tokio::runtime::Builder::new_current_thread().build()
     }
 
-    /// **Newest day first, newest first within it, and the test one session**:
+    /// **Newest day first, newest first within it, padel among them, and the
+    /// test one session**:
     /// Sunday's ride above Sunday's gym, and each numbered from the first done
     /// that day, the gym with no time first.
     #[test]
@@ -350,6 +368,7 @@ mod tests {
                                     match session {
                                         Session::Gym(_) => "gym",
                                         Session::Cycling(_) => "cycling",
+                                        Session::Padel(_) => "padel",
                                     },
                                 )
                             })
@@ -362,6 +381,7 @@ mod tests {
                 vec![
                     (date(2026, 11, 1), vec![(2, "cycling"), (1, "gym")]),
                     (date(2026, 10, 30), vec![(1, "gym")]),
+                    (date(2026, 10, 27), vec![(1, "padel")]),
                     (date(2026, 10, 25), vec![(1, "cycling")]),
                 ]
             );

@@ -4,7 +4,10 @@
 //! The operator, 2026-11-10 (#749), asked whether measurements belong here:
 //! *"Only sessions for now."*
 
-use application::history::{Day, Number, Session};
+use application::{
+    PlayedPadelGame,
+    history::{Day, Number, Session},
+};
 use domain::{
     cycling::{CanonicalBikePlusRide, CanonicalCyclingSession},
     gym::{
@@ -52,7 +55,8 @@ fn feed_day(day: &Day, today: Date) -> Markup {
                 li {
                     a href=(address(day.on, *number)) {
                         i.dot.gym[matches!(session, Session::Gym(_))]
-                            .cycling[matches!(session, Session::Cycling(_))] {}
+                            .cycling[matches!(session, Session::Cycling(_))]
+                            .padel[matches!(session, Session::Padel(_))] {}
                         span.name { (name(session)) }
                         span.facts { (facts(session)) }
                     }
@@ -71,11 +75,13 @@ fn day_name(on: Date, today: Date) -> String {
     }
 }
 
-/// What the session is called: a ride by the class it was ridden to.
-fn name(session: &Session) -> String {
+/// What the session is: the classes a cycling session was ridden to are on
+/// its page, not its name.
+const fn name(session: &Session) -> &'static str {
     match session {
-        Session::Gym(_) => "Gym session".to_owned(),
-        Session::Cycling(session) => session.working_ride().at().value().called().to_owned(),
+        Session::Gym(_) => "Gym session",
+        Session::Cycling(_) => "Cycling session",
+        Session::Padel(_) => "Padel game",
     }
 }
 
@@ -88,7 +94,17 @@ fn facts(session: &Session) -> String {
             session.working_ride().average_power().value().to_string(),
         ]
         .join(" · "),
+        Session::Padel(game) => padel_facts(game).join(" · "),
     }
+}
+
+fn padel_facts(game: &PlayedPadelGame) -> Vec<String> {
+    let mut facts = vec![length(Duration::from_seconds(game.duration.as_seconds()))];
+    facts.extend(
+        game.heart_rate
+            .map(|heart_rate| heart_rate.average().to_string()),
+    );
+    facts
 }
 
 fn gym_facts(session: &CanonicalGymSession) -> Vec<String> {
@@ -142,24 +158,35 @@ fn length(duration: Duration) -> String {
 pub fn session(here: &str, on: Date, session: &Result<Option<Session>, String>) -> Markup {
     let title = match session {
         Ok(Some(session)) => name(session),
-        Ok(None) | Err(_) => "Session".to_owned(),
+        Ok(None) | Err(_) => "Session",
     };
     html! {
         (DOCTYPE)
         html lang="en" {
-            head { (page::head(&title, &[])) }
+            head { (page::head(title, &[])) }
             body {
                 main.history {
-                    (page::header(here, &title))
+                    (page::header(here, title))
                     @match session {
                         Ok(Some(Session::Gym(session))) => (gym(on, session)),
                         Ok(Some(Session::Cycling(session))) => (cycling(session)),
+                        Ok(Some(Session::Padel(game))) => (padel(game)),
                         Ok(None) => p.sub { "No such session on " (on.strftime("%A %-d %B %Y")) "." },
                         Err(error) => p.failed { "The session could not be read: " (error) },
                     }
                     (page::bar(here))
                 }
             }
+        }
+    }
+}
+
+fn padel(game: &PlayedPadelGame) -> Markup {
+    html! {
+        p.sub { (game.started_at.wall_clock().strftime("%A %-d %B %Y, %H:%M")) }
+        p.sub { (padel_facts(game).join(" · ")) }
+        @if let Some(heart_rate) = game.heart_rate {
+            p.sub { "Highest " (heart_rate.highest()) }
         }
     }
 }

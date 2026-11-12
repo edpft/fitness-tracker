@@ -233,6 +233,7 @@ ul.sessions .facts { display: block; margin-top: 2px; font-size: 14px; color: va
 main.history i.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; }
 main.history i.gym { background: var(--gym); }
 main.history i.cycling { background: var(--cycling); }
+main.history i.padel { background: var(--ink2); }
 .card.exercise h2, .card.ride h2 { font-size: 17px; margin: 0 0 4px; }
 .card.exercise h2 + ol.sets + h2 { margin-top: 14px; }
 .card.exercise .label, .card.ride .label { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 4px; }

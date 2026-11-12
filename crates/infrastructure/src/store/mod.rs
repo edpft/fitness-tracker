@@ -39,6 +39,7 @@ pub mod myfitnesspal_normalised;
 pub mod normalisation_run_log;
 pub mod normalised;
 pub mod normalised_gym;
+pub mod padel_game;
 pub mod parameters;
 pub mod peloton_account_landing;
 pub mod peloton_class;
@@ -111,6 +112,7 @@ pub use myfitnesspal_normalised::{MyFitnessPalExportAccountReader, SqliteMyFitne
 pub use normalisation_run_log::SqliteNormalisationRunLog;
 pub use normalised::{HevySessionAccountReader, SqliteGymSessionStore};
 pub use normalised_gym::SqliteNormalisedGymSessionReader;
+pub use padel_game::SqlitePadelGames;
 pub use parameters::SqliteGenerationParameterStore;
 pub use peloton_account_landing::PelotonAccountLandingStore;
 pub use peloton_class::{Held, SqlitePelotonClassStore};
