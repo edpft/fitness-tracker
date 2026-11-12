@@ -53,16 +53,27 @@ li.paired { border-left: 2px solid var(--muted); padding-left: 0.5rem; list-styl
 .following { padding: 0 16px; max-width: 32.5rem; margin: 0 auto; }
 .following p { margin: 16px 0 0; }
 
-/* Every page, in a row that scrolls on its own rather than the page. */
-nav.menu {
-  display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none;
-  margin: 0 -16px; padding: 12px 16px; border-bottom: 1px solid var(--grid);
+/* The places (#768), in a bar fixed to the bottom of every page, which the
+   page leaves room for. */
+body { padding-bottom: calc(52px + env(safe-area-inset-bottom)); }
+nav.places {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: flex;
+  background: var(--card); border-top: 1px solid var(--grid);
+  padding-bottom: env(safe-area-inset-bottom);
 }
-nav.menu a {
-  flex: none; color: var(--ink2); text-decoration: none; font-size: 13px;
-  padding: 6px 12px; border-radius: 999px; background: var(--card);
+nav.places a {
+  flex: 1; text-align: center; padding: 15px 4px; font-size: 13px;
+  color: var(--muted); text-decoration: none;
 }
-nav.menu a[aria-current] { background: var(--ink); color: var(--bg); font-weight: 600; }
+nav.places a[aria-current] { color: var(--ink); font-weight: 600; box-shadow: inset 0 2px var(--ink); }
+
+/* A place's pages, until the place draws more of its own. */
+ul.pages { list-style: none; padding: 0; margin: 0; }
+ul.pages li { margin: 0 0 8px; }
+ul.pages a {
+  display: block; padding: 14px 16px; border-radius: 12px;
+  background: var(--card); text-decoration: none;
+}
 main > h1 { padding: 18px 0 14px; }
 
 /* The range, as one segmented control. */

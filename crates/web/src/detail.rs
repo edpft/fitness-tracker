@@ -74,11 +74,8 @@ pub fn page(here: &str, title: &str, over: Option<Over>, run: &View, body: &Mark
             body {
                 (crate::page::following(run))
                 main {
-                    (crate::page::menu(here))
-                    header.detail {
-                        a href="/" aria-label="Home" { "‹" }
-                        h1 { (title) }
-                    }
+                    (crate::page::bar(here))
+                    (crate::page::header(here, title))
                     @if let Some(over) = over {
                         (crate::range::choices(here, over))
                     }

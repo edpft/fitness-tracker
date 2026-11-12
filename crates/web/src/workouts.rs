@@ -148,8 +148,8 @@ pub fn page(
             }
             body {
                 main {
-                    (crate::page::menu("/workouts"))
-                    h1 { (TITLE) }
+                    (crate::page::bar("/workouts"))
+                    (crate::page::header("/workouts", TITLE))
                     @if let Some(said) = said { p.said { (said) } }
                     p.legend {
                         "Saving a form stores a new version from now. A plan already made keeps "
@@ -201,7 +201,7 @@ pub fn unreadable(error: &str) -> Markup {
             }
             body {
                 main {
-                    (crate::page::menu("/workouts"))
+                    (crate::page::bar("/workouts"))
                     p.failed { "the store could not be read: " (error) }
                 }
             }
