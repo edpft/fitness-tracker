@@ -464,3 +464,20 @@ svg.curves .today { stroke: var(--ink); stroke-width: 1.5; }
 .card.curves p.key i.intensity { height: 3px; vertical-align: 3px; background: var(--ink2); }
 .card.curves p.key i.planned { border: 1px dashed var(--ink2); }
 .card.curves p.key i.lost { border: 1px dashed var(--muted); }
+
+/* The workout page (#771): one workout drawn as it runs, the choice of which
+   above it, and each slot a row that opens to its form. */
+nav.choice { display: flex; background: var(--raised); border-radius: 999px; padding: 3px; margin-bottom: 14px; }
+nav.choice a { flex: 1; text-align: center; padding: 7px 12px; border-radius: 999px; font-size: 14px; color: var(--ink2); text-decoration: none; }
+nav.choice a[aria-current] { background: var(--ink); color: var(--bg); font-weight: 600; }
+.card.workout details.slot { margin-top: 16px; }
+.card.workout .superset details.slot { margin-top: 6px; }
+.card.workout .superset details.slot + details.slot { margin-top: 14px; }
+.card.workout details.slot > summary { list-style: none; cursor: pointer; }
+.card.workout details.slot > summary::-webkit-details-marker { display: none; }
+.card.workout details.slot > summary p { margin: 2px 0 0; }
+.card.workout details.slot > summary p.name { font-size: 17px; font-weight: 600; margin: 0; }
+.card.workout p.note { font-size: 13px; color: var(--ink2); margin: 6px 0 0; }
+.card.workout details.slot > summary p.sets { font-size: 15px; font-variant-numeric: tabular-nums; }
+.card.workout details.slot[open] > summary { margin-bottom: 14px; }
+.card.workout details.slot h4 { font-size: 13px; font-weight: 600; color: var(--ink2); margin: 14px 0 4px; }

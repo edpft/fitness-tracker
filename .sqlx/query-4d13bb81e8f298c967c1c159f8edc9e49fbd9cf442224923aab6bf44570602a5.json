@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT slot AS \"slot!: String\",\n               intensity,\n               valid_from AS \"valid_from!: String\",\n               recorded_at AS \"recorded_at!: String\",\n               exercise AS \"exercise!: String\",\n               assisted_maker,\n               assisted_model,\n               loaded_implement\n        FROM gym_slot_fill_change\n        WHERE mesocycle = ?\n        ORDER BY id\n        ",
+  "query": "\n        SELECT slot AS \"slot!: String\",\n               intensity,\n               valid_from AS \"valid_from!: String\",\n               recorded_at AS \"recorded_at!: String\",\n               exercise AS \"exercise!: String\",\n               assisted_maker,\n               assisted_model,\n               loaded_implement,\n               static_sets,\n               static_reps\n        FROM gym_slot_fill_change\n        WHERE mesocycle = ?\n        ORDER BY id\n        ",
   "describe": {
     "columns": [
       {
@@ -90,6 +90,28 @@
             "name": "loaded_implement"
           }
         }
+      },
+      {
+        "name": "static_sets",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_slot_fill_change",
+            "name": "static_sets"
+          }
+        }
+      },
+      {
+        "name": "static_reps",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "gym_slot_fill_change",
+            "name": "static_reps"
+          }
+        }
       }
     ],
     "parameters": {
@@ -103,8 +125,10 @@
       false,
       true,
       true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "9fdac641bc0b7940ae8384aba60e83140a224bdeaaeb3fe942c079b751bc1acc"
+  "hash": "4d13bb81e8f298c967c1c159f8edc9e49fbd9cf442224923aab6bf44570602a5"
 }

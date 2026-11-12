@@ -63,6 +63,8 @@ fn a_change_in_one_mesocycle_holds_in_the_next() {
                     exercise: Exercise::Reps(RepsExercise::DeadBug),
                     assisted_by: None,
                     loaded_by: Some(Implement::Dumbbell),
+                    sets: None,
+                    reps: None,
                 },
             )
             .await

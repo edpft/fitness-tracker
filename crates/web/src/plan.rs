@@ -214,7 +214,7 @@ mod tests {
         let card = shown.find("2026-autumn").expect("the card");
         let inputs = shown.find("Inputs").expect("the inputs");
         assert!(card < inputs, "{shown}");
-        for path in ["/workouts", "/fills", "/schedule", "/equipment"] {
+        for path in ["/workout", "/schedule", "/equipment"] {
             assert!(shown.contains(&format!(r#"<a href="{path}">"#)), "{path}");
         }
     }

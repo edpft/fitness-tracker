@@ -174,10 +174,13 @@ pub enum FillChangeError {
     Store(#[from] StoreError),
     #[error("no mesocycle is in force on {date}")]
     NoMesocycle { date: jiff::civil::Date },
-    /// A static slot carries its own sets and reps, and the primary is what
-    /// the mesocycle progresses: neither is a fill to swap.
+    /// The primary is what the mesocycle progresses, not a fill to swap.
     #[error("the {slot} slot cannot be changed partway through a mesocycle")]
     NotChangeable { slot: &'static str },
+    /// A static slot's change states its sets and reps; any other slot's
+    /// sets and reps are the workout's.
+    #[error("the {slot} slot's sets and reps are the workout's, not its fill's")]
+    NotStatic { slot: &'static str },
     #[error(
         "{specific} is not a range of bands known on {date}: declare it on the equipment page first"
     )]
