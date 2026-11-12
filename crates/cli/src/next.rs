@@ -114,7 +114,9 @@ fn render(next: &WhatIsNext) -> Result<(), Failure> {
             output::nothing_planned(*from, last.as_ref());
             Ok(())
         }
-        Prescribed::Gym(Ok(application::next::GymPrescribed::Issued { issued, delivery })) => {
+        Prescribed::Gym(Ok(application::next::GymPrescribed::Issued {
+            issued, delivery, ..
+        })) => {
             output::prescribed_session(issued);
             println!();
             match delivery {

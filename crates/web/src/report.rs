@@ -14,11 +14,11 @@ use application::{
     next::{CyclingPrescribed, Done, Found, GymPrescribed, Prescribed, Report, Step, WhatIsNext},
 };
 use domain::{
-    cycling::{CyclingMicrocycle, Ride, clock},
+    cycling::{CyclingMicrocycle, CyclingSession, PowerZone, Ride, clock},
     gym::Load,
     measure::{Duration, PositiveDuration, Spans},
     planner::{Discipline, ScheduledSlot},
-    prescription::{Prescribed as Set, PrescribedExercise, PrescribedSet, Target},
+    prescription::{Prescribed as Set, PrescribedExercise, PrescribedSet, Target, shape::SlotId},
     schedule::DayPart,
 };
 use maud::{Markup, html};
@@ -200,8 +200,8 @@ fn what_is_next(next: &WhatIsNext) -> Markup {
                     }
                 }
             }
-            Prescribed::Gym(Ok(GymPrescribed::Issued { issued, delivery })) => {
-                (gym_session(issued))
+            Prescribed::Gym(Ok(GymPrescribed::Issued { issued, primary, delivery })) => {
+                (gym_summary(issued, *primary))
                 @match delivery {
                     Ok(delivered) => (gym_delivery(delivered)),
                     Err(_) => (not_delivered(Discipline::Gym)),
@@ -245,9 +245,27 @@ fn destination(discipline: Discipline) -> String {
     )
 }
 
+/// The primary and its sets, and one tap opens the whole session (#773). The
+/// operator, 2026-11-10: *"just showing the primary lift for the next strength
+/// session."* A slot that could not be derived stays in sight, folded or not.
+fn gym_summary(issued: &Prescription, primary: Option<SlotId>) -> Markup {
+    let shape = issued.workout.shape();
+    let Some(item) = primary.and_then(|slot| shape.item_for(slot)) else {
+        return html! { (gym_session(issued)) (underivable(issued)) };
+    };
+    html! {
+        @for member in item.exercises() { (exercise(member)) }
+        details.folded {
+            summary { "All " (shape.exercises().count()) " exercises" }
+            (gym_session(issued))
+        }
+        (underivable(issued))
+    }
+}
+
 /// The session itself, drawn as Hevy draws a routine (#666): its blocks, then
-/// each exercise with a row per set, the members of a superset boxed together,
-/// and any slot that could not be derived.
+/// each exercise with a row per set, and the members of a superset boxed
+/// together.
 fn gym_session(issued: &Prescription) -> Markup {
     let mut blocks: Vec<(String, Vec<Vec<&PrescribedExercise>>)> = Vec::new();
     for item in issued.workout.shape().items().iter() {
@@ -276,6 +294,12 @@ fn gym_session(issued: &Prescription) -> Markup {
                 }
             }
         }
+    }
+}
+
+/// Any slot that could not be derived.
+fn underivable(issued: &Prescription) -> Markup {
+    html! {
         @if !issued.underivable.is_empty() {
             ul.failed {
                 @for slot in &issued.underivable {
@@ -455,10 +479,14 @@ fn heading(ride: &PrescribedRide) -> String {
     )
 }
 
-/// The ride itself: where it is done, its intervals, and its zones in watts.
+/// The ride: where it is done, its time in zone, and one tap opens its times,
+/// its intervals and the FTP they are read at (#773). The operator,
+/// 2026-11-10: *"the time in zone breakdown in the next cycling session."*
+///
+/// **A test folds nothing**: it has no zones to summarise it, and its times
+/// are three lines.
 fn cycling_ride(ride: &PrescribedRide) -> Markup {
     let session = &ride.session;
-    let ftp = ride.ftp;
     html! {
         ul.venues {
             @for venue in ride.next.ride.at().iter() {
@@ -473,6 +501,63 @@ fn cycling_ride(ride: &PrescribedRide) -> Markup {
                 }
             }
         }
+        @match session.ride() {
+            Ride::Effort(_) => (ride_detail(ride)),
+            Ride::Intervals(_) => {
+                (time_in_zone(session))
+                details.folded {
+                    summary { "Intervals" }
+                    (ride_detail(ride))
+                }
+            }
+        }
+    }
+}
+
+/// Time in zone as one bar, each zone's share in its colour, the session's
+/// total beside the heading, and a row per zone under it. The operator,
+/// 2026-11-10, on the mock: *"Yes, this is good."*
+fn time_in_zone(session: &CyclingSession) -> Markup {
+    let zones: Vec<(PowerZone, u64, String)> = session
+        .ride()
+        .time_in_zone()
+        .into_iter()
+        .map(|(zone, seconds)| {
+            let time = PositiveDuration::from_seconds(seconds)
+                .map_or_else(|_| "\u{2014}".to_owned(), clock);
+            (zone, seconds, time)
+        })
+        .collect();
+    let described = zones
+        .iter()
+        .map(|(zone, _, time)| format!("{zone} {} {time}", zone.purpose()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    html! {
+        div.zoned {
+            p.head { span { "Time in zone" } span { (clock(session.total())) " total" } }
+            div.bar role="img" aria-label=(described) {
+                @for (zone, seconds, _) in &zones {
+                    i class=(format!("z{}", zone.as_u8())) style=(format!("flex:{seconds}")) {}
+                }
+            }
+            @for (zone, _, time) in &zones {
+                div.row {
+                    i class=(format!("z{}", zone.as_u8())) {}
+                    span { (zone) }
+                    span.named { (zone.purpose()) }
+                    span.clock { (time) }
+                }
+            }
+        }
+    }
+}
+
+/// The ride's times, its intervals in watts, and the FTP they are read at.
+fn ride_detail(ride: &PrescribedRide) -> Markup {
+    let session = &ride.session;
+    let ftp = ride.ftp;
+    html! {
         table.ride {
             tr { td { "warm up" } td { (clock(session.warm_up())) } }
             @match session.ride() {
@@ -502,19 +587,6 @@ fn cycling_ride(ride: &PrescribedRide) -> Markup {
                             @if let Some(ftp) = ftp {
                                 td { (interval.zone().band().watts_at(ftp)) }
                             }
-                        }
-                    }
-                }
-                p { "time in zone" }
-                table.zones {
-                    @for (zone, seconds) in session.ride().time_in_zone() {
-                        tr {
-                            td { (zone) }
-                            td {
-                                (PositiveDuration::from_seconds(seconds)
-                                    .map_or_else(|_| "\u{2014}".to_owned(), clock))
-                            }
-                            td { (zone.purpose()) }
                         }
                     }
                 }

@@ -53,7 +53,7 @@ use domain::{
     plan::{MesocycleOrdinal, Plan, PlanName, Span},
     planner::{self, RerunOrdinal, SessionState},
     planner::{Discipline, ScheduledSlot},
-    prescription::{GymMesocycle, schedule::WeekKind},
+    prescription::{GymMesocycle, schedule::WeekKind, shape::SlotId},
     schedule::{DayPart, Diary, Holidays, Skip},
 };
 use jiff::civil::Date;
@@ -603,6 +603,10 @@ pub enum Undelivered<E> {
 pub enum GymPrescribed {
     Issued {
         issued: Box<Prescription>,
+        /// The slot the mesocycle progresses, which is what a summary of the
+        /// session shows (#773). `None` only where no mesocycle is in force
+        /// on the session's date, which prescribing it rules out.
+        primary: Option<SlotId>,
         delivery: Result<Box<Delivery>, Undelivered<DeliveryError>>,
     },
     /// Nothing is programmed at or after the slot.
@@ -824,8 +828,17 @@ where
             .map(Box::new)
             .map_err(Undelivered::Failed),
         };
+        // **The mesocycle the session was prescribed from**: a missed test
+        // carried to this slot is the earlier week's (#732).
+        let read = mesocycles();
+        let on = read.carried_to(date).await?.unwrap_or(date);
+        let primary = read
+            .on(on)
+            .await?
+            .map(|found| found.mesocycle.primary().slot());
         Ok(GymPrescribed::Issued {
             issued: Box::new(issued),
+            primary,
             delivery,
         })
     }

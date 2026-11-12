@@ -412,6 +412,26 @@ table.figures td { padding-right: 0.75rem; }
 }
 .card.next .superset .exercise { margin-top: 6px; }
 .card.next .superset .exercise + .exercise { margin-top: 14px; }
+/* Time in zone (#773): one bar, each zone's share in its colour, and a row
+   per zone under it. */
+.card.next .zoned { margin-top: 14px; }
+.card.next .zoned p.head {
+  display: flex; justify-content: space-between; gap: 12px; margin: 0 0 8px;
+  font-size: 15px; font-weight: 600;
+}
+.card.next .zoned p.head span + span { font-weight: 400; color: var(--ink2); font-variant-numeric: tabular-nums; }
+.card.next .zoned .bar { display: flex; gap: 2px; height: 14px; border-radius: 7px; overflow: hidden; margin-bottom: 6px; }
+.card.next .zoned .row {
+  display: grid; grid-template-columns: 12px 2rem 1fr auto; align-items: center; gap: 8px;
+  padding: 6px 0; font-size: 15px;
+}
+.card.next .zoned .row i { width: 12px; height: 12px; border-radius: 3px; }
+.card.next .zoned .row .named { color: var(--ink2); }
+.card.next .zoned .row .clock { font-variant-numeric: tabular-nums; text-align: right; }
+.card.next .zoned .z1 { background: var(--z1); } .card.next .zoned .z2 { background: var(--z2); }
+.card.next .zoned .z3 { background: var(--z3); } .card.next .zoned .z4 { background: var(--z4); }
+.card.next .zoned .z5 { background: var(--z5); } .card.next .zoned .z6 { background: var(--z6); }
+.card.next .zoned .z7 { background: var(--z7); }
 .card.next p.status { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink2); margin: 12px 0 0; }
 .card.microcycle .row {
   display: grid; grid-template-columns: 4.5rem auto 1fr; gap: 8px; padding: 11px 0;
