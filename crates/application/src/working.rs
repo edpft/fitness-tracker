@@ -204,14 +204,7 @@ where
     ///
     /// [`StoreError`] if any store is unavailable.
     pub async fn view(&self, today: Date, readings: &Readings<'_>) -> Result<View, StoreError> {
-        let mut plans = Vec::new();
-        for window in self.plans.windows().await? {
-            if let Some(plan) = self.plans.named(window.name()).await?
-                && !plans.contains(&plan)
-            {
-                plans.push(plan);
-            }
-        }
+        let plans = crate::macrocycle::every(&self.plans).await?;
         let Some(plan) = plans.iter().find(|plan| plan.span().covers(today)) else {
             return Ok(View {
                 today,
