@@ -50,6 +50,7 @@ use crate::{
     prescription::{
         block::{BlockPeriodisation, BlockWeek, WeekPlan},
         linear::{Linear, PrimaryPattern, SlotFills},
+        recovery::Recovery,
         sbs::{Sbs, chart},
         schedule::{Calendar, WeekIndex, WeekKind},
     },
@@ -61,6 +62,8 @@ use crate::{
 pub enum GymMesocycle {
     Test(crate::prescription::test::Test),
     Progression(Progression),
+    /// The transition's: the provider's recovery session, twice a week (#336).
+    Recovery(Recovery),
 }
 
 /// A programme that progresses a lift, by one of the two models.
@@ -100,6 +103,7 @@ impl GymMesocycle {
         match self {
             Self::Test(_) => "test",
             Self::Progression(periodisation) => periodisation.template(),
+            Self::Recovery(_) => "recovery",
         }
     }
 
@@ -107,6 +111,7 @@ impl GymMesocycle {
         match self {
             Self::Test(test) => test.fills(),
             Self::Progression(periodisation) => periodisation.fills(),
+            Self::Recovery(recovery) => recovery.fills(),
         }
     }
 
@@ -122,6 +127,7 @@ impl GymMesocycle {
         match self {
             Self::Test(test) => test.fills_mut(),
             Self::Progression(periodisation) => periodisation.fills_mut(),
+            Self::Recovery(recovery) => recovery.fills_mut(),
         }
     }
 
@@ -129,6 +135,7 @@ impl GymMesocycle {
         match self {
             Self::Test(test) => test.calendar(),
             Self::Progression(periodisation) => periodisation.calendar(),
+            Self::Recovery(recovery) => recovery.calendar(),
         }
     }
 
@@ -140,6 +147,7 @@ impl GymMesocycle {
             Self::Progression(periodisation) => {
                 Self::Progression(periodisation.recalendared(calendar))
             }
+            Self::Recovery(recovery) => Self::Recovery(recovery.recalendared(calendar)),
         }
     }
 
@@ -151,6 +159,7 @@ impl GymMesocycle {
         match self {
             Self::Test(test) => test.primary(),
             Self::Progression(periodisation) => periodisation.primary(),
+            Self::Recovery(recovery) => recovery.primary(),
         }
     }
 
@@ -158,6 +167,7 @@ impl GymMesocycle {
         match self {
             Self::Test(test) => test.primary_exercise(),
             Self::Progression(periodisation) => periodisation.primary_exercise(),
+            Self::Recovery(recovery) => recovery.primary_exercise(),
         }
     }
 
@@ -199,7 +209,7 @@ impl GymMesocycle {
             Self::Progression(Progression::Provided { cycle: sbs, .. }) => {
                 Some(sbs.primary_exercise())
             }
-            Self::Progression(Progression::Linear(_)) => None,
+            Self::Progression(Progression::Linear(_)) | Self::Recovery(_) => None,
         }
     }
 
@@ -215,6 +225,7 @@ impl GymMesocycle {
     pub fn tests_in(&self, week: WeekKind) -> bool {
         match (self, week) {
             (_, WeekKind::Holding)
+            | (Self::Recovery(_), _)
             | (Self::Progression(Progression::Linear(_)), WeekKind::Climbing(_)) => false,
             (Self::Test(_), _) | (_, WeekKind::Test) => true,
             (Self::Progression(Progression::BlockPeriodisation(block)), WeekKind::Climbing(at)) => {
@@ -261,7 +272,7 @@ impl GymMesocycle {
         match self {
             Self::Test(test) => Some(test.reps()),
             Self::Progression(Progression::Provided { .. }) => RepCount::new(1).ok(),
-            Self::Progression(Progression::Linear(_)) => None,
+            Self::Progression(Progression::Linear(_)) | Self::Recovery(_) => None,
             Self::Progression(Progression::BlockPeriodisation(block)) => {
                 let calendar = self.calendar();
                 let first_week = calendar
@@ -284,11 +295,12 @@ impl GymMesocycle {
     /// Which session's top set advances the plan, where anything does.
     ///
     /// A test gates nothing: it has no ladder to advance and its own session is
-    /// fixed at [`Test::ROLE`](crate::prescription::test::Test::ROLE).
+    /// fixed at [`Test::ROLE`](crate::prescription::test::Test::ROLE). Nor
+    /// does a recovery mesocycle, which climbs nothing.
     #[must_use]
     pub const fn gating_role(&self) -> Option<SessionRole> {
         match self {
-            Self::Test(_) => None,
+            Self::Test(_) | Self::Recovery(_) => None,
             Self::Progression(periodisation) => Some(periodisation.gating_role()),
         }
     }

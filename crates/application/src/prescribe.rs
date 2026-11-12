@@ -596,7 +596,8 @@ where
             GymMesocycle::Progression(
                 Progression::BlockPeriodisation(_) | Progression::Provided { .. },
             )
-            | GymMesocycle::Test(_) => Ok(None),
+            | GymMesocycle::Test(_)
+            | GymMesocycle::Recovery(_) => Ok(None),
         }
     }
 
@@ -617,6 +618,18 @@ where
                 self.sbs_maximum(plan, mesocycle, sbs, consulted, before)
                     .await?,
             )),
+            // **The maximum the term left behind**, which is what its
+            // recovery session is a share of (#336).
+            GymMesocycle::Recovery(recovery) => {
+                let start = recovery.calendar().start();
+                let Exercise::Reps(primary) = recovery.primary_exercise() else {
+                    return Err(PrescriptionError::NoInheritedMaximum { start });
+                };
+                self.anchor_in_force(primary, start, consulted)
+                    .await?
+                    .map(|anchor| Some(anchor.load()))
+                    .ok_or(PrescriptionError::NoInheritedMaximum { start })
+            }
             GymMesocycle::Progression(
                 Progression::Linear(_) | Progression::BlockPeriodisation(_),
             )
@@ -783,6 +796,14 @@ where
     > {
         Box::pin(async move {
             let span = mesocycle.span();
+            // **A recovery mesocycle measures nothing and leaves behind what it
+            // was given** (#336): the anchor in force when it began, as it was.
+            if let GymMesocycle::Recovery(recovery) = mesocycle {
+                let Exercise::Reps(primary) = recovery.primary_exercise() else {
+                    return Ok(None);
+                };
+                return self.anchor_in_force(primary, span.start(), consulted).await;
+            }
             let measured = match mesocycle {
                 GymMesocycle::Progression(Progression::Provided { cycle: before, .. }) => {
                     // Asked the day after it ends, so its own last session — the
@@ -802,7 +823,8 @@ where
                 },
                 GymMesocycle::Progression(
                     Progression::Linear(_) | Progression::BlockPeriodisation(_),
-                ) => None,
+                )
+                | GymMesocycle::Recovery(_) => None,
             };
 
             Ok(measured.and_then(|(load, failed)| {
@@ -1135,7 +1157,8 @@ fn asserted_by(mesocycle: &GymMesocycle) -> Option<Anchor> {
         GymMesocycle::Progression(Progression::BlockPeriodisation(block)) => block
             .entry_test()
             .and_then(domain::prescription::EntryTest::asserted),
-        GymMesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. }) => None,
+        GymMesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. })
+        | GymMesocycle::Recovery(_) => None,
     }
 }
 
@@ -1395,7 +1418,8 @@ fn week_of(mesocycle: &GymMesocycle, placed: WeekKind) -> WeekKind {
         // because its first session is a taper the chart states in full. Calling
         // the week a test would send the light session looking for a predecessor
         // to inherit from, which an SBS cycle never needs.
-        GymMesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. }) => placed,
+        GymMesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. })
+        | GymMesocycle::Recovery(_) => placed,
         GymMesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             let WeekKind::Climbing(index) = placed else {
                 return placed;
@@ -1436,13 +1460,11 @@ fn derived_from(
         // here by value so a session issued in November says what it descended
         // from. Absent, the session is refused rather than issued against
         // nothing.
-        GymMesocycle::Progression(_) => {
-            opening
-                .map(DerivedFrom::Anchor)
-                .ok_or_else(|| PrescriptionError::NoInheritedMaximum {
-                    start: mesocycle.calendar().start(),
-                })
-        }
+        GymMesocycle::Progression(_) | GymMesocycle::Recovery(_) => opening
+            .map(DerivedFrom::Anchor)
+            .ok_or_else(|| PrescriptionError::NoInheritedMaximum {
+                start: mesocycle.calendar().start(),
+            }),
         GymMesocycle::Test(test) => {
             inheritance
                 .target
@@ -1565,6 +1587,17 @@ fn primary_slot_item(
             sbs_load(consulted.chart, role, charted, steps, maximum)
         }
         GymMesocycle::Test(test) => test_load(test, consulted, role, inheritance, steps),
+        // **Both sessions are the chart's recovery session**, whichever role
+        // the slot rides (#336).
+        GymMesocycle::Recovery(_) => consulted
+            .chart
+            .recovery()
+            .ok_or(UnderivableReason::NoLadder)
+            .and_then(|day| {
+                maximum
+                    .ok_or(UnderivableReason::NoOpeningMaximum)
+                    .and_then(|maximum| chart_load(day, maximum, steps))
+            }),
     };
     let plan = match plan {
         Ok(plan) => plan,
@@ -2393,7 +2426,9 @@ where
 /// which is the one block periodisation read before the two were separated.
 const fn ramp_of<'a>(mesocycle: &GymMesocycle, with: &'a PlannedWith) -> &'a NonEmpty<WarmupStep> {
     match mesocycle {
-        GymMesocycle::Progression(Progression::Provided { .. }) => &with.sbs.warmup,
+        GymMesocycle::Progression(Progression::Provided { .. }) | GymMesocycle::Recovery(_) => {
+            &with.sbs.warmup
+        }
         GymMesocycle::Test(test) if test.provided().is_some() => &with.sbs.warmup,
         GymMesocycle::Progression(_) | GymMesocycle::Test(_) => &with.linear.warmup,
     }
@@ -2416,7 +2451,9 @@ struct PrimaryRest {
 
 const fn primary_rest(mesocycle: &GymMesocycle, with: &PlannedWith) -> PrimaryRest {
     match mesocycle {
-        GymMesocycle::Progression(Progression::Provided { .. }) => sbs_rest(with),
+        GymMesocycle::Progression(Progression::Provided { .. }) | GymMesocycle::Recovery(_) => {
+            sbs_rest(with)
+        }
         GymMesocycle::Test(test) if test.provided().is_some() => sbs_rest(with),
         GymMesocycle::Progression(_) | GymMesocycle::Test(_) => {
             let rest = with.linear.rest;

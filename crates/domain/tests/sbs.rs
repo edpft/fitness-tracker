@@ -556,3 +556,22 @@ fn only_a_rep_max_day_is_read() {
         "the chart runs four weeks, and a ninth is not one of them",
     );
 }
+
+/// **The recovery session is the easiest day, which is the one before the
+/// test** (#336): week 4's first, `3×3 @ 75%`.
+#[test]
+fn the_recovery_session_is_the_taper_before_the_test() {
+    let chart = chart().expect("the published chart builds");
+    let taper = chart
+        .day(WEEKS, SbsSession::First)
+        .expect("week 4 has a first session");
+    assert_eq!(chart.recovery(), Some(taper));
+    assert_eq!(
+        chart.recovery(),
+        Some(SbsDay::Percentage {
+            sets: reps(3).expect("three"),
+            reps: reps(3).expect("three"),
+            share: Percentage::from_basis_points(7_500).expect("75%"),
+        })
+    );
+}

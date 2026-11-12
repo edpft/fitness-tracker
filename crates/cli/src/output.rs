@@ -567,6 +567,24 @@ fn authored_plan(mesocycle: &GymMesocycle, with: &application::PlannedWith) {
                 ),
             }
         }
+        GymMesocycle::Recovery(recovery) => {
+            let session = domain::prescription::SbsChart::published()
+                .ok()
+                .and_then(|chart| chart.recovery())
+                .and_then(|day| match day {
+                    domain::prescription::SbsDay::Percentage { sets, reps, share } => {
+                        Some(format!("{sets}×{reps} @ {share}"))
+                    }
+                    domain::prescription::SbsDay::RepMax { .. }
+                    | domain::prescription::SbsDay::Test { .. } => None,
+                });
+            println!(
+                "  recovery from {}: {}, in both sessions of the week",
+                recovery.programme().name(),
+                session.as_deref().unwrap_or("its easiest session"),
+            );
+            println!("  a share of the maximum the term left behind, and it tests nothing");
+        }
         GymMesocycle::Progression(Progression::Provided { .. }) => {
             println!(
                 "  opening from whatever the mesocycle before it measures, \
@@ -873,6 +891,10 @@ pub fn mesocycle_standing(standing: &application::LadderStanding) {
         GymMesocycle::Progression(Progression::Provided { .. }) => {
             sbs_standing(standing.anchor, standing.maximum);
         }
+        GymMesocycle::Recovery(_) => match standing.maximum {
+            Some(maximum) => println!("a share of {maximum}kg, the maximum the term left behind"),
+            None => println!("nothing has measured the lift, so there is nothing to recover from"),
+        },
     }
 }
 

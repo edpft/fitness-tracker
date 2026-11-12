@@ -68,7 +68,7 @@ fn row(mesocycle: &Mesocycle) -> Markup {
                 p { i.dot.gym {} (gym_programme(gym)) }
             }
             @if let Some(cycling) = &mesocycle.cycling {
-                p { i.dot.cycling {} (cycling_programme(cycling)) }
+                p { i.dot.cycling {} (cycling_programme(cycling, recovering(mesocycle))) }
             }
         }
     }
@@ -91,6 +91,11 @@ fn day(on: Date) -> String {
 fn gym_programme(mesocycle: &GymMesocycle) -> String {
     match mesocycle {
         GymMesocycle::Test(_) => "Test week".to_owned(),
+        GymMesocycle::Recovery(recovery) => format!(
+            "Recovery from {}, {}",
+            recovery.programme().provider(),
+            recovery.programme().name()
+        ),
         GymMesocycle::Progression(Progression::Provided { from, .. }) => format!(
             "{}, {}",
             from.programme().provider(),
@@ -103,8 +108,18 @@ fn gym_programme(mesocycle: &GymMesocycle) -> String {
     }
 }
 
-fn cycling_programme(provenance: &CyclingProvenance) -> String {
+/// Whether it is the transition's recovery mesocycle (#336), which the gym's
+/// half says: the bike's is a published programme's deload, and its
+/// provenance alone reads as the programme.
+const fn recovering(mesocycle: &Mesocycle) -> bool {
+    matches!(mesocycle.gym, Some(GymMesocycle::Recovery(_)))
+}
+
+fn cycling_programme(provenance: &CyclingProvenance, recovering: bool) -> String {
     match provenance {
+        CyclingProvenance::Provided(programme) if recovering => {
+            format!("Recovery from {}", programme.name())
+        }
         CyclingProvenance::Provided(programme) => programme.name().to_string(),
         CyclingProvenance::Assembled => "Holding microcycle".to_owned(),
     }

@@ -120,6 +120,34 @@ pub fn measures(read: &PublishedRead, microcycle: u32, sessions: &[u32]) -> bool
     })
 }
 
+/// The recovery week a published programme provides (#336), and which of its
+/// sessions are ridden: `None` where it offers too few to make a week.
+///
+/// **Its first deload**: the last microcycle of the first of its mesocycles,
+/// as [`partition`] finds them. The operator, 2026-11-12: *"Mesocycle
+/// providers, like SBS and Peak need to be able to provide recovery weeks. For
+/// Peak that's the deload in the middle of the published programme."* So Peak
+/// and Base give µ4, and Build, which is one mesocycle, gives µ5.
+///
+/// **A ride measuring FTP is never taken**: recovery tests nothing, and the
+/// next macrocycle opens with its own test. Of the rest, the first `sessions`
+/// in published order, which in Peak µ4 and Build µ5 are two 45-minute
+/// Endurance rides, so either may be the one dropped.
+#[must_use]
+pub fn recovery_of(read: &PublishedRead, sessions: usize) -> Option<(u32, Vec<u32>)> {
+    let deload = *read.programme.mesocycles().first()?.last()?;
+    let rides: Vec<u32> = read
+        .programme
+        .sessions()
+        .into_iter()
+        .filter(|session| {
+            read.cells.contains_key(&(deload, *session)) && !measures(read, deload, &[*session])
+        })
+        .take(sessions)
+        .collect();
+    (rides.len() == sessions).then_some((deload, rides))
+}
+
 /// Which of the test programme's sessions are ridden.
 ///
 /// **The FTP test is taken, and the rest of the week fills up around it.** A

@@ -67,7 +67,8 @@ pub enum Phase {
     /// The mesocycle that ends on the last day of term, in a 1RM and an FTP
     /// test.
     Competitive,
-    /// The holiday that ends the macrocycle. It may hold a mesocycle too.
+    /// The holiday that ends the macrocycle, which opens with a recovery
+    /// mesocycle (#336).
     Transition,
 }
 
@@ -294,7 +295,16 @@ pub enum Cycling {
         of: Whole,
         weeks: u32,
     },
+    /// Two weeks of the recovery week the cycling programme in force provides
+    /// (#336): its first deload.
+    Recovery,
 }
+
+/// How many weeks a recovery mesocycle runs, in either discipline (#336).
+///
+/// The operator, 2026-10-02: *"a 2 week recovery-focused mesocycle, which I can
+/// run over Chrsitmas, Easter, and at the start and end of Summer"*.
+pub const RECOVERY_WEEKS: u32 = 2;
 
 /// A published programme we split into two mesocycles, taken whole.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -326,13 +336,14 @@ impl Cycling {
             Self::Hold { holding } => holding.saturating_add(1),
             Self::Base1 | Self::Base2 | Self::Build | Self::Peak1 | Self::Peak2 => 4,
             Self::Selection { weeks, .. } => weeks,
+            Self::Recovery => RECOVERY_WEEKS,
         }
     }
 
     /// Whether it ends in an FTP test, and so is an entry test for what
-    /// follows. Base 1 and Peak 1 do not.
+    /// follows. Base 1, Peak 1 and a recovery mesocycle do not.
     pub const fn ends_in_test(self) -> bool {
-        !matches!(self, Self::Base1 | Self::Peak1)
+        !matches!(self, Self::Base1 | Self::Peak1 | Self::Recovery)
     }
 
     /// Whether it may follow `previous`, the last mesocycle of this
@@ -344,7 +355,7 @@ impl Cycling {
     /// which keeps the entry test of the mesocycle it started again from.
     pub fn may_follow(self, previous: Option<Self>) -> bool {
         match self {
-            Self::Hold { .. } | Self::Selection { .. } => true,
+            Self::Hold { .. } | Self::Selection { .. } | Self::Recovery => true,
             Self::Base1 | Self::Build | Self::Peak1 => previous.is_some_and(Self::ends_in_test),
             Self::Base2 => previous == Some(Self::Base1),
             Self::Peak2 => previous == Some(Self::Peak1),
@@ -377,18 +388,25 @@ impl fmt::Display for Cycling {
             Self::Selection { of, weeks } => {
                 write!(formatter, "{of}, {} of its {}", Weeks(*weeks), of.weeks())
             }
+            Self::Recovery => formatter.write_str("recovery"),
         }
     }
 }
 
 /// What a gym mesocycle is, as a macrocycle chooses between them.
 ///
-/// **SBS or a hold, and both end in a test**: SBS week 4 is the 1RM, and a hold
-/// is holding microcycles of the linear template and then a test microcycle.
+/// **In term, SBS or a hold, and both end in a test**: SBS week 4 is the 1RM,
+/// and a hold is holding microcycles of the linear template and then a test
+/// microcycle. The transition's recovery mesocycle ends in none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Gym {
-    Hold { holding: u32 },
+    Hold {
+        holding: u32,
+    },
     Sbs,
+    /// Two weeks of the recovery session the gym programme in force provides
+    /// (#336): its easiest.
+    Recovery,
 }
 
 impl Gym {
@@ -396,6 +414,7 @@ impl Gym {
         match self {
             Self::Hold { holding } => holding.saturating_add(1),
             Self::Sbs => 4,
+            Self::Recovery => RECOVERY_WEEKS,
         }
     }
 }
@@ -408,6 +427,7 @@ impl fmt::Display for Gym {
                 write!(formatter, "hold ({}, then 1RM test)", Weeks(*holding))
             }
             Self::Sbs => formatter.write_str("SBS"),
+            Self::Recovery => formatter.write_str("recovery"),
         }
     }
 }
@@ -445,6 +465,14 @@ impl Concurrent {
         }
     }
 
+    /// Both disciplines recover, over the first weeks of the transition (#336).
+    pub const fn recovery() -> Self {
+        Self {
+            gym: Gym::Recovery,
+            cycling: Cycling::Recovery,
+        }
+    }
+
     /// SBS beside a progressing cycling mesocycle. A hold is [`Self::hold`].
     pub const fn progressing(cycling: Cycling) -> Self {
         Self {
@@ -473,6 +501,7 @@ impl fmt::Display for Concurrent {
             (Gym::Hold { holding }, Cycling::Hold { .. }) => {
                 write!(formatter, "hold ({}, then a test week)", Weeks(holding))
             }
+            (Gym::Recovery, Cycling::Recovery) => formatter.write_str("recovery"),
             (gym, cycling) => write!(formatter, "{gym} + {cycling}"),
         }
     }
@@ -508,10 +537,17 @@ impl Macrocycle {
     /// still end in a peak after it, on the last day of term: before the
     /// holiday, never across it.
     ///
-    /// `None` when `start` is not before the transition: there is no term left
-    /// to commit anything in.
+    /// **The transition opens with a recovery mesocycle** (#336), so from its
+    /// first Monday this is [`Concurrent::recovery`], where the holiday is long
+    /// enough to hold one. What the rest of a longer holiday holds is not
+    /// designed (#337), so after it, and from any later Monday, this is `None`.
     pub fn next(&self, chain: Chain, previous: Option<Cycling>, start: Date) -> Option<Concurrent> {
-        let weeks = weeks_between(start, self.transition())?;
+        let transition = self.transition();
+        if start == transition {
+            let holiday = weeks_between(transition, self.last().tomorrow().ok()?)?;
+            return (holiday >= RECOVERY_WEEKS).then(Concurrent::recovery);
+        }
+        let weeks = weeks_between(start, transition)?;
         if weeks == 0 {
             return None;
         }
