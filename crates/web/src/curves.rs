@@ -3,8 +3,8 @@
 //!
 //! Volume is bars and intensity a line. The current mesocycle is shaded, this
 //! week is marked, test weeks carry a T and lost weeks a dashed outline. **The
-//! weeks not yet committed are outlined**, because they are what the plan is
-//! expected to be rather than what it is (operator, 2026-11-09).
+//! weeks of planned mesocycles are outlined**, because they are what the term
+//! is planned to be rather than what it has been (operator, 2026-11-09).
 
 use std::fmt::Write as _;
 
@@ -54,7 +54,7 @@ pub fn card(
                 p.key {
                     span { i.volume {} "volume" }
                     span { i.intensity {} "intensity" }
-                    span { i.expected {} "expected" }
+                    span { i.planned {} "planned" }
                     span { i.lost {} "lost week" }
                     span { b { "T" } " test" }
                 }
@@ -206,7 +206,7 @@ fn mark(
 ) {
     let x = layout.centre(at);
     let bar = layout.bar();
-    let expected = if week.expected { " expected" } else { "" };
+    let planned = if week.planned { " planned" } else { "" };
     match week.on {
         OnCurve::Microcycle { point, tests } => {
             let mut top = BASE;
@@ -214,7 +214,7 @@ fn mark(
                 top = layout.volume(point.volume);
                 let _ = write!(
                     svg,
-                    r#"<rect class="volume{expected}" x="{:.1}" y="{top:.1}" width="{bar:.1}" height="{:.1}" rx="2"><title>week {}: {} {}, {}%</title></rect>"#,
+                    r#"<rect class="volume{planned}" x="{:.1}" y="{top:.1}" width="{bar:.1}" height="{:.1}" rx="2"><title>week {}: {} {}, {}%</title></rect>"#,
                     x - bar / 2.0,
                     BASE - top,
                     at + 1,
@@ -254,7 +254,7 @@ fn mark(
 }
 
 /// The intensity line, broken wherever a week has no point, and dashed where
-/// it is expected.
+/// it is planned.
 fn intensity_line(svg: &mut String, layout: &Layout, weeks: &[Week]) {
     let mut runs: Vec<Vec<(f64, f64, bool)>> = vec![Vec::new()];
     for (at, week) in weeks.iter().enumerate() {
@@ -264,7 +264,7 @@ fn intensity_line(svg: &mut String, layout: &Layout, weeks: &[Week]) {
                     run.push((
                         layout.centre(at),
                         layout.intensity(point.intensity),
-                        week.expected,
+                        week.planned,
                     ));
                 }
             }
@@ -273,9 +273,9 @@ fn intensity_line(svg: &mut String, layout: &Layout, weeks: &[Week]) {
     }
     for run in &runs {
         for pair in run.windows(2) {
-            if let [(x1, y1, _), (x2, y2, expected)] = pair {
-                let class = if *expected {
-                    "intensity expected"
+            if let [(x1, y1, _), (x2, y2, planned)] = pair {
+                let class = if *planned {
+                    "intensity planned"
                 } else {
                     "intensity"
                 };
@@ -285,8 +285,8 @@ fn intensity_line(svg: &mut String, layout: &Layout, weeks: &[Week]) {
                 );
             }
         }
-        for (x, y, expected) in run {
-            let class = if *expected { "dot expected" } else { "dot" };
+        for (x, y, planned) in run {
+            let class = if *planned { "dot planned" } else { "dot" };
             let _ = write!(
                 svg,
                 r#"<circle class="{class}" cx="{x:.1}" cy="{y:.1}" r="3.5"/>"#

@@ -48,7 +48,7 @@ use domain::{
     canonical::SessionCount,
     curve::{self, Curves},
     landing::{FetchedAt, LandingStream, RecordCount},
-    macrocycle::{Concurrent, Macrocycle},
+    macrocycle::{Concurrent, Macrocycle, PlannedMacrocycle},
     normalised::{OperatorZone, WorkoutCount},
     plan::{MesocycleOrdinal, Plan, PlanName, Span},
     planner::{self, RerunOrdinal, SessionState},
@@ -69,7 +69,7 @@ use crate::{
     RunLockError, RunSummary, SourceError, StoreError, Taken, WorkoutExtractor,
     WorkoutPrescriber as _, WorkoutStore,
     canonicalise::{Canonicalised, WeighInsCanonicalised},
-    commit::{CommitError, Due, Expected},
+    commit::{CommitError, Due},
     cycling::{PrescribedRide, RideDeliveryError, RidingError},
     deliver::{Delivering, DeliveryPorts},
     microcycle::{Session, Standing},
@@ -696,18 +696,19 @@ pub trait MesocycleCommitter {
     /// [`CommitError`] if what is due will not build or cannot be written.
     fn commit(&self, due: &Due) -> impl Future<Output = Result<(), CommitError>> + Send;
 
-    /// The plan in force as it is expected to run to the end of the term.
+    /// The macrocycle as planned: every mesocycle of the term, and where each
+    /// stands.
     ///
     /// # Errors
     ///
     /// [`CommitError`] if the plan cannot be read or the rest will not build.
-    fn expected(
+    fn planned(
         &self,
         now: DayPart,
         holidays: &Holidays,
         standing: &Standing,
         diary: &Diary,
-    ) -> impl Future<Output = Result<Option<Expected>, CommitError>> + Send;
+    ) -> impl Future<Output = Result<Option<PlannedMacrocycle>, CommitError>> + Send;
 }
 
 impl<P, G, H, R, B> MesocycleCommitter for crate::commit::Committing<P, G, H, R, B>
@@ -733,14 +734,14 @@ where
         Self::commit(self, due).await
     }
 
-    async fn expected(
+    async fn planned(
         &self,
         now: DayPart,
         holidays: &Holidays,
         standing: &Standing,
         diary: &Diary,
-    ) -> Result<Option<Expected>, CommitError> {
-        Self::expected(self, now, holidays, standing, diary).await
+    ) -> Result<Option<PlannedMacrocycle>, CommitError> {
+        Self::planned(self, now, holidays, standing, diary).await
     }
 }
 
@@ -1719,9 +1720,9 @@ where
             Ok(holidays) => self
                 .ports
                 .committing
-                .expected(now, holidays, standing, diary)
+                .planned(now, holidays, standing, diary)
                 .await
-                .map(|expected| expected.map(|expected| curves_of(&expected, standing))),
+                .map(|planned| planned.map(|planned| curves_of(&planned, standing))),
             Err(_) => Ok(None),
         };
         let macrocycle = match holidays {
@@ -2025,9 +2026,9 @@ fn gym_week(
     })
 }
 
-/// The curves of the plan as it is expected to run, with the weeks the walk
-/// found lost marked.
-fn curves_of(expected: &Expected, standing: &Standing) -> PlanCurves {
+/// The curves of the macrocycle as planned, with the weeks the walk found lost
+/// marked.
+fn curves_of(planned: &PlannedMacrocycle, standing: &Standing) -> PlanCurves {
     let lost = |discipline: Discipline, monday: Date| {
         standing.weeks.iter().any(|(week, state)| {
             *week == monday
@@ -2043,12 +2044,7 @@ fn curves_of(expected: &Expected, standing: &Standing) -> PlanCurves {
         })
     };
     PlanCurves {
-        curves: curve::curves(
-            &expected.macrocycle,
-            &expected.plan,
-            expected.committed_until,
-            lost,
-        ),
+        curves: curve::curves(planned, lost),
         mesocycle: standing.mesocycle,
         commencing: standing.commencing,
     }

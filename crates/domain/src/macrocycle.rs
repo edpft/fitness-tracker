@@ -28,6 +28,10 @@
 //! constraints, not as mesocycles: each mesocycle is realised when the one
 //! before it ends, because only then is its anchor known (#222).
 
+mod planned;
+
+pub use planned::{MesocycleState, PlannedMacrocycle, PlannedMesocycle};
+
 use std::fmt;
 
 use jiff::civil::Date;
