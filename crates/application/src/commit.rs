@@ -14,7 +14,7 @@ use domain::planner::Arrangement as _;
 use std::num::NonZeroU32;
 
 use domain::{
-    cycling::CyclingMesocycle,
+    cycling::{CyclingMesocycle, CyclingProvenance},
     macrocycle::{Concurrent, Cycling, Gym, Macrocycle, PlannedMacrocycle, Whole},
     normalised::OperatorZone,
     plan::{Plan, Span},
@@ -289,7 +289,7 @@ where
         start: Date,
     ) -> Result<(Vec<GymMesocycle>, Vec<CyclingMesocycle>), CommitError> {
         let cycling = self
-            .cycling_side(diary, concurrent.cycling(), start)
+            .cycling_side(plan, diary, concurrent.cycling(), start)
             .await?;
         // **The gym runs the same weeks as the bike** (#732): a selection's
         // positions in the whole programme, each the week of the chart it falls
@@ -349,48 +349,7 @@ where
             .ok_or(CommitError::NotDesigned { planned_at })?;
         let scales = self.ports.parameters.scales_on(start).await?;
 
-        let sbs = Gym::Sbs.weeks();
-        let provided = |microcycles: Vec<u32>| {
-            ProvidedFrom::new(programme.clone(), microcycles).map_err(|error| unbuildable(&error))
-        };
-        let shapes: Vec<(Date, Shape)> = match gym {
-            Gym::Sbs => vec![(
-                start,
-                Shape::Provided {
-                    from: provided(positions.map_or_else(
-                        || (1..=sbs).collect(),
-                        |positions| {
-                            positions
-                                .iter()
-                                .map(|position| {
-                                    position.saturating_sub(1).checked_rem(sbs).unwrap_or(0) + 1
-                                })
-                                .collect()
-                        },
-                    ))?,
-                },
-            )],
-            Gym::Hold { holding } => {
-                let test = Shape::Test {
-                    reps: domain::measure::RepCount::new(1).map_err(|error| unbuildable(&error))?,
-                    provided: Some(provided(vec![sbs])?),
-                    asserted: None,
-                };
-                match holding {
-                    0 => vec![(start, test)],
-                    weeks => vec![
-                        (
-                            start,
-                            Shape::Linear {
-                                gating: HARDER,
-                                weeks,
-                            },
-                        ),
-                        (weeks_after(start, weeks)?, test),
-                    ],
-                }
-            }
-        };
+        let shapes = gym_shapes(gym, start, programme, positions)?;
 
         let mut built = Vec::with_capacity(shapes.len());
         for (at, shape) in shapes {
@@ -429,10 +388,44 @@ where
         Ok(built)
     }
 
-    /// The cycling half: a published mesocycle, or a hold's holding weeks and its
-    /// test week.
+    /// The cycling half of a recovery mesocycle (#336): the recovery week of
+    /// the programme the last cycling mesocycle was taken from, its first
+    /// deload, every week.
+    async fn recovery_side(
+        &self,
+        plan: &Plan,
+        weeks: u32,
+        start: Date,
+        riding_days: &[Weekday],
+    ) -> Result<Vec<CyclingMesocycle>, CommitError> {
+        let published = &self.ports.published;
+        let nothing = || CommitError::NothingToCarryOn {
+            detail: "the plan's last cycling mesocycle names no published programme \
+                             to recover with"
+                .to_owned(),
+        };
+        let which = plan
+            .cycling()
+            .and_then(|side| side.mesocycles().last())
+            .and_then(CyclingMesocycle::provided_from)
+            .and_then(|from| published.which(from.programme()))
+            .ok_or_else(nothing)?;
+        let read = published.read(which).await?;
+        let weeks = usize::try_from(weeks).map_err(|error| unbuildable(&error))?;
+        Ok(vec![published::recovery(
+            start,
+            &read,
+            weeks,
+            SESSIONS,
+            riding_days,
+        )?])
+    }
+
+    /// The cycling half: a published mesocycle, a hold's holding weeks and its
+    /// test week, or the recovery week of the programme the term ended on.
     async fn cycling_side(
         &self,
+        plan: &Plan,
         diary: &Diary,
         cycling: Cycling,
         start: Date,
@@ -441,6 +434,11 @@ where
         let published = &self.ports.published;
 
         let (which, half) = match cycling {
+            Cycling::Recovery => {
+                return self
+                    .recovery_side(plan, cycling.weeks(), start, &riding_days)
+                    .await;
+            }
             Cycling::Hold { holding } => {
                 let mut built = Vec::new();
                 if let Some(weeks) = NonZeroU32::new(holding) {
@@ -563,6 +561,9 @@ pub fn cycling_kind(
     mesocycle: &CyclingMesocycle,
     which: impl Fn(&ExternalProgramme) -> Option<PublishedCycling>,
 ) -> Option<Cycling> {
+    if matches!(mesocycle.provenance(), CyclingProvenance::Recovery(_)) {
+        return Some(Cycling::Recovery);
+    }
     let Some(provided) = mesocycle.provided_from() else {
         let holding = u32::try_from(mesocycle.duration_weeks()).ok()?;
         return Some(Cycling::Hold { holding });
@@ -591,9 +592,73 @@ pub fn cycling_kind(
     }
 }
 
+/// The gym's weeks for a concurrent mesocycle, each with the shape it is
+/// authored as: SBS, a hold's linear holding weeks and its test week, or the
+/// recovery mesocycle.
+///
+/// `positions` are the weeks a selection runs, counted through cycles of the
+/// chart taken end to end: 1-2-3-6-7-8 runs chart weeks 1-2-3-2-3-4.
+fn gym_shapes(
+    gym: Gym,
+    start: Date,
+    programme: ExternalProgramme,
+    positions: Option<&[u32]>,
+) -> Result<Vec<(Date, Shape)>, CommitError> {
+    let sbs = Gym::Sbs.weeks();
+    let provided = |microcycles: Vec<u32>| {
+        ProvidedFrom::new(programme.clone(), microcycles).map_err(|error| unbuildable(&error))
+    };
+    Ok(match gym {
+        Gym::Sbs => vec![(
+            start,
+            Shape::Provided {
+                from: provided(positions.map_or_else(
+                    || (1..=sbs).collect(),
+                    |positions| {
+                        positions
+                            .iter()
+                            .map(|position| {
+                                position.saturating_sub(1).checked_rem(sbs).unwrap_or(0) + 1
+                            })
+                            .collect()
+                    },
+                ))?,
+            },
+        )],
+        Gym::Hold { holding } => {
+            let test = Shape::Test {
+                reps: domain::measure::RepCount::new(1).map_err(|error| unbuildable(&error))?,
+                provided: Some(provided(vec![sbs])?),
+                asserted: None,
+            };
+            match holding {
+                0 => vec![(start, test)],
+                weeks => vec![
+                    (
+                        start,
+                        Shape::Linear {
+                            gating: HARDER,
+                            weeks,
+                        },
+                    ),
+                    (weeks_after(start, weeks)?, test),
+                ],
+            }
+        }
+        Gym::Recovery => vec![(
+            start,
+            Shape::Recovery {
+                programme,
+                weeks: gym.weeks(),
+            },
+        )],
+    })
+}
+
 /// The published programme a gym mesocycle was taken from.
 fn published_from(mesocycle: &GymMesocycle) -> Option<ExternalProgramme> {
     match mesocycle {
+        GymMesocycle::Recovery(recovery) => Some(recovery.programme().clone()),
         GymMesocycle::Test(test) => test.provided().map(|from| from.programme().clone()),
         GymMesocycle::Progression(Progression::Provided { from, .. }) => {
             Some(from.programme().clone())

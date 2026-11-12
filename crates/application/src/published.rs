@@ -120,6 +120,34 @@ pub fn measures(read: &PublishedRead, microcycle: u32, sessions: &[u32]) -> bool
     })
 }
 
+/// The recovery week a published programme provides (#336), and which of its
+/// sessions are ridden: `None` where it offers too few to make a week.
+///
+/// **Its first deload**: the last microcycle of the first of its mesocycles,
+/// as [`partition`] finds them. The operator, 2026-11-12: *"Mesocycle
+/// providers, like SBS and Peak need to be able to provide recovery weeks. For
+/// Peak that's the deload in the middle of the published programme."* So Peak
+/// and Base give µ4, and Build, which is one mesocycle, gives µ5.
+///
+/// **A ride measuring FTP is never taken**: recovery tests nothing, and the
+/// next macrocycle opens with its own test. Of the rest, the first `sessions`
+/// in published order, which in Peak µ4 and Build µ5 are two 45-minute
+/// Endurance rides, so either may be the one dropped.
+#[must_use]
+pub fn recovery_of(read: &PublishedRead, sessions: usize) -> Option<(u32, Vec<u32>)> {
+    let deload = *read.programme.mesocycles().first()?.last()?;
+    let rides: Vec<u32> = read
+        .programme
+        .sessions()
+        .into_iter()
+        .filter(|session| {
+            read.cells.contains_key(&(deload, *session)) && !measures(read, deload, &[*session])
+        })
+        .take(sessions)
+        .collect();
+    (rides.len() == sessions).then_some((deload, rides))
+}
+
 /// Which of the test programme's sessions are ridden.
 ///
 /// **The FTP test is taken, and the rest of the week fills up around it.** A
@@ -184,6 +212,56 @@ pub fn build(
     sessions: &[u32],
     riding_days: &[Weekday],
 ) -> Result<CyclingMesocycle, BuildError> {
+    built(
+        CyclingProvenance::Provided(read.from.clone()),
+        start,
+        read,
+        microcycles,
+        sessions,
+        riding_days,
+    )
+}
+
+/// A recovery mesocycle of `weeks`, each the recovery week the programme
+/// provides ([`recovery_of`]), recorded as that and not as microcycles of it
+/// (#336).
+///
+/// # Errors
+///
+/// [`BuildError`] as [`build`], and where the programme provides no recovery
+/// week.
+pub fn recovery(
+    start: Date,
+    read: &PublishedRead,
+    weeks: usize,
+    sessions: usize,
+    riding_days: &[Weekday],
+) -> Result<CyclingMesocycle, BuildError> {
+    let (deload, sessions) = recovery_of(read, sessions).ok_or_else(|| {
+        BuildError::Source(SourceError::Malformed {
+            detail: format!("{} provides no recovery week", read.from.name()),
+        })
+    })?;
+    built(
+        CyclingProvenance::Recovery(read.from.clone()),
+        start,
+        read,
+        &vec![deload; weeks],
+        &sessions,
+        riding_days,
+    )
+}
+
+/// The rides of `microcycles`, under `provenance`: each says where it was
+/// published only where the mesocycle is microcycles of the programme.
+fn built(
+    provenance: CyclingProvenance,
+    start: Date,
+    read: &PublishedRead,
+    microcycles: &[u32],
+    sessions: &[u32],
+    riding_days: &[Weekday],
+) -> Result<CyclingMesocycle, BuildError> {
     if riding_days.len() < sessions.len() {
         return Err(BuildError::TooFewDays {
             days: riding_days.len(),
@@ -230,15 +308,24 @@ pub fn build(
             } else {
                 EASIER
             };
-            let published =
-                PublishedAt::new(*number, session).map_err(|error| unbuildable(&error))?;
-            rides.insert(position, PlannedRide::provided(ride, at, published, role));
+            let planned = match provenance {
+                CyclingProvenance::Provided(_) => PlannedRide::provided(
+                    ride,
+                    at,
+                    PublishedAt::new(*number, session).map_err(|error| unbuildable(&error))?,
+                    role,
+                ),
+                CyclingProvenance::Assembled | CyclingProvenance::Recovery(_) => {
+                    PlannedRide::assembled(ride, at, role)
+                }
+            };
+            rides.insert(position, planned);
         }
         weeks.push(CyclingMicrocycle::new(rides).map_err(|error| unbuildable(&error))?);
     }
 
     CyclingMesocycle::new(
-        CyclingProvenance::Provided(read.from.clone()),
+        provenance,
         start,
         NonEmpty::new(weeks).map_err(|error| unbuildable(&error))?,
     )

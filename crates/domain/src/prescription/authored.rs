@@ -29,11 +29,12 @@ use crate::{
         linear::{Linear, Primary, PrimaryPattern, SlotFills},
         mesocycle::{GymMesocycle, InconsistentMesocycle, Progression},
         parameters::Scales,
+        recovery::Recovery,
         sbs::{self, Sbs, WEEKS},
         schedule::{Calendar, InvalidCalendar, Skip},
         test::{Test, Tested},
     },
-    provider::ProvidedFrom,
+    provider::{ExternalProgramme, ProvidedFrom},
 };
 
 /// Why a set of answers does not make a programme.
@@ -128,6 +129,13 @@ pub enum Shape {
         /// Which microcycles of which external programme.
         from: ProvidedFrom,
     },
+    /// The transition's recovery mesocycle (#336): the provider's recovery
+    /// session, twice a week, for as long as the macrocycle says.
+    Recovery {
+        /// Whose recovery session: the programme in force when the term ended.
+        programme: ExternalProgramme,
+        weeks: u32,
+    },
 }
 
 impl Shape {
@@ -142,6 +150,7 @@ impl Shape {
             Self::Linear { .. } => "linear",
             Self::Block { .. } => "block",
             Self::Provided { .. } => "sbs",
+            Self::Recovery { .. } => "recovery",
         }
     }
 
@@ -157,7 +166,7 @@ impl Shape {
             Self::Test { .. } => Test::WEEKS,
             // One calendar week to each chart week taken (#732).
             Self::Provided { from } => u32::try_from(from.microcycles().count()).unwrap_or(WEEKS),
-            Self::Linear { weeks, .. } => *weeks,
+            Self::Linear { weeks, .. } | Self::Recovery { weeks, .. } => *weeks,
             // The entry test is a week in front of the phases rather than one of
             // them (decision 0013), so a nine-week block that measures its own
             // entry occupies ten.
@@ -289,6 +298,18 @@ pub fn mesocycle(
                 cycle: Sbs::new(pattern, primary_exercise, fills, calendar, &weeks)?,
                 from,
             }))
+        }
+        // **The holiday's weeks, whatever the diary takes from them**: a closed
+        // gym costs a session, never pushes recovery into the next term.
+        Shape::Recovery { programme, weeks } => {
+            let calendar = Calendar::new(start, weeks, &[], week, zone)?;
+            Ok(GymMesocycle::Recovery(Recovery::new(
+                pattern,
+                primary_exercise,
+                fills,
+                calendar,
+                programme,
+            )?))
         }
     }
 }

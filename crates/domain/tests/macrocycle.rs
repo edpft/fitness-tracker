@@ -243,10 +243,35 @@ fn nothing_is_committed_that_runs_into_christmas() {
         Some(Concurrent::hold(2)),
         "a hold to the end of term"
     );
+}
+
+/// **Christmas opens with two weeks of recovery** (#336), and nothing follows
+/// it: spring's entry test is spring's.
+#[test]
+fn christmas_is_two_weeks_of_recovery() {
+    let autumn = autumn_2026().expect("autumn 2026");
+    let chain = Chain::BuildThenPeak;
+
+    let recovery = autumn.next(chain, Some(Cycling::Peak2), date(2026, 12, 21));
+    assert_eq!(recovery, Some(Concurrent::recovery()));
+    assert_eq!(recovery.map(Concurrent::weeks), Some(2));
+    assert_eq!(
+        date(2026, 12, 21)
+            .checked_add(jiff::Span::new().weeks(2))
+            .ok(),
+        Some(date(2027, 1, 4)),
+        "it ends where spring starts"
+    );
+    assert!(!Cycling::Recovery.ends_in_test());
 
     assert_eq!(
-        autumn.next(chain, Some(Cycling::Build), date(2026, 12, 21)),
+        autumn.next(chain, Some(Cycling::Recovery), date(2027, 1, 4)),
         None
+    );
+    assert_eq!(
+        autumn.next(chain, Some(Cycling::Peak2), date(2026, 12, 28)),
+        None,
+        "a recovery mesocycle starts with the transition or not at all"
     );
 }
 

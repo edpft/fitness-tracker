@@ -822,3 +822,53 @@ fn a_range_of_bands_round_trips() {
         .map(|fact| &fact.value);
     assert_eq!(stated, Some(&settings));
 }
+
+/// **A recovery mesocycle round trips** (#336): the programme whose recovery
+/// session it runs, its two weeks, and no gating role, which the store's
+/// `CHECK` admits for a recovery and refuses for anything that climbs.
+#[test]
+fn a_recovery_mesocycle_round_trips() {
+    use domain::{
+        prescription::{GymMesocycle, authored::Shape},
+        provider::{ExternalProgramme, ProgrammeName, Provider},
+    };
+
+    let (plans, store, _pool, _directory) = mesocycles!();
+    let programme = ExternalProgramme::new(
+        Provider::try_from("Stronger By Science").expect("a provider"),
+        ProgrammeName::try_from("Squat 2x Int").expect("a programme"),
+    );
+    let answers = mesocycle::authored(
+        inside_the_block(),
+        Shape::Recovery {
+            programme: programme.clone(),
+            weeks: 2,
+        },
+    )
+    .expect("the fixture answers");
+    let authored = mesocycle::authoring(answers, &[])
+        .expect("the fixture values")
+        .expect("a recovery mesocycle authors");
+    let entry = mesocycle::entry_test().expect("the fixture entry test");
+    let plan = mesocycle::named_plan("fixture", vec![entry, authored.clone()])
+        .expect("the fixture plan is consistent");
+
+    run!(plans.author(&plan));
+
+    let Some(found) = run!(store.on(inside_the_block())) else {
+        panic!("what was authored is in force")
+    };
+    let GymMesocycle::Recovery(read_back) = &found.mesocycle else {
+        panic!("a recovery mesocycle reads back as one, not {found:?}")
+    };
+    assert_eq!(read_back.programme(), &programme);
+    assert_eq!(found.mesocycle.template(), "recovery");
+    assert_eq!(found.mesocycle.gating_role(), None);
+    assert_eq!(found.mesocycle.fills(), authored.fills());
+    assert_eq!(
+        found.mesocycle.primary_exercise(),
+        authored.primary_exercise()
+    );
+    assert_eq!(found.mesocycle.calendar().start(), inside_the_block());
+    assert_eq!(found.mesocycle.calendar().duration_weeks(), 2);
+}

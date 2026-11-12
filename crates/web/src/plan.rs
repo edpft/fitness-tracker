@@ -91,6 +91,7 @@ fn day(on: Date) -> String {
 fn gym_programme(mesocycle: &GymMesocycle) -> String {
     match mesocycle {
         GymMesocycle::Test(_) => "Test week".to_owned(),
+        GymMesocycle::Recovery(_) => "Recovery week".to_owned(),
         GymMesocycle::Progression(Progression::Provided { from, .. }) => format!(
             "{}, {}",
             from.programme().provider(),
@@ -106,6 +107,7 @@ fn gym_programme(mesocycle: &GymMesocycle) -> String {
 fn cycling_programme(provenance: &CyclingProvenance) -> String {
     match provenance {
         CyclingProvenance::Provided(programme) => programme.name().to_string(),
+        CyclingProvenance::Recovery(_) => "Recovery week".to_owned(),
         CyclingProvenance::Assembled => "Holding microcycle".to_owned(),
     }
 }

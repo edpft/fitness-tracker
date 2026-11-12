@@ -65,6 +65,7 @@ pub(super) async fn in_force(
                pl.name AS "plan_name!: String",
                m.provider AS "provider: String",
                m.provided_programme AS "provided_programme: String",
+               m.week AS "week: String",
                m.start_date AS "start_date!: String"
         FROM cycling_mesocycle AS m
         JOIN plan AS pl ON pl.id = m.plan
@@ -84,12 +85,24 @@ pub(super) async fn in_force(
         // Both columns or neither, which the `CHECK` also says. A mesocycle
         // naming a provider and no programme is a half-written row rather than
         // an assembled week.
-        let provenance = match (row.provider, row.provided_programme) {
-            (Some(provider), Some(name)) => CyclingProvenance::Provided(ExternalProgramme::new(
-                Provider::try_from(provider).map_err(|error| corrupt(&error))?,
-                ProgrammeName::try_from(name).map_err(|error| corrupt(&error))?,
-            )),
-            (None, None) => CyclingProvenance::Assembled,
+        // A week the programme provides names it, and says which kind.
+        let provenance = match (row.provider, row.provided_programme, row.week.as_deref()) {
+            (Some(provider), Some(name), week) => {
+                let programme = ExternalProgramme::new(
+                    Provider::try_from(provider).map_err(|error| corrupt(&error))?,
+                    ProgrammeName::try_from(name).map_err(|error| corrupt(&error))?,
+                );
+                match week {
+                    None => CyclingProvenance::Provided(programme),
+                    Some("recovery") => CyclingProvenance::Recovery(programme),
+                    Some(other) => {
+                        return Err(corrupt(&format!(
+                            "{other:?} is not a week a programme provides"
+                        )));
+                    }
+                }
+            }
+            (None, None, None) => CyclingProvenance::Assembled,
             _ => return Err(corrupt(&"a mesocycle naming half of a published programme")),
         };
         let start = row
@@ -334,26 +347,28 @@ pub(super) async fn write(
     ordinal: i64,
     mesocycle: &CyclingMesocycle,
 ) -> Result<CyclingMesocycleId, StoreError> {
-    let provider = mesocycle
-        .programme()
-        .map(|published| published.provider().to_string());
-    let programme = mesocycle
-        .programme()
-        .map(|published| published.name().to_string());
+    let (published, week) = match mesocycle.provenance() {
+        CyclingProvenance::Provided(programme) => (Some(programme), None),
+        CyclingProvenance::Recovery(programme) => (Some(programme), Some("recovery")),
+        CyclingProvenance::Assembled => (None, None),
+    };
+    let provider = published.map(|published| published.provider().to_string());
+    let programme = published.map(|published| published.name().to_string());
     let start = mesocycle.start().to_string();
 
     let id = sqlx::query!(
         r#"
         INSERT INTO cycling_mesocycle (
-            plan, ordinal, provider, provided_programme, start_date
+            plan, ordinal, provider, provided_programme, week, start_date
         )
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?)
         RETURNING id AS "id!: i64"
         "#,
         plan,
         ordinal,
         provider,
         programme,
+        week,
         start
     )
     .fetch_one(&mut **tx)

@@ -40,8 +40,8 @@ use domain::{
     planner::{Discipline, Relative, SessionRole},
     prescription::{
         Anchor, AnchorProvenance, BlockPeriodisation, ByIntensity, Calendar, FillChange,
-        FillChanges, GymMesocycle, Linear, MesocycleId, Progression, Sbs, Skip, SlotId, Test,
-        Tested,
+        FillChanges, GymMesocycle, Linear, MesocycleId, Progression, Recovery, Sbs, Skip, SlotId,
+        Test, Tested,
         block::EntryTest,
         linear::{Fill, Primary, PrimaryPattern, SlotFills, StaticFill},
     },
@@ -241,7 +241,13 @@ pub(super) async fn in_force(
         let pattern =
             PrimaryPattern::try_from(row.primary_pattern).map_err(|error| corrupt(&error))?;
         let exercise = exercise_of(&row.primary_exercise)?;
-        let provided = read_provided(pool, row.id, row.provider, row.provided_programme).await?;
+        let programme = programme_of(row.provider, row.provided_programme)?;
+        // A recovery mesocycle names whose recovery session it runs and takes
+        // no microcycles of it: the session is the chart's to say (#336).
+        let provided = match (row.template.as_str(), programme.clone()) {
+            ("recovery", _) | (_, None) => None,
+            (_, Some(programme)) => Some(read_provided(pool, row.id, programme).await?),
+        };
 
         let common = Common {
             pattern,
@@ -260,6 +266,7 @@ pub(super) async fn in_force(
         )?;
         let mesocycle = match row.template.as_str() {
             "test" => rehydrate_test(common, row.test_reps, asserted)?,
+            "recovery" => rehydrate_recovery(common, programme)?,
             template @ ("linear" | "block" | "sbs") => rehydrate_periodisation(
                 common,
                 template,
@@ -373,20 +380,25 @@ fn ordinal_in_plan(ordinal: i64) -> Result<MesocycleOrdinal, StoreError> {
 /// **Both columns or neither** — a `CHECK` says so from the other side — and the
 /// microcycle numbers are rows of their own, because a mesocycle taking µ1-2-4-5
 /// is four facts rather than a string to be parsed back.
-async fn read_provided(
-    pool: &SqlitePool,
-    mesocycle: i64,
+/// The published programme a row names, where it names one.
+fn programme_of(
     provider: Option<String>,
     programme: Option<String>,
-) -> Result<Option<ProvidedFrom>, StoreError> {
+) -> Result<Option<ExternalProgramme>, StoreError> {
     let (Some(provider), Some(programme)) = (provider, programme) else {
         return Ok(None);
     };
-    let published = ExternalProgramme::new(
+    Ok(Some(ExternalProgramme::new(
         Provider::try_from(provider).map_err(|error| corrupt(&error))?,
         ProgrammeName::try_from(programme).map_err(|error| corrupt(&error))?,
-    );
+    )))
+}
 
+async fn read_provided(
+    pool: &SqlitePool,
+    mesocycle: i64,
+    published: ExternalProgramme,
+) -> Result<ProvidedFrom, StoreError> {
     let rows = sqlx::query!(
         r#"
         SELECT microcycle AS "microcycle!: i64"
@@ -407,9 +419,7 @@ async fn read_provided(
                 .map_err(|_| corrupt(&"a published microcycle number the domain cannot hold"))?,
         );
     }
-    ProvidedFrom::new(published, microcycles)
-        .map(Some)
-        .map_err(|error| corrupt(&error))
+    ProvidedFrom::new(published, microcycles).map_err(|error| corrupt(&error))
 }
 
 /// The columns whose presence depends on the template.
@@ -436,7 +446,8 @@ fn columns_of(mesocycle: &GymMesocycle) -> Result<Columns, StoreError> {
         // An SBS cycle has no entry test: its test is the last session of the
         // last week, not a week in front (decision 0024).
         GymMesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. })
-        | GymMesocycle::Test(_) => None,
+        | GymMesocycle::Test(_)
+        | GymMesocycle::Recovery(_) => None,
     };
     let entry_test_light = entry_test
         .and_then(EntryTest::light)
@@ -457,11 +468,12 @@ fn columns_of(mesocycle: &GymMesocycle) -> Result<Columns, StoreError> {
         GymMesocycle::Progression(Progression::BlockPeriodisation(block)) => {
             block.entry_test().and_then(EntryTest::asserted)
         }
-        GymMesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. }) => None,
+        GymMesocycle::Progression(Progression::Linear(_) | Progression::Provided { .. })
+        | GymMesocycle::Recovery(_) => None,
     };
     let test_reps = match mesocycle {
         GymMesocycle::Test(test) => Some(i64::from(test.reps().as_u32())),
-        GymMesocycle::Progression(_) => None,
+        GymMesocycle::Progression(_) | GymMesocycle::Recovery(_) => None,
     };
 
     Ok(Columns {
@@ -526,6 +538,21 @@ fn rehydrate_test(
         )
         .map_err(|error| corrupt(&error))?,
     ))
+}
+
+/// A recovery mesocycle (#336), from the programme whose recovery session it
+/// runs.
+fn rehydrate_recovery(
+    common: Common,
+    programme: Option<ExternalProgramme>,
+) -> Result<GymMesocycle, StoreError> {
+    Ok(GymMesocycle::Recovery(Recovery::stored(
+        common.pattern,
+        common.exercise,
+        common.fills,
+        common.calendar,
+        programme.ok_or_else(|| corrupt(&"a recovery mesocycle that names no programme"))?,
+    )))
 }
 
 /// A programme that climbs, by whichever of the three models.
@@ -722,8 +749,14 @@ pub(super) async fn write(
     let start = mesocycle.calendar().start().to_string();
     let duration = i64::from(mesocycle.calendar().duration_weeks());
     let provided_from = provided_of(mesocycle);
-    let provider = provided_from.map(|from| from.programme().provider().to_string());
-    let provided_programme = provided_from.map(|from| from.programme().name().to_string());
+    let programme = match mesocycle {
+        GymMesocycle::Recovery(recovery) => Some(recovery.programme()),
+        GymMesocycle::Test(_) | GymMesocycle::Progression(_) => {
+            provided_from.map(ProvidedFrom::programme)
+        }
+    };
+    let provider = programme.map(|programme| programme.provider().to_string());
+    let provided_programme = programme.map(|programme| programme.name().to_string());
     let Columns {
         asserted_grams,
         provenance,
@@ -859,9 +892,8 @@ const fn provided_of(mesocycle: &GymMesocycle) -> Option<&ProvidedFrom> {
     match mesocycle {
         GymMesocycle::Progression(Progression::Provided { from, .. }) => Some(from),
         GymMesocycle::Test(test) => test.provided(),
-        GymMesocycle::Progression(Progression::Linear(_) | Progression::BlockPeriodisation(_)) => {
-            None
-        }
+        GymMesocycle::Progression(Progression::Linear(_) | Progression::BlockPeriodisation(_))
+        | GymMesocycle::Recovery(_) => None,
     }
 }
 

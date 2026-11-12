@@ -32,6 +32,7 @@ pub mod parameters;
 pub mod prilepin;
 pub mod progression;
 pub mod project;
+pub mod recovery;
 pub mod repmax;
 pub mod rest;
 pub mod sbs;
@@ -71,6 +72,7 @@ pub use mesocycle::{GymMesocycle, InconsistentMesocycle, Progression, check_prim
 pub use parameters::{InvalidPercentage, Percentage, Scales};
 pub use progression::{GatingTopSet, Progress, Reset, progress_after};
 pub use project::{Divergence, ItemPosition, Projection, ProjectionGap, project, satisfies};
+pub use recovery::Recovery;
 pub use repmax::rep_max;
 pub use rest::{rested, warmup_rested};
 pub use sbs::{

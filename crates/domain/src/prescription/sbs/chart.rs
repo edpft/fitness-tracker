@@ -289,6 +289,32 @@ impl SbsChart {
         })
     }
 
+    /// The recovery session this chart provides (#336): its easiest day.
+    ///
+    /// The operator, 2026-11-12: *"For SBS it's the session before the test,
+    /// because that's the easiest session in the programme."* **Easiest is
+    /// derived rather than named**, so a chart whose values change keeps
+    /// answering: the day with the smallest share of the maximum, and of two
+    /// at the same share the one with fewer repetitions in all. A
+    /// repetition-maximum day or the test is never easiest, since each works up
+    /// to a maximum. On the published chart it is week 4's first, `3×3 @ 75%`.
+    ///
+    /// `None` only for a chart with no percentage day at all.
+    #[must_use]
+    pub fn recovery(&self) -> Option<SbsDay> {
+        self.days()
+            .filter_map(|(_, _, day)| match day {
+                SbsDay::Percentage { sets, reps, share } => Some((
+                    share.as_basis_points(),
+                    sets.as_u32().saturating_mul(reps.as_u32()),
+                    day,
+                )),
+                SbsDay::RepMax { .. } | SbsDay::Test { .. } => None,
+            })
+            .min_by_key(|(share, volume, _)| (*share, *volume))
+            .map(|(_, _, day)| day)
+    }
+
     /// Every day, in order: week, session, and what it prescribes.
     pub fn days(&self) -> impl Iterator<Item = (u32, SbsSession, SbsDay)> + '_ {
         (1_u32..).zip(self.weeks.iter()).flat_map(|(week, days)| {
