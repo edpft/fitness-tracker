@@ -30,7 +30,8 @@ use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
 use crate::{
-    detail::{self, Axis, Chart, Layer, Metric, Traced, name},
+    detail::{self, Axis, Chart, Layer, Traced, name},
+    progress::{Written, answering, change, row, tested},
     run,
 };
 
@@ -66,120 +67,6 @@ fn body(view: &View) -> Markup {
         (so_far(macrocycle, view.today))
         (each_week(macrocycle, view.today))
         (on_the_last(macrocycle, view.today))
-    }
-}
-
-/// How a reading's figures are written.
-#[derive(Clone, Copy)]
-struct Written {
-    metric: Metric,
-    unit: &'static str,
-    /// What one of the figure's own units is in the unit shown: a gram is a
-    /// thousandth of a kilogram.
-    scale: f64,
-    places: usize,
-}
-
-impl Written {
-    fn figure(self, value: f64) -> String {
-        let shown = format!("{:.*}", self.places, value * self.scale);
-        if self.unit.is_empty() {
-            shown
-        } else {
-            format!("{shown} {}", self.unit)
-        }
-    }
-
-    fn signed(self, by: f64) -> String {
-        let shown = self.figure(by.abs());
-        if shown == self.figure(0.0) {
-            shown
-        } else if by < 0.0 {
-            format!("−{shown}")
-        } else {
-            format!("+{shown}")
-        }
-    }
-}
-
-const fn tested(tested: Tested) -> Written {
-    match tested {
-        Tested::Ftp => Written {
-            metric: Metric::Ftp,
-            unit: "W",
-            scale: 1.0,
-            places: 0,
-        },
-        Tested::OneRepMax(_) => Written {
-            metric: Metric::OneRepMax,
-            unit: "kg",
-            scale: 0.001,
-            places: 1,
-        },
-    }
-}
-
-const fn answering(reading: Answering) -> (&'static str, Written) {
-    match reading {
-        Answering::RestingHeartRate => (
-            "Resting heart rate",
-            Written {
-                metric: Metric::RestingHeartRate,
-                unit: "bpm",
-                scale: 1.0,
-                places: 1,
-            },
-        ),
-        Answering::OvernightHrv => (
-            "Overnight HRV",
-            Written {
-                metric: Metric::Hrv,
-                unit: "ms",
-                scale: 1.0,
-                places: 1,
-            },
-        ),
-        Answering::Stress => (
-            "Stress",
-            Written {
-                metric: Metric::Stress,
-                unit: "",
-                scale: 1.0,
-                places: 1,
-            },
-        ),
-    }
-}
-
-/// One row of the first card: the reading's name, its figure now, and what is
-/// said beneath.
-fn row(metric: Metric, label: &str, figure: Option<String>, beneath: &Markup) -> Markup {
-    html! {
-        div class=(format!("reading {}", metric.class())) {
-            div.name {
-                i.swatch {}
-                (label)
-                @if let Some(figure) = figure { em { (figure) } }
-            }
-            (beneath)
-        }
-    }
-}
-
-/// A change on the bar: how far, over what, and the expected result where
-/// there is one.
-fn change(written: Written, by: f64, noise: f64, over: &str, expected: Option<f64>) -> Markup {
-    html! {
-        div.change.plain {
-            div {
-                b { (written.signed(by)) }
-                span { (over) }
-                @if let Some(expected) = expected {
-                    span.aimed { i {} "expected " (written.signed(expected)) }
-                }
-            }
-            (detail::gauge(by, noise, expected))
-        }
     }
 }
 
@@ -434,7 +321,9 @@ fn on_the_last(macrocycle: &Macrocycle, today: Date) -> Markup {
 
 #[cfg(test)]
 mod tests {
-    use application::working::{Answering, Macrocycle, Performance, Responding, Tested, View};
+    use application::working::{
+        Answering, Body, Macrocycle, Performance, Responding, Tested, View,
+    };
     use domain::{
         analytical::{
             range::Range,
@@ -499,6 +388,7 @@ mod tests {
                             latest: Some((date(2026, 10, 25), 182)),
                             noise: 14.2,
                         }),
+                        estimated: None,
                     },
                     Performance {
                         tested: Tested::OneRepMax(RepsExercise::FrontSquatBarbell),
@@ -507,8 +397,14 @@ mod tests {
                             latest: Some((date(2026, 10, 23), 95_000)),
                             noise: 8_974.0,
                         }),
+                        estimated: None,
                     },
                 ],
+                body: Body {
+                    weight: None,
+                    fat: None,
+                    fat_free: None,
+                },
                 responses: vec![
                     Responding {
                         reading: Answering::RestingHeartRate,
@@ -604,6 +500,7 @@ mod tests {
                 Performance {
                     tested: Tested::Ftp,
                     since: None,
+                    estimated: None,
                 },
                 Performance {
                     tested: Tested::OneRepMax(RepsExercise::FrontSquatBarbell),
@@ -612,6 +509,7 @@ mod tests {
                         latest: None,
                         noise: 8_974.0,
                     }),
+                    estimated: None,
                 },
             ];
             macrocycle.responses = vec![Responding {

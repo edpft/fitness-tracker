@@ -43,7 +43,13 @@ use std::collections::BTreeMap;
 
 use jiff::civil::Date;
 
-use super::{Weighed, confidence::Noise, range::Range, recomposition::NutritionPhase};
+use super::{
+    Weighed,
+    confidence::Noise,
+    range::Range,
+    recomposition::NutritionPhase,
+    since_start::{SinceStart, since_start},
+};
 use crate::{macrocycle::Macrocycle, measure::Kg, plan::Span};
 
 /// What the trend is called, so a different method is never mistaken for it.
@@ -371,4 +377,167 @@ fn by_day(series: &[Weighed]) -> BTreeMap<Date, Vec<u64>> {
             .push(weighed.mass.as_grams());
     }
     by_day
+}
+
+/// Body weight's trend on one day, and where the plan's aims would have
+/// taken it by then.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Aimed {
+    pub trend: Trend,
+    /// In kilograms; `None` once a day falls under a mesocycle with no aim
+    /// stated, as a bulk has none.
+    pub expected: Option<f64>,
+}
+
+/// Body weight over the macrocycle so far, against the plan's aims (#769).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Weight {
+    /// Unbroken runs of the trend from the macrocycle's start, oldest first.
+    pub days: Vec<Vec<Aimed>>,
+    /// The trend's first day in the macrocycle against its latest, in
+    /// kilograms.
+    pub change: SinceStart,
+    /// The change the aims expect over the same days, in kilograms.
+    pub expected: Option<f64>,
+}
+
+/// The trend from the macrocycle that `began` on a day to `today`, and where
+/// the aims would have taken it from its first day there.
+///
+/// **Each day adds its mesocycle's aim, a seventh of a week's**, from the
+/// trend on the first day. A day no aim covers adds nothing (agreed with the
+/// operator, 2026-11-12), and a day whose aim states none leaves the rest of
+/// the line unknown. `None` where fewer than two trend days fall in it.
+#[must_use]
+pub fn against_aims(
+    trend: &[Vec<Trend>],
+    aims: &[Aim],
+    began: Date,
+    today: Date,
+) -> Option<Weight> {
+    let days: Vec<Vec<Trend>> = trend
+        .iter()
+        .map(|run| {
+            run.iter()
+                .filter(|day| day.on >= began && day.on <= today)
+                .copied()
+                .collect::<Vec<_>>()
+        })
+        .filter(|run| !run.is_empty())
+        .collect();
+    let first = *days.first()?.first()?;
+    let kg = |day: &Trend| kilograms(day.mass);
+    let change = since_start(
+        days.iter()
+            .flatten()
+            .filter_map(|day| Some((day.on, kg(day)?, day.margin))),
+        began,
+        today,
+    )?;
+    let mut expected = Some(change.from);
+    let mut on = first.on;
+    let mut aimed = Vec::new();
+    for run in &days {
+        let mut aimed_run = Vec::new();
+        for day in run {
+            while on < day.on {
+                on = on.tomorrow().ok()?;
+                expected = expected.and_then(|mass| {
+                    aims.iter()
+                        .find(|aim| aim.span.covers(on))
+                        .map_or(Some(mass), |aim| {
+                            aim.per_week.map(|per_week| mass + per_week / 7.0)
+                        })
+                });
+            }
+            aimed_run.push(Aimed {
+                trend: *day,
+                expected,
+            });
+        }
+        aimed.push(aimed_run);
+    }
+    let last = aimed.last()?.last()?.expected;
+    Some(Weight {
+        days: aimed,
+        change,
+        expected: last.map(|last| last - change.from),
+    })
+}
+
+fn kilograms(mass: Kg) -> Option<f64> {
+    u32::try_from(mass.as_grams())
+        .ok()
+        .map(|grams| f64::from(grams) / 1_000.0)
+}
+
+#[cfg(test)]
+mod against_aims_tests {
+    use jiff::civil::{Date, date};
+
+    use super::{Aim, Trend, against_aims};
+    use crate::{analytical::recomposition::NutritionPhase, measure::Kg, plan::Span};
+
+    const BEGAN: Date = date(2026, 9, 14);
+
+    fn trend(from: Date, to: Date) -> Vec<Trend> {
+        from.series(jiff::Span::new().days(1))
+            .take_while(|on| *on <= to)
+            .map(|on| Trend {
+                on,
+                mass: Kg::from_grams(84_600),
+                margin: Some(0.4),
+            })
+            .collect()
+    }
+
+    fn cut(start: Date, weeks: u32) -> Aim {
+        Aim {
+            span: Span::new(start, weeks),
+            phase: NutritionPhase::Cut,
+            per_week: Some(-0.25),
+        }
+    }
+
+    /// **Autumn 2026**: a cut from 28 September, nothing aimed in the
+    /// fortnight before it. Four weeks of the cut expect a kilogram.
+    #[test]
+    fn each_day_under_an_aim_adds_a_seventh_of_it() {
+        let today = date(2026, 10, 26);
+        let runs = vec![trend(BEGAN, today)];
+        let weight =
+            against_aims(&runs, &[cut(date(2026, 9, 28), 4)], BEGAN, today).expect("a trend");
+
+        let expected = weight.expected.expect("an aim throughout");
+        assert!((expected + 1.0).abs() < 1e-9, "{expected}");
+        let first = weight.days[0][0];
+        assert_eq!(first.expected, Some(84.6));
+        let before_the_cut = weight.days[0][14];
+        assert_eq!(before_the_cut.trend.on, date(2026, 9, 28));
+        assert!(
+            (before_the_cut.expected.expect("aimed") - (84.6 - 0.25 / 7.0)).abs() < 1e-9,
+            "{before_the_cut:?}"
+        );
+        assert!(weight.change.by().abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_mesocycle_with_no_aim_leaves_the_rest_unknown() {
+        let today = date(2026, 10, 12);
+        let bulk = Aim {
+            span: Span::new(date(2026, 9, 28), 4),
+            phase: NutritionPhase::Bulk,
+            per_week: None,
+        };
+        let weight = against_aims(&[trend(BEGAN, today)], &[bulk], BEGAN, today).expect("a trend");
+        assert_eq!(weight.expected, None);
+        assert_eq!(weight.days[0][13].expected, Some(84.6));
+        assert_eq!(weight.days[0][14].expected, None);
+    }
+
+    #[test]
+    fn no_trend_in_the_macrocycle_is_nothing_to_read() {
+        let runs = vec![trend(date(2026, 8, 1), date(2026, 9, 1))];
+        assert_eq!(against_aims(&runs, &[], BEGAN, date(2026, 11, 12)), None);
+    }
 }
