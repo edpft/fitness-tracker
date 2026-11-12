@@ -504,7 +504,7 @@ pub fn build() -> Option<&'static str> {
 }
 
 /// Where the plan stands, over this build's stores.
-fn microcycle(
+pub(crate) fn microcycle(
     pool: &infrastructure::SqlitePool,
     plans: &SqlitePlanStore,
     deliveries: &SqlitePrescriptionDeliveryStore,

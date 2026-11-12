@@ -3,8 +3,8 @@
 //!
 //! The operator, 2026-11-12: *"planning the macrocycle does plan the entire
 //! term, but the transitions from mesocycle to mesocycle are still gated, what
-//! changes is that the next mesocycle goes from being PLANNED to IN_PROGRESS
-//! when the current one goes from being IN_PROGRESS to COMPLETED."*
+//! changes is that the next mesocycle goes from being `PLANNED` to `IN_PROGRESS`
+//! when the current one goes from being `IN_PROGRESS` to `COMPLETED`."*
 //!
 //! **Written once it starts, derived while it is planned.** A mesocycle is
 //! written when it goes from planned to in progress, because things are then
@@ -19,7 +19,7 @@
 
 use jiff::civil::Date;
 
-use crate::plan::{Mesocycle, Plan, Span};
+use crate::plan::{Mesocycle, MesocycleOrdinal, Plan, Span};
 
 use super::Macrocycle;
 
@@ -52,11 +52,17 @@ impl MesocycleState {
 /// One concurrent mesocycle of the term, and where it stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlannedMesocycle<'a> {
+    ordinal: MesocycleOrdinal,
     mesocycle: Mesocycle<'a>,
     state: MesocycleState,
 }
 
 impl<'a> PlannedMesocycle<'a> {
+    /// Its number in the term: its place in this list, and nowhere else (#781).
+    pub const fn ordinal(&self) -> MesocycleOrdinal {
+        self.ordinal
+    }
+
     /// Both disciplines' halves of it.
     pub const fn mesocycle(&self) -> Mesocycle<'a> {
         self.mesocycle
@@ -113,9 +119,13 @@ impl PlannedMacrocycle {
             .mesocycle_spans()
             .into_iter()
             .filter_map(|span| self.plan.mesocycle_on(span.start()))
-            .map(|mesocycle| PlannedMesocycle {
-                mesocycle,
-                state: MesocycleState::of(mesocycle.span(), self.commencing),
+            .zip(1..)
+            .filter_map(|(mesocycle, number)| {
+                Some(PlannedMesocycle {
+                    ordinal: MesocycleOrdinal::new(number).ok()?,
+                    mesocycle,
+                    state: MesocycleState::of(mesocycle.span(), self.commencing),
+                })
             })
             .collect()
     }
@@ -144,9 +154,8 @@ mod tests {
         let earlier = Span::new(date(2026, 9, 28), 4);
         let current = Span::new(date(2026, 10, 26), 4);
         let next = Span::new(date(2026, 11, 23), 4);
-        let states = |commencing| {
-            [earlier, current, next].map(|span| MesocycleState::of(span, commencing))
-        };
+        let states =
+            |commencing| [earlier, current, next].map(|span| MesocycleState::of(span, commencing));
         assert_eq!(
             states(date(2026, 11, 9)),
             [

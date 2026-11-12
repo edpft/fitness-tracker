@@ -48,6 +48,7 @@ mod peloton_cool_down_contract;
 mod peloton_holding_selection;
 mod peloton_stack_contract;
 mod peloton_token_cache;
+mod planned_macrocycle;
 mod prescription;
 mod progression;
 mod refusals;

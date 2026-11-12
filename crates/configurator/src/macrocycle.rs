@@ -1,20 +1,68 @@
-//! The macrocycle in force, over this build's store: what Plan opens with
-//! (#770).
+//! The macrocycle as planned, over this build's store: what Plan opens with
+//! (#770, #789).
 
 use application::{
-    StoreError,
-    macrocycle::{InForce, Macrocycle},
+    commit::{CommitError, CommitPorts, Committing},
+    macrocycle::{Planned, PlanningPorts},
 };
-use domain::normalised::OperatorZone;
+use domain::{macrocycle::PlannedMacrocycle, normalised::OperatorZone, schedule::DayPart};
+use infrastructure::{
+    SqliteCanonicalCyclingSessionStore, SqliteDiaryStore, SqliteGenerationParameterStore,
+    SqlitePelotonClassStore, SqlitePlanStore, SqlitePrescriptionDeliveryStore,
+    peloton::{PelotonHoldingRides, PelotonProgrammes, catalogue::ClassCatalogue},
+};
 
-use crate::store::Store;
+use crate::{
+    holidays::{self, Calendars},
+    next::{NextFailure, microcycle},
+    store::Store,
+};
 
-/// The macrocycle in force today, `None` where no plan covers today.
+/// Why the planned macrocycle could not be read.
+#[derive(Debug, thiserror::Error)]
+pub enum PlannedFailure {
+    #[error(transparent)]
+    Wiring(#[from] NextFailure),
+    #[error(transparent)]
+    Commit(#[from] CommitError),
+}
+
+/// The macrocycle `now` falls in, as planned: `None` where the calendar does
+/// not reach it or no plan following a chain is in force.
+///
+/// **Read from the store alone.** The planned mesocycles are built from the
+/// Peloton classes already stored, as committing builds them without a login,
+/// so opening Plan reaches no source.
 ///
 /// # Errors
 ///
-/// [`StoreError`] if the store cannot be read.
-pub async fn today(store: &Store, zone: &OperatorZone) -> Result<Option<Macrocycle>, StoreError> {
-    let today = jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date();
-    InForce::new(store.plans(zone)).on(today).await
+/// [`PlannedFailure`] if the store or the school calendar cannot be read, or
+/// a planned mesocycle will not build.
+pub async fn planned(
+    store: &Store,
+    zone: &OperatorZone,
+    now: DayPart,
+) -> Result<Option<PlannedMacrocycle>, PlannedFailure> {
+    let pool = store.pool();
+    let plans = SqlitePlanStore::new(pool.clone(), zone.clone());
+    let deliveries = SqlitePrescriptionDeliveryStore::new(pool.clone());
+    let classes = SqlitePelotonClassStore::new(pool.clone());
+    let catalogue = ClassCatalogue::over(&classes, None);
+    let walk = microcycle(pool, &plans, &deliveries, holidays::term().await)?;
+    let use_case = Planned::new(PlanningPorts {
+        walk,
+        committing: Committing::new(
+            CommitPorts {
+                plans,
+                parameters: SqliteGenerationParameterStore::new(pool.clone()),
+                holding: PelotonHoldingRides::new(catalogue),
+                ridden: SqliteCanonicalCyclingSessionStore::new(pool.clone()),
+                published: PelotonProgrammes::new(catalogue),
+            },
+            zone.clone(),
+        ),
+        diary: SqliteDiaryStore::new(pool.clone()),
+        holidays: Calendars,
+    });
+    Ok(use_case.on(now).await?)
 }

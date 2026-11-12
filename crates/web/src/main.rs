@@ -686,9 +686,20 @@ async fn plan_page(State(runs): State<Arc<Runs>>) -> Markup {
     let macrocycle = match configurator::store::Store::open(&setting.database).await {
         Err(error) => Err(error.to_string()),
         Ok(store) => {
-            let read = configurator::macrocycle::today(&store, &setting.zone).await;
+            let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
+            let read = configurator::macrocycle::planned(
+                &store,
+                &setting.zone,
+                domain::schedule::DayPart::containing(here.datetime()),
+            )
+            .await;
             store.close().await;
-            read.map_err(|error| error.to_string())
+            read.map(|planned| {
+                planned
+                    .as_ref()
+                    .map(application::macrocycle::Macrocycle::from)
+            })
+            .map_err(|error| error.to_string())
         }
     };
     plan::page(&macrocycle)

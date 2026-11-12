@@ -1,4 +1,5 @@
-//! Plan: the macrocycle in force, then the inputs to planning (#770).
+//! Plan: the macrocycle as planned to the end of term (#789), then the inputs
+//! to planning (#770).
 //!
 //! The operator, 2026-11-10 (#749), on the pages under Plan: *"these are all
 //! inputs to planning but not planning themselves."* Asked whether Plan should
@@ -7,6 +8,7 @@
 use application::macrocycle::{Macrocycle, Mesocycle};
 use domain::{
     cycling::CyclingProvenance,
+    macrocycle::MesocycleState,
     prescription::{GymMesocycle, Progression},
 };
 use jiff::civil::Date;
@@ -14,8 +16,8 @@ use maud::{DOCTYPE, Markup, html};
 
 use crate::page::{self, PAGES, Place};
 
-/// The page, with the macrocycle in force today or the reason it could not be
-/// read.
+/// The page, with the macrocycle as planned today or the reason it could not
+/// be read.
 pub fn page(macrocycle: &Result<Option<Macrocycle>, String>) -> Markup {
     html! {
         (DOCTYPE)
@@ -56,8 +58,12 @@ fn row(mesocycle: &Mesocycle) -> Markup {
     let start = mesocycle.span.start();
     let last = mesocycle.span.end().yesterday().unwrap_or(start);
     html! {
-        div.mesocycle.now[mesocycle.current] {
-            p.when { "Mesocycle " (mesocycle.ordinal) " · " (day(start)) " to " (day(last)) }
+        div.mesocycle.now[mesocycle.state == MesocycleState::InProgress]
+            .planned[mesocycle.state == MesocycleState::Planned] {
+            p.when {
+                "Mesocycle " (mesocycle.ordinal) " · " (day(start)) " to " (day(last))
+                " · " (state(mesocycle.state))
+            }
             @if let Some(gym) = &mesocycle.gym {
                 p { i.dot.gym {} (gym_programme(gym)) }
             }
@@ -65,6 +71,14 @@ fn row(mesocycle: &Mesocycle) -> Markup {
                 p { i.dot.cycling {} (cycling_programme(cycling)) }
             }
         }
+    }
+}
+
+const fn state(state: MesocycleState) -> &'static str {
+    match state {
+        MesocycleState::Planned => "planned",
+        MesocycleState::InProgress => "in progress",
+        MesocycleState::Completed => "completed",
     }
 }
 
@@ -101,6 +115,7 @@ mod tests {
     use application::macrocycle::{Macrocycle, Mesocycle};
     use domain::{
         cycling::CyclingProvenance,
+        macrocycle::MesocycleState,
         plan::{MesocycleOrdinal, PlanName, Span},
         provider::{ExternalProgramme, ProgrammeName, Provider},
     };
@@ -108,7 +123,13 @@ mod tests {
 
     use super::page;
 
-    fn ridden(number: u32, start: jiff::civil::Date, weeks: u32, programme: &str) -> Mesocycle {
+    fn ridden(
+        number: u32,
+        start: jiff::civil::Date,
+        weeks: u32,
+        programme: &str,
+        state: MesocycleState,
+    ) -> Mesocycle {
         Mesocycle {
             ordinal: MesocycleOrdinal::new(number).expect("numbered from one"),
             span: Span::new(start, weeks),
@@ -117,34 +138,67 @@ mod tests {
                 Provider::try_from("Peloton").expect("a provider"),
                 ProgrammeName::try_from(programme).expect("a programme"),
             ))),
-            current: false,
+            state,
         }
     }
 
     fn autumn() -> Macrocycle {
-        let mut third = ridden(3, date(2026, 10, 26), 4, "Peak Your Power Zones");
-        third.current = true;
         Macrocycle {
             name: PlanName::try_from("2026-autumn").expect("a name"),
             mesocycles: vec![
-                ridden(1, date(2026, 9, 14), 1, "Power Zone test"),
-                ridden(2, date(2026, 9, 28), 4, "Build Your Power Zones"),
-                third,
+                ridden(
+                    1,
+                    date(2026, 9, 14),
+                    1,
+                    "Power Zone test",
+                    MesocycleState::Completed,
+                ),
+                ridden(
+                    2,
+                    date(2026, 9, 28),
+                    4,
+                    "Build Your Power Zones",
+                    MesocycleState::Completed,
+                ),
+                ridden(
+                    3,
+                    date(2026, 10, 26),
+                    4,
+                    "Peak Your Power Zones",
+                    MesocycleState::InProgress,
+                ),
+                ridden(
+                    4,
+                    date(2026, 11, 23),
+                    4,
+                    "Peak Your Power Zones",
+                    MesocycleState::Planned,
+                ),
             ],
         }
     }
 
-    /// **The card comes first, each mesocycle with its days and programme,
-    /// the running one marked**, then the inputs (#770).
+    /// **The card comes first, each mesocycle of the term with its days,
+    /// programme and state, the running one marked and the planned ones drawn
+    /// as planned**, then the inputs (#770, #789).
     #[test]
     fn plan_opens_with_the_macrocycle() {
         let shown = page(&Ok(Some(autumn()))).into_string();
 
         assert!(shown.contains("2026-autumn"), "{shown}");
-        assert!(shown.contains("Mesocycle 1 · 14 Sep to 20 Sep"), "{shown}");
+        assert!(
+            shown.contains("Mesocycle 1 · 14 Sep to 20 Sep · completed"),
+            "{shown}"
+        );
         assert!(
             shown.contains(
-                r#"<div class="mesocycle now"><p class="when">Mesocycle 3 · 26 Oct to 22 Nov"#
+                r#"<div class="mesocycle now"><p class="when">Mesocycle 3 · 26 Oct to 22 Nov · in progress"#
+            ),
+            "{shown}"
+        );
+        assert!(
+            shown.contains(
+                r#"<div class="mesocycle planned"><p class="when">Mesocycle 4 · 23 Nov to 20 Dec · planned"#
             ),
             "{shown}"
         );

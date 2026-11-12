@@ -90,8 +90,8 @@ pub fn curves(planned: &PlannedMacrocycle, lost: impl Fn(Discipline, Date) -> bo
         Week {
             monday,
             on,
-            planned: planned.state_on(monday).map_or(
-                monday >= planned.commencing(),
+            planned: planned.state_on(monday).map_or_else(
+                || monday >= planned.commencing(),
                 |state| state == MesocycleState::Planned,
             ),
         }
