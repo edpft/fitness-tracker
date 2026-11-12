@@ -29,6 +29,7 @@ pub mod extract;
 pub mod fills;
 pub mod ftp_tests;
 pub mod heart_rate;
+pub mod history;
 pub mod holding;
 pub mod macrocycle;
 pub mod microcycle;
@@ -67,15 +68,15 @@ pub use ports::{
     NormalisedCyclingSessionReader, NormalisedEntityStore, NormalisedGymSessionReader,
     NormalisedLayers, NormalisedWeighInReader, Occupant, OvernightHrvHistory, Part, Performance,
     PerformedCyclingSessions, PerformedGymSessions, PerformedSessionLog, PerformedSetSummary,
-    Placed, PlanAuthor, PlanStore, PlannedWith, PrescribedWorkoutId, PrescribedWorkoutStore,
-    Prescription, PrescriptionDeliverer, PrescriptionDeliveryStore, PrescriptionDestination,
-    PrescriptionLifecycle, ProgressionStore, PublishedCell, PublishedCycling, PublishedProgrammes,
-    PublishedRead, PulseWaveVelocityHistory, RawExtent, Reached, ReadUpTo, Reading,
-    RecordedDevices, Rederivation, RefusalReport, RefusalReporter, RefusalStore, RenderingDigest,
-    ReplyStatus, RestingHeartRateHistory, ResumptionPointResetter, ResumptionPointStore,
-    RiddenSession, RiddenSessionLog, RiddenVenues, RideDestination, RidesPlaced, RunLock,
-    RunSummary, SessionOrdinal, SleepHistory, SourceAccount, SourceEvent, StreamStatus,
-    StressHistory, Taken, Terms, TrainingDone, Translation, Translator, UnderivableReason,
-    UnderivableSlot, Unexpressed, WearRecord, WeighInHistory, WorkoutEventSource, WorkoutExtractor,
-    WorkoutNormaliser, WorkoutPrescriber, WorkoutStore,
+    Placed, PlanAuthor, PlanStore, PlannedWith, PlayedPadelGame, PlayedPadelGames,
+    PrescribedWorkoutId, PrescribedWorkoutStore, Prescription, PrescriptionDeliverer,
+    PrescriptionDeliveryStore, PrescriptionDestination, PrescriptionLifecycle, ProgressionStore,
+    PublishedCell, PublishedCycling, PublishedProgrammes, PublishedRead, PulseWaveVelocityHistory,
+    RawExtent, Reached, ReadUpTo, Reading, RecordedDevices, Rederivation, RefusalReport,
+    RefusalReporter, RefusalStore, RenderingDigest, ReplyStatus, RestingHeartRateHistory,
+    ResumptionPointResetter, ResumptionPointStore, RiddenSession, RiddenSessionLog, RiddenVenues,
+    RideDestination, RidesPlaced, RunLock, RunSummary, SessionOrdinal, SleepHistory, SourceAccount,
+    SourceEvent, StreamStatus, StressHistory, Taken, Terms, TrainingDone, Translation, Translator,
+    UnderivableReason, UnderivableSlot, Unexpressed, WearRecord, WeighInHistory,
+    WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber, WorkoutStore,
 };

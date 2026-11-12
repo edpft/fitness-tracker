@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT started_at_utc AS \"started_at!: String\",\n                   zone AS \"zone!: String\",\n                   duration_seconds AS \"duration!: i64\",\n                   average_bpm, highest_bpm\n            FROM padel_game\n            ORDER BY started_at_utc, landing_record_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "started_at!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "padel_game",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "padel_game",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "duration!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "padel_game",
+            "name": "duration_seconds"
+          }
+        }
+      },
+      {
+        "name": "average_bpm",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "padel_game",
+            "name": "average_bpm"
+          }
+        }
+      },
+      {
+        "name": "highest_bpm",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "padel_game",
+            "name": "highest_bpm"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "95169a6911e5e509f0688ed1087e0ee7c7acfc5444c7cb4149ec2ce225e04417"
+}

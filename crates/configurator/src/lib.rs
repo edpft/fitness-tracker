@@ -20,6 +20,7 @@ pub mod equipment;
 pub mod fills;
 pub mod ftp_tests;
 pub mod heart_rate;
+pub mod history;
 pub mod holidays;
 pub mod macrocycle;
 pub mod next;

@@ -33,23 +33,24 @@ pub fn index(view: &View) -> Markup {
 /// The places the bar takes him between (#768), in the order it shows them.
 ///
 /// The operator, 2026-11-10 (#749): *"I like the idea of a bottom bar and
-/// today, progress, plan, and history make sense."* History joins when its
-/// page does (#772).
+/// today, progress, plan, and history make sense."*
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Place {
     Today,
     Progress,
     Plan,
+    History,
 }
 
 impl Place {
-    pub const ALL: [Self; 3] = [Self::Today, Self::Progress, Self::Plan];
+    pub const ALL: [Self; 4] = [Self::Today, Self::Progress, Self::Plan, Self::History];
 
     pub const fn path(self) -> &'static str {
         match self {
             Self::Today => "/",
             Self::Progress => "/progress",
             Self::Plan => "/plan",
+            Self::History => "/history",
         }
     }
 
@@ -58,14 +59,21 @@ impl Place {
             Self::Today => "Today",
             Self::Progress => "Progress",
             Self::Plan => "Plan",
+            Self::History => "History",
         }
     }
 
-    /// The place `here` is in: the place itself, or the one its page is under.
+    /// The place `here` is in: the place itself, the one its page is under,
+    /// or History for a session opened from it.
     fn of(here: &str) -> Self {
         Self::ALL
             .into_iter()
             .find(|place| place.path() == here)
+            .or_else(|| {
+                here.strip_prefix(Self::History.path())
+                    .filter(|rest| rest.starts_with('/'))
+                    .map(|_| Self::History)
+            })
             .or_else(|| {
                 PAGES
                     .iter()
@@ -290,13 +298,13 @@ pub const STYLESHEET: &str = "/style.css";
 mod tests {
     use super::{PAGES, Place, bar, header};
 
-    /// **The bar is the three places, the one a page is under marked**, and
-    /// no pill (#768).
+    /// **The bar is the four places, the one a page is under marked**, and
+    /// no pill (#768, #772).
     #[test]
     fn the_bar_marks_the_place_a_page_is_opened_from() {
         let shown = bar("/body-weight").into_string();
 
-        assert_eq!(shown.matches("<a ").count(), 3, "{shown}");
+        assert_eq!(shown.matches("<a ").count(), 4, "{shown}");
         assert!(
             shown.contains(r#"<a href="/progress" aria-current="true">Progress</a>"#),
             "{shown}"
@@ -325,6 +333,12 @@ mod tests {
         assert!(
             schedule.contains(r#"<a href="/plan" aria-label="Plan">‹</a>"#),
             "{schedule}"
+        );
+
+        let session = header("/history/2026-10-30/1", "Gym session").into_string();
+        assert!(
+            session.contains(r#"<a href="/history" aria-label="History">‹</a>"#),
+            "{session}"
         );
     }
 

@@ -1592,6 +1592,28 @@ pub trait PerformedSessionLog {
     ) -> impl Future<Output = Result<Vec<Occurred>, StoreError>> + Send;
 }
 
+/// One padel game, as History shows it (#772): when it started, how long it
+/// took, and the heart rate the watch stated over it.
+///
+/// **A projection, for [`WeighInHistory`]'s reason**: the game's landing
+/// record and provenance have no reader here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayedPadelGame {
+    pub started_at: domain::normalised::StartedAt,
+    pub duration: PositiveDuration,
+    pub heart_rate: Option<domain::measure::HeartRateSummary>,
+}
+
+/// Every padel game the normalised layer holds, which only the watch records.
+pub trait PlayedPadelGames {
+    /// Oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn all(&self) -> impl Future<Output = Result<Vec<PlayedPadelGame>, StoreError>> + Send;
+}
+
 /// One cycling session the record holds, and the classes it was ridden to.
 ///
 /// **The join § 11 exists for.** A [`RideVenue`] names a place a ride is *to
