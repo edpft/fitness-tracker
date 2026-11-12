@@ -52,11 +52,8 @@ pub fn page(here: &str, title: &str, body: &Markup) -> Markup {
             head { (crate::page::head(title, &[])) }
             body {
                 main {
-                    (crate::page::menu(here))
-                    header.detail {
-                        a href="/" aria-label="Home" { "‹" }
-                        h1 { (title) }
-                    }
+                    (crate::page::bar(here))
+                    (crate::page::header(here, title))
                     (body)
                 }
             }

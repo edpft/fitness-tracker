@@ -48,6 +48,7 @@ use maud::{Markup, PreEscaped};
 use tokio_stream::{Stream, StreamExt as _, wrappers::WatchStream};
 use tracing::Instrument as _;
 
+use page::Place;
 use run::{Asked, Runs, Setting};
 
 fn main() -> std::process::ExitCode {
@@ -150,6 +151,14 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route_layer(middleware::from_fn(recorded));
     let app = Router::new()
         .route("/", get(index))
+        .route(
+            Place::Progress.path(),
+            get(|| async { page::place(Place::Progress) }),
+        )
+        .route(
+            Place::Plan.path(),
+            get(|| async { page::place(Place::Plan) }),
+        )
         .merge(charts)
         .route("/equipment", get(equipment_page).post(equipment_post))
         .route(schedule::HERE, get(schedule_page).post(schedule_post))

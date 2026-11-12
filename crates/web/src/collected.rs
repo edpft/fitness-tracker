@@ -39,17 +39,17 @@ fn chart(path: &str) -> Option<Result<Scope, WiringError>> {
     })
 }
 
-/// The sessions first, then the charts in the menu's order.
+/// The sessions first, then the charts in the order Progress lists them.
 fn rows() -> Vec<Row> {
     let sessions = Discipline::ALL.iter().map(|discipline| Row {
         name: format!("{} sessions", capitalised(discipline.as_str())),
         path: None,
         reads: configurator::next::prescribed_from(*discipline),
     });
-    let charts = PAGES.iter().filter_map(|(path, name)| {
-        chart(path).map(|reads| Row {
-            name: (*name).to_owned(),
-            path: Some(path),
+    let charts = PAGES.iter().filter_map(|page| {
+        chart(page.path).map(|reads| Row {
+            name: page.name.to_owned(),
+            path: Some(page.path),
             reads,
         })
     });
@@ -135,7 +135,7 @@ mod tests {
             rows.len(),
             2 + PAGES
                 .iter()
-                .filter(|(path, _)| chart(path).is_some())
+                .filter(|page| chart(page.path).is_some())
                 .count()
         );
         assert_eq!(rows.len(), 12, "{names:?}");

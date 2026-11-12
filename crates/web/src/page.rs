@@ -14,59 +14,149 @@ pub fn index(view: &View) -> Markup {
         (DOCTYPE)
         html lang="en" {
             head {
-                (head("Home", &[]))
+                (head(Place::Today.name(), &[]))
                 script src="/htmx.min.js" {}
                 script src="/sse.min.js" {}
             }
             body {
                 main {
-                    (menu("/"))
                     div.home hx-ext="sse" sse-connect="/run/events" sse-swap="run" {
                         (view.render())
                     }
+                    (bar(Place::Today.path()))
                 }
             }
         }
     }
 }
 
-/// Every page, in the order the menu lists them: the home page, then the rest
-/// as the home page used to list them.
-pub const PAGES: [(&str, &str); 15] = [
-    ("/", "Home"),
-    ("/working", "Is what I'm doing working?"),
-    ("/heart-rate", "Heart rate per power zone"),
-    ("/ftp", "FTP tests"),
-    ("/body-weight", "Body weight"),
-    ("/body-composition", "Body composition"),
-    ("/resting-heart-rate", "Resting heart rate"),
-    ("/hrv", "Overnight HRV"),
-    ("/pulse-wave-velocity", "Pulse wave velocity"),
-    ("/sleep", "Sleep"),
-    ("/estimated-1rm", "Estimated 1RM"),
-    ("/workouts", "Workouts"),
-    ("/schedule", "Schedule"),
-    ("/fills", "Fills"),
-    ("/equipment", "Equipment"),
+/// The places the bar takes him between (#768), in the order it shows them.
+///
+/// The operator, 2026-11-10 (#749): *"I like the idea of a bottom bar and
+/// today, progress, plan, and history make sense."* History joins when its
+/// page does (#772).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    Today,
+    Progress,
+    Plan,
+}
+
+impl Place {
+    pub const ALL: [Self; 3] = [Self::Today, Self::Progress, Self::Plan];
+
+    pub const fn path(self) -> &'static str {
+        match self {
+            Self::Today => "/",
+            Self::Progress => "/progress",
+            Self::Plan => "/plan",
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Today => "Today",
+            Self::Progress => "Progress",
+            Self::Plan => "Plan",
+        }
+    }
+
+    /// The place `here` is in: the place itself, or the one its page is under.
+    fn of(here: &str) -> Self {
+        Self::ALL
+            .into_iter()
+            .find(|place| place.path() == here)
+            .or_else(|| {
+                PAGES
+                    .iter()
+                    .find(|page| page.path == here)
+                    .map(|page| page.place)
+            })
+            .unwrap_or(Self::Today)
+    }
+}
+
+/// A page, and the place it is opened from.
+pub struct Page {
+    pub path: &'static str,
+    pub name: &'static str,
+    pub place: Place,
+}
+
+const fn page(path: &'static str, name: &'static str, place: Place) -> Page {
+    Page { path, name, place }
+}
+
+/// Every page, in the order its place lists them.
+pub const PAGES: [Page; 15] = [
+    page("/", "Today", Place::Today),
+    page("/working", "Is what I'm doing working?", Place::Progress),
+    page("/heart-rate", "Heart rate per power zone", Place::Progress),
+    page("/ftp", "FTP tests", Place::Progress),
+    page("/body-weight", "Body weight", Place::Progress),
+    page("/body-composition", "Body composition", Place::Progress),
+    page("/resting-heart-rate", "Resting heart rate", Place::Progress),
+    page("/hrv", "Overnight HRV", Place::Progress),
+    page(
+        "/pulse-wave-velocity",
+        "Pulse wave velocity",
+        Place::Progress,
+    ),
+    page("/sleep", "Sleep", Place::Progress),
+    page("/estimated-1rm", "Estimated 1RM", Place::Progress),
+    page("/workouts", "Workouts", Place::Plan),
+    page("/fills", "Fills", Place::Plan),
+    page("/schedule", "Schedule", Place::Plan),
+    page("/equipment", "Equipment", Place::Plan),
 ];
 
-/// The menu every page carries (#500), the page it is on marked.
-///
-/// **One list, so every page links to every other.** The operator,
-/// 2026-10-19: *"the menu is only available on the main page, all other pages
-/// have to go back to the menu to navigate"*. And on the page the menu used to
-/// live on, *"the main page is called run next, which is confusing"*, so here
-/// it is the home page.
-///
-/// **It wraps rather than scrolls**, so it fits a phone held upright.
-pub fn menu(here: &str) -> Markup {
+/// The bar fixed to the bottom of every page (#768), the place it is in
+/// marked: as the page itself on the place, as where it was opened from on a
+/// page under it.
+pub fn bar(here: &str) -> Markup {
+    let current = Place::of(here);
     html! {
-        nav.menu aria-label="Pages" {
-            @for (path, name) in PAGES {
-                @if path == here {
-                    a href=(path) aria-current="page" { (name) }
+        nav.places aria-label="Places" {
+            @for place in Place::ALL {
+                @if place.path() == here {
+                    a href=(place.path()) aria-current="page" { (place.name()) }
+                } @else if place == current {
+                    a href=(place.path()) aria-current="true" { (place.name()) }
                 } @else {
-                    a href=(path) { (name) }
+                    a href=(place.path()) { (place.name()) }
+                }
+            }
+        }
+    }
+}
+
+/// A page's name, after a ‹ back to the place it is opened from.
+pub fn header(here: &str, title: &str) -> Markup {
+    let place = Place::of(here);
+    html! {
+        header.detail {
+            a href=(place.path()) aria-label=(place.name()) { "‹" }
+            h1 { (title) }
+        }
+    }
+}
+
+/// A place other than Today: the pages under it, as plain links until its
+/// own issue gives it more (#769, #770).
+pub fn place(place: Place) -> Markup {
+    html! {
+        (DOCTYPE)
+        html lang="en" {
+            head { (head(place.name(), &[])) }
+            body {
+                main {
+                    h1 { (place.name()) }
+                    ul.pages {
+                        @for page in PAGES.iter().filter(|page| page.place == place) {
+                            li { a href=(page.path) { (page.name) } }
+                        }
+                    }
+                    (bar(place.path()))
                 }
             }
         }
@@ -103,8 +193,8 @@ pub fn following(run: &View) -> Markup {
 pub fn collecting(here: &str, run: &View) -> Markup {
     let title = PAGES
         .iter()
-        .find(|(path, _)| *path == here)
-        .map_or(here, |(_, name)| name);
+        .find(|page| page.path == here)
+        .map_or(here, |page| page.name);
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -112,10 +202,10 @@ pub fn collecting(here: &str, run: &View) -> Markup {
             body {
                 (following(run))
                 main {
-                    (menu(here))
-                    h1 { (title) }
+                    (header(here, title))
                     p.collecting { "Collecting what this page shows…" }
                     (redrawing())
+                    (bar(here))
                 }
             }
         }
@@ -164,21 +254,65 @@ pub const STYLESHEET: &str = "/style.css";
 
 #[cfg(test)]
 mod tests {
-    use super::{PAGES, menu};
+    use super::{PAGES, Place, bar, header, place};
 
-    /// **Every page is in the menu, the one it is on marked, and the main
-    /// page is the home page** (#500).
+    /// **The bar is the three places, the one a page is under marked**, and
+    /// no pill (#768).
     #[test]
-    fn the_menu_lists_every_page_and_marks_the_one_it_is_on() {
-        let shown = menu("/hrv").into_string();
+    fn the_bar_marks_the_place_a_page_is_opened_from() {
+        let shown = bar("/body-weight").into_string();
 
-        assert_eq!(shown.matches("<a ").count(), PAGES.len(), "{shown}");
+        assert_eq!(shown.matches("<a ").count(), 3, "{shown}");
         assert!(
-            shown.contains(r#"<a href="/hrv" aria-current="page">Overnight HRV</a>"#),
+            shown.contains(r#"<a href="/progress" aria-current="true">Progress</a>"#),
             "{shown}"
         );
         assert_eq!(shown.matches("aria-current").count(), 1, "{shown}");
-        assert!(shown.contains(r#"<a href="/">Home</a>"#), "{shown}");
-        assert!(!shown.contains("Run next"), "{shown}");
+        assert!(!shown.contains("menu"), "{shown}");
+
+        let on_plan = bar("/plan").into_string();
+        assert!(
+            on_plan.contains(r#"<a href="/plan" aria-current="page">Plan</a>"#),
+            "{on_plan}"
+        );
+    }
+
+    /// **‹ returns to the place a page is opened from**: Body weight to
+    /// Progress, Schedule to Plan (#768).
+    #[test]
+    fn back_returns_to_the_place() {
+        let weight = header("/body-weight", "Body weight").into_string();
+        assert!(
+            weight.contains(r#"<a href="/progress" aria-label="Progress">‹</a>"#),
+            "{weight}"
+        );
+
+        let schedule = header("/schedule", "Schedule").into_string();
+        assert!(
+            schedule.contains(r#"<a href="/plan" aria-label="Plan">‹</a>"#),
+            "{schedule}"
+        );
+    }
+
+    /// **Every page the pills reached is still reachable**: Today is the home
+    /// page, and every other page is listed by its place.
+    #[test]
+    fn every_page_is_reachable_from_a_place() {
+        let listed: String = [Place::Progress, Place::Plan]
+            .into_iter()
+            .map(|one| place(one).into_string())
+            .collect();
+
+        for page in &PAGES {
+            if page.place == Place::Today {
+                assert_eq!(page.path, Place::Today.path());
+            } else {
+                assert!(
+                    listed.contains(&format!(r#"<a href="{}">"#, page.path)),
+                    "{} is on no place",
+                    page.path
+                );
+            }
+        }
     }
 }

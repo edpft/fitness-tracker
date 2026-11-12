@@ -61,7 +61,7 @@ pub fn unreadable(error: &str) -> Markup {
             head { (crate::page::head(TITLE, &[])) }
             body {
                 main {
-                    (crate::page::menu(HERE))
+                    (crate::page::bar(HERE))
                     p.failed { "the store could not be read: " (error) }
                 }
             }
