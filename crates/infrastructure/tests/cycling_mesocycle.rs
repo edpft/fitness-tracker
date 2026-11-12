@@ -622,3 +622,40 @@ fn an_illness_that_week_eases_the_surviving_wednesday() {
         "the Sunday was lost to illness, so the Wednesday rides the easier class"
     );
 }
+
+/// **A recovery week round trips as the programme's recovery week** (#336):
+/// named by its kind and its provider, never as microcycles of it, so it
+/// cannot read back as Peak's own week 4.
+#[test]
+fn a_recovery_week_round_trips_as_its_kind() {
+    let (opened, _directory) = opened!();
+    let Ok(rides) = holding(date(2026, 12, 21)) else {
+        panic!("the fixture rides are valid")
+    };
+    let (Ok(provider), Ok(name)) = (
+        Provider::try_from("Peloton".to_owned()),
+        ProgrammeName::try_from("Peak Your Power Zones".to_owned()),
+    ) else {
+        panic!("the fixture programme is valid")
+    };
+    let peak = ExternalProgramme::new(provider, name);
+    let Ok(authored) = CyclingMesocycle::new(
+        CyclingProvenance::Recovery(peak.clone()),
+        rides.start(),
+        rides.microcycles().clone(),
+    ) else {
+        panic!("a recovery week of rides naming no published week is valid")
+    };
+    let Ok(plan) = plan("autumn", vec![authored.clone()]) else {
+        panic!("the fixture plan is valid")
+    };
+
+    run!(author(&opened, &plan));
+
+    let Some((_, _, read_back)) = run!(opened.cycling.on(date(2026, 12, 23))) else {
+        panic!("the recovery week covers the Wednesday")
+    };
+    assert_eq!(read_back, authored, "exactly as authored");
+    assert_eq!(read_back.provenance(), &CyclingProvenance::Recovery(peak));
+    assert_eq!(read_back.provided_from(), None, "no microcycles of Peak");
+}

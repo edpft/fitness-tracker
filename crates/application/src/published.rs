@@ -212,6 +212,56 @@ pub fn build(
     sessions: &[u32],
     riding_days: &[Weekday],
 ) -> Result<CyclingMesocycle, BuildError> {
+    built(
+        CyclingProvenance::Provided(read.from.clone()),
+        start,
+        read,
+        microcycles,
+        sessions,
+        riding_days,
+    )
+}
+
+/// A recovery mesocycle of `weeks`, each the recovery week the programme
+/// provides ([`recovery_of`]), recorded as that and not as microcycles of it
+/// (#336).
+///
+/// # Errors
+///
+/// [`BuildError`] as [`build`], and where the programme provides no recovery
+/// week.
+pub fn recovery(
+    start: Date,
+    read: &PublishedRead,
+    weeks: usize,
+    sessions: usize,
+    riding_days: &[Weekday],
+) -> Result<CyclingMesocycle, BuildError> {
+    let (deload, sessions) = recovery_of(read, sessions).ok_or_else(|| {
+        BuildError::Source(SourceError::Malformed {
+            detail: format!("{} provides no recovery week", read.from.name()),
+        })
+    })?;
+    built(
+        CyclingProvenance::Recovery(read.from.clone()),
+        start,
+        read,
+        &vec![deload; weeks],
+        &sessions,
+        riding_days,
+    )
+}
+
+/// The rides of `microcycles`, under `provenance`: each says where it was
+/// published only where the mesocycle is microcycles of the programme.
+fn built(
+    provenance: CyclingProvenance,
+    start: Date,
+    read: &PublishedRead,
+    microcycles: &[u32],
+    sessions: &[u32],
+    riding_days: &[Weekday],
+) -> Result<CyclingMesocycle, BuildError> {
     if riding_days.len() < sessions.len() {
         return Err(BuildError::TooFewDays {
             days: riding_days.len(),
@@ -258,15 +308,24 @@ pub fn build(
             } else {
                 EASIER
             };
-            let published =
-                PublishedAt::new(*number, session).map_err(|error| unbuildable(&error))?;
-            rides.insert(position, PlannedRide::provided(ride, at, published, role));
+            let planned = match provenance {
+                CyclingProvenance::Provided(_) => PlannedRide::provided(
+                    ride,
+                    at,
+                    PublishedAt::new(*number, session).map_err(|error| unbuildable(&error))?,
+                    role,
+                ),
+                CyclingProvenance::Assembled | CyclingProvenance::Recovery(_) => {
+                    PlannedRide::assembled(ride, at, role)
+                }
+            };
+            rides.insert(position, planned);
         }
         weeks.push(CyclingMicrocycle::new(rides).map_err(|error| unbuildable(&error))?);
     }
 
     CyclingMesocycle::new(
-        CyclingProvenance::Provided(read.from.clone()),
+        provenance,
         start,
         NonEmpty::new(weeks).map_err(|error| unbuildable(&error))?,
     )

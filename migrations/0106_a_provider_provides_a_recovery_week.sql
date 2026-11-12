@@ -88,4 +88,7 @@ ALTER TABLE gym_mesocycle_rebuilt RENAME TO gym_mesocycle;
 
 CREATE INDEX gym_mesocycle_start ON gym_mesocycle(start_date);
 
+ALTER TABLE cycling_mesocycle ADD COLUMN week TEXT
+    CHECK (week IS NULL OR (week = 'recovery' AND provider IS NOT NULL));
+
 PRAGMA foreign_keys = ON;

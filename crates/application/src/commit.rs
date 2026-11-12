@@ -14,7 +14,7 @@ use domain::planner::Arrangement as _;
 use std::num::NonZeroU32;
 
 use domain::{
-    cycling::CyclingMesocycle,
+    cycling::{CyclingMesocycle, CyclingProvenance},
     macrocycle::{Concurrent, Cycling, Gym, Macrocycle, PlannedMacrocycle, Whole},
     normalised::OperatorZone,
     plan::{Plan, Span},
@@ -411,17 +411,12 @@ where
             .and_then(|from| published.which(from.programme()))
             .ok_or_else(nothing)?;
         let read = published.read(which).await?;
-        let (deload, sessions) = published::recovery_of(&read, SESSIONS).ok_or_else(|| {
-            CommitError::Source(SourceError::Malformed {
-                detail: format!("{} offers no recovery week", read.from.name()),
-            })
-        })?;
         let weeks = usize::try_from(weeks).map_err(|error| unbuildable(&error))?;
-        Ok(vec![published::build(
+        Ok(vec![published::recovery(
             start,
             &read,
-            &vec![deload; weeks],
-            &sessions,
+            weeks,
+            SESSIONS,
             riding_days,
         )?])
     }
@@ -566,6 +561,9 @@ pub fn cycling_kind(
     mesocycle: &CyclingMesocycle,
     which: impl Fn(&ExternalProgramme) -> Option<PublishedCycling>,
 ) -> Option<Cycling> {
+    if matches!(mesocycle.provenance(), CyclingProvenance::Recovery(_)) {
+        return Some(Cycling::Recovery);
+    }
     let Some(provided) = mesocycle.provided_from() else {
         let holding = u32::try_from(mesocycle.duration_weeks()).ok()?;
         return Some(Cycling::Hold { holding });

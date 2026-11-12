@@ -439,6 +439,17 @@ pub enum CyclingProvenance {
     /// microcycle, and a re-authoring has nothing to ask for. What the classes
     /// are is recorded where it belongs — in the venues each ride names.
     Assembled,
+    /// The recovery week a published programme provides (#336), taken every
+    /// week of a recovery mesocycle.
+    ///
+    /// **Recorded by its kind and its provider, never as microcycles of it.**
+    /// The operator, 2026-11-12: *"My idea was that mesocycle providers could
+    /// provide there usual mesocycles but also stand alone test or recovery
+    /// weeks, so that they handle the logic for deciding which is an
+    /// appropriate test or recovery week."* Which of its weeks the programme
+    /// chose is its business; calling the result week 4 of Peak would make it
+    /// indistinguishable from Peak's own week 4.
+    Recovery(ExternalProgramme),
 }
 
 impl CyclingProvenance {
@@ -447,7 +458,7 @@ impl CyclingProvenance {
     pub const fn programme(&self) -> Option<&ExternalProgramme> {
         match self {
             Self::Provided(programme) => Some(programme),
-            Self::Assembled => None,
+            Self::Assembled | Self::Recovery(_) => None,
         }
     }
 }
@@ -457,6 +468,7 @@ impl std::fmt::Display for CyclingProvenance {
         match self {
             Self::Provided(programme) => write!(f, "{programme}"),
             Self::Assembled => f.write_str("a holding microcycle"),
+            Self::Recovery(programme) => write!(f, "recovery week of {programme}"),
         }
     }
 }
@@ -530,7 +542,7 @@ impl CyclingMesocycle {
                 })?;
                 ProvidedFrom::new(programme.clone(), published)?;
             }
-            CyclingProvenance::Assembled => {
+            CyclingProvenance::Assembled | CyclingProvenance::Recovery(_) => {
                 if ordinals.iter().any(Option::is_some) {
                     return Err(InvalidCyclingMesocycle::ProvenanceDiffers {
                         says: "assembled here",

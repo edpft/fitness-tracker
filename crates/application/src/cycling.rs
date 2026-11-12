@@ -19,8 +19,8 @@
 use domain::planner::Arrangement as _;
 use domain::{
     cycling::{
-        CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide, Ftp, PlannedRide,
-        RideVenue, SessionPosition,
+        CyclingMesocycle, CyclingMesocycleId, CyclingProvenance, CyclingSession, DeliveredRide,
+        Ftp, PlannedRide, RideVenue, SessionPosition,
     },
     measure::PositiveDuration,
     planner,
@@ -375,7 +375,17 @@ where
         let (mesocycle, due) = next_ride(&store, from, &week, diary, &missed).await?;
 
         let (next, published) = match due {
-            Due::Ride(next) => (next, mesocycle.programme().map(|from| from.name().clone())),
+            // A recovery week's ride is its provider's (#336), not a holding
+            // ride chosen here.
+            Due::Ride(next) => {
+                let published = match mesocycle.provenance() {
+                    CyclingProvenance::Provided(from) | CyclingProvenance::Recovery(from) => {
+                        Some(from.name().clone())
+                    }
+                    CyclingProvenance::Assembled => None,
+                };
+                (next, published)
+            }
             Due::Holding(day) => (
                 crate::holding::ride(&self.ports.holding, &self.ports.ridden, day).await?,
                 None,
