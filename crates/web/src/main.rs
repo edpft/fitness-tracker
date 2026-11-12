@@ -14,6 +14,7 @@ mod detail;
 mod equipment;
 mod fills;
 mod ftp;
+mod history;
 mod hrv;
 mod input;
 mod one_rep_max;
@@ -35,7 +36,7 @@ use std::{collections::HashMap, convert::Infallible, net::SocketAddr, path::Path
 
 use axum::{
     Form, Router,
-    extract::{Query, Request, State},
+    extract::{Path, Query, Request, State},
     http::{HeaderMap, header},
     middleware::{self, Next},
     response::{
@@ -151,6 +152,8 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route(one_rep_max::PATH, get(estimated_one_rep_max))
         .route(working::PATH, get(is_it_working))
         .route(progress::PATH, get(progress_page))
+        .route(Place::History.path(), get(history_page))
+        .route("/history/{on}/{number}", get(session_page))
         .route_layer(middleware::from_fn(recorded));
     let app = Router::new()
         .route("/", get(index))
@@ -681,6 +684,64 @@ async fn equipment_shown(runs: &Runs, refused: Option<&equipment::Refused<'_>>) 
 }
 
 /// Plan: the macrocycle in force, then the inputs to planning (#770).
+/// History, read afresh from the store once a run has collected what it
+/// reads (#772).
+async fn history_page(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
+    let collects = configurator::history::collects();
+    let run = opened(&runs, &headers, only(&collects)).await;
+    drawn(&runs, &collects, Place::History.path(), None, &run, async {
+        let setting = runs.setting();
+        let today = jiff::Timestamp::now()
+            .to_zoned(setting.zone.as_time_zone())
+            .date();
+        let days = match configurator::store::Store::open(&setting.database).await {
+            Err(error) => Err(error.to_string()),
+            Ok(store) => {
+                let days = configurator::history::days(&store, &setting.zone).await;
+                store.close().await;
+                days.map_err(|error| error.to_string())
+            }
+        };
+        history::page(&days, today)
+    })
+    .await
+}
+
+/// One session opened from History (#772): the `number`th done `on`.
+///
+/// **No run of its own**: History started one as it was opened, and this
+/// waits on it as any page reading the same layers does.
+async fn session_page(
+    State(runs): State<Arc<Runs>>,
+    Path((on, number)): Path<(String, String)>,
+) -> Response {
+    let (Ok(on), Some(number)) = (
+        on.parse::<jiff::civil::Date>(),
+        number
+            .parse::<usize>()
+            .ok()
+            .and_then(|number| application::history::Number::try_from(number).ok()),
+    ) else {
+        return Redirect::to(Place::History.path()).into_response();
+    };
+    let here = history::address(on, number);
+    let collects = configurator::history::collects();
+    let run = runs.view();
+    drawn(&runs, &collects, &here, None, &run, async {
+        let session = match configurator::store::Store::open(&runs.setting().database).await {
+            Err(error) => Err(error.to_string()),
+            Ok(store) => {
+                let session = configurator::history::session(&store, on, number).await;
+                store.close().await;
+                session.map_err(|error| error.to_string())
+            }
+        };
+        history::session(&here, on, &session)
+    })
+    .await
+    .into_response()
+}
+
 async fn plan_page(State(runs): State<Arc<Runs>>) -> Markup {
     let setting = runs.setting();
     let macrocycle = match configurator::store::Store::open(&setting.database).await {
