@@ -302,8 +302,8 @@ pub enum Cycling {
 
 /// How many weeks a recovery mesocycle runs, in either discipline (#336).
 ///
-/// The operator, 2026-10-02: *"a 2 week recovery-focused mesocycle, which I can
-/// run over Chrsitmas, Easter, and at the start and end of Summer"*.
+/// The operator, 2026-10-02: *"a 2 week recovery-focused mesocycle"*, for
+/// Christmas, Easter, and the start and end of Summer.
 pub const RECOVERY_WEEKS: u32 = 2;
 
 /// A published programme we split into two mesocycles, taken whole.
