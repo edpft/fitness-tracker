@@ -18,6 +18,7 @@ mod hrv;
 mod input;
 mod one_rep_max;
 mod page;
+mod progress;
 mod pulse_wave_velocity;
 mod range;
 mod report;
@@ -148,13 +149,10 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/sleep", get(sleep_page))
         .route(one_rep_max::PATH, get(estimated_one_rep_max))
         .route(working::PATH, get(is_it_working))
+        .route(progress::PATH, get(progress_page))
         .route_layer(middleware::from_fn(recorded));
     let app = Router::new()
         .route("/", get(index))
-        .route(
-            Place::Progress.path(),
-            get(|| async { page::place(Place::Progress) }),
-        )
         .route(
             Place::Plan.path(),
             get(|| async { page::place(Place::Plan) }),
@@ -619,6 +617,26 @@ async fn estimated_one_rep_max(State(runs): State<Arc<Runs>>, headers: HeaderMap
         match view {
             Ok(view) => one_rep_max::page(&view, &run),
             Err(error) => one_rep_max::unreadable(&error.to_string()),
+        }
+    })
+    .await
+}
+
+/// Progress, for the macrocycle in force, read afresh from the store (#769).
+async fn progress_page(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
+    let collects = configurator::working::collects();
+    let run = opened(&runs, &headers, only(&collects)).await;
+    drawn(&runs, &collects, progress::PATH, None, &run, async {
+        let setting = runs.setting();
+        let store = match configurator::store::Store::open(&setting.database).await {
+            Ok(store) => store,
+            Err(error) => return progress::unreadable(&error.to_string()),
+        };
+        let view = configurator::working::view(&store, &setting.zone).await;
+        store.close().await;
+        match view {
+            Ok(view) => progress::page(&view, &run),
+            Err(error) => progress::unreadable(&error.to_string()),
         }
     })
     .await

@@ -76,34 +76,75 @@ impl Place {
     }
 }
 
-/// A page, and the place it is opened from.
+/// The groups Progress shows its readings in (#769), in its order.
+///
+/// The operator, 2026-11-12: *"Progress must be measured against plan or
+/// expectation, and the plan is the training in the macrocycle."* Performance
+/// is what the tests and their estimates give; body weight and composition,
+/// and resting heart rate, HRV and stress, are each read together; health is
+/// held against guidelines or cohorts rather than the training.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Group {
+    Performance,
+    Body,
+    Response,
+    Health,
+}
+
+impl Group {
+    pub const fn heading(self) -> &'static str {
+        match self {
+            Self::Performance => "Performance",
+            Self::Body => "Body weight and composition",
+            Self::Response => "Resting heart rate, HRV and stress",
+            Self::Health => "Health",
+        }
+    }
+}
+
+/// A page, the place it is opened from, and the group a metric's page is in.
 pub struct Page {
     pub path: &'static str,
     pub name: &'static str,
     pub place: Place,
+    pub group: Option<Group>,
 }
 
 const fn page(path: &'static str, name: &'static str, place: Place) -> Page {
-    Page { path, name, place }
+    Page {
+        path,
+        name,
+        place,
+        group: None,
+    }
 }
 
-/// Every page, in the order its place lists them.
+const fn metric(path: &'static str, name: &'static str, group: Group) -> Page {
+    Page {
+        path,
+        name,
+        place: Place::Progress,
+        group: Some(group),
+    }
+}
+
+/// Every page, in the order its place shows them.
 pub const PAGES: [Page; 15] = [
     page("/", "Today", Place::Today),
-    page("/working", "Is what I'm doing working?", Place::Progress),
-    page("/heart-rate", "Heart rate per power zone", Place::Progress),
-    page("/ftp", "FTP tests", Place::Progress),
-    page("/body-weight", "Body weight", Place::Progress),
-    page("/body-composition", "Body composition", Place::Progress),
-    page("/resting-heart-rate", "Resting heart rate", Place::Progress),
-    page("/hrv", "Overnight HRV", Place::Progress),
-    page(
-        "/pulse-wave-velocity",
-        "Pulse wave velocity",
-        Place::Progress,
+    metric("/ftp", "FTP tests", Group::Performance),
+    metric(
+        "/heart-rate",
+        "Heart rate per power zone",
+        Group::Performance,
     ),
-    page("/sleep", "Sleep", Place::Progress),
-    page("/estimated-1rm", "Estimated 1RM", Place::Progress),
+    metric("/estimated-1rm", "Estimated 1RM", Group::Performance),
+    metric("/body-weight", "Body weight", Group::Body),
+    metric("/body-composition", "Body composition", Group::Body),
+    metric("/resting-heart-rate", "Resting heart rate", Group::Response),
+    metric("/hrv", "Overnight HRV", Group::Response),
+    page("/working", "Is what I'm doing working?", Place::Progress),
+    metric("/sleep", "Sleep", Group::Health),
+    metric("/pulse-wave-velocity", "Pulse wave velocity", Group::Health),
     page("/workouts", "Workouts", Place::Plan),
     page("/fills", "Fills", Place::Plan),
     page("/schedule", "Schedule", Place::Plan),
@@ -130,19 +171,27 @@ pub fn bar(here: &str) -> Markup {
     }
 }
 
-/// A page's name, after a ‹ back to the place it is opened from.
+/// A page's name, after a ‹ back to the place it is opened from, and above
+/// it the group a metric's page is in (#769).
 pub fn header(here: &str, title: &str) -> Markup {
     let place = Place::of(here);
+    let group = PAGES
+        .iter()
+        .find(|page| page.path == here)
+        .and_then(|page| page.group);
     html! {
         header.detail {
             a href=(place.path()) aria-label=(place.name()) { "‹" }
-            h1 { (title) }
+            div {
+                @if let Some(group) = group { p.group { (group.heading()) } }
+                h1 { (title) }
+            }
         }
     }
 }
 
-/// A place other than Today: the pages under it, as plain links until its
-/// own issue gives it more (#769, #770).
+/// A place other than Today and Progress: the pages under it, as plain links
+/// until its own issue gives it more (#770).
 pub fn place(place: Place) -> Markup {
     html! {
         (DOCTYPE)
@@ -194,7 +243,14 @@ pub fn collecting(here: &str, run: &View) -> Markup {
     let title = PAGES
         .iter()
         .find(|page| page.path == here)
-        .map_or(here, |page| page.name);
+        .map(|page| page.name)
+        .or_else(|| {
+            Place::ALL
+                .into_iter()
+                .find(|place| place.path() == here)
+                .map(Place::name)
+        })
+        .unwrap_or(here);
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -295,18 +351,16 @@ mod tests {
     }
 
     /// **Every page the pills reached is still reachable**: Today is the home
-    /// page, and every other page is listed by its place.
+    /// page, Plan lists its pages, and Progress opens each of its own from a
+    /// tile (`progress::tests`).
     #[test]
-    fn every_page_is_reachable_from_a_place() {
-        let listed: String = [Place::Progress, Place::Plan]
-            .into_iter()
-            .map(|one| place(one).into_string())
-            .collect();
+    fn every_plan_page_is_listed_by_plan() {
+        let listed = place(Place::Plan).into_string();
 
         for page in &PAGES {
             if page.place == Place::Today {
                 assert_eq!(page.path, Place::Today.path());
-            } else {
+            } else if page.place == Place::Plan {
                 assert!(
                     listed.contains(&format!(r#"<a href="{}">"#, page.path)),
                     "{} is on no place",
