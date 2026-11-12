@@ -7,7 +7,11 @@
 //! already parts of it rather than sessions of their own; a padel game is the
 //! normalised one, which only the watch records. Nothing is written.
 
-use domain::{canonical::Occurred, cycling::CanonicalCyclingSession, gym::CanonicalGymSession};
+use domain::{
+    canonical::Occurred,
+    cycling::CanonicalCyclingSession,
+    gym::{CanonicalGymSession, exercise::RepsExercise},
+};
 use jiff::{
     Timestamp,
     civil::{Date, date},
@@ -15,6 +19,7 @@ use jiff::{
 
 use crate::{
     error::StoreError,
+    one_rep_max::Tests,
     ports::{PerformedCyclingSessions, PerformedGymSessions, PlayedPadelGame, PlayedPadelGames},
 };
 
@@ -28,7 +33,11 @@ const EARLIEST: Date = date(2000, 1, 1);
 /// hundred.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Session {
-    Gym(Box<CanonicalGymSession>),
+    /// A gym session, and the lifts whose 1RM it tested.
+    Gym {
+        session: Box<CanonicalGymSession>,
+        tested: Vec<RepsExercise>,
+    },
     Cycling(Box<CanonicalCyclingSession>),
     Padel(PlayedPadelGame),
 }
@@ -37,7 +46,7 @@ impl Session {
     /// The day it was done on, in the zone it was done in.
     pub fn on(&self) -> Date {
         match self {
-            Self::Gym(session) => session.occurred().day(),
+            Self::Gym { session, .. } => session.occurred().day(),
             Self::Cycling(session) => session.started_at().wall_clock().date(),
             Self::Padel(game) => game.started_at.wall_clock().date(),
         }
@@ -46,12 +55,22 @@ impl Session {
     /// When it started, where a source stated a time.
     const fn instant(&self) -> Option<Timestamp> {
         match self {
-            Self::Gym(session) => match session.occurred() {
+            Self::Gym { session, .. } => match session.occurred() {
                 Occurred::At(started) => Some(started.instant()),
                 Occurred::On(_) => None,
             },
             Self::Cycling(session) => Some(session.started_at().instant()),
             Self::Padel(game) => Some(game.started_at.instant()),
+        }
+    }
+
+    /// Whether it was a test: an FTP test, or a gym session that tested a
+    /// lift's 1RM.
+    pub const fn is_test(&self) -> bool {
+        match self {
+            Self::Gym { tested, .. } => !tested.is_empty(),
+            Self::Cycling(session) => matches!(**session, CanonicalCyclingSession::Test { .. }),
+            Self::Padel(_) => false,
         }
     }
 }
@@ -114,13 +133,18 @@ where
         }
     }
 
-    /// Every day through `today` that holds a session, newest first.
+    /// Every day through `today` that holds a session, newest first, each gym
+    /// session marked with the 1RM tests it performed.
+    ///
+    /// **The tests are [`crate::one_rep_max::OneRepMaxTests`]'s**: a session
+    /// is a test where its prescription named it one, which is that use case's
+    /// to read, not this one's.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
-    pub async fn days(&self, today: Date) -> Result<Vec<Day>, StoreError> {
-        Ok(days(self.between(EARLIEST, today).await?))
+    pub async fn days(&self, today: Date, tests: &[Tests]) -> Result<Vec<Day>, StoreError> {
+        Ok(days(self.between(EARLIEST, today, tests).await?))
     }
 
     /// The session `number` of those done `on`, where there is one.
@@ -128,8 +152,13 @@ where
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
-    pub async fn session(&self, on: Date, number: Number) -> Result<Option<Session>, StoreError> {
-        Ok(days(self.between(on, on).await?)
+    pub async fn session(
+        &self,
+        on: Date,
+        number: Number,
+        tests: &[Tests],
+    ) -> Result<Option<Session>, StoreError> {
+        Ok(days(self.between(on, on, tests).await?)
             .into_iter()
             .flat_map(|day| day.sessions)
             .find(|(numbered, _)| *numbered == number)
@@ -137,13 +166,21 @@ where
     }
 
     /// Every session done between the two days, both included.
-    async fn between(&self, from: Date, to: Date) -> Result<Vec<Session>, StoreError> {
+    async fn between(
+        &self,
+        from: Date,
+        to: Date,
+        tests: &[Tests],
+    ) -> Result<Vec<Session>, StoreError> {
         let mut sessions: Vec<Session> = self
             .gym
             .between(from, to)
             .await?
             .into_iter()
-            .map(|session| Session::Gym(Box::new(session)))
+            .map(|session| Session::Gym {
+                tested: tested(&session, tests),
+                session: Box::new(session),
+            })
             .collect();
         sessions.extend(
             self.cycling
@@ -156,6 +193,22 @@ where
         sessions.retain(|session| (from..=to).contains(&session.on()));
         Ok(sessions)
     }
+}
+
+/// The lifts whose 1RM a session tested: a test on its day, of a lift it
+/// performed.
+fn tested(session: &CanonicalGymSession, tests: &[Tests]) -> Vec<RepsExercise> {
+    let on = session.occurred().day();
+    tests
+        .iter()
+        .filter(|lift| lift.tests.iter().any(|(day, _)| *day == on))
+        .filter(|lift| {
+            session
+                .exercises()
+                .any(|exercise| exercise.exercise_key() == Some(lift.lift.as_str()))
+        })
+        .map(|lift| lift.lift)
+        .collect()
 }
 
 /// The sessions by day, newest day first and newest first within it.
@@ -207,6 +260,7 @@ mod tests {
     use jiff::civil::{Date, date};
 
     use super::{History, Number, Session};
+    use crate::one_rep_max::Tests;
     use crate::{
         PrescribedWorkoutId,
         error::StoreError,
@@ -353,7 +407,7 @@ mod tests {
     fn days_are_newest_first_and_a_test_is_one_session() {
         runtime().expect("a runtime").block_on(async {
             let history = autumn().expect("his autumn");
-            let days = history.days(date(2026, 11, 12)).await.expect("read");
+            let days = history.days(date(2026, 11, 12), &[]).await.expect("read");
 
             let shown: Vec<(Date, Vec<(usize, &str)>)> = days
                 .iter()
@@ -366,7 +420,8 @@ mod tests {
                                 (
                                     number.get(),
                                     match session {
-                                        Session::Gym(_) => "gym",
+                                        Session::Gym { tested, .. } if tested.is_empty() => "gym",
+                                        Session::Gym { .. } => "1RM test",
                                         Session::Cycling(_) => "cycling",
                                         Session::Padel(_) => "padel",
                                     },
@@ -388,12 +443,66 @@ mod tests {
         });
     }
 
+    /// **A test is marked as one**: the FTP test of 25 October, and the gym
+    /// session of 30 October where front squat's 1RM was tested. A test of a
+    /// lift the session did not perform marks nothing.
+    #[test]
+    fn tests_are_marked() {
+        runtime().expect("a runtime").block_on(async {
+            let history = autumn().expect("his autumn");
+            let tests = [
+                Tests {
+                    lift: RepsExercise::FrontSquatBarbell,
+                    tests: vec![(date(2026, 10, 30), 100_000)],
+                },
+                Tests {
+                    lift: RepsExercise::DeadliftBarbell,
+                    tests: vec![(date(2026, 11, 1), 150_000)],
+                },
+            ];
+            let days = history
+                .days(date(2026, 11, 12), &tests)
+                .await
+                .expect("read");
+
+            let marked: Vec<(Date, Vec<bool>)> = days
+                .iter()
+                .map(|day| {
+                    (
+                        day.on,
+                        day.sessions
+                            .iter()
+                            .map(|(_, session)| session.is_test())
+                            .collect(),
+                    )
+                })
+                .collect();
+            assert_eq!(
+                marked,
+                vec![
+                    (date(2026, 11, 1), vec![false, false]),
+                    (date(2026, 10, 30), vec![true]),
+                    (date(2026, 10, 27), vec![false]),
+                    (date(2026, 10, 25), vec![true]),
+                ]
+            );
+            let friday = days
+                .iter()
+                .find(|day| day.on == date(2026, 10, 30))
+                .and_then(|day| day.sessions.first());
+            assert!(
+                matches!(friday, Some((_, Session::Gym { tested, .. })) if tested == &[RepsExercise::FrontSquatBarbell]),
+                "{friday:?}"
+            );
+        });
+    }
+
     /// **Nothing after today**, so a ride the record dates tomorrow waits.
     #[test]
     fn days_stop_at_today() {
         runtime().expect("a runtime").block_on(async {
             let history = autumn().expect("his autumn");
-            let days = history.days(date(2026, 10, 31)).await.expect("read");
+            let days = history.days(date(2026, 10, 31), &[]).await.expect("read");
 
             assert_eq!(days.first().map(|day| day.on), Some(date(2026, 10, 30)));
         });
@@ -409,7 +518,7 @@ mod tests {
             let third = Number::try_from(3).expect("three");
 
             let opened = history
-                .session(date(2026, 11, 1), second)
+                .session(date(2026, 11, 1), second, &[])
                 .await
                 .expect("read");
             assert!(
@@ -418,7 +527,7 @@ mod tests {
             );
             assert_eq!(
                 history
-                    .session(date(2026, 11, 1), third)
+                    .session(date(2026, 11, 1), third, &[])
                     .await
                     .expect("read"),
                 None

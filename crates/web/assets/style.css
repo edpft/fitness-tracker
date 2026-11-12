@@ -237,6 +237,8 @@ main.history i.padel { background: var(--ink2); }
 .card.exercise h2, .card.ride h2 { font-size: 17px; margin: 0 0 4px; }
 .card.exercise h2 + ol.sets + h2 { margin-top: 14px; }
 .card.exercise .label, .card.ride .label { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 4px; }
+ul.sessions em.test, p.test { font-style: normal; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--bg); background: var(--ink2); border-radius: 6px; padding: 2px 6px; vertical-align: 1px; }
+p.test { display: inline-block; margin: 0 0 8px; }
 ol.sets { margin: 0; font-variant-numeric: tabular-nums; }
 main.history p.sub + section.card { margin-top: 14px; }
 

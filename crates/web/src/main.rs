@@ -728,10 +728,12 @@ async fn session_page(
     let collects = configurator::history::collects();
     let run = runs.view();
     drawn(&runs, &collects, &here, None, &run, async {
-        let session = match configurator::store::Store::open(&runs.setting().database).await {
+        let setting = runs.setting();
+        let session = match configurator::store::Store::open(&setting.database).await {
             Err(error) => Err(error.to_string()),
             Ok(store) => {
-                let session = configurator::history::session(&store, on, number).await;
+                let session =
+                    configurator::history::session(&store, &setting.zone, on, number).await;
                 store.close().await;
                 session.map_err(|error| error.to_string())
             }

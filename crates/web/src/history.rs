@@ -12,7 +12,7 @@ use domain::{
     cycling::{CanonicalBikePlusRide, CanonicalCyclingSession},
     gym::{
         CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Load, Performed,
-        SetKind,
+        SetKind, exercise::RepsExercise,
     },
     measure::{Duration, RepCount},
 };
@@ -54,10 +54,11 @@ fn feed_day(day: &Day, today: Date) -> Markup {
             @for (number, session) in &day.sessions {
                 li {
                     a href=(address(day.on, *number)) {
-                        i.dot.gym[matches!(session, Session::Gym(_))]
+                        i.dot.gym[matches!(session, Session::Gym { .. })]
                             .cycling[matches!(session, Session::Cycling(_))]
                             .padel[matches!(session, Session::Padel(_))] {}
                         span.name { (name(session)) }
+                        @if let Some(test) = test(session) { " " em.test { (test) } }
                         span.facts { (facts(session)) }
                     }
                 }
@@ -75,11 +76,23 @@ fn day_name(on: Date, today: Date) -> String {
     }
 }
 
+/// The test it was, where it was one.
+const fn test(session: &Session) -> Option<&'static str> {
+    match session {
+        _ if !session.is_test() => None,
+        Session::Gym { .. } => Some(ONE_REP_MAX_TEST),
+        Session::Cycling(_) => Some("FTP test"),
+        Session::Padel(_) => None,
+    }
+}
+
+const ONE_REP_MAX_TEST: &str = "1RM test";
+
 /// What the session is: the classes a cycling session was ridden to are on
 /// its page, not its name.
 const fn name(session: &Session) -> &'static str {
     match session {
-        Session::Gym(_) => "Gym session",
+        Session::Gym { .. } => "Gym session",
         Session::Cycling(_) => "Cycling session",
         Session::Padel(_) => "Padel game",
     }
@@ -88,7 +101,7 @@ const fn name(session: &Session) -> &'static str {
 /// Enough of it to recognise it by.
 fn facts(session: &Session) -> String {
     match session {
-        Session::Gym(session) => gym_facts(session).join(" · "),
+        Session::Gym { session, .. } => gym_facts(session).join(" · "),
         Session::Cycling(session) => [
             length(ridden(session)),
             session.working_ride().average_power().value().to_string(),
@@ -160,6 +173,11 @@ pub fn session(here: &str, on: Date, session: &Result<Option<Session>, String>) 
         Ok(Some(session)) => name(session),
         Ok(None) | Err(_) => "Session",
     };
+    let marked = session
+        .as_ref()
+        .ok()
+        .and_then(Option::as_ref)
+        .and_then(test);
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -167,8 +185,9 @@ pub fn session(here: &str, on: Date, session: &Result<Option<Session>, String>) 
             body {
                 main.history {
                     (page::header(here, title))
+                    @if let Some(test) = marked { p.test { (test) } }
                     @match session {
-                        Ok(Some(Session::Gym(session))) => (gym(on, session)),
+                        Ok(Some(Session::Gym { session, tested })) => (gym(on, session, tested)),
                         Ok(Some(Session::Cycling(session))) => (cycling(session)),
                         Ok(Some(Session::Padel(game))) => (padel(game)),
                         Ok(None) => p.sub { "No such session on " (on.strftime("%A %-d %B %Y")) "." },
@@ -191,7 +210,7 @@ fn padel(game: &PlayedPadelGame) -> Markup {
     }
 }
 
-fn gym(on: Date, session: &CanonicalGymSession) -> Markup {
+fn gym(on: Date, session: &CanonicalGymSession, tested: &[RepsExercise]) -> Markup {
     let when = session.occurred().instant().map_or_else(
         || on.strftime("%A %-d %B %Y").to_string(),
         |started| {
@@ -209,17 +228,20 @@ fn gym(on: Date, session: &CanonicalGymSession) -> Markup {
         }
         @for item in session.items().iter() {
             @match item {
-                CanonicalItem::Exercise(exercise) => section.card.exercise { (exercise_sets(exercise)) },
+                CanonicalItem::Exercise(exercise) => section.card.exercise { (exercise_sets(exercise, tested)) },
                 CanonicalItem::Superset(members) => section.card.exercise {
                     p.label { "Superset" }
-                    @for exercise in members.iter() { (exercise_sets(exercise)) }
+                    @for exercise in members.iter() { (exercise_sets(exercise, tested)) }
                 },
             }
         }
     }
 }
 
-fn exercise_sets(exercise: &CanonicalExercise) -> Markup {
+fn exercise_sets(exercise: &CanonicalExercise, tested: &[RepsExercise]) -> Markup {
+    let is_tested = tested
+        .iter()
+        .any(|lift| exercise.exercise_key() == Some(lift.as_str()));
     let (named, sets): (String, Vec<String>) = match exercise {
         CanonicalExercise::ForReps { identified, sets } => (
             match identified.value() {
@@ -247,6 +269,7 @@ fn exercise_sets(exercise: &CanonicalExercise) -> Markup {
         ),
     };
     html! {
+        @if is_tested { p.label { (ONE_REP_MAX_TEST) } }
         h2 { (named) }
         ol.sets { @for set in &sets { li { (set) } } }
     }
