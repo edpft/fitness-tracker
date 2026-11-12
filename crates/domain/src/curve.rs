@@ -18,7 +18,7 @@ use jiff::civil::Date;
 
 use crate::{
     cycling::{CyclingMesocycle, CyclingMicrocycle, ZoneProfile},
-    macrocycle::Macrocycle,
+    macrocycle::{Macrocycle, MesocycleState, PlannedMacrocycle},
     plan::Plan,
     planner::Discipline,
     prescription::{
@@ -57,9 +57,10 @@ pub struct Week {
     /// Its Monday.
     pub monday: Date,
     pub on: OnCurve,
-    /// Whether it is in a mesocycle not yet committed, which is what the
-    /// plan is expected to be rather than what it is.
-    pub expected: bool,
+    /// Whether it is in a mesocycle that has not started, or past the current
+    /// microcycle where no mesocycle covers it: what the term is planned to
+    /// be rather than what it has been.
+    pub planned: bool,
 }
 
 /// Both disciplines' weeks across a macrocycle, Monday to Monday.
@@ -69,20 +70,14 @@ pub struct Curves {
     pub cycling: Vec<Week>,
 }
 
-/// Every week of `macrocycle` on the curves, read from `plan`.
+/// Every week of the term on the curves, read from what is planned for it.
 ///
-/// `committed_until` is the first day no committed mesocycle covers: what
-/// `plan` holds from then on is expected. `lost` says whether a discipline's
-/// week was lost, which the plan no longer shows once a lost week carries on
-/// (#735).
+/// `lost` says whether a discipline's week was lost, which the plan no longer
+/// shows once a lost week carries on (#735).
 #[must_use]
-pub fn curves(
-    macrocycle: &Macrocycle,
-    plan: &Plan,
-    committed_until: Date,
-    lost: impl Fn(Discipline, Date) -> bool,
-) -> Curves {
-    let mondays = mondays(macrocycle);
+pub fn curves(planned: &PlannedMacrocycle, lost: impl Fn(Discipline, Date) -> bool) -> Curves {
+    let plan = planned.plan();
+    let mondays = mondays(planned.macrocycle());
     let week = |discipline: Discipline, monday: Date| {
         let on = if lost(discipline, monday) {
             OnCurve::Lost
@@ -95,7 +90,10 @@ pub fn curves(
         Week {
             monday,
             on,
-            expected: monday >= committed_until,
+            planned: planned.state_on(monday).map_or_else(
+                || monday >= planned.commencing(),
+                |state| state == MesocycleState::Planned,
+            ),
         }
     };
     Curves {

@@ -21,6 +21,7 @@ pub mod fills;
 pub mod ftp_tests;
 pub mod heart_rate;
 pub mod holidays;
+pub mod macrocycle;
 pub mod next;
 pub mod one_rep_max;
 pub mod paths;

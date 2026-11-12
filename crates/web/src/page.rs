@@ -190,28 +190,6 @@ pub fn header(here: &str, title: &str) -> Markup {
     }
 }
 
-/// A place other than Today and Progress: the pages under it, as plain links
-/// until its own issue gives it more (#770).
-pub fn place(place: Place) -> Markup {
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head { (head(place.name(), &[])) }
-            body {
-                main {
-                    h1 { (place.name()) }
-                    ul.pages {
-                        @for page in PAGES.iter().filter(|page| page.place == place) {
-                            li { a href=(page.path) { (page.name) } }
-                        }
-                    }
-                    (bar(place.path()))
-                }
-            }
-        }
-    }
-}
-
 /// The step the run is on, above a page drawn from the store, and the page
 /// redrawn from the store when the run ends.
 ///
@@ -310,7 +288,7 @@ pub const STYLESHEET: &str = "/style.css";
 
 #[cfg(test)]
 mod tests {
-    use super::{PAGES, Place, bar, header, place};
+    use super::{PAGES, Place, bar, header};
 
     /// **The bar is the three places, the one a page is under marked**, and
     /// no pill (#768).
@@ -355,7 +333,7 @@ mod tests {
     /// tile (`progress::tests`).
     #[test]
     fn every_plan_page_is_listed_by_plan() {
-        let listed = place(Place::Plan).into_string();
+        let listed = crate::plan::page(&Ok(None)).into_string();
 
         for page in &PAGES {
             if page.place == Place::Today {

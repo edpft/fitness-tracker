@@ -194,7 +194,7 @@ p.marks i.dash { width: 14px; height: 0; border-radius: 0; border-top: 2px dashe
 .change span.aimed i { display: inline-block; width: 14px; margin-right: 6px; vertical-align: middle; border-top: 2px dashed var(--ink); }
 
 /* Progress (#769): tiles under group headings, each row opening its page. */
-main.progress h2.group { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 22px 0 8px; }
+main.progress h2.group, main.plan h2.group { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 22px 0 8px; }
 .card.tile { margin-bottom: 12px; }
 .card.tile h3 { font-size: 15px; font-weight: 600; margin: 0 0 2px; }
 a.row { display: block; color: inherit; text-decoration: none; }
@@ -204,6 +204,22 @@ svg.trace .band { fill: var(--c); fill-opacity: 0.16; }
 svg.trace .read { fill: none; stroke: var(--c); stroke-width: 2; }
 svg.trace .expected { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 5 4; }
 header.detail p.group { margin: 0 0 2px; font-size: 13px; color: var(--muted); }
+
+/* Plan (#770): the macrocycle as planned, a row per mesocycle, the running one
+   marked by a rule down its edge and the planned ones by a dashed one, as the
+   curves outline planned weeks (#789). */
+.macrocycle .label { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0; }
+.macrocycle .named { font-size: 24px; font-weight: 650; margin: 2px 0 6px; }
+.mesocycle { padding: 12px 0 12px 12px; border-top: 1px solid var(--grid); border-left: 3px solid transparent; }
+.mesocycle p { margin: 2px 0 0; font-size: 15px; color: var(--ink2); }
+.mesocycle p.when { font-size: 13px; color: var(--muted); margin: 0; }
+.mesocycle.now { border-left-color: var(--ink); }
+.mesocycle.now p { color: var(--ink); }
+.mesocycle.now p.when { color: var(--ink2); font-weight: 600; }
+.mesocycle.planned { border-left: 3px dashed var(--grid); }
+.mesocycle i.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; }
+.mesocycle i.gym { background: var(--gym); }
+.mesocycle i.cycling { background: var(--cycling); }
 .card.weeks .sub { margin-top: 10px; }
 
 /* Observations singled out, ringed. */
@@ -414,11 +430,11 @@ svg.curves .grid { stroke: var(--grid); }
 svg.curves .tick, svg.curves .week { fill: var(--muted); font-size: 10px; }
 svg.curves .week.current { fill: var(--ink); font-weight: 700; }
 svg.curves .volume { fill: var(--c); fill-opacity: 0.28; }
-svg.curves .volume.expected { fill-opacity: 0.06; stroke: var(--c); stroke-width: 1; stroke-dasharray: 2 2; }
+svg.curves .volume.planned { fill-opacity: 0.06; stroke: var(--c); stroke-width: 1; stroke-dasharray: 2 2; }
 svg.curves .intensity { stroke: var(--c); stroke-width: 2.5; stroke-linecap: round; }
-svg.curves .intensity.expected { stroke-dasharray: 4 4; stroke-width: 2; }
+svg.curves .intensity.planned { stroke-dasharray: 4 4; stroke-width: 2; }
 svg.curves .dot { fill: var(--c); }
-svg.curves .dot.expected { fill: var(--card); stroke: var(--c); stroke-width: 2; }
+svg.curves .dot.planned { fill: var(--card); stroke: var(--c); stroke-width: 2; }
 svg.curves .lost { fill: none; stroke: var(--muted); stroke-dasharray: 3 3; }
 svg.curves .test { fill: var(--ink2); font-size: 11px; font-weight: 700; }
 svg.curves .today { stroke: var(--ink); stroke-width: 1.5; }
@@ -426,5 +442,5 @@ svg.curves .today { stroke: var(--ink); stroke-width: 1.5; }
 .card.curves p.key i { display: inline-block; width: 12px; height: 10px; margin-right: 5px; vertical-align: -1px; border-radius: 2px; }
 .card.curves p.key i.volume { background: var(--ink2); opacity: 0.5; }
 .card.curves p.key i.intensity { height: 3px; vertical-align: 3px; background: var(--ink2); }
-.card.curves p.key i.expected { border: 1px dashed var(--ink2); }
+.card.curves p.key i.planned { border: 1px dashed var(--ink2); }
 .card.curves p.key i.lost { border: 1px dashed var(--muted); }

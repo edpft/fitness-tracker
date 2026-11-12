@@ -15,7 +15,7 @@ use std::num::NonZeroU32;
 
 use domain::{
     cycling::CyclingMesocycle,
-    macrocycle::{Concurrent, Cycling, Gym, Macrocycle, Whole},
+    macrocycle::{Concurrent, Cycling, Gym, Macrocycle, PlannedMacrocycle, Whole},
     normalised::OperatorZone,
     plan::{Plan, Span},
     planner,
@@ -90,16 +90,6 @@ pub struct Due {
     diary: Diary,
     pub concurrent: Concurrent,
     pub span: Span,
-}
-
-/// The plan in force, as it is expected to run to the end of its macrocycle.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Expected {
-    pub macrocycle: Macrocycle,
-    /// What is committed, then what the macrocycle would choose after it.
-    pub plan: Plan,
-    /// The first day no committed mesocycle covers.
-    pub committed_until: Date,
 }
 
 /// `plan` with `gym` and `cycling` after what it holds.
@@ -238,14 +228,14 @@ where
             .await?)
     }
 
-    /// The plan in force as it is expected to run to the end of the term
-    /// (#742): what is committed, then every mesocycle the macrocycle would
-    /// choose after it, built as committing builds them and written nowhere.
+    /// The macrocycle as planned (#789): what is committed, then every
+    /// mesocycle the macrocycle would choose after it, built as committing
+    /// builds them and written nowhere (#742).
     ///
     /// **What it should be as of now, not what it will be.** A mesocycle is
     /// still committed only when the one before it is finished, and a missed
     /// test moved into the next week shortens the one after it (operator,
-    /// 2026-11-09).
+    /// 2026-11-09), so the planned ones are projected again on every call.
     ///
     /// `None` where no plan following a chain is in force this macrocycle.
     ///
@@ -253,13 +243,13 @@ where
     ///
     /// [`CommitError`] if the plan cannot be read, or a mesocycle the
     /// macrocycle would choose will not build.
-    pub async fn expected(
+    pub async fn planned(
         &self,
         now: DayPart,
         holidays: &Holidays,
         standing: &Standing,
         diary: &Diary,
-    ) -> Result<Option<Expected>, CommitError> {
+    ) -> Result<Option<PlannedMacrocycle>, CommitError> {
         let Some(macrocycle) = Macrocycle::on(now.date, holidays) else {
             return Ok(None);
         };
@@ -274,8 +264,7 @@ where
         let monday = standing
             .commencing
             .unwrap_or_else(|| planner::commencing(now.date));
-        let committed_until = plan.span().end();
-        let mut start = committed_until.max(monday);
+        let mut start = plan.span().end().max(monday);
         let mut previous = plan
             .cycling()
             .and_then(|side| side.mesocycles().last())
@@ -287,11 +276,7 @@ where
             previous = Some(concurrent.cycling());
             start = weeks_after(start, concurrent.weeks())?;
         }
-        Ok(Some(Expected {
-            macrocycle,
-            plan,
-            committed_until,
-        }))
+        Ok(Some(PlannedMacrocycle::new(macrocycle, plan, monday)))
     }
 
     /// Both halves of a concurrent mesocycle starting on `start`, built after

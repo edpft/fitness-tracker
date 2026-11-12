@@ -30,6 +30,7 @@ pub mod fills;
 pub mod ftp_tests;
 pub mod heart_rate;
 pub mod holding;
+pub mod macrocycle;
 pub mod microcycle;
 pub mod next;
 pub mod normalise;

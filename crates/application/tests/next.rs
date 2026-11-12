@@ -628,13 +628,13 @@ impl MesocycleCommitter for Committer {
         Ok(())
     }
 
-    async fn expected(
+    async fn planned(
         &self,
         _now: DayPart,
         _holidays: &Holidays,
         _standing: &Standing,
         _diary: &Diary,
-    ) -> Result<Option<application::commit::Expected>, CommitError> {
+    ) -> Result<Option<domain::macrocycle::PlannedMacrocycle>, CommitError> {
         Ok(None)
     }
 }

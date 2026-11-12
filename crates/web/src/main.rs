@@ -18,6 +18,7 @@ mod hrv;
 mod input;
 mod one_rep_max;
 mod page;
+mod plan;
 mod progress;
 mod pulse_wave_velocity;
 mod range;
@@ -153,10 +154,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route_layer(middleware::from_fn(recorded));
     let app = Router::new()
         .route("/", get(index))
-        .route(
-            Place::Plan.path(),
-            get(|| async { page::place(Place::Plan) }),
-        )
+        .route(Place::Plan.path(), get(plan_page))
         .merge(charts)
         .route("/equipment", get(equipment_page).post(equipment_post))
         .route(schedule::HERE, get(schedule_page).post(schedule_post))
@@ -680,6 +678,31 @@ async fn equipment_shown(runs: &Runs, refused: Option<&equipment::Refused<'_>>) 
         ),
         Err(error) => equipment::unreadable(&error.to_string()),
     }
+}
+
+/// Plan: the macrocycle in force, then the inputs to planning (#770).
+async fn plan_page(State(runs): State<Arc<Runs>>) -> Markup {
+    let setting = runs.setting();
+    let macrocycle = match configurator::store::Store::open(&setting.database).await {
+        Err(error) => Err(error.to_string()),
+        Ok(store) => {
+            let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
+            let read = configurator::macrocycle::planned(
+                &store,
+                &setting.zone,
+                domain::schedule::DayPart::containing(here.datetime()),
+            )
+            .await;
+            store.close().await;
+            read.map(|planned| {
+                planned
+                    .as_ref()
+                    .map(application::macrocycle::Macrocycle::from)
+            })
+            .map_err(|error| error.to_string())
+        }
+    };
+    plan::page(&macrocycle)
 }
 
 async fn equipment_page(State(runs): State<Arc<Runs>>) -> Markup {
