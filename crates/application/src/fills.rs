@@ -44,14 +44,15 @@ where
         Ok(self.mesocycles.on(date).await?)
     }
 
-    /// Record a change: a slot filled with an exercise from a date, assisted
+    /// Record a change: a slot filled with an exercise from a date, with its
+    /// sets and reps where the slot is static (#771), assisted
     /// by a specific or not, and loaded above bodyweight by a kind held or
     /// not.
     ///
     /// # Errors
     ///
     /// [`FillChangeError`] if no mesocycle is in force then, the slot is
-    /// static or the primary, the range of bands is not known on that date,
+    /// the primary, sets and reps are stated for a slot that is not static, the range of bands is not known on that date,
     /// or what loads it is named for an exercise that is not bodyweight.
     pub async fn change(&self, change: FillChange) -> Result<(), FillChangeError> {
         let FillChange {
@@ -66,15 +67,21 @@ where
             return Err(FillChangeError::NoMesocycle { date: from });
         };
         // The primary is knee or hip dominant, and is what the mesocycle
-        // progresses; a static slot carries its own sets and reps.
+        // progresses; only a static slot carries its own sets and reps.
         let fills = found.mesocycle.fills();
         let primary = found.mesocycle.primary_exercise();
         let is_primary = matches!(slot, SlotId::KneeDominant | SlotId::HipDominant)
             && SessionRole::ALL.iter().any(|role| {
                 matches!(fills.content(slot, *role), SlotContent::Single(held) if *held == primary)
             });
-        if is_primary || fills.clone().single_mut(slot).is_none() {
+        if is_primary {
             return Err(FillChangeError::NotChangeable {
+                slot: slot.as_str(),
+            });
+        }
+        let stated = change.sets.is_some() || change.reps.is_some();
+        if stated && fills.clone().static_mut(slot).is_none() {
+            return Err(FillChangeError::NotStatic {
                 slot: slot.as_str(),
             });
         }

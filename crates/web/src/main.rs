@@ -12,7 +12,6 @@ mod composition;
 mod curves;
 mod detail;
 mod equipment;
-mod fills;
 mod ftp;
 mod history;
 mod hrv;
@@ -21,6 +20,7 @@ mod one_rep_max;
 mod page;
 mod plan;
 mod progress;
+mod progression;
 mod pulse_wave_velocity;
 mod range;
 mod report;
@@ -30,7 +30,7 @@ mod schedule;
 mod sleep;
 mod weight;
 mod working;
-mod workouts;
+mod workout;
 
 use std::{collections::HashMap, convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc};
 
@@ -51,6 +51,7 @@ use maud::{Markup, PreEscaped};
 use tokio_stream::{Stream, StreamExt as _, wrappers::WatchStream};
 use tracing::Instrument as _;
 
+use domain::planner::Relative;
 use page::Place;
 use run::{Asked, Runs, Setting};
 
@@ -161,8 +162,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .merge(charts)
         .route("/equipment", get(equipment_page).post(equipment_post))
         .route(schedule::HERE, get(schedule_page).post(schedule_post))
-        .route("/fills", get(fills_page).post(fills_post))
-        .route("/workouts", get(workouts_page).post(workouts_post))
+        .route(workout::HERE, get(workout_page).post(workout_post))
         .route("/run/events", get(events))
         .route("/run/step", get(step))
         .route("/htmx.min.js", get(htmx))
@@ -908,51 +908,81 @@ async fn schedule_post(
     }
 }
 
-/// The fills in force today, read afresh, with the last post if it was
+/// One workout as it runs today, read afresh, with the last post if it was
 /// refused.
-async fn fills_shown(runs: &Runs, refused: Option<&fills::Refused<'_>>) -> Markup {
+async fn workout_shown(
+    runs: &Runs,
+    intensity: Relative,
+    refused: Option<&workout::Refused<'_>>,
+) -> Markup {
     let store = match configurator::store::Store::open(&runs.setting().database).await {
         Ok(store) => store,
-        Err(error) => return fills::unreadable(&error.to_string()),
+        Err(error) => return workout::unreadable(&error.to_string()),
     };
     let zone = &runs.setting().zone;
     let today = configurator::equipment::today(zone);
     let found = configurator::fills::on(&store, zone, today).await;
+    let in_force = configurator::design::in_force(&store).await;
     let facts = configurator::equipment::facts(&store).await;
     store.close().await;
-    match (found, facts) {
-        (Ok(found), Ok(facts)) => fills::page(found.as_ref(), &facts, today, refused),
-        (Err(error), _) => fills::unreadable(&error.to_string()),
-        (_, Err(error)) => fills::unreadable(&error.to_string()),
+    match (found, in_force, facts) {
+        (Ok(found), Ok(in_force), Ok(facts)) => workout::page(
+            &workout::Shown {
+                intensity,
+                found: found.as_ref(),
+                in_force: &in_force,
+                facts: &facts,
+                today,
+            },
+            refused,
+        ),
+        (Err(error), _, _) => workout::unreadable(&error.to_string()),
+        (_, Err(error), _) => workout::unreadable(&error.to_string()),
+        (_, _, Err(error)) => workout::unreadable(&error.to_string()),
     }
 }
 
-async fn fills_page(State(runs): State<Arc<Runs>>) -> Markup {
-    fills_shown(&runs, None).await
+/// The workout a query or a post names, the higher-intensity one if none.
+fn intensity_of<'a>(mut pairs: impl Iterator<Item = (&'a String, &'a String)>) -> Relative {
+    pairs
+        .find(|(key, _)| *key == "intensity")
+        .and_then(|(_, value)| Relative::try_from(value.clone()).ok())
+        .unwrap_or(Relative::Higher)
 }
 
-/// Change a fill, then show the page again, keeping what was typed when it is
-/// refused.
-async fn fills_post(
+async fn workout_page(
+    State(runs): State<Arc<Runs>>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Markup {
+    workout_shown(&runs, intensity_of(query.iter()), None).await
+}
+
+/// Change a slot or author a progression, then show the workout again,
+/// keeping what was typed when it is refused.
+async fn workout_post(
     State(runs): State<Arc<Runs>>,
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
-    let refusal = match fills::asked(&form) {
-        Err(refusal) => Some(refusal),
-        Ok(asked) => match configurator::store::Store::open(&runs.setting().database).await {
-            Err(error) => Some(input::Refusal::whole(error.to_string())),
-            Ok(store) => {
-                let done = configurator::fills::change(&store, &runs.setting().zone, asked).await;
-                store.close().await;
-                done.err().map(|error| fills::refusal(&error))
-            }
-        },
+    let intensity = intensity_of(form.iter().map(|(key, value)| (key, value)));
+    let refusal = match configurator::store::Store::open(&runs.setting().database).await {
+        Err(error) => Some(input::Refusal::whole(error.to_string())),
+        Ok(store) => {
+            let refusal = workout_written(&store, &runs.setting().zone, &form).await;
+            store.close().await;
+            refusal
+        }
     };
     match refusal {
-        None => Redirect::to("/fills").into_response(),
-        Some(refusal) => fills_shown(
+        None => Redirect::to(&format!(
+            "{}?intensity={}",
+            workout::HERE,
+            intensity.as_str()
+        ))
+        .into_response(),
+        Some(refusal) => workout_shown(
             &runs,
-            Some(&fills::Refused {
+            intensity,
+            Some(&workout::Refused {
                 typed: &form,
                 refusal: &refusal,
             }),
@@ -962,60 +992,52 @@ async fn fills_post(
     }
 }
 
-/// The versions in force, read afresh, with what the last post came to.
-async fn workouts_shown(
-    runs: &Runs,
-    said: Option<&str>,
-    typed: Option<&workouts::Fields>,
-) -> Markup {
-    let store = match configurator::store::Store::open(&runs.setting().database).await {
-        Ok(store) => store,
-        Err(error) => return workouts::unreadable(&error.to_string()),
-    };
-    let in_force = configurator::design::in_force(&store).await;
-    store.close().await;
-    match in_force {
-        Ok(in_force) => workouts::page(&in_force, &runs.setting().zone, said, typed),
-        Err(error) => workouts::unreadable(&error.to_string()),
-    }
-}
-
-async fn workouts_page(State(runs): State<Arc<Runs>>) -> Markup {
-    workouts_shown(&runs, None, None).await
-}
-
-/// Author a version, then show the page again, as the equipment page does,
-/// keeping what was typed when it is refused.
-async fn workouts_post(
-    State(runs): State<Arc<Runs>>,
-    Form(form): Form<Vec<(String, String)>>,
-) -> Response {
-    let typed = workouts::Fields::new(form);
-    let refused = match workouts::asked(&typed) {
-        Err(refused) => Some(refused),
-        Ok(asked) => match configurator::store::Store::open(&runs.setting().database).await {
-            Err(error) => Some(error.to_string()),
-            Ok(store) => {
-                let done = match asked {
-                    workouts::Asked::Workout(intensity, workout) => {
-                        configurator::design::workout(&store, intensity, &workout).await
-                    }
-                    workouts::Asked::Linear(linear) => {
-                        configurator::design::linear(&store, &linear).await
-                    }
-                    workouts::Asked::Sbs(sbs) => configurator::design::sbs(&store, &sbs).await,
-                };
-                store.close().await;
-                done.err().map(|error| error.to_string())
+/// Write what a post asks, or why it was refused.
+async fn workout_written(
+    store: &configurator::store::Store,
+    zone: &domain::normalised::OperatorZone,
+    form: &[(String, String)],
+) -> Option<input::Refusal> {
+    let whole = |error: &dyn std::fmt::Display| Some(input::Refusal::whole(error.to_string()));
+    if form.iter().any(|(key, _)| key == "design") {
+        let done = match progression::asked(&progression::Fields::new(form.to_vec())) {
+            Err(refused) => return Some(input::Refusal::whole(refused)),
+            Ok(progression::Asked::Linear(linear)) => {
+                configurator::design::linear(store, &linear).await
             }
-        },
-    };
-    match refused {
-        None => Redirect::to("/workouts").into_response(),
-        Some(refused) => workouts_shown(&runs, Some(&refused), Some(&typed))
-            .await
-            .into_response(),
+            Ok(progression::Asked::Sbs(sbs)) => configurator::design::sbs(store, &sbs).await,
+        };
+        return done.err().and_then(|error| whole(&error));
     }
+    let asked = match workout::asked(form) {
+        Ok(asked) => asked,
+        Err(refusal) => return Some(refusal),
+    };
+    let today = configurator::equipment::today(zone);
+    let found = match configurator::fills::on(store, zone, today).await {
+        Ok(Some(found)) => found,
+        Ok(None) => return whole(&"no mesocycle is in force today"),
+        Err(error) => return whole(&error),
+    };
+    let in_force = match configurator::design::in_force(store).await {
+        Ok(in_force) => in_force,
+        Err(error) => return whole(&error),
+    };
+    let writes = match workout::writes(&asked, &found, &in_force) {
+        Ok(writes) => writes,
+        Err(refusal) => return Some(refusal),
+    };
+    if let Some(change) = writes.change
+        && let Err(error) = configurator::fills::change(store, zone, change).await
+    {
+        return Some(workout::refusal(&error));
+    }
+    for (intensity, version) in writes.workouts {
+        if let Err(error) = configurator::design::workout(store, intensity, &version).await {
+            return whole(&error);
+        }
+    }
+    None
 }
 
 /// Every change to the run, starting with how it stands now.

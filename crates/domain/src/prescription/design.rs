@@ -243,3 +243,88 @@ pub struct Workout {
     /// history. One duration for every static slot.
     pub static_hold: Duration,
 }
+
+impl Workout {
+    /// This workout with one slot's sets and reps, and the rest that ends it,
+    /// as stated for that slot (#771).
+    ///
+    /// **Stated at the narrowest level that reaches it, and only where it
+    /// differs**: sets and reps for the slot itself, and the rest for the
+    /// slot, or for its superset's round where it is in one, since a member
+    /// does not rest before the next. A value it already runs is not stated
+    /// again, so restating a slot as it stands leaves the workout as it was.
+    #[must_use]
+    pub fn restated(
+        mut self,
+        slot: SlotId,
+        within: Option<&Superset>,
+        scheme: Option<AccessoryScheme>,
+        rest: Option<Target<Duration>>,
+    ) -> Self {
+        if let Some(scheme) = scheme
+            && *self.reps.for_slot(slot, within) != scheme
+        {
+            self.reps.exercises.insert(slot, scheme);
+        }
+        if let Some(rest) = rest
+            && self.rest.ending(slot, within) != rest
+        {
+            match within {
+                Some(superset) => {
+                    self.rest.supersets.insert(superset.clone(), rest);
+                }
+                None => {
+                    self.rest.exercises.insert(slot, rest);
+                }
+            }
+        }
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        measure::{Duration, RepCount},
+        prescription::{SlotId, Target, seed},
+    };
+
+    use super::{AccessoryScheme, Superset};
+
+    /// **A slot restated as it stands leaves the workout as it was**, so a
+    /// form saved unchanged adds nothing narrower.
+    #[test]
+    fn restating_a_slot_as_it_stands_changes_nothing() {
+        let workout = seed::workout().expect("the seed builds");
+        let scheme = *workout.reps.for_slot(SlotId::Core, None);
+        let rest = workout.rest.ending(SlotId::Core, None);
+
+        let restated = workout
+            .clone()
+            .restated(SlotId::Core, None, Some(scheme), Some(rest));
+
+        assert_eq!(restated, workout);
+    }
+
+    /// **A member's rest is its superset's round**, and its reps its own.
+    #[test]
+    fn a_members_rest_is_its_rounds() {
+        let workout = seed::workout().expect("the seed builds");
+        let pair = Superset::of(SlotId::Biceps, SlotId::Triceps, &[]);
+        let scheme = AccessoryScheme {
+            reps: Target::Exactly(RepCount::new(15).expect("a count")),
+            sets: RepCount::new(2).expect("a count"),
+        };
+        let rest = Target::Exactly(Duration::from_seconds(45));
+
+        let restated = workout.restated(SlotId::Biceps, Some(&pair), Some(scheme), Some(rest));
+
+        assert_eq!(*restated.reps.for_slot(SlotId::Biceps, Some(&pair)), scheme);
+        assert_ne!(
+            *restated.reps.for_slot(SlotId::Triceps, Some(&pair)),
+            scheme
+        );
+        assert_eq!(restated.rest.ending(SlotId::Triceps, Some(&pair)), rest);
+        assert!(restated.rest.exercises.is_empty());
+    }
+}

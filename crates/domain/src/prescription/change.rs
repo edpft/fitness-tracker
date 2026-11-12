@@ -21,10 +21,11 @@ use jiff::{Timestamp, civil::Date};
 
 use crate::{
     gym::{Exercise, equipment::Specific, exercise::Implement},
+    measure::RepCount,
     planner::{Relative, SessionRole},
 };
 
-use super::{ByIntensity, Fill, SlotFills, SlotId};
+use super::{ByIntensity, Fill, SlotFills, SlotId, StaticFill};
 
 /// One slot's fill from a date.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +41,11 @@ pub struct FillChange {
     /// The kind held to load it above bodyweight, where one is: its steps are
     /// that kind's scale.
     pub loaded_by: Option<Implement>,
+    /// A static slot's sets and reps from the same date (#771), since its fill
+    /// carries them; `None` keeps the mesocycle's own. Only a static slot
+    /// states them.
+    pub sets: Option<RepCount>,
+    pub reps: Option<RepCount>,
 }
 
 /// Every change to one mesocycle's fills.
@@ -75,7 +81,7 @@ impl FillChanges {
     }
 
     /// The fills as they stood on a date. A slot changed for both
-    /// intensities alike holds one exercise; otherwise each keeps its own.
+    /// intensities alike holds one fill; otherwise each keeps its own.
     #[must_use]
     pub fn apply(&self, fills: &SlotFills, date: Date) -> SlotFills {
         let mut changed = fills.clone();
@@ -85,23 +91,15 @@ impl FillChanges {
             if lower.is_none() && higher.is_none() {
                 continue;
             }
-            let Some(fill) = changed.single_mut(*slot) else {
-                continue;
-            };
-            let held = |intensity: Relative| match &*fill {
-                Fill::Same(exercise) => *exercise,
-                Fill::Alternating(by) => match intensity {
-                    Relative::Lower => by.lower,
-                    Relative::Higher => by.higher,
-                },
-            };
-            let lower = lower.map_or_else(|| held(Relative::Lower), |change| change.exercise);
-            let higher = higher.map_or_else(|| held(Relative::Higher), |change| change.exercise);
-            *fill = if lower == higher {
-                Fill::Same(lower)
-            } else {
-                Fill::Alternating(ByIntensity { lower, higher })
-            };
+            if let Some(fill) = changed.single_mut(*slot) {
+                *fill = refilled(fill, lower, higher, |_, change| change.exercise);
+            } else if let Some(fill) = changed.static_mut(*slot) {
+                *fill = refilled(fill, lower, higher, |held, change| StaticFill {
+                    exercise: change.exercise,
+                    sets: change.sets.unwrap_or(held.sets),
+                    reps: change.reps.unwrap_or(held.reps),
+                });
+            }
         }
         changed
     }
@@ -134,5 +132,31 @@ impl FillChanges {
 
     pub fn iter(&self) -> impl Iterator<Item = &FillChange> {
         self.0.iter()
+    }
+}
+
+/// A fill with each intensity's change in force, if it has one.
+fn refilled<T: Copy + PartialEq>(
+    fill: &Fill<T>,
+    lower: Option<&FillChange>,
+    higher: Option<&FillChange>,
+    by: impl Fn(T, &FillChange) -> T,
+) -> Fill<T> {
+    let held = |intensity: Relative| match fill {
+        Fill::Same(held) => *held,
+        Fill::Alternating(per) => match intensity {
+            Relative::Lower => per.lower,
+            Relative::Higher => per.higher,
+        },
+    };
+    let side = |intensity, change: Option<&FillChange>| {
+        change.map_or_else(|| held(intensity), |change| by(held(intensity), change))
+    };
+    let lower = side(Relative::Lower, lower);
+    let higher = side(Relative::Higher, higher);
+    if lower == higher {
+        Fill::Same(lower)
+    } else {
+        Fill::Alternating(ByIntensity { lower, higher })
     }
 }

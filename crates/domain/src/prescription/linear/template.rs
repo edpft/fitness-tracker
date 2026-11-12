@@ -258,6 +258,15 @@ impl SlotFills {
         }
     }
 
+    /// A static slot's fill, to change; nothing for a single slot.
+    pub const fn static_mut(&mut self, slot: SlotId) -> Option<&mut Fill<StaticFill>> {
+        match slot {
+            SlotId::Plyometric => Some(&mut self.plyometric),
+            SlotId::Power => Some(&mut self.power),
+            _ => None,
+        }
+    }
+
     /// A single slot's fill, to change; nothing for a static slot, whose fill
     /// carries its own sets and reps.
     pub const fn single_mut(&mut self, slot: SlotId) -> Option<&mut Fill<Exercise>> {

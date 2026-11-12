@@ -1083,7 +1083,9 @@ async fn read_changes(pool: &SqlitePool, mesocycle: i64) -> Result<FillChanges, 
                exercise AS "exercise!: String",
                assisted_maker,
                assisted_model,
-               loaded_implement
+               loaded_implement,
+               static_sets,
+               static_reps
         FROM gym_slot_fill_change
         WHERE mesocycle = ?
         ORDER BY id
@@ -1125,6 +1127,8 @@ async fn read_changes(pool: &SqlitePool, mesocycle: i64) -> Result<FillChanges, 
                 .map(Implement::try_from)
                 .transpose()
                 .map_err(|error| corrupt(&error))?,
+            sets: row.static_sets.map(count_of).transpose()?,
+            reps: row.static_reps.map(count_of).transpose()?,
         });
     }
     Ok(FillChanges::new(changes))
@@ -1161,12 +1165,14 @@ async fn write_change(
         .as_ref()
         .map(|specific| specific.model.as_str());
     let loaded = change.loaded_by.map(Implement::as_str);
+    let sets = change.sets.map(|count| i64::from(count.as_u32()));
+    let reps = change.reps.map(|count| i64::from(count.as_u32()));
     sqlx::query!(
         r"
         INSERT INTO gym_slot_fill_change
             (mesocycle, slot, intensity, valid_from, recorded_at, exercise,
-             assisted_maker, assisted_model, loaded_implement)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             assisted_maker, assisted_model, loaded_implement, static_sets, static_reps)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ",
         mesocycle,
         slot,
@@ -1176,7 +1182,9 @@ async fn write_change(
         exercise,
         maker,
         model,
-        loaded
+        loaded,
+        sets,
+        reps
     )
     .execute(pool)
     .await
