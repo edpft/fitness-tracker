@@ -227,14 +227,6 @@ const fn mark(length: Option<SlotLength>) -> &'static str {
     }
 }
 
-/// A word with its first letter in capitals.
-fn title(word: &str) -> String {
-    let mut letters = word.chars();
-    letters.next().map_or_else(String::new, |first| {
-        first.to_uppercase().chain(letters).collect()
-    })
-}
-
 /// The week commencing a date: the grid as tapped, and the two ways to save
 /// it.
 fn week(diary: &Diary, today: Date, tapped: &Tapped, refused: Option<&Refusal>) -> Markup {
@@ -279,7 +271,7 @@ fn week(diary: &Diary, today: Date, tapped: &Tapped, refused: Option<&Refusal>) 
                 }
                 div.slots {
                     span {}
-                    @for part in PartOfDay::ALL { span.part { (title(part.as_str())) } }
+                    @for part in PartOfDay::ALL { span.part { (input::title(part.as_str())) } }
                     @for (date, (weekday, name)) in days.iter().zip(WEEKDAYS) {
                         @let past = *date < today;
                         span.day.past[past] { (name) small { (date.day()) } }

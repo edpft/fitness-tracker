@@ -90,6 +90,34 @@ pub fn field(
     }
 }
 
+/// A field of several rows, the equipment's increments, bands and steps:
+/// a label over them and the reason under them, as a single field has.
+///
+/// `name` is what a refusal of the rows names, since each row posts under
+/// names of its own.
+pub fn group(name: &str, label: &str, rows: &Markup, refused: Option<&Refusal>) -> Markup {
+    let reason = refused
+        .filter(|refusal| refusal.field == Some(name))
+        .map(|refusal| refusal.reason.as_str());
+    html! {
+        fieldset.field.refused[reason.is_some()] {
+            legend { (label) }
+            (rows)
+            @if let Some(reason) = reason {
+                span.reason { (reason) }
+            }
+        }
+    }
+}
+
+/// A word with its first letter in capitals.
+pub fn title(word: &str) -> String {
+    let mut letters = word.chars();
+    letters.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(letters).collect()
+    })
+}
+
 /// The reason a whole form was refused, where it is shown: above its button.
 pub fn whole(refused: Option<&Refusal>) -> Markup {
     html! {

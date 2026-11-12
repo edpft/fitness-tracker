@@ -237,6 +237,7 @@ form.input { display: grid; gap: 14px; margin: 0; }
 .field.refused input, .field.refused select { border-color: var(--failed); }
 .field .reason, form.input p.reason { font-size: 14px; color: var(--failed); margin: 0; }
 details.folded { margin-top: 12px; }
+.card > details.folded:first-child { margin-top: 0; }
 details.folded > summary {
   list-style: none; cursor: pointer; text-align: center; font-weight: 600; font-size: 15px;
   padding: 11px; border-radius: 999px; background: var(--raised);
@@ -248,6 +249,28 @@ form.input button { border: 0; border-radius: 999px; font-size: 16px; padding: 1
 .card > h3 { margin-top: 18px; }
 .card .held { font-size: 19px; font-weight: 600; margin: 4px 0 0; }
 .card .held .from, .card .held.from { font-size: 14px; font-weight: 400; color: var(--muted); }
+/* A range of bands as the ladder a prescription steps through (#667): each
+   step's bands, and their load. */
+.card > h2.small .period { font-weight: 400; color: var(--muted); }
+.ladder { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; margin-top: 8px; font-size: 16px; }
+.ladder .kg { color: var(--ink2); font-variant-numeric: tabular-nums; text-align: right; }
+/* A field of several rows (#667): the equipment's increments, bands and
+   steps, a row added or removed without a post. */
+fieldset.field { border: 0; padding: 0; margin: 0; }
+.field > legend {
+  padding: 0; margin-bottom: 6px;
+  font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink2);
+}
+.rows { display: grid; gap: 8px; }
+.row.band, .row.step { display: grid; gap: 8px; align-items: center; }
+.row.band { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px; }
+.row.step { grid-template-columns: repeat(3, minmax(0, 1fr)) 36px; }
+.row.head { font-size: 13px; color: var(--muted); }
+form.input button.remove { padding: 0; height: 44px; background: none; color: var(--muted); font-size: 22px; font-weight: 400; }
+.rows > .row:first-child .remove { visibility: hidden; }
+fieldset.field button.quiet { margin-top: 2px; padding: 10px; font-size: 15px; }
+label.check { display: flex; gap: 10px; align-items: center; font-size: 15px; color: var(--ink2); }
+label.check input { width: 20px; height: 20px; margin: 0; }
 
 /* A week (#671): a day per row, a part of the day per column, a shorter slot
    a circle and a longer one a lozenge. */
