@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO calendar (name, served, etag, last_modified, asked_at)\n            VALUES (?, ?, ?, ?, ?)\n            ON CONFLICT (name) DO UPDATE\n               SET served = excluded.served,\n                   etag = excluded.etag,\n                   last_modified = excluded.last_modified,\n                   asked_at = excluded.asked_at\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "d309e8547e6d924be8e66287c65e8e1d7e44ea0ce4a90c570cf4885646a57dfe"
+}

@@ -55,6 +55,7 @@ use crate::error::{
     DeliveryError, ExtractionError, NormalisationError, PrescriptionError, RunLockError,
     SourceError, StatusError, StoreError,
 };
+use crate::graph::Calendar;
 
 // --- Driven ports -----------------------------------------------------------
 
@@ -3392,10 +3393,10 @@ pub trait PrescriptionDeliverer {
 
 /// Where the school and public holidays come from.
 ///
-/// **A thing that is read, never written**: both are facts about the world
-/// (#181), set by the school and by the government, so the answer is fetched
-/// each time and nothing is stored (§ 14). One source may know only one kind,
-/// and [`Holidays::and`] is where two meet.
+/// **Read as last served** (#809): both are facts about the world (#181), set
+/// by the school and by the government, and only their current value is kept
+/// (§ 14). A run asks whether either has changed; reading them asks nothing.
+/// One source may know only one kind, and [`Holidays::and`] is where two meet.
 pub trait HolidayCalendar {
     /// Every holiday the source currently publishes.
     ///
@@ -3404,6 +3405,77 @@ pub trait HolidayCalendar {
     /// [`SourceError`] if the source is unreachable or serves something this
     /// adapter cannot read.
     fn holidays(&self) -> impl Future<Output = Result<Holidays, SourceError>> + Send;
+}
+
+/// What a calendar's publisher served, and what to ask it with next time to
+/// learn whether it has changed (#809).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Served {
+    pub body: String,
+    /// The publisher's `ETag`, asked with `If-None-Match`.
+    pub etag: Option<String>,
+    /// The publisher's `Last-Modified`, asked with `If-Modified-Since`.
+    pub last_modified: Option<String>,
+}
+
+/// A calendar as it was last served, and when its publisher was last asked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Kept {
+    pub served: Served,
+    pub asked: Timestamp,
+}
+
+/// The body that sets a calendar, asked whether it has changed (#809).
+///
+/// **The source declares a change** (`Changed::Declared`): it is asked with
+/// what it last served, and a publisher that has nothing new says so.
+pub trait CalendarPublisher {
+    /// What it serves now, or `None` where it answers that nothing has changed
+    /// since `kept`. A body it serves is one this adapter can read.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError`] if it is unreachable or serves something unreadable.
+    fn served_since(
+        &self,
+        kept: Option<&Served>,
+    ) -> impl Future<Output = Result<Option<Served>, SourceError>> + Send;
+}
+
+/// Each calendar as it was last served (§ 14: the current value, nothing
+/// more).
+pub trait CalendarStore {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn kept(
+        &self,
+        calendar: Calendar,
+    ) -> impl Future<Output = Result<Option<Kept>, StoreError>> + Send;
+
+    /// Keep what `calendar`'s publisher served when asked at `asked`, in place
+    /// of what it served before.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn keep(
+        &self,
+        calendar: Calendar,
+        served: &Served,
+        asked: Timestamp,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Its publisher was asked at `asked` and said nothing has changed.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn unchanged(
+        &self,
+        calendar: Calendar,
+        asked: Timestamp,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Everything the operator has said about their week.

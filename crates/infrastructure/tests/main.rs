@@ -8,6 +8,7 @@ mod absence_migration;
 mod authored_data;
 mod btwb_exports;
 mod btwb_sessions;
+mod calendar_contract;
 mod canonical_gym_session;
 mod canonicalise;
 mod comparison;

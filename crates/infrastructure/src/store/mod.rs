@@ -8,6 +8,7 @@
 
 pub mod btwb_export_landing;
 pub mod btwb_normalised;
+pub mod calendar;
 pub mod canonical_changes;
 pub mod canonical_cycling;
 pub mod canonical_gym;
@@ -75,6 +76,7 @@ use domain::{
 
 pub use btwb_export_landing::BtwbExportLandingStore;
 pub use btwb_normalised::{BtwbExportAccountReader, SqliteBtwbStore};
+pub use calendar::SqliteCalendarStore;
 pub use canonical_cycling::{
     SqliteCanonicalCyclingSessionStore, SqliteNormalisedCyclingSessionReader,
 };

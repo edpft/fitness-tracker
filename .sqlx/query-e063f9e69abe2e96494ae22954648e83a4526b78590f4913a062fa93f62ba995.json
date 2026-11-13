@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT served AS \"served!: String\",\n                   etag,\n                   last_modified,\n                   asked_at AS \"asked_at!: String\"\n              FROM calendar\n             WHERE name = ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "served!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "calendar",
+            "name": "served"
+          }
+        }
+      },
+      {
+        "name": "etag",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "calendar",
+            "name": "etag"
+          }
+        }
+      },
+      {
+        "name": "last_modified",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "calendar",
+            "name": "last_modified"
+          }
+        }
+      },
+      {
+        "name": "asked_at!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "calendar",
+            "name": "asked_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "e063f9e69abe2e96494ae22954648e83a4526b78590f4913a062fa93f62ba995"
+}

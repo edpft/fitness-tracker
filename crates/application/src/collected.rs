@@ -68,7 +68,9 @@ pub fn parts(step: &Step) -> BTreeSet<Part> {
         Step::CanonicalisingWeighIns => {
             BTreeSet::from([Part::Canonicalising(CanonicalLayer::WeighIns)])
         }
-        Step::RefreshingClasses | Step::Committing | Step::Skipping => BTreeSet::new(),
+        Step::FetchingCalendar(_) | Step::RefreshingClasses | Step::Committing | Step::Skipping => {
+            BTreeSet::new()
+        }
     }
 }
 

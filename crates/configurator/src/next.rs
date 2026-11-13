@@ -44,7 +44,6 @@ use infrastructure::{
 use crate::{
     access, catalogue,
     config::{SourceAccess, source_access_for},
-    holidays::Calendars,
     telemetry::{self, Run, Spanned},
     wiring::{self, Command, Outcome, SystemClock, Unreported, WiringError},
 };
@@ -294,10 +293,15 @@ async fn over(
         canonical: canonical(&pool),
         ledger: SqliteDerivationLedger::new(pool.clone()),
         classes: class_source,
-        holidays: Calendars,
+        holidays: crate::holidays::calendars(&pool),
         diary: SqliteDiaryStore::new(pool.clone()),
         plans: plans.clone(),
-        microcycle: microcycle(&pool, &plans, &deliveries, crate::holidays::term().await)?,
+        microcycle: microcycle(
+            &pool,
+            &plans,
+            &deliveries,
+            crate::holidays::term(&pool).await,
+        )?,
         committing: Committing::new(
             CommitPorts {
                 plans: plans.clone(),

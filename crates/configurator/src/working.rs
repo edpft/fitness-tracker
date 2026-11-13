@@ -71,7 +71,7 @@ pub async fn view(store: &Store, zone: &OperatorZone) -> Result<View, NextFailur
     let at_power =
         domain::analytical::heart_rate_at_power::trended(&heart_rate::rides(store).await?);
     let weight = body_weight::series(store).await?;
-    let aims = body_weight::aims_over(plans.clone(), zone).await?;
+    let aims = body_weight::aims_over(store, plans.clone(), zone).await?;
     let composition = composition::by_method(store).await?;
     Ok(IsItWorking::new(
         SqliteOvernightHrvHistory::new(pool.clone()),

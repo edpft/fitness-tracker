@@ -33,6 +33,12 @@ pub fn step(step: &Step) -> String {
             format!("Canonicalising {} sessions", discipline.as_str())
         }
         Step::CanonicalisingWeighIns => "Canonicalising weigh-ins".to_owned(),
+        Step::FetchingCalendar(application::Calendar::School) => {
+            "Fetching the school calendar".to_owned()
+        }
+        Step::FetchingCalendar(application::Calendar::Public) => {
+            "Fetching the public holidays".to_owned()
+        }
         // **The configurator knows which catalogue this build keeps**, as it
         // knows where rides are done.
         Step::RefreshingClasses => "Refreshing Peloton's classes".to_owned(),
@@ -73,11 +79,12 @@ fn ended(done: &Done) -> String {
         Err(failure) => return format!("failed: {failure}"),
         Ok(Found::NotDue(why)) => return why.to_string(),
         Ok(Found::Unchanged) => return "unchanged".to_owned(),
+        Ok(Found::Changed) => return "changed".to_owned(),
         Ok(Found::Joined) => return "done".to_owned(),
         Ok(found) => found,
     };
     let what = match found {
-        Found::NotDue(_) | Found::Unchanged | Found::Joined => String::new(),
+        Found::NotDue(_) | Found::Unchanged | Found::Changed | Found::Joined => String::new(),
         Found::Landed(records) if records.as_usize() == 0 => "nothing new".to_owned(),
         Found::Landed(records) => format!("{records} new"),
         Found::Written(written) => format!("{written} written"),

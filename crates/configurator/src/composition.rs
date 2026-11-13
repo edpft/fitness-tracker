@@ -2,7 +2,7 @@
 //! and against the nutrition phase in force (#489).
 
 use application::{
-    HolidayCalendar, StoreError,
+    StoreError,
     composition::{AgainstPhase, Composition, InForce},
     next::Scope,
 };
@@ -13,7 +13,7 @@ use infrastructure::{
 };
 
 use crate::{
-    holidays::Calendars,
+    holidays,
     next::{self, NextFailure, Reads},
     rescheduling,
     store::Store,
@@ -59,6 +59,9 @@ pub async fn against_phase(
         SqliteCompositionHistory::new(store.pool().clone()),
         rescheduling::plans(store, zone).await?,
     )
-    .on(crate::equipment::today(zone), Calendars.holidays().await)
+    .on(
+        crate::equipment::today(zone),
+        holidays::holidays(store).await,
+    )
     .await?)
 }

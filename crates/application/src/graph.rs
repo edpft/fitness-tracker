@@ -55,10 +55,28 @@ pub enum Interpretive {
 pub enum Generation {
     /// The plates and fills to hand.
     Equipment,
+    Calendar(Calendar),
+}
+
+/// A calendar the training is run in, as the body that sets it publishes it:
+/// received from outside, and kept as it was last served (§ 14).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Calendar {
     /// The school's term dates.
-    SchoolCalendar,
+    School,
     /// The public holidays.
-    PublicHolidays,
+    Public,
+}
+
+impl Calendar {
+    pub const ALL: [Self; 2] = [Self::School, Self::Public];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::School => "school",
+            Self::Public => "public",
+        }
+    }
 }
 
 /// What a derivation, a page or a prescription reads.

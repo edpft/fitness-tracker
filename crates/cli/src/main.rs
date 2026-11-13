@@ -1069,7 +1069,7 @@ async fn authored_command(
             Some(discipline_command_run(name, sub, credentials, stated_timezone, database).await)
         }
         "canonicalise" => Some(canonicalise_command_run(sub, database).await),
-        "holidays" => Some(holidays::list().await),
+        "holidays" => Some(holidays::list(database).await),
         "schedule" => Some(schedule_command_run(sub, database).await),
         "mesocycle" => {
             let zone = match zone(sub) {

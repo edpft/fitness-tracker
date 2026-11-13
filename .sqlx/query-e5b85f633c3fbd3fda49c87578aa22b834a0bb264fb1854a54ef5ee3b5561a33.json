@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE calendar SET asked_at = ? WHERE name = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "e5b85f633c3fbd3fda49c87578aa22b834a0bb264fb1854a54ef5ee3b5561a33"
+}

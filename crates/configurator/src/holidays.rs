@@ -1,39 +1,55 @@
 //! The school and public holidays, as this build reads them.
 //!
-//! **Read, not recorded** (#181). Both are facts about the world, set by the
-//! school and by the government, so they are asked each time and nothing is
-//! stored.
+//! **Kept as last served** (#809). Both are facts about the world, set by the
+//! school and by the government; a run of `next` asks each whether it has
+//! changed, and everything else reads what is kept and asks nothing.
 
-use application::{HolidayCalendar, SourceError, microcycle::Term};
+use application::{HolidayCalendar as _, SourceError, microcycle::Term};
 use domain::schedule::Holidays;
-use infrastructure::{BankHolidays, GOV_UK_BANK_HOLIDAYS, SchoolCalendar};
+use infrastructure::{
+    BankHolidays, GOV_UK_BANK_HOLIDAYS, SchoolCalendar, SqliteCalendarStore, SqlitePool,
+};
+
+use crate::store::Store;
 
 /// The school the operator's family follows, and the iCal feed its website
 /// publishes. Its term dates, not the council's recommended ones: a school may
 /// set its own.
 const SCHOOL_CALENDAR: &str = "https://hemplandprimary.co.uk/?rhc_action=get_icalendar_events";
 
-/// What the walk through the plan starts a programme again against (#732):
-/// the holidays as read now, and Peloton's names for its programmes.
-///
-/// `None` where either calendar cannot be read. Nothing starts again then, and
-/// a re-run lengthens its mesocycle as it did before.
-pub async fn term() -> Option<Term> {
-    Some(Term {
-        holidays: Calendars.holidays().await.ok()?,
-        identify: infrastructure::peloton::provider::identify,
-    })
+/// Both calendars: kept in the store, and asked of the school and gov.uk.
+pub type Calendars =
+    application::calendars::Calendars<SqliteCalendarStore, SchoolCalendar, BankHolidays>;
+
+/// Both calendars, over the store in `pool`.
+pub(crate) fn calendars(pool: &SqlitePool) -> Calendars {
+    Calendars::new(
+        SqliteCalendarStore::new(pool.clone()),
+        SchoolCalendar::new(SCHOOL_CALENDAR),
+        BankHolidays::new(GOV_UK_BANK_HOLIDAYS),
+    )
 }
 
-/// Both calendars, as one: what a macrocycle is read against.
-pub struct Calendars;
+/// Every school and public holiday, as last served.
+///
+/// # Errors
+///
+/// [`SourceError`] if either has not been fetched yet, or what was kept
+/// cannot be read.
+pub async fn holidays(store: &Store) -> Result<Holidays, SourceError> {
+    calendars(store.pool()).holidays().await
+}
 
-impl HolidayCalendar for Calendars {
-    async fn holidays(&self) -> Result<Holidays, SourceError> {
-        let school = SchoolCalendar::new(SCHOOL_CALENDAR).holidays().await?;
-        let public = BankHolidays::new(GOV_UK_BANK_HOLIDAYS).holidays().await?;
-        Ok(school.and(public))
-    }
+/// What the walk through the plan starts a programme again against (#732):
+/// the holidays as last served, and Peloton's names for its programmes.
+///
+/// `None` where either calendar has not been fetched yet. Nothing starts again
+/// then, and a re-run lengthens its mesocycle as it did before.
+pub async fn term(pool: &SqlitePool) -> Option<Term> {
+    Some(Term {
+        holidays: calendars(pool).holidays().await.ok()?,
+        identify: infrastructure::peloton::provider::identify,
+    })
 }
 
 #[cfg(test)]
