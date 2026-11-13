@@ -926,8 +926,14 @@ fn a_source_that_cannot_be_fetched_is_a_failed_step_and_the_run_carries_on() {
             (&Step::Canonicalising(Discipline::Cycling), true),
             (&Step::CanonicalisingWeighIns, true),
             // A calendar that cannot be asked is a failed step too (#809).
-            (&Step::FetchingCalendar(application::Calendar::School), false),
-            (&Step::FetchingCalendar(application::Calendar::Public), false),
+            (
+                &Step::FetchingCalendar(application::Calendar::School),
+                false
+            ),
+            (
+                &Step::FetchingCalendar(application::Calendar::Public),
+                false
+            ),
         ]
     );
     assert!(matches!(
