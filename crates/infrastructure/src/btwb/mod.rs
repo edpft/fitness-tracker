@@ -524,3 +524,10 @@ fn exercise_named(name: &str) -> Option<Exercise> {
     };
     Some(Exercise::Reps(reps))
 }
+
+/// Nothing beyond the accounts it is handed (#809).
+impl application::Input for BtwbTranslator {
+    fn reads() -> application::Reads {
+        application::Reads::default()
+    }
+}

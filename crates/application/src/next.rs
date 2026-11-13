@@ -72,6 +72,7 @@ use crate::{
     commit::{CommitError, Due},
     cycling::{PrescribedRide, RideDeliveryError, RidingError},
     deliver::{Delivering, DeliveryPorts},
+    graph::{Derivation, Input, Node, Reads},
     microcycle::{Session, Standing},
     ports::{
         CanonicalLayer, DerivationLedger, DerivedFrom, NewestObservation, NormalisedLayers,
@@ -992,6 +993,28 @@ where
             layer.version(),
             written_by.as_str()
         )))
+    }
+}
+
+impl<GR: Input, GC, CR: Input, CC, WR: Input, WC> CanonicalPorts<GR, GC, CR, CC, WR, WC> {
+    /// What `layer` is built from: what the reader of its normalised layer
+    /// reads (#809).
+    #[must_use]
+    pub fn reads(layer: CanonicalLayer) -> Reads {
+        match layer {
+            CanonicalLayer::Gym => GR::reads(),
+            CanonicalLayer::Cycling => CR::reads(),
+            CanonicalLayer::WeighIns => WR::reads(),
+        }
+    }
+
+    /// Each canonical layer's derivation.
+    #[must_use]
+    pub fn derivations() -> [Derivation; 3] {
+        CANONICAL.map(|layer| Derivation {
+            node: Node::Canonical(layer),
+            reads: Self::reads(layer),
+        })
     }
 }
 

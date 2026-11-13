@@ -316,3 +316,10 @@ impl Translator for GarminHrvTranslator {
         )
     }
 }
+
+/// Nothing beyond the accounts it is handed (#809).
+impl application::Input for GarminHrvTranslator {
+    fn reads() -> application::Reads {
+        application::Reads::default()
+    }
+}

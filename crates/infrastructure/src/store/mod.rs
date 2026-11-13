@@ -67,7 +67,7 @@ pub mod weigh_in;
 pub mod withings_landing;
 pub mod withings_normalised;
 
-use application::StoreError;
+use application::{Node, Reads, StoreError};
 use domain::{
     landing::{EventProvenance, PayloadDigest, Provenance, RunId},
     normalised::NormalisationRunId,
@@ -298,4 +298,26 @@ fn count_from_storage(value: Option<i64>) -> Result<usize, StoreError> {
     usize::try_from(value).map_err(|_| StoreError::Corrupt {
         detail: format!("a stored count of {value} is not a count"),
     })
+}
+
+/// What a port reading these streams' landing tables reads (#809).
+///
+/// **Named beside the SQL that reads them**, which is what a port's
+/// declaration is: each stream's constant is the one its own landing store is
+/// opened with, so it is a stream.
+pub(crate) fn landed(streams: &[&str]) -> Reads {
+    streams
+        .iter()
+        .filter_map(|stream| domain::landing::LandingStream::try_from(*stream).ok())
+        .map(Node::Landing)
+        .collect()
+}
+
+/// What a port reading a normalised table these streams write reads (#809).
+pub(crate) fn normalised(streams: &[&str]) -> Reads {
+    streams
+        .iter()
+        .filter_map(|stream| domain::landing::LandingStream::try_from(*stream).ok())
+        .map(Node::Normalised)
+        .collect()
 }

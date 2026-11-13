@@ -520,3 +520,10 @@ impl Translator for WithingsWeighInTranslator {
         })
     }
 }
+
+/// Nothing beyond the accounts it is handed (#809).
+impl application::Input for WithingsWeighInTranslator {
+    fn reads() -> application::Reads {
+        application::Reads::default()
+    }
+}

@@ -136,3 +136,10 @@ impl Translator for GarminDailyHeartRateTranslator {
         })
     }
 }
+
+/// Nothing beyond the accounts it is handed (#809).
+impl application::Input for GarminDailyHeartRateTranslator {
+    fn reads() -> application::Reads {
+        application::Reads::default()
+    }
+}

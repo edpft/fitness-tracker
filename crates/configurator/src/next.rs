@@ -11,7 +11,7 @@ use tracing::Instrument as _;
 
 use application::{
     CanonicalLayer, Clock, DerivedFrom, FetchLog, Fetched, NormalisationError,
-    NormalisationSummary, NormalisedLayers, Part, Rederivation, RunLockError, StoreError,
+    NormalisationSummary, NormalisedLayers, Rederivation, RunLockError, StoreError,
     commit::{CommitPorts, Committing},
     cycling::{Riding, RidingPorts},
     microcycle::{Microcycle, MicrocyclePorts},
@@ -28,19 +28,13 @@ use domain::{
     schedule::DayPart,
 };
 use infrastructure::{
-    BtwbExportLandingStore, FileRunLock, GarminActivityFileLandingStore,
-    GarminActivityLandingStore, GarminDailyHeartRateLandingStore, GarminDailySummaryLandingStore,
-    GarminExerciseSetLandingStore, GarminHrvLandingStore, GarminSleepLandingStore,
-    HevyWorkoutLandingStore, MyFitnessPalExportLandingStore, PelotonAccountLandingStore,
-    PelotonRideDetailLandingStore, PelotonRideLandingStore, PelotonRideSampleLandingStore,
-    SpreadsheetFileLandingStore, SqliteCanonicalCyclingSessionStore,
-    SqliteCanonicalGymSessionStore, SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore,
-    SqliteCyclingMesocycleStore, SqliteDerivationLedger, SqliteDiaryStore, SqliteExerciseHistory,
-    SqliteExtractionRunLog, SqliteFtpHistory, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqliteNormalisedCyclingSessionReader,
-    SqliteNormalisedGymSessionReader, SqliteNormalisedWeighInReader, SqlitePelotonClassStore,
-    SqlitePlanStore, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
-    WithingsMeasurementLandingStore, connect,
+    FileRunLock, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
+    SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
+    SqliteDerivationLedger, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
+    SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
+    SqliteNormalisedCyclingSessionReader, SqliteNormalisedGymSessionReader,
+    SqliteNormalisedWeighInReader, SqlitePelotonClassStore, SqlitePlanStore,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, connect,
     peloton::{
         PelotonClassSource, PelotonHoldingRides, PelotonProgrammes, PelotonRideDestination,
         catalogue::ClassCatalogue,
@@ -365,34 +359,22 @@ pub enum Reads {
 }
 
 /// The parts a run collecting what `reads` names takes: each part read, and
-/// every part it is derived from.
+/// every part it is derived from, as the graph has it (#809).
 ///
 /// # Errors
 ///
 /// [`WiringError`] if a name read is not a stream's.
 pub fn scope(reads: impl IntoIterator<Item = Reads>) -> Result<Scope, WiringError> {
     let stream = |name: &str| LandingStream::try_from(name).map_err(WiringError::from);
-    let normalised = |name: &str| -> Result<Vec<Part>, WiringError> {
-        let mut parts = vec![Part::Normalising(stream(name)?)];
-        for landed in landed_from(name) {
-            parts.push(Part::Fetching(stream(landed)?));
-        }
-        Ok(parts)
-    };
-    let mut parts = Vec::new();
+    let mut nodes = Vec::new();
     for read in reads {
-        match read {
-            Reads::Landed(name) => parts.push(Part::Fetching(stream(name)?)),
-            Reads::Normalised(name) => parts.extend(normalised(name)?),
-            Reads::Canonical(layer) => {
-                parts.push(Part::Canonicalising(layer));
-                for name in built_from(layer) {
-                    parts.extend(normalised(name)?);
-                }
-            }
-        }
+        nodes.push(match read {
+            Reads::Landed(name) => application::graph::Node::Landing(stream(name)?),
+            Reads::Normalised(name) => application::graph::Node::Normalised(stream(name)?),
+            Reads::Canonical(layer) => application::graph::Node::Canonical(layer),
+        });
     }
-    Ok(Scope::new(parts))
+    Ok(crate::graph::scope(&nodes.into_iter().collect()))
 }
 
 /// What a discipline's next session is prescribed from (#666).
@@ -411,73 +393,8 @@ pub fn prescribed_from(discipline: Discipline) -> Result<Scope, WiringError> {
     })])
 }
 
-/// The walks `next` lands a normalised layer's records by. None for a stream
-/// read from a folder, which `next` derives but does not fetch.
-///
-/// **The landing tables [`wiring::inputs`] counts for the stream**, which are
-/// what its arm of [`wiring::run`] derives from.
-fn landed_from(normalised: &str) -> &'static [&'static str] {
-    match normalised {
-        HevyWorkoutLandingStore::STREAM => &[HevyWorkoutLandingStore::STREAM],
-        PelotonRideLandingStore::STREAM => &[
-            PelotonRideLandingStore::STREAM,
-            PelotonRideDetailLandingStore::STREAM,
-            PelotonRideSampleLandingStore::STREAM,
-            PelotonAccountLandingStore::STREAM,
-        ],
-        WithingsMeasurementLandingStore::STREAM => &[WithingsMeasurementLandingStore::STREAM],
-        GarminHrvLandingStore::STREAM => &[
-            GarminHrvLandingStore::STREAM,
-            GarminSleepLandingStore::STREAM,
-        ],
-        GarminActivityLandingStore::STREAM => &[
-            GarminActivityLandingStore::STREAM,
-            GarminExerciseSetLandingStore::STREAM,
-            GarminActivityFileLandingStore::STREAM,
-        ],
-        GarminDailyHeartRateLandingStore::STREAM => &[
-            GarminDailyHeartRateLandingStore::STREAM,
-            GarminSleepLandingStore::STREAM,
-        ],
-        GarminSleepLandingStore::STREAM => &[GarminSleepLandingStore::STREAM],
-        GarminDailySummaryLandingStore::STREAM => &[
-            GarminDailySummaryLandingStore::STREAM,
-            GarminSleepLandingStore::STREAM,
-        ],
-        _ => &[],
-    }
-}
-
-/// The normalised layers each canonical layer is built from: the streams that
-/// write the normalised tables its reader reads.
-const fn built_from(layer: CanonicalLayer) -> &'static [&'static str] {
-    match layer {
-        CanonicalLayer::Gym => &[
-            HevyWorkoutLandingStore::STREAM,
-            GarminActivityLandingStore::STREAM,
-            SpreadsheetFileLandingStore::STREAM,
-            BtwbExportLandingStore::STREAM,
-        ],
-        CanonicalLayer::Cycling => &[PelotonRideLandingStore::STREAM],
-        CanonicalLayer::WeighIns => &[
-            WithingsMeasurementLandingStore::STREAM,
-            SpreadsheetFileLandingStore::STREAM,
-            MyFitnessPalExportLandingStore::STREAM,
-        ],
-    }
-}
-
 /// Each canonical layer, and the normalised layers it is built from.
-pub(crate) fn canonical(
-    pool: &infrastructure::SqlitePool,
-) -> CanonicalPorts<
-    SqliteNormalisedGymSessionReader,
-    SqliteCanonicalGymSessionStore,
-    SqliteNormalisedCyclingSessionReader,
-    SqliteCanonicalCyclingSessionStore,
-    SqliteNormalisedWeighInReader,
-    SqliteCanonicalWeighInStore,
-> {
+pub(crate) fn canonical(pool: &infrastructure::SqlitePool) -> crate::graph::Canonical {
     CanonicalPorts {
         normalised_gym: SqliteNormalisedGymSessionReader::new(pool.clone()),
         canonical_gym: SqliteCanonicalGymSessionStore::new(pool.clone()),
@@ -711,8 +628,7 @@ mod tests {
     use application::{CanonicalLayer, Part, next::Scope};
     use domain::landing::LandingStream;
 
-    use super::landed_from;
-    use crate::{body_weight, catalogue, composition, heart_rate, one_rep_max, per_device, wiring};
+    use crate::{body_weight, composition, heart_rate, one_rep_max, per_device};
 
     fn named(scope: &Scope) -> Vec<String> {
         scope
@@ -828,22 +744,5 @@ mod tests {
         };
         assert!(super::collecting(&database, &one_rep_max).expect("tried"));
         assert!(!super::collecting(&database, &body_weight).expect("tried"));
-    }
-
-    /// **Every stream `next` fetches and derives says what it is landed by**,
-    /// so a chart reading it fetches it: a stream added without saying would
-    /// be derived by a page's run from whatever the last whole run landed.
-    #[test]
-    fn every_fetched_stream_says_what_it_is_landed_by() {
-        for known in catalogue::KNOWN
-            .iter()
-            .filter(|known| wiring::derives(known) && known.system().is_some())
-        {
-            assert!(
-                !landed_from(&known.name()).is_empty(),
-                "{} says nothing of what lands it",
-                known.name()
-            );
-        }
     }
 }

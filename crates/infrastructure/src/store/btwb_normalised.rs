@@ -181,3 +181,10 @@ impl NormalisedEntityStore for SqliteBtwbStore {
         Ok(WorkoutCount::from(count_from_storage(Some(row.count))?))
     }
 }
+
+/// The exports landed (#809).
+impl application::Input for BtwbExportAccountReader {
+    fn reads() -> application::Reads {
+        super::landed(&[super::BtwbExportLandingStore::STREAM])
+    }
+}

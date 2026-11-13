@@ -299,3 +299,10 @@ pub(super) async fn count_manual_weigh_ins(pool: &SqlitePool) -> Result<usize, S
         .map_err(|error| store_error(&error))?;
     count_from_storage(Some(row.total))
 }
+
+/// The workbooks landed (#809).
+impl application::Input for SpreadsheetFileAccountReader {
+    fn reads() -> application::Reads {
+        super::landed(&[super::SpreadsheetFileLandingStore::STREAM])
+    }
+}

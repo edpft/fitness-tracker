@@ -178,3 +178,10 @@ impl Translator for GarminSleepTranslator {
         })
     }
 }
+
+/// Nothing beyond the accounts it is handed (#809).
+impl application::Input for GarminSleepTranslator {
+    fn reads() -> application::Reads {
+        application::Reads::default()
+    }
+}

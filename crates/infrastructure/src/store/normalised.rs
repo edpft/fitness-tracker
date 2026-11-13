@@ -825,3 +825,10 @@ fn metres_for_storage(metres: domain::measure::Metres) -> Result<i64, StoreError
         detail: "a distance larger than the store can hold".to_owned(),
     })
 }
+
+/// The workouts landed (#809).
+impl application::Input for HevySessionAccountReader {
+    fn reads() -> application::Reads {
+        super::landed(&[super::HevyWorkoutLandingStore::STREAM])
+    }
+}

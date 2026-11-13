@@ -467,3 +467,14 @@ fn mass(grams: i64) -> Result<Kg, StoreError> {
 fn weigh_in_id(id: i64) -> Result<NormalisedWeighInId, StoreError> {
     NormalisedWeighInId::try_from(id).map_err(|error| corrupt(&error))
 }
+
+/// `weigh_in`, which Withings, the spreadsheets and MyFitnessPal write (#809).
+impl application::Input for SqliteNormalisedWeighInReader {
+    fn reads() -> application::Reads {
+        super::normalised(&[
+            super::WithingsMeasurementLandingStore::STREAM,
+            super::SpreadsheetFileLandingStore::STREAM,
+            super::MyFitnessPalExportLandingStore::STREAM,
+        ])
+    }
+}

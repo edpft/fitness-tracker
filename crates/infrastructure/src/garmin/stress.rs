@@ -133,3 +133,10 @@ impl Translator for GarminStressTranslator {
         )
     }
 }
+
+/// Nothing beyond the accounts it is handed (#809).
+impl application::Input for GarminStressTranslator {
+    fn reads() -> application::Reads {
+        application::Reads::default()
+    }
+}
