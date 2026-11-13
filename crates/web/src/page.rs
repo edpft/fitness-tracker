@@ -137,7 +137,7 @@ const fn metric(path: &'static str, name: &'static str, group: Group) -> Page {
 }
 
 /// Every page, in the order its place shows them.
-pub const PAGES: [Page; 14] = [
+pub const PAGES: [Page; 13] = [
     page("/", "Today", Place::Today),
     metric("/ftp", "FTP tests", Group::Performance),
     metric(
@@ -146,8 +146,7 @@ pub const PAGES: [Page; 14] = [
         Group::Performance,
     ),
     metric("/estimated-1rm", "Estimated 1RM", Group::Performance),
-    metric("/body-weight", "Body weight", Group::Body),
-    metric("/body-composition", "Body composition", Group::Body),
+    metric(crate::body::PATH, crate::body::TITLE, Group::Body),
     metric("/resting-heart-rate", "Resting heart rate", Group::Response),
     metric("/hrv", "Overnight HRV", Group::Response),
     page("/working", "Is what I'm doing working?", Place::Progress),
@@ -179,13 +178,15 @@ pub fn bar(here: &str) -> Markup {
 }
 
 /// A page's name, after a ‹ back to the place it is opened from, and above
-/// it the group a metric's page is in (#769).
+/// it the group a metric's page is in (#769), unless the page is the whole
+/// group (#786).
 pub fn header(here: &str, title: &str) -> Markup {
     let place = Place::of(here);
     let group = PAGES
         .iter()
         .find(|page| page.path == here)
-        .and_then(|page| page.group);
+        .and_then(|page| page.group)
+        .filter(|group| group.heading() != title);
     html! {
         header.detail {
             a href=(place.path()) aria-label=(place.name()) { "‹" }
@@ -301,7 +302,7 @@ mod tests {
     /// no pill (#768, #772).
     #[test]
     fn the_bar_marks_the_place_a_page_is_opened_from() {
-        let shown = bar("/body-weight").into_string();
+        let shown = bar("/body").into_string();
 
         assert_eq!(shown.matches("<a ").count(), 4, "{shown}");
         assert!(
@@ -318,11 +319,11 @@ mod tests {
         );
     }
 
-    /// **‹ returns to the place a page is opened from**: Body weight to
+    /// **‹ returns to the place a page is opened from**: Body weight and composition to
     /// Progress, Schedule to Plan (#768).
     #[test]
     fn back_returns_to_the_place() {
-        let weight = header("/body-weight", "Body weight").into_string();
+        let weight = header("/body", "Body weight and composition").into_string();
         assert!(
             weight.contains(r#"<a href="/progress" aria-label="Progress">‹</a>"#),
             "{weight}"

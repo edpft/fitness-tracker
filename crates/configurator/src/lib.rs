@@ -8,6 +8,7 @@
 //! depends on the other.
 
 pub mod access;
+pub mod body;
 pub mod body_weight;
 pub mod catalogue;
 pub mod composition;

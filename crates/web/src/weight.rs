@@ -1,4 +1,4 @@
-//! Body weight as one time series (#250), on the detail template (#614).
+//! Body weight as one time series (#250), on the body page (#786).
 //!
 //! **Date across, mass up, one dot per weigh-in.** Nothing joins two dots: a
 //! line between two weigh-ins would claim something about the days between
@@ -21,71 +21,35 @@ use std::collections::BTreeMap;
 
 use domain::{
     analytical::{
-        body_weight::{Aim, CHANGE_METHOD, METHOD, Series, Trend, WeightChange},
-        confidence::BAND,
-        range::{Over, Range, Ranges},
+        body_weight::{Aim, Series, Trend, WeightChange},
+        range::Range,
     },
     canonical::Occurred,
     measure::Kg,
 };
 use jiff::civil::Date;
-use maud::{DOCTYPE, Markup, html};
+use maud::{Markup, html};
 
 use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Traced};
 
-const TITLE: &str = "Body weight";
-const HERE: &str = "/body-weight";
-
-/// The whole page.
-pub fn page(
-    series: &Series,
-    aims: &[Aim],
-    ranges: &Ranges,
-    over: Over,
-    run: &crate::run::View,
-) -> Markup {
-    detail::page(
-        HERE,
-        TITLE,
-        Some(over),
-        run,
-        &body(series, aims, ranges, over),
-    )
+/// The days a weigh-in was recorded on.
+pub fn recorded(series: &Series) -> Option<Range> {
+    Range::spanning(series.weigh_ins.iter().map(|weighed| weighed.at.day()))
 }
 
-/// The page when the store could not be read.
-pub fn unreadable(error: &str) -> Markup {
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head { (crate::page::head(TITLE, &[])) }
-            body {
-                main {
-                    (crate::page::bar(HERE))
-                    p.failed { "the store could not be read: " (error) }
-                }
-            }
-        }
+/// Body weight and weight change over `range`. Nothing where no weigh-in was
+/// recorded, since the page may still have composition to show.
+pub fn charts(series: &Series, aims: &[Aim], range: Range) -> Markup {
+    if series.weigh_ins.is_empty() {
+        return html! {};
     }
-}
-
-/// The summary, the two charts over the range chosen, and the latest
-/// weigh-ins, or why there is no range.
-fn body(series: &Series, aims: &[Aim], ranges: &Ranges, over: Over) -> Markup {
-    let recorded = Range::spanning(series.weigh_ins.iter().map(|weighed| weighed.at.day()));
-    let range = match crate::range::chosen(ranges, over, recorded, "No weigh-in has been recorded.")
-    {
-        Ok(range) => range,
-        Err(said) => return said,
-    };
     let today = range.to;
     let within = series.within(range);
     html! {
-        (summary(series, today))
         (detail::chart(&Chart {
             id: "weight",
             metric: Metric::BodyWeight,
-            title: TITLE,
+            title: "Body weight",
             sub: weigh_ins(within.weigh_ins.len()),
             range,
             axis: Axis::Figures,
@@ -109,39 +73,57 @@ fn body(series: &Series, aims: &[Aim], ranges: &Ranges, over: Over) -> Markup {
             ],
             days: change_days(&within, today),
         }))
-        (detail::latest(
-            "Weigh-ins",
-            "kg",
-            &series
-                .weigh_ins
-                .iter()
-                .rev()
-                .take(7)
-                .map(|weighed| (when(&weighed.at, today), html! { (tenths(weighed.mass)) }))
-                .collect::<Vec<_>>(),
-        ))
-        (detail::foot(&format!(
-            "Dots: each weigh-in. Line: the trend, the {METHOD}. Weight change: {CHANGE_METHOD}; dashed, the plan's aim. Band: {BAND}."
-        )))
     }
 }
 
-/// The latest trend weight: what the underlying weight is taken to be now.
-fn summary(series: &Series, today: Date) -> Markup {
-    let Some(latest) = series.trend.iter().flatten().next_back() else {
+/// The latest seven weigh-ins, each its mass and, where it gave one, its fat
+/// and fat-free mass.
+///
+/// **Fat is the weigh-in's mass less its fat-free mass**, which is how the
+/// weigh-in's fat-free mass was had where it stated its fat.
+pub fn latest(series: &Series, today: Date) -> Markup {
+    let rows: Vec<(String, Markup)> = series
+        .weigh_ins
+        .iter()
+        .rev()
+        .take(7)
+        .map(|weighed| {
+            let fat = weighed
+                .fat_free
+                .and_then(|fat_free| weighed.mass.as_grams().checked_sub(fat_free.as_grams()))
+                .map(Kg::from_grams);
+            let split = |mass: Option<Kg>| mass.map_or_else(|| "–".to_owned(), tenths);
+            (
+                when(&weighed.at, today),
+                html! {
+                    (tenths(weighed.mass))
+                    " · " span.fat { (split(fat)) }
+                    " · " span.fat-free { (split(weighed.fat_free)) }
+                },
+            )
+        })
+        .collect();
+    if rows.is_empty() {
         return html! {};
-    };
-    detail::summary(
-        &[Cell {
+    }
+    detail::latest("Weigh-ins", "weight · fat · fat-free, kg", &rows)
+}
+
+/// The latest trend weight: what the underlying weight is taken to be now,
+/// and the day it is the trend on.
+pub fn cell(series: &Series) -> Option<(Cell<'static>, Date)> {
+    let latest = series.trend.iter().flatten().next_back()?;
+    Some((
+        Cell {
             metric: Metric::BodyWeight,
             label: "Trend weight",
             figure: tenths(latest.mass),
             unit: "kg",
             margin: latest.margin.map(|margin| format!("{margin:.1} kg")),
             readings: Vec::new(),
-        }],
-        &detail::day(latest.on, today),
-    )
+        },
+        latest.on,
+    ))
 }
 
 /// What a tap on each day shows: its weigh-ins and its trend.
@@ -284,8 +266,26 @@ mod tests {
         plan::Span,
     };
     use jiff::civil::{Date, date};
+    use maud::Markup;
 
-    use super::page;
+    /// The body page with no composition recorded.
+    fn page(
+        series: &Series,
+        aims: &[Aim],
+        ranges: &Ranges,
+        over: Over,
+        run: &crate::run::View,
+    ) -> Markup {
+        crate::body::page(
+            series,
+            aims,
+            &[],
+            &application::composition::AgainstPhase::NoMacrocycle,
+            ranges,
+            over,
+            run,
+        )
+    }
 
     fn day(d: i8, grams: u64) -> Weighed {
         Weighed {
@@ -340,15 +340,31 @@ mod tests {
             "{page}"
         );
         assert!(
-            page.contains(r#"<span class="on">1 Oct 07:12</span><span class="value">84.1</span>"#),
+            page.contains(r#"<span class="on">1 Oct 07:12</span><span class="value">84.1 · <span class="fat">–</span> · <span class="fat-free">–</span></span>"#),
             "{page}"
         );
+    }
+
+    /// **A weigh-in is one row**: its mass, its fat and its fat-free mass.
+    #[test]
+    fn a_weigh_in_lists_its_fat_and_fat_free_mass() {
+        let weigh_ins = vec![Weighed {
+            at: Occurred::On(date(2026, 11, 12)),
+            mass: Kg::from_grams(83_648),
+            fat_free: Some(Kg::from_grams(66_038)),
+        }];
+        let page = shown(weigh_ins, &ranges(date(2026, 11, 12)), Over::All);
+        assert!(
+            page.contains(r#"<span class="value">83.6 · <span class="fat">17.6</span> · <span class="fat-free">66.0</span></span>"#),
+            "{page}"
+        );
+        assert!(page.contains("weight · fat · fat-free, kg"), "{page}");
     }
 
     #[test]
     fn no_weigh_ins_is_said_rather_than_drawn() {
         let page = shown(Vec::new(), &ranges(date(2026, 9, 23)), Over::All);
-        assert!(page.contains("No weigh-in has been recorded."), "{page}");
+        assert!(page.contains("Nothing has been recorded."), "{page}");
         assert!(!page.contains(r#"class="plotted""#), "{page}");
     }
 

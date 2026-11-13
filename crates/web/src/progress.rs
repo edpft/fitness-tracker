@@ -363,7 +363,7 @@ fn body_tile(macrocycle: &Macrocycle, today: Date) -> Option<Markup> {
             })
             .collect();
         linked(
-            "/body-weight",
+            crate::body::PATH,
             &row(
                 Metric::BodyWeight,
                 "Body weight",
@@ -378,7 +378,7 @@ fn body_tile(macrocycle: &Macrocycle, today: Date) -> Option<Markup> {
     let component = |metric: Metric, label: &str, since: Option<SinceStart>| {
         since.map(|since| {
             linked(
-                "/body-composition",
+                crate::body::PATH,
                 &since_start(Written { metric, ..KG }, label, since),
             )
         })
@@ -714,10 +714,10 @@ mod tests {
             "<b>−1.4 bpm</b><span>since the start</span>",
             r#"<a class="row" href="/estimated-1rm">"#,
             "<b>+0.8 kg</b><span>since the start</span>",
-            r#"<a class="row" href="/body-weight">"#,
+            r#"<a class="row" href="/body">"#,
             "<em>84.6 kg</em>",
             "expected −1.8 kg",
-            r#"<a class="row" href="/body-composition">"#,
+            r#"<a class="row" href="/body">"#,
             "<b>−0.8 kg</b>",
             r#"<a class="row" href="/resting-heart-rate">"#,
             "<b>+1.4 bpm</b><span>since the start</span>",

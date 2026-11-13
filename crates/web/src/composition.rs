@@ -1,4 +1,4 @@
-//! Body composition, on the detail template (#619).
+//! Body composition, on the body page (#619, #786).
 //!
 //! **Fat and fat-free mass side by side**: each one's latest trend and its
 //! change over [`AGAINST_DAYS`] days against the method's own noise, as #419
@@ -21,56 +21,16 @@ use std::collections::BTreeMap;
 use application::composition::AgainstPhase;
 use domain::{
     analytical::{
-        composition::{AGAINST_DAYS, Change, ComponentSeries, Method, MethodSeries, TREND, Unit},
-        confidence::BAND,
-        range::{Over, Range, Ranges},
+        composition::{AGAINST_DAYS, Change, ComponentSeries, Method, MethodSeries, Unit},
+        range::Range,
         recomposition::{Cell as Moved, GOAL, MesocycleReading, NutritionPhase},
     },
     body::Component,
 };
 use jiff::civil::Date;
-use maud::{DOCTYPE, Markup, html};
+use maud::{Markup, html};
 
-use crate::{
-    detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced},
-    run::View,
-};
-
-const TITLE: &str = "Body composition";
-const HERE: &str = "/body-composition";
-
-/// The whole page, over the range chosen.
-pub fn page(
-    components: &[ComponentSeries],
-    against: &AgainstPhase,
-    ranges: &Ranges,
-    over: Over,
-    run: &View,
-) -> Markup {
-    detail::page(
-        HERE,
-        TITLE,
-        Some(over),
-        run,
-        &body(components, against, ranges, over),
-    )
-}
-
-/// The page when the store could not be read.
-pub fn unreadable(error: &str) -> Markup {
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head { (crate::page::head(TITLE, &[])) }
-            body {
-                main {
-                    (crate::page::bar(HERE))
-                    p.failed { "the store could not be read: " (error) }
-                }
-            }
-        }
-    }
-}
+use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced};
 
 /// The component in the unit, where anything measured it.
 fn charted(
@@ -83,24 +43,18 @@ fn charted(
         .find(|one| one.component == component && one.unit == unit)
 }
 
-/// The summary, the two charts over the range chosen, the matrix and the
-/// latest weigh-ins, or why there is no range.
-fn body(
-    components: &[ComponentSeries],
-    against: &AgainstPhase,
-    ranges: &Ranges,
-    over: Over,
-) -> Markup {
-    let recorded = Range::spanning(
+/// The days anything measured a component.
+pub fn recorded(components: &[ComponentSeries]) -> Option<Range> {
+    Range::spanning(
         components
             .iter()
             .flat_map(|component| &component.series)
             .flat_map(|one| one.readings.iter().map(|reading| reading.on)),
-    );
-    let range = match crate::range::chosen(ranges, over, recorded, "Nothing has been recorded.") {
-        Ok(range) => range,
-        Err(said) => return said,
-    };
+    )
+}
+
+/// Fat and fat-free mass over `range`, then the matrix.
+pub fn charts(components: &[ComponentSeries], against: &AgainstPhase, range: Range) -> Markup {
     let today = range.to;
     let fat: Vec<(&str, Chart<'_>)> = [Unit::Kilograms, Unit::Percentage]
         .into_iter()
@@ -114,17 +68,7 @@ fn body(
         .collect();
     let fat_free = charted(components, Component::FatFree, Unit::Kilograms)
         .map(|one| chart(&one.within(range), Metric::FatFree, range, today));
-    let hollow = components
-        .iter()
-        .map(|component| component.within(range))
-        .any(|component| {
-            component
-                .series
-                .iter()
-                .any(|one| one.method == Method::Spreadsheets && !one.readings.is_empty())
-        });
     html! {
-        (summary(components, today))
         @match fat.as_slice() {
             [] => {}
             [(_, one)] => (detail::chart(one)),
@@ -134,13 +78,21 @@ fn body(
             (detail::chart(one))
         }
         (against_phase(against))
-        (latest(components, today))
-        (detail::foot(&if hollow {
-            format!("Dots: each weigh-in, hollow from the spreadsheets. Line: each method's trend, the {TREND}. Band: {BAND}.")
-        } else {
-            format!("Dots: each weigh-in. Line: the trend, the {TREND}. Band: {BAND}.")
-        }))
     }
+}
+
+/// Whether the spreadsheets measured anything in `range`, so that some
+/// points are hollow.
+pub fn hollow(components: &[ComponentSeries], range: Range) -> bool {
+    components
+        .iter()
+        .map(|component| component.within(range))
+        .any(|component| {
+            component
+                .series
+                .iter()
+                .any(|one| one.method == Method::Spreadsheets && !one.readings.is_empty())
+        })
 }
 
 /// What a component is headed.
@@ -178,11 +130,12 @@ fn latest_trend(
 }
 
 /// Fat and fat-free mass, each its latest trend and its change over
-/// [`AGAINST_DAYS`] days against the method's noise.
-fn summary(components: &[ComponentSeries], today: Date) -> Markup {
+/// [`AGAINST_DAYS`] days against the method's noise, and the day and method
+/// each trend is.
+pub fn summary(components: &[ComponentSeries], today: Date) -> (Vec<Cell<'static>>, Vec<String>) {
     let read: Vec<(
         Metric,
-        &str,
+        &'static str,
         &MethodSeries,
         domain::analytical::composition::Trend,
     )> = [
@@ -195,10 +148,7 @@ fn summary(components: &[ComponentSeries], today: Date) -> Markup {
         Some((metric, label, one, latest))
     })
     .collect();
-    if read.is_empty() {
-        return html! {};
-    }
-    let cells: Vec<Cell<'_>> = read
+    let cells: Vec<Cell<'static>> = read
         .iter()
         .map(|(metric, label, one, latest)| Cell {
             metric: *metric,
@@ -238,7 +188,7 @@ fn summary(components: &[ComponentSeries], today: Date) -> Markup {
         })
         .collect();
     asof.dedup();
-    detail::summary(&cells, &asof.join("; "))
+    (cells, asof)
 }
 
 /// One component in one unit over `range`: each method's trend, and its
@@ -360,43 +310,6 @@ fn weigh_ins(count: usize) -> String {
     } else {
         format!("{count} weigh-ins")
     }
-}
-
-/// The latest seven weigh-ins, each its fat and fat-free mass.
-fn latest(components: &[ComponentSeries], today: Date) -> Markup {
-    let mut weighed: BTreeMap<(Date, Method), (Option<f64>, Option<f64>)> = BTreeMap::new();
-    for (component, fat) in [(Component::Fat, true), (Component::FatFree, false)] {
-        for one in charted(components, component, Unit::Kilograms)
-            .into_iter()
-            .flat_map(|charted| &charted.series)
-        {
-            for reading in &one.readings {
-                let entry = weighed.entry((reading.on, one.method)).or_default();
-                if fat {
-                    entry.0 = Some(reading.value);
-                } else {
-                    entry.1 = Some(reading.value);
-                }
-            }
-        }
-    }
-    let tenths =
-        |value: Option<f64>| value.map_or_else(|| "–".to_owned(), |value| format!("{value:.1}"));
-    let rows: Vec<(String, Markup)> = weighed
-        .iter()
-        .rev()
-        .take(7)
-        .map(|((on, _), (fat, fat_free))| {
-            (
-                detail::day(*on, today),
-                html! { span.fat { (tenths(*fat)) } " · " span.fat-free { (tenths(*fat_free)) } },
-            )
-        })
-        .collect();
-    if rows.is_empty() {
-        return html! {};
-    }
-    detail::latest("Weigh-ins", "fat · fat-free, kg", &rows)
 }
 
 /// The current macrocycle, one matrix per nutrition phase and a point per
@@ -639,8 +552,6 @@ mod tests {
         schedule::{Holidays, SchoolHoliday},
     };
 
-    use super::page;
-
     const NONE: AgainstPhase = AgainstPhase::NoMacrocycle;
 
     const NO_PLAN: Ranges = Ranges {
@@ -665,7 +576,9 @@ mod tests {
         ranges: &Ranges,
         over: Over,
     ) -> String {
-        page(
+        crate::body::page(
+            &domain::analytical::body_weight::Series::of(Vec::new()),
+            &[],
             components,
             against,
             ranges,
@@ -810,10 +723,7 @@ mod tests {
         assert!(!page.contains(r#"class="hollow""#), "{page}");
         assert!(!page.contains("spreadsheets"), "{page}");
         assert_eq!(page.matches(r#"class="dot""#).count(), 1, "{page}");
-        assert!(
-            page.contains(r#"href="/body-composition?over=all""#),
-            "{page}"
-        );
+        assert!(page.contains(r#"href="/body?over=all""#), "{page}");
     }
 
     /// Autumn 2026, from the school's feed.
