@@ -465,6 +465,34 @@ impl HolidayCalendar for Answering {
     }
 }
 
+/// A publisher that does not answer, asked by a run (#809).
+impl application::calendars::KeptCalendars for Unreachable {
+    async fn ask(
+        &self,
+        _calendar: application::Calendar,
+        _at: jiff::Timestamp,
+        _refetch: application::next::Refetch,
+    ) -> Result<Result<application::next::Found, application::next::StepFailure>, StoreError> {
+        Ok(Err(application::next::StepFailure::Source(
+            SourceError::Unavailable {
+                detail: "the feed did not answer".to_owned(),
+            },
+        )))
+    }
+}
+
+/// A publisher with nothing new, asked by a run (#809).
+impl application::calendars::KeptCalendars for Answering {
+    async fn ask(
+        &self,
+        _calendar: application::Calendar,
+        _at: jiff::Timestamp,
+        _refetch: application::next::Refetch,
+    ) -> Result<Result<application::next::Found, application::next::StepFailure>, StoreError> {
+        Ok(Ok(application::next::Found::Unchanged))
+    }
+}
+
 /// A diary with one week recorded, or none, and the skips written to it.
 struct Recorded {
     diary: Diary,
@@ -897,6 +925,15 @@ fn a_source_that_cannot_be_fetched_is_a_failed_step_and_the_run_carries_on() {
             (&Step::Canonicalising(Discipline::Gym), true),
             (&Step::Canonicalising(Discipline::Cycling), true),
             (&Step::CanonicalisingWeighIns, true),
+            // A calendar that cannot be asked is a failed step too (#809).
+            (
+                &Step::FetchingCalendar(application::Calendar::School),
+                false
+            ),
+            (
+                &Step::FetchingCalendar(application::Calendar::Public),
+                false
+            ),
         ]
     );
     assert!(matches!(

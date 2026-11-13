@@ -1,18 +1,19 @@
 //! `fitness holidays` — the school and public holidays still to come.
 //!
-//! **Read, not recorded** (#181). Both are facts about the world, set by the
-//! school and by the government, so this asks them each time and stores
-//! nothing. During either, the ordinary week cannot be assumed to hold.
+//! **As last served** (#809). Both are facts about the world, set by the
+//! school and by the government, and a run of `next` asks each whether it has
+//! changed. During either, the ordinary week cannot be assumed to hold.
 
-use application::HolidayCalendar as _;
-use configurator::holidays::Calendars;
+use std::path::Path;
+
+use configurator::store::Store;
 use domain::schedule::Holidays;
 
 use crate::{Failure, output};
 
 /// List every school and public holiday from today.
-pub async fn list() -> Result<(), Failure> {
-    output::holidays(&read().await?, jiff::Zoned::now().date());
+pub async fn list(database: &Path) -> Result<(), Failure> {
+    output::holidays(&read(database).await?, jiff::Zoned::now().date());
     Ok(())
 }
 
@@ -21,7 +22,10 @@ pub async fn list() -> Result<(), Failure> {
 ///
 /// # Errors
 ///
-/// [`Failure`] if either source cannot be read.
-pub async fn read() -> Result<Holidays, Failure> {
-    Ok(Calendars.holidays().await?)
+/// [`Failure`] if the store cannot be opened, or either has not been fetched.
+pub async fn read(database: &Path) -> Result<Holidays, Failure> {
+    let store = Store::open(database).await?;
+    let holidays = configurator::holidays::holidays(&store).await;
+    store.close().await;
+    Ok(holidays?)
 }

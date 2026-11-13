@@ -5,7 +5,7 @@
 
 use std::sync::OnceLock;
 
-use application::{HolidayCalendar, SourceError};
+use application::{CalendarPublisher, SourceError};
 use domain::schedule::{Holidays, PublicHoliday, SchoolHolidayKind};
 use jiff::civil::Date;
 use serde::Deserialize;
@@ -29,9 +29,18 @@ impl BankHolidays {
     }
 }
 
-impl HolidayCalendar for BankHolidays {
-    async fn holidays(&self) -> Result<Holidays, SourceError> {
-        super::get(super::client(&self.client)?, &self.url, public_holidays).await
+impl CalendarPublisher for BankHolidays {
+    async fn served_since(
+        &self,
+        kept: Option<&application::Served>,
+    ) -> Result<Option<application::Served>, SourceError> {
+        super::served_since(
+            super::client(&self.client)?,
+            &self.url,
+            kept,
+            public_holidays,
+        )
+        .await
     }
 }
 

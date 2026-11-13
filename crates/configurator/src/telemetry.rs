@@ -391,6 +391,7 @@ impl<'a, P> Spanned<'a, P> {
             step = Empty,
             stream = Empty,
             layer = Empty,
+            calendar = Empty,
             parts = Empty,
             found = Empty,
             why = Empty,
@@ -424,6 +425,10 @@ impl<'a, P> Spanned<'a, P> {
             Step::CanonicalisingWeighIns => {
                 span.record("layer", CanonicalLayer::WeighIns.as_str());
                 "canonicalising"
+            }
+            Step::FetchingCalendar(calendar) => {
+                span.record("calendar", calendar.as_str());
+                "fetching"
             }
             Step::RefreshingClasses => "refreshing classes",
             Step::Committing => "committing",
@@ -494,6 +499,9 @@ fn found(span: &Span, outcome: &Result<Found, StepFailure>) {
                 }
                 Found::Skipped { .. } => {
                     span.record("found", "skipped");
+                }
+                Found::Changed => {
+                    span.record("found", "changed");
                 }
                 Found::NotDue(_) | Found::Unchanged => {}
             }

@@ -11,7 +11,7 @@
 
 use std::{num::NonZeroU8, sync::OnceLock};
 
-use application::{HolidayCalendar, SourceError};
+use application::{CalendarPublisher, Served, SourceError};
 use domain::schedule::{Holidays, SchoolHoliday};
 use jiff::civil::Date;
 
@@ -35,9 +35,9 @@ impl SchoolCalendar {
     }
 }
 
-impl HolidayCalendar for SchoolCalendar {
-    async fn holidays(&self) -> Result<Holidays, SourceError> {
-        super::get(self.client()?, &self.url, school_holidays).await
+impl CalendarPublisher for SchoolCalendar {
+    async fn served_since(&self, kept: Option<&Served>) -> Result<Option<Served>, SourceError> {
+        super::served_since(self.client()?, &self.url, kept, school_holidays).await
     }
 }
 

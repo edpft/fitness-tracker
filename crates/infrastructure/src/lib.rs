@@ -54,7 +54,7 @@ pub use store::{
     PelotonAccountLandingStore, PelotonRawExtent, PelotonRideDetailLandingStore,
     PelotonRideLandingStore, PelotonRideSampleLandingStore, PelotonSessionAccountReader,
     SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SqliteBtwbStore,
-    SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
+    SqliteCalendarStore, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
     SqliteCanonicalWeighInStore, SqliteCompositionHistory, SqliteCyclingDeliveryStore,
     SqliteCyclingMesocycleStore, SqliteCyclingSessionStore, SqliteDailyHeartRateStore,
     SqliteDerivationLedger, SqliteDiaryStore, SqliteEditOverlayStore, SqliteEquipmentStore,

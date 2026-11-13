@@ -13,7 +13,7 @@ use infrastructure::{
 };
 
 use crate::{
-    holidays::{self, Calendars},
+    holidays,
     next::{NextFailure, microcycle},
     store::Store,
 };
@@ -48,7 +48,7 @@ pub async fn planned(
     let deliveries = SqlitePrescriptionDeliveryStore::new(pool.clone());
     let classes = SqlitePelotonClassStore::new(pool.clone());
     let catalogue = ClassCatalogue::over(&classes, None);
-    let walk = microcycle(pool, &plans, &deliveries, holidays::term().await)?;
+    let walk = microcycle(pool, &plans, &deliveries, holidays::term(pool).await)?;
     let use_case = Planned::new(PlanningPorts {
         walk,
         committing: Committing::new(
@@ -62,7 +62,7 @@ pub async fn planned(
             zone.clone(),
         ),
         diary: SqliteDiaryStore::new(pool.clone()),
-        holidays: Calendars,
+        holidays: holidays::calendars(pool),
     });
     Ok(use_case.on(now).await?)
 }

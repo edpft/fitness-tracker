@@ -41,7 +41,7 @@ pub async fn standing(
         destination(domain::planner::Discipline::Gym)?,
         destination(domain::planner::Discipline::Cycling)?,
     );
-    let walk = match crate::holidays::term().await {
+    let walk = match crate::holidays::term(store.pool()).await {
         Some(term) => walk.within(term),
         None => walk,
     };

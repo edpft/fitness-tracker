@@ -68,11 +68,12 @@ use crate::{
     PrescriptionError, PrescriptionLifecycle, ProgressionStore, RideDestination, RidesPlaced,
     RunLockError, RunSummary, SourceError, StoreError, Taken, WorkoutExtractor,
     WorkoutPrescriber as _, WorkoutStore,
+    calendars::KeptCalendars,
     canonicalise::{Canonicalised, WeighInsCanonicalised},
     commit::{CommitError, Due},
     cycling::{PrescribedRide, RideDeliveryError, RidingError},
     deliver::{Delivering, DeliveryPorts},
-    graph::{Derivation, Input, Node, Reads},
+    graph::{Calendar, Derivation, Input, Node, Reads},
     microcycle::{Session, Standing},
     ports::{
         CanonicalLayer, DerivationLedger, DerivedFrom, NewestObservation, NormalisedLayers,
@@ -406,6 +407,8 @@ pub enum Step {
     /// Rebuilding the canonical weigh-ins (#409). Not a discipline: body
     /// weight has a source and no session to prescribe.
     CanonicalisingWeighIns,
+    /// Asking a calendar's publisher whether it has changed (#809).
+    FetchingCalendar(Calendar),
     /// Keeping the local class catalogue current (#246).
     RefreshingClasses,
     /// Committing the next concurrent mesocycle (#222).
@@ -425,8 +428,11 @@ pub enum Found {
     NotDue(NotDue),
     /// Entities a normalised layer's derivation wrote.
     Written(WorkoutCount),
-    /// A layer nothing new reached, left as it stands.
+    /// A layer nothing new reached, or a calendar its publisher says has
+    /// not changed, left as it stands.
     Unchanged,
+    /// A calendar its publisher served anew, kept in place of the old.
+    Changed,
     /// Canonical sessions the record now holds.
     Canonical(SessionCount),
     /// Canonical weigh-ins the record now holds, and the weighings left out.
@@ -1076,7 +1082,7 @@ where
     CL: Canonicalising + Sync,
     DL: DerivationLedger + Sync,
     K: ClassSource + Sync,
-    HC: HolidayCalendar + Sync,
+    HC: HolidayCalendar + KeptCalendars + Sync,
     D: DiaryStore + DiaryAuthor + Sync,
     P: PlanStore + Clone + Send + Sync,
     M: StandingReader + Sync,
@@ -1130,6 +1136,15 @@ where
         let judge = self.judge(now).await?;
         self.gather(&everything.without(&joined), &judge, progress, &mut run)
             .await?;
+        for calendar in Calendar::ALL {
+            let started = start(progress, Step::FetchingCalendar(calendar));
+            let outcome = self
+                .ports
+                .holidays
+                .ask(calendar, judge.at.as_timestamp(), self.ports.refetch)
+                .await?;
+            finish(progress, &mut run, started, outcome);
+        }
 
         // 2. The next concurrent mesocycle, if the one before it has ended.
         let holidays = self.ports.holidays.holidays().await;
