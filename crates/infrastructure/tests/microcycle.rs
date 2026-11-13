@@ -1367,11 +1367,7 @@ fn a_completed_mesocycle_keeps_the_reruns_written_when_it_completed() {
     .expect("a runtime is available")
     .expect("the store authors and answers");
 
-    assert_eq!(
-        read,
-        Some(written),
-        "the store reads back what it wrote"
-    );
+    assert_eq!(read, Some(written), "the store reads back what it wrote");
     assert_eq!(after.standing.reruns, vec![rerun]);
     assert_eq!(
         after.gym,
