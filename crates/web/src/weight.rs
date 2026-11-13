@@ -36,7 +36,8 @@ pub fn recorded(series: &Series) -> Option<Range> {
 }
 
 /// Body weight over `range`, against where the plan's aims would have taken
-/// the trend since the macrocycle that `began` on a day (#786). Nothing where
+/// the trend since each mesocycle of the macrocycle that `began` on a day
+/// started (#786). Nothing where
 /// no weigh-in was recorded, since the page may still have composition to
 /// show.
 ///
@@ -49,18 +50,13 @@ pub fn charts(series: &Series, aims: &[Aim], began: Option<Date>, range: Range) 
     }
     let today = range.to;
     let within = series.within(range);
-    let expected: Vec<Vec<(Date, f64)>> = began
-        .and_then(|began| against_aims(&series.trend, aims, began, today))
-        .map(|weight| weight.expected())
-        .unwrap_or_default()
-        .into_iter()
-        .map(|run| {
-            run.into_iter()
-                .filter(|(on, _)| range.from <= *on && *on <= range.to)
-                .collect::<Vec<_>>()
-        })
-        .filter(|run| !run.is_empty())
-        .collect();
+    let expected = detail::expected(
+        &began
+            .and_then(|began| against_aims(&series.trend, aims, began, today))
+            .map(|weight| weight.aimed)
+            .unwrap_or_default(),
+        range,
+    );
     html! {
         (detail::chart(&Chart {
             id: "weight",
@@ -229,15 +225,7 @@ mod tests {
         over: Over,
         run: &crate::run::View,
     ) -> Markup {
-        crate::body::page(
-            series,
-            aims,
-            &[],
-            &application::composition::AgainstPhase::NoMacrocycle,
-            ranges,
-            over,
-            run,
-        )
+        crate::body::page(series, aims, &[], ranges, over, run)
     }
 
     fn day(d: i8, grams: u64) -> Weighed {
@@ -347,7 +335,7 @@ mod tests {
     }
 
     /// **The trend against where the aims would have taken it**, from the
-    /// trend on the macrocycle's first day, as Progress's tile draws it.
+    /// trend on each mesocycle's first day, as Progress's tile draws it.
     #[test]
     fn the_trend_is_drawn_against_the_aims() {
         let mut weigh_ins: Vec<Weighed> = (1..=30).map(|d| day(d, 84_000)).collect();
@@ -369,10 +357,14 @@ mod tests {
             &crate::run::View::default(),
         )
         .into_string();
-        assert_eq!(page.matches(r#"class="aim""#).count(), 1, "{page}");
+        assert_eq!(
+            page.matches(r#"class="aim""#).count(),
+            2,
+            "reset where the cut starts: {page}"
+        );
         assert!(
             page.contains("31 Oct</span> · <b>84.0 kg</b> · trend 84.0 kg · expected 83.0 kg"),
-            "four weeks at −0.25 kg from 84.0 kg: {page}"
+            "four weeks at −0.25 kg from 28 Sep's trend: {page}"
         );
         assert!(
             !page.contains(

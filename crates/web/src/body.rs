@@ -7,10 +7,10 @@
 //!
 //! **Two sections, each with its own summary** (operator, 2026-11-13): body
 //! weight, its trend against where the plan's aims would have taken it; then
-//! body composition, fat, fat-free mass and the mesocycle matrix. Beneath both,
+//! body composition, fat and fat-free mass against what the aims expect of
+//! them. Each expectation resets at every mesocycle's start. Beneath both,
 //! the weigh-ins, each its weight, fat and fat-free mass.
 
-use application::composition::AgainstPhase;
 use domain::analytical::{
     body_weight::{Aim, METHOD, Series},
     composition::{ComponentSeries, TREND},
@@ -34,7 +34,6 @@ pub fn page(
     series: &Series,
     aims: &[Aim],
     components: &[ComponentSeries],
-    against: &AgainstPhase,
     ranges: &Ranges,
     over: Over,
     run: &View,
@@ -44,7 +43,7 @@ pub fn page(
         TITLE,
         Some(over),
         run,
-        &body(series, aims, components, against, ranges, over),
+        &body(series, aims, components, ranges, over),
     )
 }
 
@@ -70,7 +69,6 @@ fn body(
     series: &Series,
     aims: &[Aim],
     components: &[ComponentSeries],
-    against: &AgainstPhase,
     ranges: &Ranges,
     over: Over,
 ) -> Markup {
@@ -85,6 +83,7 @@ fn body(
         Err(said) => return said,
     };
     let today = range.to;
+    let began = ranges.macrocycle.map(|cycle| cycle.from);
     let weighed = weight::cell(series).map(|(cell, on)| {
         detail::summary(&[cell], &format!("Trend on {}", detail::day(on, today)))
     });
@@ -94,12 +93,12 @@ fn body(
         @if weight::recorded(series).is_some() {
             h2.group { "Body weight" }
             @if let Some(summary) = weighed { (summary) }
-            (weight::charts(series, aims, ranges.macrocycle.map(|cycle| cycle.from), range))
+            (weight::charts(series, aims, began, range))
         }
         @if composition::recorded(components).is_some() {
             h2.group { "Body composition" }
             @if let Some(summary) = measured { (summary) }
-            (composition::charts(components, against, range))
+            (composition::charts(components, aims, began, range))
         }
         (weight::latest(series, today))
         (detail::foot(&foot(series, components, range)))
@@ -116,7 +115,7 @@ fn foot(series: &Series, components: &[ComponentSeries], range: Range) -> String
     if !series.weigh_ins.is_empty() {
         said.push(format!("Line: the trend, the {METHOD}"));
         said.push(
-            "Dashed: where the plan's aims would have taken the trend since the macrocycle began"
+            "Dashed: where the plan's aims would have taken each trend since its mesocycle began; fat takes the aim, and fat-free mass holds"
                 .to_owned(),
         );
     }
@@ -186,7 +185,6 @@ mod tests {
                 component(Component::Fat, 18.0),
                 component(Component::FatFree, 66.0),
             ],
-            &application::composition::AgainstPhase::NoMacrocycle,
             &ranges,
             Over::Mesocycle,
             &crate::run::View::default(),

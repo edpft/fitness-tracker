@@ -676,6 +676,23 @@ pub fn latest(title: &str, heading: &str, rows: &[(String, Markup)]) -> Markup {
     }
 }
 
+/// An expectation as `domain` gives it, as the dashed line over `range`: one
+/// run per mesocycle, so the line resets rather than joining across (#786).
+pub fn expected(
+    runs: &[Vec<domain::analytical::expected::Expected>],
+    range: Range,
+) -> Vec<Vec<(Date, f64)>> {
+    runs.iter()
+        .map(|run| {
+            run.iter()
+                .filter(|day| range.from <= day.on && day.on <= range.to)
+                .map(|day| (day.on, day.value))
+                .collect::<Vec<_>>()
+        })
+        .filter(|run| !run.is_empty())
+        .collect()
+}
+
 /// The one line saying what the line and band are.
 pub fn foot(said: &str) -> Markup {
     html! { p.foot { (said) } }

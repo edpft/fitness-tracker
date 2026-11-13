@@ -423,19 +423,12 @@ async fn body_page(
             let series = configurator::body_weight::series(&store).await;
             let aims = configurator::body_weight::aims(&store, &setting.zone).await;
             let components = configurator::composition::by_method(&store).await;
-            let against = configurator::composition::against_phase(&store, &setting.zone).await;
             let ranges = configurator::ranges::today(&store, &setting.zone).await;
             store.close().await;
-            match series.and_then(|series| Ok((series, aims?, components?, against?, ranges?))) {
-                Ok((series, aims, components, against, ranges)) => body::page(
-                    &series,
-                    &aims,
-                    &components,
-                    &against,
-                    &ranges,
-                    over(&query),
-                    &run,
-                ),
+            match series.and_then(|series| Ok((series, aims?, components?, ranges?))) {
+                Ok((series, aims, components, ranges)) => {
+                    body::page(&series, &aims, &components, &ranges, over(&query), &run)
+                }
                 Err(error) => body::unreadable(&error.to_string()),
             }
         },

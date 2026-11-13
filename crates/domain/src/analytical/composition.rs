@@ -59,7 +59,9 @@ use std::{collections::BTreeMap, fmt};
 use jiff::civil::Date;
 
 use super::{
+    body_weight::Aim,
     confidence::Noise,
+    expected::{Expected, each_mesocycle},
     range::{Range, runs_within},
 };
 use crate::{
@@ -170,6 +172,41 @@ pub struct MethodSeries {
     /// Oldest first, wherever a day and the day [`AGAINST_DAYS`] before it
     /// both have a trend and the method's scatter is known.
     pub changes: Vec<Change>,
+}
+
+/// A component's share of a mesocycle's aim, in kilograms a week (#786).
+///
+/// **The aimed change is all fat, and fat-free mass holds** (operator,
+/// 2026-11-13): in a cut, fat is expected to fall as body weight's aim does
+/// and fat-free mass to stay where it was. `None` for a component the aims
+/// say nothing of, or where the aim states no rate, as a bulk's does not.
+#[must_use]
+pub fn aimed(component: Component, aim: &Aim) -> Option<f64> {
+    match component {
+        Component::Fat => aim.per_week,
+        Component::FatFree => aim.per_week.map(|_| 0.0),
+        _ => None,
+    }
+}
+
+impl MethodSeries {
+    /// Where the aims would have taken this method's trend of `component`,
+    /// in kilograms, reset at each mesocycle's start from `began` to `today`.
+    #[must_use]
+    pub fn against_aims(
+        &self,
+        component: Component,
+        aims: &[Aim],
+        began: Date,
+        today: Date,
+    ) -> Vec<Vec<Expected>> {
+        let line: Vec<Vec<(Date, f64)>> = self
+            .trend
+            .iter()
+            .map(|run| run.iter().map(|day| (day.on, day.value)).collect())
+            .collect();
+        each_mesocycle(&line, aims, began, today, |aim| aimed(component, aim))
+    }
 }
 
 impl MethodSeries {
@@ -432,4 +469,55 @@ fn changes(trend: &[Vec<Trend>], sigma: f64) -> Vec<Change> {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod aimed_tests {
+    use jiff::civil::date;
+
+    use super::{Method, MethodSeries, Reading, aimed};
+    use crate::{
+        analytical::{body_weight::Aim, recomposition::NutritionPhase},
+        body::Component,
+        plan::Span,
+    };
+
+    const CUT: Aim = Aim {
+        span: Span::new(date(2026, 9, 28), 4),
+        phase: NutritionPhase::Cut,
+        per_week: Some(-0.25),
+    };
+
+    /// **In a cut, the aim is fat's, and fat-free mass holds.**
+    #[test]
+    fn fat_takes_the_aim_and_fat_free_mass_holds() {
+        assert_eq!(aimed(Component::Fat, &CUT), Some(-0.25));
+        assert_eq!(aimed(Component::FatFree, &CUT), Some(0.0));
+        assert_eq!(aimed(Component::Water, &CUT), None);
+        let bulk = Aim {
+            phase: NutritionPhase::Bulk,
+            per_week: None,
+            ..CUT
+        };
+        assert_eq!(aimed(Component::FatFree, &bulk), None);
+    }
+
+    #[test]
+    fn fat_is_expected_to_fall_from_the_mesocycle_s_first_trend() {
+        let readings = date(2026, 9, 21)
+            .series(jiff::Span::new().days(1))
+            .take(22)
+            .map(|on| Reading { on, value: 19.0 })
+            .collect();
+        let series = MethodSeries::of(Method::BodyScan { algorithm: 1 }, readings);
+        let runs = series.against_aims(
+            Component::Fat,
+            &[CUT],
+            date(2026, 9, 28),
+            date(2026, 10, 12),
+        );
+        let last = runs.last().and_then(|run| run.last()).expect("a line");
+        assert_eq!(last.on, date(2026, 10, 12));
+        assert!((last.value - 18.5).abs() < 1e-9, "{last:?}");
+    }
 }

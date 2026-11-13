@@ -23,7 +23,10 @@
 //! **A reading with nothing to show yet is left out**, not drawn empty.
 
 use application::working::{Answering, Body, Macrocycle, Performance, Responding, Tested, View};
-use domain::{analytical::since_start::SinceStart, planner::Discipline};
+use domain::{
+    analytical::{range::Range, since_start::SinceStart},
+    planner::Discipline,
+};
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
@@ -356,7 +359,6 @@ fn body_tile(macrocycle: &Macrocycle, today: Date) -> Option<Markup> {
                             on: day.trend.on,
                             read: kilograms(day.trend.mass.as_grams())?,
                             margin: day.trend.margin,
-                            expected: day.expected,
                         })
                     })
                     .collect()
@@ -370,7 +372,7 @@ fn body_tile(macrocycle: &Macrocycle, today: Date) -> Option<Markup> {
                 Some(KG.figure(weight.change.now)),
                 &html! {
                     (moved(KG, weight.change.by(), weight.expected))
-                    (trace(&runs, macrocycle.began, today))
+                    (trace(&runs, &detail::expected(&weight.aimed, Range { from: macrocycle.began, to: today }), macrocycle.began, today))
                 },
             ),
         )
@@ -432,8 +434,16 @@ fn responding(one: &Responding, began: Date, today: Date) -> Option<Markup> {
                     on: week.to,
                     read: week.read,
                     margin: week.margin,
-                    expected: week.expected,
                 })
+                .collect()
+        })
+        .collect();
+    let expected: Vec<Vec<(Date, f64)>> = response
+        .weeks
+        .iter()
+        .map(|run| {
+            run.iter()
+                .filter_map(|week| Some((week.to, week.expected?)))
                 .collect()
         })
         .collect();
@@ -450,7 +460,7 @@ fn responding(one: &Responding, began: Date, today: Date) -> Option<Markup> {
             Some(written.figure(read.now)),
             &html! {
                 (moved(written, read.by, read.expected))
-                (trace(&runs, began, today))
+                (trace(&runs, &expected, began, today))
             },
         ),
     ))
@@ -461,7 +471,6 @@ struct Traced {
     on: Date,
     read: f64,
     margin: Option<f64>,
-    expected: Option<f64>,
 }
 
 const TRACE_WIDTH: f64 = 300.0;
@@ -469,19 +478,21 @@ const TRACE_HEIGHT: f64 = 64.0;
 
 /// Each run of a reading from the start to today: its band, the expected
 /// result dashed, the reading in its colour, and a dot on the latest day.
-fn trace(runs: &[Vec<Traced>], began: Date, today: Date) -> Markup {
+fn trace(runs: &[Vec<Traced>], expected: &[Vec<(Date, f64)>], began: Date, today: Date) -> Markup {
     let days = |on: Date| f64::from(began.until(on).map_or(0, |gap| gap.get_days()));
     let width = days(today).max(1.0);
     let x = |on: Date| (days(on) / width).mul_add(TRACE_WIDTH - 8.0, 4.0);
     let all = runs.iter().flatten();
     let (low, high) = all.fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), day| {
         let margin = day.margin.unwrap_or(0.0);
-        let expected = day.expected.unwrap_or(day.read);
-        (
-            low.min(day.read - margin).min(expected),
-            high.max(day.read + margin).max(expected),
-        )
+        (low.min(day.read - margin), high.max(day.read + margin))
     });
+    let (low, high) = expected
+        .iter()
+        .flatten()
+        .fold((low, high), |(low, high), (_, value)| {
+            (low.min(*value), high.max(*value))
+        });
     if !low.is_finite() || !high.is_finite() {
         return html! {};
     }
@@ -511,7 +522,9 @@ fn trace(runs: &[Vec<Traced>], began: Date, today: Date) -> Markup {
     html! {
         svg.trace viewBox=(format!("0 0 {TRACE_WIDTH} {TRACE_HEIGHT}")) aria-hidden="true" {
             @for run in runs { polygon.band points=(band(run)) {} }
-            @for run in runs { polyline.expected points=(points(run, &|day| day.expected)) {} }
+            @for run in expected {
+                polyline.expected points=(run.iter().map(|(on, value)| format!("{:.1},{:.1}", x(*on), y(*value))).collect::<Vec<_>>().join(" ")) {}
+            }
             @for run in runs { polyline.read points=(points(run, &|day| Some(day.read))) {} }
             @if let Some(last) = last {
                 circle.fell cx=(format!("{:.1}", x(last.on))) cy=(format!("{:.1}", y(last.read))) r="4" {}
@@ -629,6 +642,15 @@ mod tests {
                                         margin: Some(0.4),
                                     },
                                     expected: Some(84.6),
+                                })
+                                .collect(),
+                        ],
+                        aimed: vec![
+                            days()
+                                .map(|on| domain::analytical::expected::Expected {
+                                    on,
+                                    value: 84.6,
+                                    since: BEGAN,
                                 })
                                 .collect(),
                         ],
