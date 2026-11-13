@@ -32,6 +32,15 @@ pub enum Node {
     Generation(Generation),
 }
 
+/// What is authored, by name, so a driven adapter declaring that it reads one
+/// names only the node (#809).
+impl Node {
+    pub const PLAN: Self = Self::Authored(Authored::Plan);
+    pub const PRESCRIPTIONS: Self = Self::Authored(Authored::Prescriptions);
+    pub const WORKOUTS: Self = Self::Authored(Authored::Workouts);
+    pub const DIARY: Self = Self::Authored(Authored::Diary);
+}
+
 /// What the operator authors (§ 12).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Authored {

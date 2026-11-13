@@ -1292,8 +1292,6 @@ fn count_of(value: i64) -> Result<RepCount, StoreError> {
 /// The gym's mesocycles, committed from the plans (#809).
 impl application::Input for SqliteGymMesocycleStore {
     fn reads() -> application::Reads {
-        application::Reads::of([application::Node::Authored(
-            application::graph::Authored::Plan,
-        )])
+        application::Reads::of([application::Node::PLAN])
     }
 }

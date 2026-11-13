@@ -330,8 +330,6 @@ fn ordinal(at: usize) -> Result<i64, StoreError> {
 /// The plans and their mesocycles (#809).
 impl application::Input for SqlitePlanStore {
     fn reads() -> application::Reads {
-        application::Reads::of([application::Node::Authored(
-            application::graph::Authored::Plan,
-        )])
+        application::Reads::of([application::Node::PLAN])
     }
 }

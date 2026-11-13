@@ -386,8 +386,8 @@ impl application::Input for SqliteExerciseHistory {
             application::CanonicalLayer::Gym,
         )])
         .and(application::Reads::of([
-            application::Node::Authored(application::graph::Authored::Plan),
-            application::Node::Authored(application::graph::Authored::Prescriptions),
+            application::Node::PLAN,
+            application::Node::PRESCRIPTIONS,
         ]))
     }
 }

@@ -352,8 +352,6 @@ impl PrescriptionLifecycle for SqlitePrescriptionDeliveryStore {
 /// Where each gym prescription was put (#809).
 impl application::Input for SqlitePrescriptionDeliveryStore {
     fn reads() -> application::Reads {
-        application::Reads::of([application::Node::Authored(
-            application::graph::Authored::Prescriptions,
-        )])
+        application::Reads::of([application::Node::PRESCRIPTIONS])
     }
 }

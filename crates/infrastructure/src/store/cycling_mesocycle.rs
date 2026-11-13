@@ -499,8 +499,6 @@ async fn write_ride(
 /// Cycling's mesocycles, committed from the plans (#809).
 impl application::Input for SqliteCyclingMesocycleStore {
     fn reads() -> application::Reads {
-        application::Reads::of([application::Node::Authored(
-            application::graph::Authored::Plan,
-        )])
+        application::Reads::of([application::Node::PLAN])
     }
 }

@@ -906,8 +906,6 @@ impl ProgressionStore for SqliteGenerationParameterStore {
 /// How each workout and primary progression prescribes (#809).
 impl application::Input for SqliteGenerationParameterStore {
     fn reads() -> application::Reads {
-        application::Reads::of([application::Node::Authored(
-            application::graph::Authored::Workouts,
-        )])
+        application::Reads::of([application::Node::WORKOUTS])
     }
 }

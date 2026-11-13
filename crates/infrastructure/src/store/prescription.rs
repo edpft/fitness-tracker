@@ -1000,8 +1000,6 @@ struct SetRow {
 /// What was prescribed (#809).
 impl application::Input for SqlitePrescribedWorkoutStore {
     fn reads() -> application::Reads {
-        application::Reads::of([application::Node::Authored(
-            application::graph::Authored::Prescriptions,
-        )])
+        application::Reads::of([application::Node::PRESCRIPTIONS])
     }
 }
