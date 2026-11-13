@@ -9,7 +9,7 @@
 use application::{
     DiaryStore as _, MesocycleStore, PlanStore,
     microcycle::{Microcycle, MicrocyclePorts, Standing},
-    reschedule::{Reschedule, Rescheduled},
+    reschedule::{Reschedule, Rescheduled, ReschedulingPlans},
 };
 use domain::{normalised::OperatorZone, schedule::DayPart};
 
@@ -62,6 +62,25 @@ pub async fn reschedule(store: &Store, zone: &OperatorZone) -> Result<Reschedule
     let standing = standing(store, zone, DayPart::containing(here.datetime())).await?;
     let diary = store.diary().diary().await?;
     Ok(standing.reschedule(diary))
+}
+
+/// The plans, as they now stand: what Plan reads, so every mesocycle a
+/// chart is read over or an aim is drawn across has the days Plan shows (#800).
+///
+/// A rerun test week is in the mesocycle it reruns, though what was written
+/// when that mesocycle started gave it one week fewer.
+///
+/// # Errors
+///
+/// As [`reschedule`].
+pub async fn plans(
+    store: &Store,
+    zone: &OperatorZone,
+) -> Result<ReschedulingPlans<impl PlanStore + Clone + Send + Sync + use<>>, NextFailure> {
+    Ok(ReschedulingPlans::new(
+        store.plans(zone),
+        reschedule(store, zone).await?,
+    ))
 }
 
 /// The gym's mesocycles, as the plan now stands.

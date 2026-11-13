@@ -276,6 +276,7 @@ impl<S: CyclingMesocycleStore + Sync, P: PlanStore + Sync> CyclingMesocycleStore
 }
 
 /// Plans, as they now stand.
+#[derive(Debug, Clone)]
 pub struct ReschedulingPlans<P> {
     plans: P,
     reschedule: Reschedule,

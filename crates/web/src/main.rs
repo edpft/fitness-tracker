@@ -349,7 +349,10 @@ async fn heart_rate(
             let rides = configurator::heart_rate::rides(&store).await;
             let ranges = configurator::ranges::today(&store, &setting.zone).await;
             store.close().await;
-            match rides.and_then(|rides| Ok((rides, ranges?))) {
+            match rides
+                .map_err(configurator::next::NextFailure::from)
+                .and_then(|rides| Ok((rides, ranges?)))
+            {
                 Ok((rides, ranges)) => at_power::page(
                     &domain::analytical::heart_rate_at_power::trended(&rides),
                     &ranges,
@@ -388,7 +391,10 @@ async fn ftp_tests(
             let heart_rates = configurator::ftp_tests::heart_rates(&store).await;
             let ranges = configurator::ranges::today(&store, &setting.zone).await;
             store.close().await;
-            match tests.and_then(|tests| Ok((tests, heart_rates?, ranges?))) {
+            match tests
+                .map_err(configurator::next::NextFailure::from)
+                .and_then(|tests| Ok((tests, heart_rates?, ranges?)))
+            {
                 Ok((tests, heart_rates, ranges)) => {
                     ftp::page(&tests, &heart_rates, &ranges, tests_over(&query), &run)
                 }
@@ -425,7 +431,10 @@ async fn body_page(
             let components = configurator::composition::by_method(&store).await;
             let ranges = configurator::ranges::today(&store, &setting.zone).await;
             store.close().await;
-            match series.and_then(|series| Ok((series, aims?, components?, ranges?))) {
+            match series
+                .map_err(configurator::next::NextFailure::from)
+                .and_then(|series| Ok((series, aims?, components?, ranges?)))
+            {
                 Ok((series, aims, components, ranges)) => {
                     body::page(&series, &aims, &components, &ranges, over(&query), &run)
                 }
@@ -469,7 +478,10 @@ async fn overnight_hrv(
             let trended = configurator::per_device::overnight_hrv_trend(&store).await;
             let ranges = configurator::ranges::today(&store, &setting.zone).await;
             store.close().await;
-            match trended.and_then(|trended| Ok((trended, ranges?))) {
+            match trended
+                .map_err(configurator::next::NextFailure::from)
+                .and_then(|trended| Ok((trended, ranges?)))
+            {
                 Ok((trended, ranges)) => hrv::page(&trended, &ranges, over(&query), &run),
                 Err(error) => hrv::unreadable(&error.to_string()),
             }
@@ -502,7 +514,10 @@ async fn pulse_wave_velocity_page(
             let series = configurator::pulse_wave_velocity::by_algorithm(&store).await;
             let ranges = configurator::ranges::today(&store, &setting.zone).await;
             store.close().await;
-            match series.and_then(|series| Ok((series, ranges?))) {
+            match series
+                .map_err(configurator::next::NextFailure::from)
+                .and_then(|series| Ok((series, ranges?)))
+            {
                 Ok((series, ranges)) => {
                     pulse_wave_velocity::page(&series, &ranges, over(&query), &run)
                 }
@@ -537,7 +552,10 @@ async fn resting_heart_rate(
             let trended = configurator::per_device::resting_heart_rate_trend(&store).await;
             let ranges = configurator::ranges::today(&store, &setting.zone).await;
             store.close().await;
-            match trended.and_then(|trended| Ok((trended, ranges?))) {
+            match trended
+                .map_err(configurator::next::NextFailure::from)
+                .and_then(|trended| Ok((trended, ranges?)))
+            {
                 Ok((trended, ranges)) => resting::page(&trended, &ranges, over(&query), &run),
                 Err(error) => resting::unreadable(&error.to_string()),
             }
@@ -570,7 +588,10 @@ async fn sleep_page(
             let nights = configurator::sleep::nights(&store).await;
             let ranges = configurator::ranges::today(&store, &setting.zone).await;
             store.close().await;
-            match nights.and_then(|nights| Ok((nights, ranges?))) {
+            match nights
+                .map_err(configurator::next::NextFailure::from)
+                .and_then(|nights| Ok((nights, ranges?)))
+            {
                 Ok((nights, ranges)) => sleep::page(&nights, &ranges, over(&query), &run),
                 Err(error) => sleep::unreadable(&error.to_string()),
             }
