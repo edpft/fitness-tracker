@@ -20,6 +20,7 @@ pub mod devices;
 pub mod equipment;
 pub mod fills;
 pub mod ftp_tests;
+pub mod graph;
 pub mod heart_rate;
 pub mod history;
 pub mod holidays;

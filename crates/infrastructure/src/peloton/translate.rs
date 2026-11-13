@@ -675,3 +675,10 @@ fn heart_rate_of(
 
     (Some(HeartRateSeries::new(samples)), declared_missing, noted)
 }
+
+/// Nothing beyond the accounts it is handed (#809).
+impl application::graph::Input for PelotonSessionTranslator {
+    fn reads() -> application::graph::Reads {
+        application::graph::Reads::default()
+    }
+}

@@ -268,3 +268,10 @@ async fn write_weigh_ins(
     }
     Ok(())
 }
+
+/// The exports landed (#809).
+impl application::graph::Input for MyFitnessPalExportAccountReader {
+    fn reads() -> application::graph::Reads {
+        super::landed(&[super::MyFitnessPalExportLandingStore::STREAM])
+    }
+}

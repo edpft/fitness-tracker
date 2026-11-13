@@ -17,6 +17,8 @@
 
 use std::collections::BTreeSet;
 
+use crate::graph::{Input, Interpretive, Node, Reads};
+
 use domain::{
     landing::{LandedRecord, LandingRecordId, LandingStream, RecordCount, SourceRecordId},
     normalised::{
@@ -96,6 +98,16 @@ where
     #[must_use]
     pub fn under(self, terms: Terms) -> Self {
         Self { terms, ..self }
+    }
+}
+
+/// **A stream's normalised layer reads what its reader and its translator
+/// read** (#809), and the zones a day is placed by.
+impl<R: Input, T: Input, W, F, G, C> Input for Normalisation<R, T, W, F, G, C> {
+    fn reads() -> Reads {
+        R::reads()
+            .and(T::reads())
+            .and(Reads::of([Node::Interpretive(Interpretive::Zones)]))
     }
 }
 

@@ -371,3 +371,13 @@ async fn write_reading(
     .map_err(|error| store_error(&error))?;
     Ok(())
 }
+
+/// The nights landed, and the sleep record naming each night's watch (#809).
+impl application::graph::Input for GarminHrvAccountReader {
+    fn reads() -> application::graph::Reads {
+        super::landed(&[
+            super::GarminHrvLandingStore::STREAM,
+            super::GarminSleepLandingStore::STREAM,
+        ])
+    }
+}

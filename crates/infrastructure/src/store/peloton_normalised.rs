@@ -820,3 +820,14 @@ impl application::RawExtent for PelotonRawExtent {
         ))
     }
 }
+
+/// The rides landed, their samples, and the account naming each ride's monitor (#809).
+impl application::graph::Input for PelotonSessionAccountReader {
+    fn reads() -> application::graph::Reads {
+        super::landed(&[
+            super::PelotonRideLandingStore::STREAM,
+            super::PelotonRideSampleLandingStore::STREAM,
+            super::PelotonAccountLandingStore::STREAM,
+        ])
+    }
+}

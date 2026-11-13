@@ -293,3 +293,10 @@ fn open<'record>(record: &'record LandedRecord, scribe: &mut Scribe) -> Option<O
         }
     }
 }
+
+/// Nothing beyond the accounts it is handed (#809).
+impl application::graph::Input for SpreadsheetTranslator {
+    fn reads() -> application::graph::Reads {
+        application::graph::Reads::default()
+    }
+}

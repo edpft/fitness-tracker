@@ -538,3 +538,10 @@ async fn write_part(
     .map_err(|error| store_error(&error))?;
     Ok(())
 }
+
+/// The measurements landed (#809).
+impl application::graph::Input for WithingsWeighInAccountReader {
+    fn reads() -> application::graph::Reads {
+        super::landed(&[super::WithingsMeasurementLandingStore::STREAM])
+    }
+}

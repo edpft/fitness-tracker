@@ -735,3 +735,13 @@ fn flush(
         _ => {}
     }
 }
+
+/// The corrections asserted on the workouts landed (#809).
+impl application::graph::Input for HevySessionTranslator {
+    fn reads() -> application::graph::Reads {
+        domain::landing::LandingStream::try_from(crate::HevyWorkoutLandingStore::STREAM)
+            .map(application::graph::Node::Edits)
+            .into_iter()
+            .collect()
+    }
+}

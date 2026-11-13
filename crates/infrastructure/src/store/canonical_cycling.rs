@@ -1071,3 +1071,10 @@ fn too_large(what: &str) -> StoreError {
         detail: format!("{what} larger than the store can hold"),
     }
 }
+
+/// `cycling_session`, which Peloton writes (#809).
+impl application::graph::Input for SqliteNormalisedCyclingSessionReader {
+    fn reads() -> application::graph::Reads {
+        super::normalised(&[super::PelotonRideLandingStore::STREAM])
+    }
+}

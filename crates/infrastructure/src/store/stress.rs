@@ -281,3 +281,13 @@ impl StressHistory for SqliteStressHistory {
             .collect()
     }
 }
+
+/// The days landed, and the sleep record naming each day's watch (#809).
+impl application::graph::Input for GarminDailySummaryAccountReader {
+    fn reads() -> application::graph::Reads {
+        super::landed(&[
+            super::GarminDailySummaryLandingStore::STREAM,
+            super::GarminSleepLandingStore::STREAM,
+        ])
+    }
+}

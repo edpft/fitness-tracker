@@ -156,3 +156,13 @@ impl Translator for GarminActivityTranslator {
         })
     }
 }
+
+/// The corrections asserted on the sets landed, which is what a corrected figure belongs to (#809).
+impl application::graph::Input for GarminActivityTranslator {
+    fn reads() -> application::graph::Reads {
+        domain::landing::LandingStream::try_from(crate::GarminExerciseSetLandingStore::STREAM)
+            .map(application::graph::Node::Edits)
+            .into_iter()
+            .collect()
+    }
+}

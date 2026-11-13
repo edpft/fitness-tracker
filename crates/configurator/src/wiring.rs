@@ -65,7 +65,7 @@ use infrastructure::{
     },
 };
 
-use crate::{catalogue::KnownStream, config::SourceAccess};
+use crate::{catalogue::KnownStream, config::SourceAccess, graph};
 
 /// What the operator asked for.
 ///
@@ -488,7 +488,7 @@ async fn garmin_daily_heart_rate(
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
             let terms = terms(&pool, &zones, None, GarminDailyHeartRateTranslator::VERSION).await?;
-            let normalisation = Normalisation::new(
+            let normalisation: graph::GarminDailyHeartRate = Normalisation::new(
                 NormalisationPorts {
                     raw: GarminDailyHeartRateAccountReader::new(pool.clone())?,
                     translator: GarminDailyHeartRateTranslator,
@@ -559,7 +559,7 @@ async fn garmin_sleep(command: Command, database: &Path) -> Result<Outcome, Wiri
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
             let terms = terms(&pool, &zones, None, GarminSleepTranslator::VERSION).await?;
-            let normalisation = Normalisation::new(
+            let normalisation: graph::GarminSleep = Normalisation::new(
                 NormalisationPorts {
                     raw: GarminSleepAccountReader::new(pool.clone())?,
                     translator: GarminSleepTranslator,
@@ -630,7 +630,7 @@ async fn garmin_daily_summary(command: Command, database: &Path) -> Result<Outco
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
             let terms = terms(&pool, &zones, None, GarminStressTranslator::VERSION).await?;
-            let normalisation = Normalisation::new(
+            let normalisation: graph::GarminDailySummary = Normalisation::new(
                 NormalisationPorts {
                     raw: GarminDailySummaryAccountReader::new(pool.clone())?,
                     translator: GarminStressTranslator,
@@ -994,7 +994,7 @@ fn peloton_normalisation(
     pool: SqlitePool,
     zones: StatedZones,
     terms: Terms,
-) -> Result<impl WorkoutNormaliser + Sync + use<>, WiringError> {
+) -> Result<graph::PelotonRides, WiringError> {
     Ok(Normalisation::new(
         NormalisationPorts {
             raw: PelotonSessionAccountReader::new(pool.clone())?,
@@ -1078,7 +1078,7 @@ async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, Wiring
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
             let terms = terms(&pool, &zones, None, GarminHrvTranslator::VERSION).await?;
-            let normalisation = Normalisation::new(
+            let normalisation: graph::GarminHrv = Normalisation::new(
                 NormalisationPorts {
                     raw: GarminHrvAccountReader::new(pool.clone())?,
                     translator: GarminHrvTranslator,
@@ -1184,7 +1184,7 @@ async fn garmin_activities(
                     .overlay()
                     .await?;
 
-            let normalisation = Normalisation::new(
+            let normalisation: graph::GarminActivities = Normalisation::new(
                 NormalisationPorts {
                     raw: GarminGymAccountReader::new(pool.clone())?,
                     translator: GarminActivityTranslator::new(GarminGymTranslator::correcting(
@@ -1943,7 +1943,7 @@ async fn hevy_normalisation(
     pool: SqlitePool,
     zones: StatedZones,
     terms: Terms,
-) -> Result<impl WorkoutNormaliser + Sync + use<>, WiringError> {
+) -> Result<graph::HevyWorkouts, WiringError> {
     let overlay = SqliteEditOverlayStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?
         .overlay()
         .await?;
@@ -2019,7 +2019,7 @@ fn withings_normalisation(
     pool: SqlitePool,
     zones: StatedZones,
     terms: Terms,
-) -> Result<impl WorkoutNormaliser + Sync + use<>, WiringError> {
+) -> Result<graph::WithingsMeasurements, WiringError> {
     Ok(Normalisation::new(
         NormalisationPorts {
             raw: WithingsWeighInAccountReader::new(pool.clone())?,
@@ -2212,7 +2212,7 @@ async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome,
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
             let terms = terms(&pool, &zones, None, SpreadsheetTranslator::VERSION).await?;
-            let normalisation = Normalisation::new(
+            let normalisation: graph::Spreadsheets = Normalisation::new(
                 NormalisationPorts {
                     raw: SpreadsheetFileAccountReader::new(pool.clone())?,
                     translator: SpreadsheetTranslator,
@@ -2292,7 +2292,7 @@ async fn btwb_exports(command: Command, database: &Path) -> Result<Outcome, Wiri
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
             let terms = terms(&pool, &zones, None, BtwbTranslator::VERSION).await?;
-            let normalisation = Normalisation::new(
+            let normalisation: graph::Btwb = Normalisation::new(
                 NormalisationPorts {
                     raw: BtwbExportAccountReader::new(pool.clone())?,
                     translator: BtwbTranslator,
@@ -2372,7 +2372,7 @@ async fn myfitnesspal_exports(command: Command, database: &Path) -> Result<Outco
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(&pool, &declared).await?;
             let terms = terms(&pool, &zones, None, MyFitnessPalWeighInTranslator::VERSION).await?;
-            let normalisation = Normalisation::new(
+            let normalisation: graph::MyFitnessPal = Normalisation::new(
                 NormalisationPorts {
                     raw: MyFitnessPalExportAccountReader::new(pool.clone())?,
                     translator: MyFitnessPalWeighInTranslator,
