@@ -693,6 +693,23 @@ pub fn expected(
         .collect()
 }
 
+/// The macrocycle's mesocycles, as stretches shaded behind a chart over
+/// `range`, each named by its number: only the days of each that fall in it.
+///
+/// **Numbered from 0** (operator, 2026-11-11): the entry tests are
+/// Mesocycle 0, so the first non-test mesocycle is Mesocycle 1.
+pub fn mesocycles(spans: &[domain::plan::Span], range: Range) -> Vec<(Date, Date, String)> {
+    spans
+        .iter()
+        .zip(0..)
+        .filter_map(|(span, number): (_, u32)| {
+            let first = span.start().max(range.from);
+            let last = span.end().yesterday().ok()?.min(range.to);
+            (first <= last).then(|| (first, last, format!("Mesocycle {number}")))
+        })
+        .collect()
+}
+
 /// The one line saying what the line and band are.
 pub fn foot(said: &str) -> Markup {
     html! { p.foot { (said) } }

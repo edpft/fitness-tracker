@@ -66,6 +66,7 @@ pub fn charts(series: &Series, aims: &[Aim], began: Option<Date>, range: Range) 
             range,
             axis: Axis::Figures,
             layers: vec![
+                Layer::Spans(detail::mesocycles(&aims.iter().map(|aim| aim.span).collect::<Vec<_>>(), range)),
                 Layer::Trend(within.trend.iter().map(|run| run.iter().map(traced).collect()).collect()),
                 Layer::Dots(within.weigh_ins.iter().map(|weighed| (weighed.at.day(), kilograms(weighed.mass))).collect()),
                 Layer::Aim(expected.clone()),

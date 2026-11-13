@@ -62,6 +62,7 @@ pub fn charts(
     range: Range,
 ) -> Markup {
     let today = range.to;
+    let shaded = detail::mesocycles(&aims.iter().map(|aim| aim.span).collect::<Vec<_>>(), range);
     let expected = |one: &ComponentSeries| -> Vec<Vec<(Date, f64)>> {
         let Some(began) = began.filter(|_| one.unit == Unit::Kilograms) else {
             return Vec::new();
@@ -82,7 +83,14 @@ pub fn charts(
         .map(|one| {
             (
                 one.unit.as_str(),
-                chart(&one.within(range), Metric::Fat, range, today, expected(one)),
+                chart(
+                    &one.within(range),
+                    Metric::Fat,
+                    range,
+                    today,
+                    expected(one),
+                    &shaded,
+                ),
             )
         })
         .collect();
@@ -93,6 +101,7 @@ pub fn charts(
             range,
             today,
             expected(one),
+            &shaded,
         )
     });
     html! {
@@ -225,6 +234,7 @@ fn chart(
     range: Range,
     today: Date,
     expected: Vec<Vec<(Date, f64)>>,
+    mesocycles: &[(Date, Date, String)],
 ) -> Chart<'static> {
     let aimed: BTreeMap<Date, f64> = expected.iter().flatten().copied().collect();
     let points = |hollow: bool| -> Vec<(Date, f64)> {
@@ -252,6 +262,7 @@ fn chart(
         range,
         axis: Axis::Figures,
         layers: vec![
+            Layer::Spans(mesocycles.to_vec()),
             Layer::Trend(
                 component
                     .series
@@ -584,5 +595,11 @@ mod tests {
         );
         assert!(page.contains("expected 65.5 kg"), "{page}");
         assert!(!page.contains("matrix"), "the lines replaced it: {page}");
+        assert_eq!(
+            page.matches(r#"class="span""#).count(),
+            4,
+            "Mesocycles 0 and 2 shaded on each chart: {page}"
+        );
+        assert!(page.contains(">Mesocycle 1</text>"), "{page}");
     }
 }
