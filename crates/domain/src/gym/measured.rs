@@ -163,12 +163,6 @@ impl GuessedExercise {
             None => None,
         }
     }
-
-    /// Whether the source proposed this for this set, or it was carried from
-    /// the run.
-    pub const fn from_the_source(self) -> bool {
-        matches!(self, Self::Proposed(_))
-    }
 }
 
 impl fmt::Display for GuessedExercise {
@@ -403,14 +397,6 @@ impl MeasuredGymSession {
     /// heart rate for.
     pub fn set_count(&self) -> usize {
         self.recorded.sets().map_or(0, NonEmpty::count)
-    }
-
-    /// How many readings its recording holds. Zero where none landed.
-    pub fn reading_count(&self) -> usize {
-        self.recorded
-            .heart_rate()
-            .and_then(MeasuredHeartRate::series)
-            .map_or(0, |series| series.samples().count())
     }
 }
 

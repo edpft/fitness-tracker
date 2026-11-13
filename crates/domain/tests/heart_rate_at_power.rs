@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use domain::{
     analytical::{
         body_weight::Direction,
-        heart_rate::{RideHeartRate, SentBy, heart_rate_by_zone},
+        heart_rate::{RideHeartRate, SentBy, ride_heart_rate},
         heart_rate_at_power::{AtPower, Second, seconds, trended},
     },
     canonical::{Attributed, NormalisedSessionId},
@@ -126,7 +126,7 @@ fn read(ride: CanonicalBikePlusRide, register: &Register) -> Fallible<RideHeartR
         main: ride,
         cool_down: None,
     };
-    Ok(heart_rate_by_zone(&session, Some(ftp()?), None, register).ok_or("a main ride")?)
+    Ok(ride_heart_rate(&session, Some(ftp()?), register).ok_or("a main ride")?)
 }
 
 /// A ride on `on` whose seconds lie, to the beat, on

@@ -34,7 +34,7 @@ use std::fmt;
 use crate::measure::PositiveDuration;
 use crate::sequence::NonEmpty;
 
-use super::zone::{Ftp, PowerZone};
+use super::zone::PowerZone;
 
 /// One stretch at one zone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,15 +118,6 @@ impl Ride {
         totals.sort_by_key(|(zone, _)| *zone);
         totals
     }
-
-    /// The hardest zone this ride reaches, if it names any.
-    #[must_use]
-    pub fn peak_zone(&self) -> Option<PowerZone> {
-        match self {
-            Self::Intervals(intervals) => intervals.iter().map(|interval| interval.zone()).max(),
-            Self::Effort(_) => None,
-        }
-    }
 }
 
 /// A whole cycling session: warm up, ride, cool down.
@@ -205,20 +196,6 @@ impl CyclingSession {
             ride: self.ride.clone(),
             cool_down: Some(PositiveDuration::from_seconds(seconds).unwrap_or(extra)),
         }
-    }
-
-    /// Each interval, with the watts it means for a rider at this FTP.
-    ///
-    /// Empty for an effort, which names no zone to convert.
-    #[must_use]
-    pub fn in_watts(&self, ftp: Ftp) -> Vec<(Interval, super::zone::WattRange)> {
-        let Ride::Intervals(intervals) = &self.ride else {
-            return Vec::new();
-        };
-        intervals
-            .iter()
-            .map(|interval| (*interval, interval.zone().band().watts_at(ftp)))
-            .collect()
     }
 }
 

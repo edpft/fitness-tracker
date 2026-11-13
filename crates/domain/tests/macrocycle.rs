@@ -60,7 +60,6 @@ fn today_is_in_autumn_2026() {
     assert_eq!(autumn.term(), Term::Autumn);
     assert_eq!(autumn.to_string(), "autumn 2026");
     assert_eq!(autumn.start(), date(2026, 9, 7));
-    assert_eq!(autumn.last_day_of_term(), date(2026, 12, 20));
     assert_eq!(autumn.transition(), date(2026, 12, 21));
 }
 
@@ -89,7 +88,7 @@ fn christmas_is_autumns_transition_and_spring_follows_it() {
     assert_eq!(spring.start(), date(2027, 1, 4));
     assert_eq!(spring.term(), Term::Spring);
     assert_eq!(spring.to_string(), "spring 2027");
-    assert_eq!(spring.last_day_of_term(), date(2027, 3, 21));
+    assert_eq!(spring.transition(), date(2027, 3, 22));
 }
 
 /// **A Summer holiday starting on a Tuesday takes that whole week**, so the
@@ -101,7 +100,7 @@ fn summer_2027_takes_the_week_it_starts_in() {
 
     assert_eq!(summer.to_string(), "summer 2027");
     assert_eq!(summer.start(), date(2027, 4, 5));
-    assert_eq!(summer.last_day_of_term(), date(2027, 7, 25));
+    assert_eq!(summer.transition(), date(2027, 7, 26));
 }
 
 /// **Competitive only for the mesocycle ending on the last day of term.** The

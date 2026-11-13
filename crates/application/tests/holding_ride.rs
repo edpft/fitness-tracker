@@ -89,8 +89,11 @@ fn the_harder_holding_ride_is_the_first_session_and_its_classes_own() {
     assert_eq!(ride.microcycle, 1);
     assert_eq!(ride.date, Date::constant(2026, 9, 30));
     assert_eq!(ride.ride.at().first().reference(), "pz");
+    let Ride::Intervals(intervals) = ride.ride.session().ride() else {
+        panic!("a power zone ride is intervals");
+    };
     assert_eq!(
-        ride.ride.session().ride().peak_zone(),
+        intervals.iter().map(|interval| interval.zone()).max(),
         Some(PowerZone::Four)
     );
     assert_eq!(

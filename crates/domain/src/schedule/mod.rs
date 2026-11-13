@@ -182,12 +182,6 @@ impl DayPart {
             |part| Some(Self::new(self.date, part)),
         )
     }
-
-    /// The moment a slot on a date begins.
-    #[must_use]
-    pub const fn of_slot(date: Date, slot: TrainingSlot) -> Self {
-        Self::new(date, slot.part)
-    }
 }
 
 impl std::fmt::Display for DayPart {

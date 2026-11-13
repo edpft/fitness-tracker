@@ -67,11 +67,6 @@ impl ZoneProfile {
         Self(totals)
     }
 
-    #[must_use]
-    pub fn seconds_at(&self, zone: PowerZone) -> u64 {
-        self.0.get(&zone).copied().unwrap_or_default()
-    }
-
     /// Every zone with time in it, lightest first.
     pub fn iter(&self) -> impl Iterator<Item = (PowerZone, u64)> + '_ {
         self.0.iter().map(|(zone, seconds)| (*zone, *seconds))

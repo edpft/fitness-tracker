@@ -27,7 +27,7 @@ pub fn collects() -> Result<Scope, WiringError> {
     next::scope([Reads::Canonical(CanonicalLayer::WeighIns)])
 }
 
-/// Every canonical weigh-in, the trend through them and how fast it moved.
+/// Every canonical weigh-in, and the trend through them.
 ///
 /// # Errors
 ///

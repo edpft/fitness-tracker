@@ -292,15 +292,6 @@ impl PrescribedExercise {
             Self::ForDistance { sets, .. } => sets.count(),
         }
     }
-
-    /// How many of the sets are working sets. What a volume count is over.
-    pub fn working_set_count(&self) -> usize {
-        match self {
-            Self::ForReps { sets, .. } => sets.iter().filter(|set| !set.warmup).count(),
-            Self::ForDuration { sets, .. } => sets.iter().filter(|set| !set.warmup).count(),
-            Self::ForDistance { sets, .. } => sets.iter().filter(|set| !set.warmup).count(),
-        }
-    }
 }
 
 impl fmt::Display for PrescribedExercise {

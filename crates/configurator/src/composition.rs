@@ -1,21 +1,14 @@
-//! Body composition, one series per method, over this build's store (#256),
-//! and against the nutrition phase in force (#489).
+//! Body composition, one series per method, over this build's store (#256).
 
-use application::{
-    StoreError,
-    composition::{AgainstPhase, Composition, InForce},
-    next::Scope,
-};
-use domain::{analytical::composition::ComponentSeries, normalised::OperatorZone};
+use application::{StoreError, composition::Composition, next::Scope};
+use domain::analytical::composition::ComponentSeries;
 use infrastructure::{
     MyFitnessPalExportLandingStore, SpreadsheetFileLandingStore, SqliteCompositionHistory,
     WithingsMeasurementLandingStore,
 };
 
 use crate::{
-    holidays,
-    next::{self, NextFailure, Reads},
-    rescheduling,
+    next::{self, Reads},
     store::Store,
     wiring::WiringError,
 };
@@ -43,25 +36,4 @@ pub async fn by_method(store: &Store) -> Result<Vec<ComponentSeries>, StoreError
     Composition::new(SqliteCompositionHistory::new(store.pool().clone()))
         .by_method()
         .await
-}
-
-/// The current macrocycle's periods, each against its nutrition phase, today,
-/// as the plans now stand (#800).
-///
-/// # Errors
-///
-/// [`NextFailure`] if the store cannot be read.
-pub async fn against_phase(
-    store: &Store,
-    zone: &OperatorZone,
-) -> Result<AgainstPhase, NextFailure> {
-    Ok(InForce::new(
-        SqliteCompositionHistory::new(store.pool().clone()),
-        rescheduling::plans(store, zone).await?,
-    )
-    .on(
-        crate::equipment::today(zone),
-        holidays::holidays(store).await,
-    )
-    .await?)
 }

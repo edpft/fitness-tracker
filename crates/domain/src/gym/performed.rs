@@ -101,12 +101,6 @@ impl PerformedGymSession {
             .flat_map(|workout| workout.items().iter())
     }
 
-    /// The first item performed. There is always one: a workout's items are
-    /// non-empty and so are a session's workouts.
-    pub const fn first_item(&self) -> &WorkoutItem {
-        self.workouts.first().items().first()
-    }
-
     /// Every performed exercise, flattened across the session's workouts in the
     /// order they were performed.
     pub fn exercises(&self) -> impl Iterator<Item = &PerformedExercise> {

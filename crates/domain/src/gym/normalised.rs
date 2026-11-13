@@ -125,12 +125,6 @@ impl NormalisedGymSession {
     pub fn items(&self) -> &[CanonicalItem] {
         &self.items
     }
-
-    /// Whether this account holds anything a canonical session needs
-    /// exercises for.
-    pub const fn has_items(&self) -> bool {
-        !self.items.is_empty()
-    }
 }
 
 impl NormalisedGymSession {

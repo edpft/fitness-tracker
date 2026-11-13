@@ -24,7 +24,7 @@ use application::{AccountReader, NormalisedEntityStore, Reached, Reading, StoreE
 use domain::{
     gym::{
         Guess, GuessedExercise, Load, MeasuredGymSession, MeasuredHeartRate, MeasuredSet,
-        exercise::{Description, Implement, Movement, RepsExercise},
+        exercise::Implement,
     },
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
@@ -527,52 +527,6 @@ pub(super) async fn clear_measured(
     .await
     .map_err(|error| store_error(&error))?;
     Ok(())
-}
-
-/// What a stored row guessed, and how it was arrived at.
-///
-/// The two key columns are exclusive, which the table checks: a row names one
-/// of our exercises or describes a movement, never both.
-///
-/// # Errors
-///
-/// [`StoreError::Corrupt`] if a key is not one of ours, which is a row written
-/// by a version whose vocabulary has since moved; if the row says a movement
-/// without saying where it came from; or if it says both an exercise and a
-/// description.
-pub fn guessed_from_row(
-    exercise: Option<String>,
-    movement: Option<String>,
-    implement: Option<String>,
-    from: Option<&str>,
-) -> Result<GuessedExercise, StoreError> {
-    let guess = match (exercise, movement) {
-        (None, None) => return Ok(GuessedExercise::Undetermined),
-        (Some(key), None) => {
-            Guess::Exercise(RepsExercise::try_from(key).map_err(|error| corrupt(&error))?)
-        }
-        (None, Some(key)) => {
-            let movement = Movement::try_from(key).map_err(|error| corrupt(&error))?;
-            let description = Description::of(movement);
-            Guess::Description(match implement {
-                Some(key) => description
-                    .loaded_with(Implement::try_from(key).map_err(|error| corrupt(&error))?),
-                None => description,
-            })
-        }
-        (Some(_), Some(_)) => {
-            return Err(StoreError::Corrupt {
-                detail: "a guess names an exercise and describes a movement".to_owned(),
-            });
-        }
-    };
-    match from {
-        Some("proposed") => Ok(GuessedExercise::Proposed(guess)),
-        Some("from-its-run") => Ok(GuessedExercise::FromItsRun(guess)),
-        other => Err(StoreError::Corrupt {
-            detail: format!("{other:?} is not how a guess is arrived at"),
-        }),
-    }
 }
 
 /// How much raw the gym derivation reads: the activities, their sets and their

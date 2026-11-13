@@ -93,7 +93,7 @@ pub use shape::{
     UnknownSection, UnknownSlot, WorkoutShape,
 };
 pub use steps::{InvalidLoadSteps, LoadSteps, Step};
-pub use succession::{RECENT_WEEKS, is_recent_enough, weeks_between};
+pub use succession::{RECENT_WEEKS, weeks_between};
 pub use target::{Prescribed, PrescribedSet, Target};
 pub use test::{Test, Tested};
 pub use warmup::{WarmupStep, ramp as warmup_ramp};

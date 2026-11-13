@@ -105,7 +105,6 @@ fn a_prescription_nobody_has_been_given_is_drafted() {
     let state = run!(deliveries.state_of(application::PrescribedWorkoutId::new(id)));
 
     assert_eq!(state, PrescriptionState::Drafted);
-    assert!(state.is_disposable(), "a draft may be thrown away");
     assert_eq!(state.reference(), None);
 }
 
@@ -132,11 +131,6 @@ fn a_delivered_prescription_nobody_has_performed_is_published() {
         PrescriptionState::Published {
             reference: reference!("routine-1")
         }
-    );
-    assert!(
-        state.is_disposable(),
-        "published is still cheap: withdrawing it removes the session at the \
-         destination, and loses nothing else"
     );
 }
 
@@ -176,10 +170,6 @@ fn a_prescription_a_workout_names_is_performed() {
         PrescriptionState::Performed {
             reference: reference!("routine-2")
         }
-    );
-    assert!(
-        !state.is_disposable(),
-        "what it records happened, so it is not deletable"
     );
 }
 

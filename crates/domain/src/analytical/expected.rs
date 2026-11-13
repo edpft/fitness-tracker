@@ -121,7 +121,7 @@ mod tests {
 
     use super::{each_mesocycle, over};
     use crate::{
-        analytical::{body_weight::Aim, recomposition::NutritionPhase},
+        analytical::{body_weight::Aim, nutrition_phase::NutritionPhase},
         plan::Span,
     };
 

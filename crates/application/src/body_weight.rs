@@ -30,8 +30,7 @@ where
         Self { weigh_ins }
     }
 
-    /// Every canonical weigh-in, oldest first, the trend through them and
-    /// how fast it moved.
+    /// Every canonical weigh-in, oldest first, and the trend through them.
     ///
     /// # Errors
     ///
