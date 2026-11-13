@@ -268,14 +268,8 @@ pub enum Layer {
     Reference(Vec<(Date, f64, f64)>),
     /// Each observation's span, from low to high on its day, never joined.
     Bars(Vec<(Date, f64, f64)>),
-    /// Zero, across the whole chart, where a change is none.
-    Zero,
     /// What was intended, dashed, one line per stretch a plan states it.
     Aim(Vec<Vec<(Date, f64)>>),
-    /// A change: one line per unbroken run, filled down to zero, more
-    /// strongly below it than above, so which side of zero it falls reads at
-    /// a glance rather than as a trend (operator, 2026-11-02, #689).
-    Filled(Vec<Vec<Traced>>),
 }
 
 impl Layer {
@@ -297,14 +291,7 @@ impl Layer {
                 .iter()
                 .flat_map(|(_, low, high)| [*low, *high])
                 .collect(),
-            Self::Zero => vec![0.0],
             Self::Aim(runs) => runs.iter().flatten().map(|(_, value)| *value).collect(),
-            Self::Filled(runs) => runs
-                .iter()
-                .flatten()
-                .map(|day| day.value)
-                .chain(std::iter::once(0.0))
-                .collect(),
         }
     }
 }
@@ -416,7 +403,7 @@ pub fn drawn(chart: &Chart<'_>) -> Markup {
     let recorded = chart
         .layers
         .iter()
-        .filter(|layer| !matches!(layer, Layer::Reference(_) | Layer::Zero | Layer::Aim(_)))
+        .filter(|layer| !matches!(layer, Layer::Reference(_) | Layer::Aim(_)))
         .any(|layer| !layer.values().is_empty());
     let values: Vec<f64> = chart.layers.iter().flat_map(Layer::values).collect();
     let low = values.iter().copied().reduce(f64::min).filter(|_| recorded);
@@ -526,24 +513,6 @@ fn plotted(chart: &Chart<'_>, frame: &Frame) -> Markup {
                                 @let x = format!("{:.1}", frame.x(*on));
                                 line.bar x1=(x) x2=(x) y1=(format!("{:.1}", frame.y(*low))) y2=(format!("{:.1}", frame.y(*high)))
                                     stroke-width=(if frame.days > 400 { "1" } else { "2" }) {}
-                            }
-                        }
-                        Layer::Zero => {
-                            line.zero x1="0" x2=(WIDTH) y1=(format!("{:.1}", frame.y(0.0))) y2=(format!("{:.1}", frame.y(0.0))) {}
-                        }
-                        Layer::Filled(runs) => {
-                            @let zero = frame.y(0.0);
-                            defs {
-                                clipPath id=(format!("{}-below", chart.id)) { rect x="0" y=(format!("{zero:.1}")) width=(WIDTH) height=(HEIGHT) {} }
-                                clipPath id=(format!("{}-above", chart.id)) { rect x="0" y="0" width=(WIDTH) height=(format!("{zero:.1}")) {} }
-                            }
-                            @for run in runs {
-                                @if let (Some(first), Some(last)) = (run.first(), run.last()) {
-                                    @let area = format!("{:.1},{zero:.1} {} {:.1},{zero:.1}", frame.x(first.on), line(run, frame), frame.x(last.on));
-                                    polygon.below points=(area) clip-path=(format!("url(#{}-below)", chart.id)) {}
-                                    polygon.above points=(area) clip-path=(format!("url(#{}-above)", chart.id)) {}
-                                }
-                                polyline.line points=(line(run, frame)) {}
                             }
                         }
                         Layer::Aim(runs) => {

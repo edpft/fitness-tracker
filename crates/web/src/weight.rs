@@ -8,20 +8,18 @@
 //! as one line per unbroken run `domain` gives, so where it has no trend the
 //! line breaks.
 //!
-//! **Weight change is a second chart** (#689): how fast the trend moved, in kg
-//! a week, filled down to zero and against the plan's aim. No word says what it means; the
-//! line against them shows it (operator, 2026-11-02, #688).
+//! **Against where the plan's aims would have taken it** (#786): the trend
+//! against expectation, as Progress's body tile draws it. The weight change
+//! chart (#689) went with it (operator, 2026-11-13).
 //!
 //! **The summary is the latest trend weight**, whatever the range: the range
-//! only chooses which days the charts show. Weight change is not in it: its
-//! latest day is 17 days back, and as a figure it read as this week's change
-//! (operator, 2026-11-02).
+//! only chooses which days the chart shows.
 
 use std::collections::BTreeMap;
 
 use domain::{
     analytical::{
-        body_weight::{Aim, Series, Trend, WeightChange},
+        body_weight::{Aim, Series, Trend, against_aims},
         range::Range,
     },
     canonical::Occurred,
@@ -37,14 +35,32 @@ pub fn recorded(series: &Series) -> Option<Range> {
     Range::spanning(series.weigh_ins.iter().map(|weighed| weighed.at.day()))
 }
 
-/// Body weight and weight change over `range`. Nothing where no weigh-in was
-/// recorded, since the page may still have composition to show.
-pub fn charts(series: &Series, aims: &[Aim], range: Range) -> Markup {
+/// Body weight over `range`, against where the plan's aims would have taken
+/// the trend since the macrocycle that `began` on a day (#786). Nothing where
+/// no weigh-in was recorded, since the page may still have composition to
+/// show.
+///
+/// **The expectation is Progress's body tile's** (`against_aims`), so the
+/// tile and the page draw one line, not two versions of it (operator,
+/// 2026-11-13).
+pub fn charts(series: &Series, aims: &[Aim], began: Option<Date>, range: Range) -> Markup {
     if series.weigh_ins.is_empty() {
         return html! {};
     }
     let today = range.to;
     let within = series.within(range);
+    let expected: Vec<Vec<(Date, f64)>> = began
+        .and_then(|began| against_aims(&series.trend, aims, began, today))
+        .map(|weight| weight.expected())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|run| {
+            run.into_iter()
+                .filter(|(on, _)| range.from <= *on && *on <= range.to)
+                .collect::<Vec<_>>()
+        })
+        .filter(|run| !run.is_empty())
+        .collect();
     html! {
         (detail::chart(&Chart {
             id: "weight",
@@ -56,22 +72,9 @@ pub fn charts(series: &Series, aims: &[Aim], range: Range) -> Markup {
             layers: vec![
                 Layer::Trend(within.trend.iter().map(|run| run.iter().map(traced).collect()).collect()),
                 Layer::Dots(within.weigh_ins.iter().map(|weighed| (weighed.at.day(), kilograms(weighed.mass))).collect()),
+                Layer::Aim(expected.clone()),
             ],
-            days: days(&within, today),
-        }))
-        (detail::chart(&Chart {
-            id: "weight-change",
-            metric: Metric::BodyWeight,
-            title: "Weight change",
-            sub: "kg a week".to_owned(),
-            range,
-            axis: Axis::Figures,
-            layers: vec![
-                Layer::Filled(within.weight_change.iter().map(|run| run.iter().map(changed).collect()).collect()),
-                Layer::Aim(aimed(aims, range)),
-                Layer::Zero,
-            ],
-            days: change_days(&within, today),
+            days: days(&within, &expected.iter().flatten().copied().collect(), today),
         }))
     }
 }
@@ -126,8 +129,9 @@ pub fn cell(series: &Series) -> Option<(Cell<'static>, Date)> {
     ))
 }
 
-/// What a tap on each day shows: its weigh-ins and its trend.
-fn days(series: &Series, today: Date) -> Vec<(Date, Markup)> {
+/// What a tap on each day shows: its weigh-ins, its trend and where the aims
+/// would have taken it.
+fn days(series: &Series, expected: &BTreeMap<Date, f64>, today: Date) -> Vec<(Date, Markup)> {
     let mut weighed: BTreeMap<Date, Vec<String>> = BTreeMap::new();
     for one in &series.weigh_ins {
         weighed
@@ -155,41 +159,11 @@ fn days(series: &Series, today: Date) -> Vec<(Date, Markup)> {
                 @if let Some(day) = trend.get(&on) {
                     " · trend " (tenths(day.mass)) " kg"
                 }
-            };
-            (on, said)
-        })
-        .collect()
-}
-
-/// What a tap on each day of weight change shows.
-fn change_days(series: &Series, today: Date) -> Vec<(Date, Markup)> {
-    series
-        .weight_change
-        .iter()
-        .flatten()
-        .map(|change| {
-            let said = html! {
-                span.on { (detail::day(change.on, today)) }
-                " · " b { (signed(change.per_week)) " kg a week" }
-                @if let Some(margin) = change.margin {
-                    " ± " (format!("{margin:.2}"))
+                @if let Some(expected) = expected.get(&on) {
+                    " · expected " (format!("{expected:.1}")) " kg"
                 }
             };
-            (change.on, said)
-        })
-        .collect()
-}
-
-/// Each aim the plans state, as a line across the days of its mesocycle that
-/// fall in `range`.
-fn aimed(aims: &[Aim], range: Range) -> Vec<Vec<(Date, f64)>> {
-    aims.iter()
-        .filter_map(|aim| {
-            let per_week = aim.per_week?;
-            let last = aim.span.end().yesterday().ok()?;
-            let from = aim.span.start().max(range.from);
-            let to = last.min(range.to);
-            (from <= to).then(|| vec![(from, per_week), (to, per_week)])
+            (on, said)
         })
         .collect()
 }
@@ -202,33 +176,12 @@ fn traced(day: &Trend) -> Traced {
     }
 }
 
-const fn changed(day: &WeightChange) -> Traced {
-    Traced {
-        on: day.on,
-        value: day.per_week,
-        margin: day.margin,
-    }
-}
-
 fn weigh_ins(count: usize) -> String {
     if count == 1 {
         "1 weigh-in".to_owned()
     } else {
         format!("{count} weigh-ins")
     }
-}
-
-/// Kilograms a week to the nearest 0.01, with its sign.
-fn signed(per_week: f64) -> String {
-    let hundredths = (per_week * 100.0).round();
-    let sign = if hundredths < 0.0 {
-        "−"
-    } else if hundredths > 0.0 {
-        "+"
-    } else {
-        ""
-    };
-    format!("{sign}{:.2}", hundredths.abs() / 100.0)
 }
 
 /// A mass to the nearest 0.1 kg (operator, 2026-10-31, on the weigh-ins).
@@ -382,65 +335,50 @@ mod tests {
     }
 
     #[test]
-    fn the_summary_is_trend_weight_and_weight_change_is_charted() {
-        // 40 g a day for 60 days from 2026-08-01: 0.28 kg a week. The last
-        // weigh-in is 09-29, so the last weight change is 17 days before it.
-        let weigh_ins = (0..60)
-            .map(|offset| {
-                let on = date(2026, 8, 1)
-                    .checked_add(jiff::Span::new().days(offset))
-                    .expect("a day");
-                Weighed {
-                    at: Occurred::On(on),
-                    mass: Kg::from_grams(86_000 - 40 * u64::try_from(offset).expect("a count")),
-                    fat_free: None,
-                }
-            })
-            .collect();
-        let page = shown(weigh_ins, &ranges(date(2026, 9, 29)), Over::All);
+    fn the_summary_is_trend_weight_and_weight_change_is_not_charted() {
+        let weigh_ins = (1..=28).map(|d| day(d, 84_000)).collect();
+        let page = shown(weigh_ins, &ranges(date(2026, 9, 28)), Over::All);
         assert!(page.contains("Trend weight"), "{page}");
-        assert!(
-            !page.contains("<small>kg a week</small>"),
-            "weight change is not a figure in the summary: {page}"
-        );
         assert!(!page.contains(r#"class="badge""#), "no arrow: {page}");
         assert!(
-            page.contains("12 Sep</span> · <b>−0.28 kg a week</b>"),
-            "{page}"
+            !page.contains("Weight change"),
+            "weight change went (2026-11-13): {page}"
         );
     }
 
+    /// **The trend against where the aims would have taken it**, from the
+    /// trend on the macrocycle's first day, as Progress's tile draws it.
     #[test]
-    fn weight_change_is_drawn_against_zero_and_the_aim() {
-        let weigh_ins = (1..=30).map(|d| day(d, 84_000)).collect::<Vec<_>>();
-        let mut more: Vec<Weighed> = (1..=31)
-            .map(|d| Weighed {
-                at: Occurred::On(date(2026, 10, d)),
-                mass: Kg::from_grams(84_000),
-                fat_free: None,
-            })
-            .collect();
-        more.extend(weigh_ins);
+    fn the_trend_is_drawn_against_the_aims() {
+        let mut weigh_ins: Vec<Weighed> = (1..=30).map(|d| day(d, 84_000)).collect();
+        weigh_ins.extend((1..=31).map(|d| Weighed {
+            at: Occurred::On(date(2026, 10, d)),
+            mass: Kg::from_grams(84_000),
+            fat_free: None,
+        }));
         let aims = [Aim {
             span: Span::new(date(2026, 9, 28), 4),
             phase: NutritionPhase::Cut,
             per_week: Some(-0.25),
         }];
         let page = page(
-            &Series::of(more),
+            &Series::of(weigh_ins),
             &aims,
             &ranges(date(2026, 10, 31)),
             Over::All,
             &crate::run::View::default(),
         )
         .into_string();
-        assert!(page.contains("<h2>Weight change</h2>"), "{page}");
-        assert_eq!(page.matches(r#"class="zero""#).count(), 1, "{page}");
         assert_eq!(page.matches(r#"class="aim""#).count(), 1, "{page}");
-        assert_eq!(
-            page.matches(r#"class="below""#).count(),
-            1,
-            "filled down to zero, not a trend's band: {page}"
+        assert!(
+            page.contains("31 Oct</span> · <b>84.0 kg</b> · trend 84.0 kg · expected 83.0 kg"),
+            "four weeks at −0.25 kg from 84.0 kg: {page}"
+        );
+        assert!(
+            !page.contains(
+                r#"<span class="on">6 Sep</span> · <b>84.0 kg</b> · trend 84.0 kg · expected"#
+            ),
+            "nothing is expected before the macrocycle: {page}"
         );
     }
 

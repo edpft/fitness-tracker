@@ -401,6 +401,34 @@ pub struct Weight {
     pub expected: Option<f64>,
 }
 
+impl Weight {
+    /// Where the aims would have taken the trend, day by day: one run per
+    /// stretch where it is known, so a chart draws a line that breaks where
+    /// the trend does or an aim states none.
+    #[must_use]
+    pub fn expected(&self) -> Vec<Vec<(Date, f64)>> {
+        let mut runs: Vec<Vec<(Date, f64)>> = Vec::new();
+        for run in &self.days {
+            let mut open = false;
+            for day in run {
+                match day.expected {
+                    Some(expected) if open => {
+                        if let Some(last) = runs.last_mut() {
+                            last.push((day.trend.on, expected));
+                        }
+                    }
+                    Some(expected) => {
+                        runs.push(vec![(day.trend.on, expected)]);
+                        open = true;
+                    }
+                    None => open = false,
+                }
+            }
+        }
+        runs
+    }
+}
+
 /// The trend from the macrocycle that `began` on a day to `today`, and where
 /// the aims would have taken it from its first day there.
 ///
@@ -533,6 +561,11 @@ mod against_aims_tests {
         assert_eq!(weight.expected, None);
         assert_eq!(weight.days[0][13].expected, Some(84.6));
         assert_eq!(weight.days[0][14].expected, None);
+
+        let expected = weight.expected();
+        assert_eq!(expected.len(), 1, "the line stops at the bulk");
+        assert_eq!(expected[0].len(), 14);
+        assert_eq!(expected[0].last(), Some(&(date(2026, 9, 27), 84.6)));
     }
 
     #[test]

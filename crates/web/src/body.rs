@@ -5,14 +5,14 @@
 //! answers whether he is losing weight at the rate the plan intends and
 //! whether what he loses is fat or fat-free mass.
 //!
-//! **Body weight's charts, then composition's**: the summary holds trend
-//! weight, fat and fat-free mass; then body weight and weight change against
-//! the plan's aim; then fat, fat-free mass and the mesocycle matrix; then the
-//! weigh-ins, each its weight, fat and fat-free mass.
+//! **Two sections, each with its own summary** (operator, 2026-11-13): body
+//! weight, its trend against where the plan's aims would have taken it; then
+//! body composition, fat, fat-free mass and the mesocycle matrix. Beneath both,
+//! the weigh-ins, each its weight, fat and fat-free mass.
 
 use application::composition::AgainstPhase;
 use domain::analytical::{
-    body_weight::{Aim, CHANGE_METHOD, METHOD, Series},
+    body_weight::{Aim, METHOD, Series},
     composition::{ComponentSeries, TREND},
     confidence::BAND,
     range::{Over, Range, Ranges},
@@ -84,35 +84,26 @@ fn body(
         Ok(range) => range,
         Err(said) => return said,
     };
+    let today = range.to;
+    let weighed = weight::cell(series).map(|(cell, on)| {
+        detail::summary(&[cell], &format!("Trend on {}", detail::day(on, today)))
+    });
+    let (cells, asof) = composition::summary(components, today);
+    let measured = (!cells.is_empty()).then(|| detail::summary(&cells, &asof.join("; ")));
     html! {
-        (summary(series, components, range))
-        (weight::charts(series, aims, range))
-        (composition::charts(components, against, range))
-        (weight::latest(series, range.to))
+        @if weight::recorded(series).is_some() {
+            h2.group { "Body weight" }
+            @if let Some(summary) = weighed { (summary) }
+            (weight::charts(series, aims, ranges.macrocycle.map(|cycle| cycle.from), range))
+        }
+        @if composition::recorded(components).is_some() {
+            h2.group { "Body composition" }
+            @if let Some(summary) = measured { (summary) }
+            (composition::charts(components, against, range))
+        }
+        (weight::latest(series, today))
         (detail::foot(&foot(series, components, range)))
     }
-}
-
-/// Trend weight, then fat and fat-free mass, and the day each trend is on.
-fn summary(series: &Series, components: &[ComponentSeries], range: Range) -> Markup {
-    let today = range.to;
-    let weighed = weight::cell(series);
-    let (fat, mut asof) = composition::summary(components, today);
-    if let Some((_, on)) = &weighed {
-        let said = format!("Trend on {}", detail::day(*on, today));
-        if !asof.iter().any(|one| one.starts_with(&said)) {
-            asof.insert(0, said);
-        }
-    }
-    let cells: Vec<detail::Cell<'_>> = weighed
-        .map(|(cell, _)| cell)
-        .into_iter()
-        .chain(fat)
-        .collect();
-    if cells.is_empty() {
-        return html! {};
-    }
-    detail::summary(&cells, &asof.join("; "))
 }
 
 /// What the dots, lines and bands are, for what the page draws.
@@ -124,9 +115,10 @@ fn foot(series: &Series, components: &[ComponentSeries], range: Range) -> String
     }];
     if !series.weigh_ins.is_empty() {
         said.push(format!("Line: the trend, the {METHOD}"));
-        said.push(format!(
-            "Weight change: {CHANGE_METHOD}; dashed, the plan's aim"
-        ));
+        said.push(
+            "Dashed: where the plan's aims would have taken the trend since the macrocycle began"
+                .to_owned(),
+        );
     }
     if composition::recorded(components).is_some() {
         said.push(format!(
@@ -154,8 +146,8 @@ mod tests {
 
     use super::page;
 
-    /// **One page reads both**: trend weight, fat and fat-free mass in one
-    /// summary, and body weight's charts before composition's.
+    /// **One page reads both, in two sections**: body weight with its own
+    /// summary, then composition with its own.
     #[test]
     fn body_weight_and_composition_are_one_page() {
         let weigh_ins = (1..=28)
@@ -205,6 +197,11 @@ mod tests {
             page.contains("<h1>Body weight and composition</h1>"),
             "{page}"
         );
+        assert_eq!(
+            page.matches(r#"class="card summary""#).count(),
+            2,
+            "a summary for each section: {page}"
+        );
         for label in ["Trend weight", "Fat", "Fat-free"] {
             assert!(
                 page.contains(&format!(r#"<i class="swatch"></i>{label}</div>"#)),
@@ -212,8 +209,9 @@ mod tests {
             );
         }
         let order: Vec<usize> = [
+            r#"<h2 class="group">Body weight</h2>"#,
             "<h2>Body weight</h2>",
-            "<h2>Weight change</h2>",
+            r#"<h2 class="group">Body composition</h2>"#,
             "<h2>Fat</h2>",
             "<h2>Fat-free mass</h2>",
             "<h2>Weigh-ins</h2>",
@@ -222,9 +220,10 @@ mod tests {
         .map(|heading| page.find(heading).expect(heading))
         .collect();
         assert!(order.is_sorted(), "{order:?}");
+        assert!(!page.contains("Weight change"), "{page}");
         assert!(
             page.contains("Trend on 28 Oct · Body Scan, algorithm 218300672<"),
-            "one day said once: {page}"
+            "{page}"
         );
         assert!(page.contains(r#"href="/body?over=all""#), "{page}");
     }
