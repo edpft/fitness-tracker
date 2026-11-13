@@ -1369,7 +1369,7 @@ fn a_completed_mesocycle_keeps_the_reruns_written_when_it_completed() {
 
     assert_eq!(
         read,
-        Some(written.clone()),
+        Some(written),
         "the store reads back what it wrote"
     );
     assert_eq!(after.standing.reruns, vec![rerun]);
