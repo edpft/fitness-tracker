@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO plan_completion (plan, through) VALUES (?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "052ee69dd959a43c35c2c4b247dc794617236da3c44395e20c39ac743f956c62"
+}

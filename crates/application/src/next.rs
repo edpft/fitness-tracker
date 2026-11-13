@@ -1112,6 +1112,13 @@ where
         let holidays = self.ports.holidays.holidays().await;
         let standing = self.ports.microcycle.standing(now).await?;
         let diary = self.ports.diary.diary().await?;
+        // What the mesocycles that have completed settled, written once, so the
+        // walk reads it from here on rather than deriving it again (#801).
+        if let Some((plan, completed)) = &standing.completed
+            && self.ports.plans.completed(plan).await?.as_ref() != Some(completed)
+        {
+            self.ports.plans.complete(plan, completed).await?;
+        }
         if let Ok(holidays) = &holidays
             && let Some((started, outcome)) = self
                 .commit(now, holidays, &standing, &diary, progress)

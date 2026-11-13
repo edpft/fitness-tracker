@@ -22,6 +22,7 @@ use domain::{
     macrocycle::Chain,
     normalised::OperatorZone,
     plan::{Mesocycles, Plan, PlanId, PlanName, PlanWindow},
+    planner::{Completed, Discipline, Rerun},
     prescription::GymMesocycle,
 };
 use sqlx::SqlitePool;
@@ -217,6 +218,107 @@ impl PlanStore for SqlitePlanStore {
 
         tx.commit().await.map_err(|error| store_error(&error))
     }
+
+    async fn completed(&self, plan: &PlanName) -> Result<Option<Completed>, StoreError> {
+        let name = plan.to_string();
+        let Some(found) = sqlx::query!(
+            r#"
+            SELECT plan AS "plan!: i64", through AS "through!: String"
+            FROM plan_completion
+            WHERE plan = (SELECT id FROM plan WHERE name = ?
+                          ORDER BY authored_at DESC LIMIT 1)
+            "#,
+            name
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?
+        else {
+            return Ok(None);
+        };
+
+        let reruns = sqlx::query!(
+            r#"
+            SELECT monday AS "monday!: String", holding AS "holding: String"
+            FROM plan_rerun
+            WHERE plan = ?
+            ORDER BY monday ASC
+            "#,
+            found.plan
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?
+        .into_iter()
+        .map(|row| {
+            Ok(Rerun {
+                monday: date(&row.monday)?,
+                holding: row
+                    .holding
+                    .map(Discipline::try_from)
+                    .transpose()
+                    .map_err(|error| corrupt(&error))?,
+            })
+        })
+        .collect::<Result<Vec<_>, StoreError>>()?;
+
+        Ok(Some(Completed::new(date(&found.through)?, reruns)))
+    }
+
+    async fn complete(&self, plan: &PlanName, completed: &Completed) -> Result<(), StoreError> {
+        let mut tx = super::writing(&self.pool)
+            .await
+            .map_err(|error| store_error(&error))?;
+
+        let name = plan.to_string();
+        let id = sqlx::query!(
+            r#"
+            SELECT id AS "id!: i64" FROM plan WHERE name = ?
+            ORDER BY authored_at DESC LIMIT 1
+            "#,
+            name
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| store_error(&error))?
+        .ok_or_else(|| corrupt(&format!("no plan is authored under {plan}")))?
+        .id;
+
+        sqlx::query!("DELETE FROM plan_completion WHERE plan = ?", id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| store_error(&error))?;
+        let through = completed.through().to_string();
+        sqlx::query!(
+            "INSERT INTO plan_completion (plan, through) VALUES (?, ?)",
+            id,
+            through
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+        for rerun in completed.reruns() {
+            let monday = rerun.monday.to_string();
+            let holding = rerun.holding.map(Discipline::as_str);
+            sqlx::query!(
+                "INSERT INTO plan_rerun (plan, monday, holding) VALUES (?, ?, ?)",
+                id,
+                monday,
+                holding
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| store_error(&error))?;
+        }
+
+        tx.commit().await.map_err(|error| store_error(&error))
+    }
+}
+
+/// A date as the store writes one.
+fn date(text: &str) -> Result<jiff::civil::Date, StoreError> {
+    text.parse()
+        .map_err(|_| corrupt(&format!("{text:?} is not a date")))
 }
 
 /// A mesocycle's place in its programme, counting from one as the schema does.

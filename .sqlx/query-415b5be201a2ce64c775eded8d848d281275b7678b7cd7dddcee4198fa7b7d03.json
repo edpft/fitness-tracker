@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT plan AS \"plan!: i64\", through AS \"through!: String\"\n            FROM plan_completion\n            WHERE plan = (SELECT id FROM plan WHERE name = ?\n                          ORDER BY authored_at DESC LIMIT 1)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "plan!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "plan_completion",
+            "name": "plan"
+          }
+        }
+      },
+      {
+        "name": "through!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "plan_completion",
+            "name": "through"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "415b5be201a2ce64c775eded8d848d281275b7678b7cd7dddcee4198fa7b7d03"
+}

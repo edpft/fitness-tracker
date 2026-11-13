@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM plan_completion WHERE plan = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "585a327662f6ce3fcf5ec1cff5338a61159d7fdaa04d67bfd31680761c935bdf"
+}

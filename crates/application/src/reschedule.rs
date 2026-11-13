@@ -23,7 +23,7 @@ use domain::planner::Arrangement as _;
 use domain::{
     cycling::{CyclingMesocycle, CyclingMesocycleId},
     plan::{Mesocycles, Occupies, Plan, PlanId, PlanName, PlanWindow},
-    planner::{self, Missed, Rerun, RerunOrdinal},
+    planner::{self, Completed, Missed, Rerun, RerunOrdinal},
     planner::{Discipline, SessionRole},
     prescription::{GymMesocycle, MesocycleId},
     schedule::Diary,
@@ -322,5 +322,13 @@ impl<P: PlanStore + Sync> PlanStore for ReschedulingPlans<P> {
         cycling: &[CyclingMesocycle],
     ) -> Result<(), StoreError> {
         self.plans.commit(plan, gym, cycling).await
+    }
+
+    async fn completed(&self, plan: &PlanName) -> Result<Option<Completed>, StoreError> {
+        self.plans.completed(plan).await
+    }
+
+    async fn complete(&self, plan: &PlanName, completed: &Completed) -> Result<(), StoreError> {
+        self.plans.complete(plan, completed).await
     }
 }

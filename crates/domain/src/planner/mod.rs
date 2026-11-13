@@ -876,6 +876,68 @@ pub struct Rerun {
     pub holding: Option<Discipline>,
 }
 
+/// The mesocycles of a plan that have completed: where the last of them ended,
+/// and the weeks run again before that (#801).
+///
+/// **Written when a mesocycle completes, and read rather than derived after.**
+/// The operator, 2026-11-13: *"we know when they start and when the end and so
+/// we can and should write different things at those transitions."* What
+/// settles when a mesocycle completes is which of its weeks ran again: a test
+/// is one week, and autumn's first mesocycle was that week run twice, not a
+/// test of two.
+///
+/// **It cannot be overturned by a workout landing late**, because a mesocycle
+/// completes only once the walk has passed its last week, and a lost entry test
+/// runs again rather than letting the walk pass.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Completed {
+    through: Date,
+    reruns: Vec<Rerun>,
+}
+
+impl Completed {
+    /// The mesocycles ending on `through`, exclusive, and the weeks among them
+    /// run again. A week from `through` on is not yet settled, so it is left
+    /// out.
+    #[must_use]
+    pub fn new(through: Date, reruns: impl IntoIterator<Item = Rerun>) -> Self {
+        let mut reruns: Vec<Rerun> = reruns
+            .into_iter()
+            .filter(|rerun| rerun.monday < through)
+            .collect();
+        reruns.sort_unstable();
+        reruns.dedup_by_key(|rerun| rerun.monday);
+        Self { through, reruns }
+    }
+
+    /// The day after the last completed mesocycle.
+    #[must_use]
+    pub const fn through(&self) -> Date {
+        self.through
+    }
+
+    /// The weeks run again, oldest first.
+    #[must_use]
+    pub fn reruns(&self) -> &[Rerun] {
+        &self.reruns
+    }
+
+    /// Whether the week commencing `monday` is settled.
+    #[must_use]
+    pub fn covers(&self, monday: Date) -> bool {
+        monday < self.through
+    }
+
+    /// The rerun of the week commencing `monday`, as written.
+    #[must_use]
+    pub fn rerun(&self, monday: Date) -> Option<Rerun> {
+        self.reruns
+            .iter()
+            .find(|rerun| rerun.monday == monday)
+            .copied()
+    }
+}
+
 /// What a microcycle that has ended costs the plan: nothing, or a week run
 /// again.
 ///

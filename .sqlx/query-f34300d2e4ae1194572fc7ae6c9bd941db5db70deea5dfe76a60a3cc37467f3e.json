@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id AS \"id!: i64\" FROM plan WHERE name = ?\n            ORDER BY authored_at DESC LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "plan",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f34300d2e4ae1194572fc7ae6c9bd941db5db70deea5dfe76a60a3cc37467f3e"
+}

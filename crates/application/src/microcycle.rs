@@ -15,9 +15,9 @@
 use domain::planner::Arrangement as _;
 use domain::{
     macrocycle::Macrocycle,
-    plan::{Plan, Span},
+    plan::{Plan, PlanName, Span},
     planner::{
-        self, Filled, MicrocycleState, Missed, Placed, Recorded, Rerun, SessionState,
+        self, Completed, Filled, MicrocycleState, Missed, Placed, Recorded, Rerun, SessionState,
         Unreschedulable,
     },
     planner::{Discipline, RecordedSession, ScheduledSlot, SessionRole, accounted},
@@ -78,6 +78,10 @@ pub struct Standing {
     /// together, as the plan now stands: what says which phase of the
     /// macrocycle this is (#224).
     pub mesocycle: Option<Span>,
+    /// What the plan has completed, as of the current microcycle: what
+    /// `fitness next` writes, so that the walk reads it rather than deriving
+    /// it again (#801).
+    pub completed: Option<(PlanName, Completed)>,
 }
 
 impl Standing {
@@ -301,10 +305,11 @@ where
     /// Monday evening slot closes its window. A session performed belongs to
     /// the microcycle that was current when it was.
     ///
-    /// **Derived on every read, never stored**, as a ladder's position is. A
-    /// workout that lands late and turns out to have been the entry test undoes
-    /// the shift on the next run, where a stored shift would stand wrong for
-    /// ever.
+    /// **Derived on every read until its mesocycle completes**, as a ladder's
+    /// position is: a workout that lands late and turns out to have been the
+    /// entry test undoes the shift on the next run. Once the mesocycle has
+    /// completed, which re-runs it had is settled and written (#801), and the
+    /// weeks before [`Completed::through`] read it rather than deriving it again.
     ///
     /// # Errors
     ///
@@ -315,6 +320,8 @@ where
         let Some(authored) = self.plan_begun_by(now.date).await? else {
             return Ok(Standing::default());
         };
+        let stored = self.ports.plans.completed(authored.name()).await?;
+        let settled = |monday: Date| stored.as_ref().filter(|stored| stored.covers(monday));
 
         let mut monday = planner::commencing(authored.window().span().start());
         let mut opens: Option<Boundary> = None;
@@ -344,6 +351,14 @@ where
                     .mesocycle_on(monday)
                     .or_else(|| plan.mesocycle_on(now.date))
                     .map(|mesocycle| mesocycle.span());
+                let completed = completed_by(&plan, monday, &reruns)
+                    .filter(|now| {
+                        stored
+                            .as_ref()
+                            .is_none_or(|stored| now.through() > stored.through())
+                    })
+                    .or(stored)
+                    .map(|completed| (authored.name().clone(), completed));
                 return Ok(Standing {
                     commencing: Some(monday),
                     sessions: week.sessions,
@@ -351,6 +366,7 @@ where
                     reruns,
                     missed: missed.with_carried(&carried),
                     mesocycle,
+                    completed,
                 });
             };
 
@@ -365,8 +381,13 @@ where
                 })?;
             // **Only a new lift's entry test runs again; everything else
             // carries on**, a missed test carried to the next slot of its
-            // discipline (#732).
-            if let Some(rerun) = planner::rerun(monday, state, &placed, &lost, &anchoring) {
+            // discipline (#732). A week of a completed mesocycle ran again or
+            // did not, as written when it completed (#801).
+            let rerun = settled(monday).map_or_else(
+                || planner::rerun(monday, state, &placed, &lost, &anchoring),
+                |stored| stored.rerun(monday),
+            );
+            if let Some(rerun) = rerun {
                 reruns.push(rerun);
             } else {
                 for (discipline, due) in tests_lost(&week.sessions, &placed, &lost, &carried) {
@@ -743,6 +764,30 @@ fn rescheduled(plan: &Plan, reruns: &[Rerun], diary: &Diary) -> Result<Plan, Sto
             detail: format!("{} will not reschedule: {error}", plan.name()),
         }
     })
+}
+
+/// What the plan has completed by the microcycle commencing `monday`: the
+/// latest mesocycle, both disciplines' halves of it, to have ended by then, and
+/// the re-runs before its end.
+///
+/// `None` where none has.
+fn completed_by(plan: &Plan, monday: Date, reruns: &[Rerun]) -> Option<Completed> {
+    use domain::plan::Occupies;
+    let gym = plan
+        .gym()
+        .into_iter()
+        .flat_map(|side| side.mesocycles().map(Occupies::span));
+    let cycling = plan
+        .cycling()
+        .into_iter()
+        .flat_map(|side| side.mesocycles().map(Occupies::span));
+    let end = gym
+        .chain(cycling)
+        .filter_map(|span| plan.mesocycle_on(span.start()))
+        .map(|mesocycle| mesocycle.span().end())
+        .filter(|end| *end <= monday)
+        .max()?;
+    Some(Completed::new(end, reruns.iter().copied()))
 }
 
 /// The essential sessions of a week, read as the diary holds it, that were
