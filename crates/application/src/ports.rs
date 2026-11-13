@@ -41,7 +41,7 @@ use domain::normalised::{
     RefusalReason, StatedZones, WorkoutCount,
 };
 use domain::plan::{MesocycleOrdinal, Plan, PlanId, PlanName, PlanWindow};
-use domain::planner::RerunOrdinal;
+use domain::planner::{Completed, RerunOrdinal};
 use domain::planner::{Relative, SessionRole};
 use domain::prescription::{
     Anchor, ByIntensity, GymMesocycle, LinearProgression, MesocycleId, PrescribedWorkout,
@@ -2233,6 +2233,31 @@ pub trait PlanStore {
         plan: &PlanName,
         gym: &[GymMesocycle],
         cycling: &[CyclingMesocycle],
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// What the plan in force under a name has completed (#801).
+    ///
+    /// `None` where none of its mesocycles has.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn completed(
+        &self,
+        plan: &PlanName,
+    ) -> impl Future<Output = Result<Option<Completed>, StoreError>> + Send;
+
+    /// Write what the plan in force under a name has completed, in place of
+    /// what it held.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable, or nothing is authored under
+    /// the name.
+    fn complete(
+        &self,
+        plan: &PlanName,
+        completed: &Completed,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 

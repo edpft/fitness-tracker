@@ -19,7 +19,7 @@ use domain::planner::Arrangement as _;
 
 use application::{
     CyclingDeliveryStore as _, CyclingMesocycleStore, DestinationName, DiaryAuthor as _,
-    DiaryStore as _, MesocycleStore, PerformedSessionLog, PlanAuthor as _,
+    DiaryStore as _, MesocycleStore, PerformedSessionLog, PlanAuthor as _, PlanStore as _,
     PrescribedWorkoutStore as _, PrescriptionDeliveryStore as _, RiddenSession, RiddenSessionLog,
     StoreError,
     microcycle::{Microcycle, MicrocyclePorts},
@@ -35,8 +35,8 @@ use domain::{
     measure::PositiveDuration,
     normalised::{OperatorZone, StartedAt},
     plan::{Mesocycles, Plan, PlanName},
+    planner::{Completed, MicrocycleState, Rerun, SessionState},
     planner::{Discipline, Relative, SessionRole},
-    planner::{MicrocycleState, Rerun, SessionState},
     prescription::{WeekIndex, WeekKind},
     provider::ProgrammeName,
     schedule::{AbsenceKind, DayPart, Illness, PartOfDay, Skip},
@@ -1245,6 +1245,10 @@ fn the_ftp_test_ridden_and_the_1rm_test_missed_holds_the_bike() {
         }]
     );
     assert_eq!(
+        after.standing.completed, None,
+        "the test week is running again, so nothing has completed"
+    );
+    assert_eq!(
         after.gym,
         vec![
             ("test", WeekKind::Climbing(WeekIndex::FIRST)),
@@ -1302,6 +1306,14 @@ fn the_entry_test_done_and_the_ftp_test_missed_carries_the_test_to_the_wednesday
 
     assert_eq!(after.standing.reruns, Vec::new(), "nothing runs again");
     assert_eq!(
+        after.standing.completed,
+        Some((
+            PlanName::try_from("2026-autumn".to_owned()).expect("a plan name"),
+            Completed::new(Date::constant(2026, 9, 21), Vec::new())
+        )),
+        "the test week completed on the Sunday, running once"
+    );
+    assert_eq!(
         after.gym,
         vec![
             ("linear", WeekKind::Climbing(WeekIndex::FIRST)),
@@ -1320,6 +1332,56 @@ fn the_entry_test_done_and_the_ftp_test_missed_carries_the_test_to_the_wednesday
         "the Wednesday rides the test week's FTP test, carried"
     );
     assert!(ride.ride.session().is_test());
+}
+
+/// **#801, a completed mesocycle is read, not derived again.** The test week
+/// was written as completed on the 28th, its week of the 14th run again with
+/// the bike holding. A workout landing now on the Saturday 19th would, derived,
+/// say the entry test was done and nothing ran again: what was written stands.
+#[test]
+fn a_completed_mesocycle_keeps_the_reruns_written_when_it_completed() {
+    let rerun = Rerun {
+        monday: Date::constant(2026, 9, 14),
+        holding: Some(Discipline::Cycling),
+    };
+    let written = Completed::new(Date::constant(2026, 9, 28), vec![rerun]);
+    let (after, read) = corpus::block_on(async {
+        let (pool, _directory) = autumn_tested().await?;
+        away_over_the_monday(&pool).await?;
+        gym_delivered_for_the_friday(&pool).await?;
+        let plans = SqlitePlanStore::new(pool.clone(), corpus::zone()?);
+        let autumn = PlanName::try_from("2026-autumn".to_owned())?;
+        plans.complete(&autumn, &written).await?;
+        let read = plans.completed(&autumn).await?;
+        let after = after(
+            &pool,
+            Trained::at(vec![Date::constant(2026, 9, 19).at(10, 0, 0, 0)]),
+            Ridden::of(vec![(
+                Date::constant(2026, 9, 16).at(19, 0, 0, 0),
+                vec![RideVenue::new("4d302bef", "20 min FTP Test Ride")?],
+            )]),
+        )
+        .await?;
+        Fallible::Ok((after, read))
+    })
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    assert_eq!(read, Some(written), "the store reads back what it wrote");
+    assert_eq!(after.standing.reruns, vec![rerun]);
+    assert_eq!(
+        after.gym,
+        vec![
+            ("test", WeekKind::Climbing(WeekIndex::FIRST)),
+            ("linear", WeekKind::Climbing(WeekIndex::FIRST)),
+        ],
+        "the test week is still 14 to 27 September"
+    );
+    assert_eq!(
+        after.next_mesocycle,
+        Some(Date::constant(2026, 9, 28)),
+        "the bike's next mesocycle still starts on the 28th"
+    );
 }
 
 /// The autumn term of 2026, as the walk is given it to carry a test within.

@@ -41,7 +41,7 @@ use domain::{
     normalised::{NormalisationRunId, OperatorZone, RefusalCount, WorkoutCount},
     plan::{Plan, PlanId, PlanName, PlanWindow},
     planner::SessionState,
-    planner::{Discipline, Relative, ScheduledSlot, SessionRole},
+    planner::{Completed, Discipline, Relative, ScheduledSlot, SessionRole},
     prescription::GymMesocycle,
     schedule::{
         DayPart, Diary, Holidays, PartOfDay, Skip, SlotLength, TrainingPattern, TrainingSlot,
@@ -563,6 +563,14 @@ impl PlanStore for NoPlans {
         _gym: &[GymMesocycle],
         _cycling: &[CyclingMesocycle],
     ) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    async fn completed(&self, _plan: &PlanName) -> Result<Option<Completed>, StoreError> {
+        Ok(None)
+    }
+
+    async fn complete(&self, _plan: &PlanName, _completed: &Completed) -> Result<(), StoreError> {
         Ok(())
     }
 }

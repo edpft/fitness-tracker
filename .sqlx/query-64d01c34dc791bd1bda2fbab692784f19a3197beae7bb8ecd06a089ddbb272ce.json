@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO plan_rerun (plan, monday, holding) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "64d01c34dc791bd1bda2fbab692784f19a3197beae7bb8ecd06a089ddbb272ce"
+}

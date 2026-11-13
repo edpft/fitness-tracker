@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT monday AS \"monday!: String\", holding AS \"holding: String\"\n            FROM plan_rerun\n            WHERE plan = ?\n            ORDER BY monday ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "monday!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "plan_rerun",
+            "name": "monday"
+          }
+        }
+      },
+      {
+        "name": "holding: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "plan_rerun",
+            "name": "holding"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "387dc416c492ff5e0ab9578ca15d2dd8a603a3090cf5297919aebb6dba983be7"
+}
