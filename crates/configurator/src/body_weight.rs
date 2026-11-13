@@ -1,7 +1,7 @@
 //! Body weight as one time series, over this build's store (#250).
 
 use application::{
-    CanonicalLayer, HolidayCalendar, StoreError,
+    CanonicalLayer, HolidayCalendar, PlanStore, StoreError,
     body_weight::{Aims, BodyWeight},
     next::Scope,
 };
@@ -12,7 +12,8 @@ use domain::{
 
 use crate::{
     holidays::Calendars,
-    next::{self, Reads},
+    next::{self, NextFailure, Reads},
+    rescheduling,
     store::Store,
     wiring::WiringError,
 };
@@ -35,13 +36,22 @@ pub async fn series(store: &Store) -> Result<Series, StoreError> {
     BodyWeight::new(store.weigh_ins()).series().await
 }
 
-/// What the plans intended over this macrocycle's mesocycles, today (#689).
+/// What the plans intended over this macrocycle's mesocycles, as they now
+/// stand, today (#689, #800).
 ///
 /// # Errors
 ///
-/// [`StoreError`] if the store cannot be read.
-pub async fn aims(store: &Store, zone: &OperatorZone) -> Result<Vec<Aim>, StoreError> {
-    Aims::new(store.plans(zone))
+/// [`NextFailure`] if the store cannot be read.
+pub async fn aims(store: &Store, zone: &OperatorZone) -> Result<Vec<Aim>, NextFailure> {
+    Ok(aims_over(rescheduling::plans(store, zone).await?, zone).await?)
+}
+
+/// What `plans` intended over this macrocycle's mesocycles, today.
+pub(crate) async fn aims_over(
+    plans: impl PlanStore + Sync,
+    zone: &OperatorZone,
+) -> Result<Vec<Aim>, StoreError> {
+    Aims::new(plans)
         .on(crate::equipment::today(zone), Calendars.holidays().await)
         .await
 }

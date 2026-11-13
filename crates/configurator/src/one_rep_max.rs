@@ -2,14 +2,15 @@
 //! this build's store (#420, #253).
 
 use application::{
-    CanonicalLayer, StoreError,
+    CanonicalLayer, PlanStore, StoreError,
     next::Scope,
     one_rep_max::{EstimatedOneRepMax, OneRepMaxTests, Tests, View},
 };
 use domain::{analytical::Rts, normalised::OperatorZone};
 
 use crate::{
-    next::{self, Reads},
+    next::{self, NextFailure, Reads},
+    rescheduling,
     store::Store,
     wiring::WiringError,
 };
@@ -27,21 +28,26 @@ pub fn collects() -> Result<Scope, WiringError> {
     ])
 }
 
-/// Each lift over the macrocycle in force, through today.
+/// Each lift over the macrocycle in force, through today, its mesocycles as
+/// the plans now stand (#800).
 ///
 /// # Errors
 ///
-/// [`StoreError`] if the store cannot be read.
-pub async fn view(store: &Store, zone: &OperatorZone) -> Result<View, StoreError> {
+/// [`NextFailure`] if the store cannot be read.
+pub async fn view(store: &Store, zone: &OperatorZone) -> Result<View, NextFailure> {
+    Ok(view_over(store, rescheduling::plans(store, zone).await?, zone).await?)
+}
+
+/// Each lift over the macrocycle in force in `plans`, through today.
+pub(crate) async fn view_over(
+    store: &Store,
+    plans: impl PlanStore + Sync,
+    zone: &OperatorZone,
+) -> Result<View, StoreError> {
     let today = jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date();
-    EstimatedOneRepMax::new(
-        Rts,
-        store.canonical_gym(),
-        store.weigh_ins(),
-        store.plans(zone),
-    )
-    .view(today)
-    .await
+    EstimatedOneRepMax::new(Rts, store.canonical_gym(), store.weigh_ins(), plans)
+        .view(today)
+        .await
 }
 
 /// Each lift's 1RM tests, through today (#517).

@@ -2,7 +2,7 @@
 //! store (#517): what Progress shows (#769).
 
 use application::{
-    CanonicalLayer, StoreError,
+    CanonicalLayer,
     devices::DeviceRegister,
     next::Scope,
     working::{IsItWorking, Readings, View},
@@ -17,8 +17,8 @@ use infrastructure::{
 
 use crate::{
     body_weight, composition, devices, ftp_tests, heart_rate,
-    next::{self, Reads},
-    one_rep_max,
+    next::{self, NextFailure, Reads},
+    one_rep_max, rescheduling,
     store::Store,
     wiring::WiringError,
 };
@@ -53,23 +53,27 @@ pub fn collects() -> Result<Scope, WiringError> {
     )
 }
 
-/// The macrocycle in force, through today.
+/// The macrocycle in force, through today, its mesocycles as the plans now
+/// stand (#800).
 ///
 /// # Errors
 ///
-/// [`StoreError`] if the store cannot be read.
-pub async fn view(store: &Store, zone: &OperatorZone) -> Result<View, StoreError> {
+/// [`NextFailure`] if the store cannot be read.
+pub async fn view(store: &Store, zone: &OperatorZone) -> Result<View, NextFailure> {
     let today = jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date();
     let pool = store.pool();
+    let plans = rescheduling::plans(store, zone).await?;
     let ftp = ftp_tests::tests(store).await?;
     let strength = one_rep_max::tests(store, zone).await?;
-    let estimated = one_rep_max::view(store, zone).await?.lifts;
+    let estimated = one_rep_max::view_over(store, plans.clone(), zone)
+        .await?
+        .lifts;
     let at_power =
         domain::analytical::heart_rate_at_power::trended(&heart_rate::rides(store).await?);
     let weight = body_weight::series(store).await?;
-    let aims = body_weight::aims(store, zone).await?;
+    let aims = body_weight::aims_over(plans.clone(), zone).await?;
     let composition = composition::by_method(store).await?;
-    IsItWorking::new(
+    Ok(IsItWorking::new(
         SqliteOvernightHrvHistory::new(pool.clone()),
         SqliteRestingHeartRateHistory::new(pool.clone()),
         SqliteStressHistory::new(pool.clone()),
@@ -78,7 +82,7 @@ pub async fn view(store: &Store, zone: &OperatorZone) -> Result<View, StoreError
             GarminRecordedDevices::new(pool.clone()),
             GarminWear::new(pool.clone()),
         ),
-        store.plans(zone),
+        plans,
     )
     .view(
         today,
@@ -92,5 +96,5 @@ pub async fn view(store: &Store, zone: &OperatorZone) -> Result<View, StoreError
             composition: &composition,
         },
     )
-    .await
+    .await?)
 }
