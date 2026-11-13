@@ -55,6 +55,8 @@ pub use error::{
     NormalisationError, PrescriptionError, RunLockError, ScheduleError, SourceError, StatusError,
     StoreError,
 };
+/// What a port reads is part of the port (#809).
+pub use graph::{Input, Node, Reads};
 pub use ports::{
     AccountReader, Authored, ByReason, CanonicalCyclingSessionStore, CanonicalGymSessionStore,
     CanonicalLayer, CanonicalWeighInStore, ClassPrescriptions, ClassSource, ClassesHeld,

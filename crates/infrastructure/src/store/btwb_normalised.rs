@@ -183,8 +183,8 @@ impl NormalisedEntityStore for SqliteBtwbStore {
 }
 
 /// The exports landed (#809).
-impl application::graph::Input for BtwbExportAccountReader {
-    fn reads() -> application::graph::Reads {
+impl application::Input for BtwbExportAccountReader {
+    fn reads() -> application::Reads {
         super::landed(&[super::BtwbExportLandingStore::STREAM])
     }
 }

@@ -827,8 +827,8 @@ fn metres_for_storage(metres: domain::measure::Metres) -> Result<i64, StoreError
 }
 
 /// The workouts landed (#809).
-impl application::graph::Input for HevySessionAccountReader {
-    fn reads() -> application::graph::Reads {
+impl application::Input for HevySessionAccountReader {
+    fn reads() -> application::Reads {
         super::landed(&[super::HevyWorkoutLandingStore::STREAM])
     }
 }

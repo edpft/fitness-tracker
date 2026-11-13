@@ -318,8 +318,8 @@ impl Translator for GarminHrvTranslator {
 }
 
 /// Nothing beyond the accounts it is handed (#809).
-impl application::graph::Input for GarminHrvTranslator {
-    fn reads() -> application::graph::Reads {
-        application::graph::Reads::default()
+impl application::Input for GarminHrvTranslator {
+    fn reads() -> application::Reads {
+        application::Reads::default()
     }
 }

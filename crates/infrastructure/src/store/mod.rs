@@ -67,10 +67,7 @@ pub mod weigh_in;
 pub mod withings_landing;
 pub mod withings_normalised;
 
-use application::{
-    StoreError,
-    graph::{Node, Reads},
-};
+use application::{Node, Reads, StoreError};
 use domain::{
     landing::{EventProvenance, PayloadDigest, Provenance, RunId},
     normalised::NormalisationRunId,

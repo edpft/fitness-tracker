@@ -291,8 +291,8 @@ impl SleepHistory for SqliteSleepHistory {
 }
 
 /// The nights landed (#809).
-impl application::graph::Input for GarminSleepAccountReader {
-    fn reads() -> application::graph::Reads {
+impl application::Input for GarminSleepAccountReader {
+    fn reads() -> application::Reads {
         super::landed(&[super::GarminSleepLandingStore::STREAM])
     }
 }

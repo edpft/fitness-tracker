@@ -422,8 +422,8 @@ fn recorded_by(stored: Option<String>) -> Result<Option<DeviceIdentifier>, Store
 }
 
 /// The days landed, and the sleep record naming each day's watch (#809).
-impl application::graph::Input for GarminDailyHeartRateAccountReader {
-    fn reads() -> application::graph::Reads {
+impl application::Input for GarminDailyHeartRateAccountReader {
+    fn reads() -> application::Reads {
         super::landed(&[
             super::GarminDailyHeartRateLandingStore::STREAM,
             super::GarminSleepLandingStore::STREAM,

@@ -301,8 +301,8 @@ pub(super) async fn count_manual_weigh_ins(pool: &SqlitePool) -> Result<usize, S
 }
 
 /// The workbooks landed (#809).
-impl application::graph::Input for SpreadsheetFileAccountReader {
-    fn reads() -> application::graph::Reads {
+impl application::Input for SpreadsheetFileAccountReader {
+    fn reads() -> application::Reads {
         super::landed(&[super::SpreadsheetFileLandingStore::STREAM])
     }
 }

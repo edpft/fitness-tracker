@@ -289,8 +289,8 @@ fn weigh_in(
 }
 
 /// Nothing beyond the accounts it is handed (#809).
-impl application::graph::Input for MyFitnessPalWeighInTranslator {
-    fn reads() -> application::graph::Reads {
-        application::graph::Reads::default()
+impl application::Input for MyFitnessPalWeighInTranslator {
+    fn reads() -> application::Reads {
+        application::Reads::default()
     }
 }

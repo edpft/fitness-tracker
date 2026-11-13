@@ -540,8 +540,8 @@ async fn write_part(
 }
 
 /// The measurements landed (#809).
-impl application::graph::Input for WithingsWeighInAccountReader {
-    fn reads() -> application::graph::Reads {
+impl application::Input for WithingsWeighInAccountReader {
+    fn reads() -> application::Reads {
         super::landed(&[super::WithingsMeasurementLandingStore::STREAM])
     }
 }

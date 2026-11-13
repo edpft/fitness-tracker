@@ -618,8 +618,8 @@ impl application::RawExtent for GarminGymRawExtent {
 }
 
 /// The activities landed, their sets and their recordings (#809).
-impl application::graph::Input for GarminGymAccountReader {
-    fn reads() -> application::graph::Reads {
+impl application::Input for GarminGymAccountReader {
+    fn reads() -> application::Reads {
         super::landed(&[
             super::GarminActivityLandingStore::STREAM,
             super::GarminExerciseSetLandingStore::STREAM,
