@@ -67,3 +67,10 @@ fn beats(bpm: i64) -> Result<BeatsPerMinute, StoreError> {
         .map_err(|error| corrupt(&error))
         .and_then(|bpm| BeatsPerMinute::new(bpm).map_err(|error| corrupt(&error)))
 }
+
+/// `padel_game`, which Garmin's activities write (#809).
+impl application::Input for SqlitePadelGames {
+    fn reads() -> application::Reads {
+        super::normalised(&[super::GarminActivityLandingStore::STREAM])
+    }
+}

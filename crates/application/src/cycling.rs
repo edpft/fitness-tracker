@@ -331,6 +331,8 @@ pub struct Riding<S, P, H, R, F, Y> {
     destination: DestinationName,
 }
 
+crate::graph::through!(Riding<S, P, H, R, F, Y>);
+
 impl<S, P, H, R, F, Y> Riding<S, P, H, R, F, Y>
 where
     S: CyclingMesocycleStore + Clone + Sync,

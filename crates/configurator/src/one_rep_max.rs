@@ -2,67 +2,89 @@
 //! this build's store (#420, #253).
 
 use application::{
-    CanonicalLayer, PlanStore, StoreError,
+    StoreError,
     next::Scope,
-    one_rep_max::{EstimatedOneRepMax, OneRepMaxTests, Tests, View},
+    one_rep_max::{EstimatedOneRepMax, OneRepMaxTests, View},
 };
 use domain::{analytical::Rts, normalised::OperatorZone};
-
-use crate::{
-    next::{self, NextFailure, Reads},
-    rescheduling,
-    store::Store,
-    wiring::WiringError,
+use infrastructure::{
+    SqliteCanonicalGymSessionStore, SqliteCanonicalWeighInStore, SqlitePlanStore,
+    SqlitePrescribedWorkoutStore,
 };
 
-/// What the estimated 1RM charts read: the canonical gym sessions (#559) and
-/// the canonical weigh-ins.
-///
-/// # Errors
-///
-/// [`WiringError`] if a name read is not a stream's.
-pub fn collects() -> Result<Scope, WiringError> {
-    next::scope([
-        Reads::Canonical(CanonicalLayer::Gym),
-        Reads::Canonical(CanonicalLayer::WeighIns),
-    ])
+use crate::{
+    graph::page,
+    next::NextFailure,
+    rescheduling::{self, Plans},
+    store::Store,
+};
+
+/// Each lift over the macrocycle in force, its mesocycles as the plans now
+/// stand (#800).
+pub(crate) type Estimated =
+    EstimatedOneRepMax<Rts, SqliteCanonicalGymSessionStore, SqliteCanonicalWeighInStore, Plans>;
+
+/// Each lift's 1RM tests (#517).
+pub(crate) type Tests = OneRepMaxTests<
+    Rts,
+    SqliteCanonicalGymSessionStore,
+    SqlitePlanStore,
+    SqlitePrescribedWorkoutStore,
+>;
+
+page! {
+    /// What the estimated 1RM page reads: the canonical gym sessions (#559),
+    /// the canonical weigh-ins, and the plans as they now stand.
+    pub struct Page {
+        estimated: Estimated,
+    }
 }
 
-/// Each lift over the macrocycle in force, through today, its mesocycles as
-/// the plans now stand (#800).
-///
-/// # Errors
-///
-/// [`NextFailure`] if the store cannot be read.
-pub async fn view(store: &Store, zone: &OperatorZone) -> Result<View, NextFailure> {
-    Ok(view_over(store, rescheduling::plans(store, zone).await?, zone).await?)
+/// The parts a run collecting what the page reads takes.
+#[must_use]
+pub fn collects() -> Scope {
+    crate::graph::collects::<Page>()
 }
 
-/// Each lift over the macrocycle in force in `plans`, through today.
-pub(crate) async fn view_over(
-    store: &Store,
-    plans: impl PlanStore + Sync,
-    zone: &OperatorZone,
-) -> Result<View, StoreError> {
-    let today = jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date();
-    EstimatedOneRepMax::new(Rts, store.canonical_gym(), store.weigh_ins(), plans)
-        .view(today)
-        .await
+/// Each lift over the macrocycle in force in `plans`.
+pub(crate) fn estimated(store: &Store, plans: Plans) -> Estimated {
+    EstimatedOneRepMax::new(
+        Rts,
+        SqliteCanonicalGymSessionStore::new(store.pool().clone()),
+        SqliteCanonicalWeighInStore::new(store.pool().clone()),
+        plans,
+    )
 }
 
-/// Each lift's 1RM tests, through today (#517).
-///
-/// # Errors
-///
-/// [`StoreError`] if the store cannot be read.
-pub async fn tests(store: &Store, zone: &OperatorZone) -> Result<Vec<Tests>, StoreError> {
-    let today = jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date();
+/// Each lift's 1RM tests over `store`.
+pub(crate) fn tests(store: &Store, zone: &OperatorZone) -> Tests {
+    let pool = store.pool();
     OneRepMaxTests::new(
         Rts,
-        store.canonical_gym(),
-        store.plans(zone),
-        store.prescriptions(zone),
+        SqliteCanonicalGymSessionStore::new(pool.clone()),
+        SqlitePlanStore::new(pool.clone(), zone.clone()),
+        SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
     )
-    .tests(today)
-    .await
+}
+
+impl Page {
+    /// The page over `store`.
+    ///
+    /// # Errors
+    ///
+    /// [`NextFailure`] if the store cannot be read.
+    pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
+        Ok(Self {
+            estimated: estimated(store, rescheduling::plans(store, zone).await?),
+        })
+    }
+
+    /// Each lift over the macrocycle in force, through today.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub async fn view(&self, zone: &OperatorZone) -> Result<View, StoreError> {
+        self.estimated.view(crate::equipment::today(zone)).await
+    }
 }

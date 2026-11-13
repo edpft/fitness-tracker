@@ -296,3 +296,10 @@ impl application::Input for GarminSleepAccountReader {
         super::landed(&[super::GarminSleepLandingStore::STREAM])
     }
 }
+
+/// `sleep`, which Garmin's sleep writes (#809).
+impl application::Input for SqliteSleepHistory {
+    fn reads() -> application::Reads {
+        super::normalised(&[super::GarminSleepLandingStore::STREAM])
+    }
+}

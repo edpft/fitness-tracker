@@ -35,6 +35,14 @@ impl<S, A, B> Calendars<S, A, B> {
     }
 }
 
+/// **What is kept is what is read** (#809): the publishers are what a run
+/// asks, and nothing reads them.
+impl<S: crate::graph::Input, A, B> crate::graph::Input for Calendars<S, A, B> {
+    fn reads() -> crate::graph::Reads {
+        S::reads()
+    }
+}
+
 /// Asking whether a calendar has changed, as a step of a run.
 pub trait KeptCalendars {
     /// Ask `calendar`'s publisher at `at` whether it has changed since it was
@@ -51,6 +59,19 @@ pub trait KeptCalendars {
         at: Timestamp,
         refetch: Refetch,
     ) -> impl Future<Output = Result<Result<Found, StepFailure>, StoreError>> + Send;
+
+    /// Whether asking `calendar` at `at` would ask its publisher, rather than
+    /// answer that it was asked within `refetch`.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn due(
+        &self,
+        calendar: Calendar,
+        at: Timestamp,
+        refetch: Refetch,
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
 }
 
 impl<S, A, B> KeptCalendars for Calendars<S, A, B>
@@ -67,7 +88,7 @@ where
     ) -> Result<Result<Found, StepFailure>, StoreError> {
         let kept = self.store.kept(calendar).await?;
         if let (Refetch::After(within), Some(kept)) = (refetch, &kept)
-            && at.duration_since(kept.asked).unsigned_abs() < within
+            && asked_within(kept.asked, at, within)
         {
             return Ok(Ok(Found::NotDue(NotDue::Fetched { within })));
         }
@@ -88,6 +109,24 @@ where
             }
         })
     }
+
+    async fn due(
+        &self,
+        calendar: Calendar,
+        at: Timestamp,
+        refetch: Refetch,
+    ) -> Result<bool, StoreError> {
+        let kept = self.store.kept(calendar).await?;
+        Ok(match (refetch, kept) {
+            (Refetch::After(within), Some(kept)) => !asked_within(kept.asked, at, within),
+            (Refetch::WhenDue, _) | (_, None) => true,
+        })
+    }
+}
+
+/// Whether a calendar last asked at `asked` was asked within `within` of `at`.
+fn asked_within(asked: Timestamp, at: Timestamp, within: std::time::Duration) -> bool {
+    at.duration_since(asked).unsigned_abs() < within
 }
 
 /// What is kept, read: the store says what the holidays are.

@@ -39,6 +39,9 @@ pub enum Authored {
     Plan,
     /// What was prescribed, and where it was delivered.
     Prescriptions,
+    /// How each workout and each primary progression prescribes, as
+    /// designed (§ 14.1).
+    Workouts,
     /// When there is room to train, and what departs from it.
     Diary,
 }
@@ -55,6 +58,9 @@ pub enum Interpretive {
 pub enum Generation {
     /// The plates and fills to hand.
     Equipment,
+    /// The classes a ride can be prescribed from, as the catalogue last read
+    /// them.
+    Classes,
     Calendar(Calendar),
 }
 
@@ -148,6 +154,26 @@ tuple_input!(A, B, C, D, E);
 tuple_input!(A, B, C, D, E, F);
 tuple_input!(A, B, C, D, E, F, G);
 
+/// **A use case reads what its ports read**, each port a type parameter:
+/// `through!(Sleeping<S, R, W>)` reads what `S`, `R` and `W` do.
+macro_rules! through {
+    ($($use_case:ident<$($port:ident),+>),+ $(,)?) => {$(
+        impl<$($port: $crate::graph::Input),+> $crate::graph::Input for $use_case<$($port),+> {
+            fn reads() -> $crate::graph::Reads {
+                $crate::graph::Reads::default()$(.and($port::reads()))+
+            }
+        }
+    )+};
+}
+pub(crate) use through;
+
+/// The estimate of a one-repetition maximum is arithmetic, and reads nothing.
+impl Input for domain::analytical::Rts {
+    fn reads() -> Reads {
+        Reads::default()
+    }
+}
+
 impl<T: Input> Input for &T {
     fn reads() -> Reads {
         T::reads()
@@ -235,7 +261,7 @@ impl Graph {
     }
 
     /// The parts a run collecting what `reads` reads takes: each node that is
-    /// fetched or derived, and every one it is derived from.
+    /// fetched, asked or derived, and every one it is derived from.
     #[must_use]
     pub fn parts(&self, reads: &Reads) -> BTreeSet<Part> {
         self.upstream(reads)
@@ -244,11 +270,16 @@ impl Graph {
                 Node::Landing(stream) => Some(Part::Fetching(stream)),
                 Node::Normalised(stream) => Some(Part::Normalising(stream)),
                 Node::Canonical(layer) => Some(Part::Canonicalising(layer)),
-                Node::Edits(_)
+                Node::Generation(Generation::Calendar(calendar)) => {
+                    Some(Part::FetchingCalendar(calendar))
+                }
+                // **Refreshed only by a run that delivers** (#246), which is
+                // the only one that prescribes from them.
+                Node::Generation(Generation::Classes | Generation::Equipment)
+                | Node::Edits(_)
                 | Node::Matches
                 | Node::Authored(_)
-                | Node::Interpretive(_)
-                | Node::Generation(_) => None,
+                | Node::Interpretive(_) => None,
             })
             .collect()
     }

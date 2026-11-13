@@ -164,6 +164,8 @@ pub struct IsItWorking<N, D, S, T, R, W, P> {
     plans: P,
 }
 
+crate::graph::through!(IsItWorking<N, D, S, T, R, W, P>);
+
 impl<N, D, S, T, R, W, P> IsItWorking<N, D, S, T, R, W, P>
 where
     N: OvernightHrvHistory + Sync,

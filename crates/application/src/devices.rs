@@ -18,6 +18,8 @@ pub struct DeviceRegister<R, W> {
     wear: W,
 }
 
+crate::graph::through!(DeviceRegister<R, W>);
+
 impl<R, W> DeviceRegister<R, W>
 where
     R: RecordedDevices + Sync,

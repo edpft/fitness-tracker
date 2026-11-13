@@ -61,3 +61,10 @@ impl PulseWaveVelocityHistory for SqlitePulseWaveVelocityHistory {
             .collect()
     }
 }
+
+/// The Body Scan's readings, which Withings writes (#809).
+impl application::Input for SqlitePulseWaveVelocityHistory {
+    fn reads() -> application::Reads {
+        super::normalised(&[super::WithingsMeasurementLandingStore::STREAM])
+    }
+}

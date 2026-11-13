@@ -196,7 +196,7 @@ async fn recorded(request: Request, next: Next) -> Response {
 }
 
 async fn index(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
-    page::index(&opened(&runs, &headers, Ok(Asked::Everything)).await)
+    page::index(&opened(&runs, &headers, Asked::Everything).await)
 }
 
 /// Start a run of what a page asks for as it is opened, or join one going
@@ -205,24 +205,16 @@ async fn index(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
 /// **Not when htmx asks**, which is a page redrawing itself because a run
 /// ended: starting another would redraw it again when that one ended, for
 /// ever.
-async fn opened(runs: &Arc<Runs>, headers: &HeaderMap, asked: Result<Asked, String>) -> run::View {
+async fn opened(runs: &Arc<Runs>, headers: &HeaderMap, asked: Asked) -> run::View {
     if !headers.contains_key("hx-request") {
-        match asked {
-            Ok(asked) => runs.open(&asked).await,
-            Err(error) => runs.refuse(&format!("the run could not be asked for: {error}")),
-        }
+        runs.open(&asked).await;
     }
     runs.view()
 }
 
 /// What a chart's page asks a run to collect: what it reads.
-fn only(
-    collects: &Result<application::next::Scope, configurator::wiring::WiringError>,
-) -> Result<Asked, String> {
-    collects
-        .as_ref()
-        .map(|scope| Asked::Only(scope.clone()))
-        .map_err(ToString::to_string)
+fn only(collects: &application::next::Scope) -> Asked {
+    Asked::Only(collects.clone())
 }
 
 /// A chart's page drawn from the store, or while a run is collecting what it
@@ -238,7 +230,7 @@ fn only(
 /// shown at once rather than the placeholder.
 async fn drawn(
     runs: &Runs,
-    collects: &Result<application::next::Scope, configurator::wiring::WiringError>,
+    scope: &application::next::Scope,
     here: &str,
     over: Option<domain::analytical::range::Over>,
     run: &run::View,
@@ -247,10 +239,6 @@ async fn drawn(
     if let Some(over) = over {
         configurator::telemetry::ranged(range::name(over));
     }
-    let Ok(scope) = collects else {
-        configurator::telemetry::served(Served::Drawn);
-        return read.await;
-    };
     let address = over.map_or_else(
         || here.to_owned(),
         |over| format!("{here}?over={}", range::name(over)),
@@ -346,13 +334,16 @@ async fn heart_rate(
                 Ok(store) => store,
                 Err(error) => return at_power::unreadable(&error.to_string()),
             };
-            let rides = configurator::heart_rate::rides(&store).await;
-            let ranges = configurator::ranges::today(&store, &setting.zone).await;
+            let read = async {
+                let page = configurator::heart_rate::Page::open(&store, &setting.zone).await?;
+                Ok::<_, configurator::next::NextFailure>((
+                    page.rides().await?,
+                    page.ranges(&setting.zone).await?,
+                ))
+            }
+            .await;
             store.close().await;
-            match rides
-                .map_err(configurator::next::NextFailure::from)
-                .and_then(|rides| Ok((rides, ranges?)))
-            {
+            match read {
                 Ok((rides, ranges)) => at_power::page(
                     &domain::analytical::heart_rate_at_power::trended(&rides),
                     &ranges,
@@ -387,14 +378,17 @@ async fn ftp_tests(
                 Ok(store) => store,
                 Err(error) => return ftp::unreadable(&error.to_string()),
             };
-            let tests = configurator::ftp_tests::tests(&store).await;
-            let heart_rates = configurator::ftp_tests::heart_rates(&store).await;
-            let ranges = configurator::ranges::today(&store, &setting.zone).await;
+            let read = async {
+                let page = configurator::ftp_tests::Page::open(&store, &setting.zone).await?;
+                Ok::<_, configurator::next::NextFailure>((
+                    page.tests().await?,
+                    page.heart_rates().await?,
+                    page.ranges(&setting.zone).await?,
+                ))
+            }
+            .await;
             store.close().await;
-            match tests
-                .map_err(configurator::next::NextFailure::from)
-                .and_then(|tests| Ok((tests, heart_rates?, ranges?)))
-            {
+            match read {
                 Ok((tests, heart_rates, ranges)) => {
                     ftp::page(&tests, &heart_rates, &ranges, tests_over(&query), &run)
                 }
@@ -426,15 +420,18 @@ async fn body_page(
                 Ok(store) => store,
                 Err(error) => return body::unreadable(&error.to_string()),
             };
-            let series = configurator::body_weight::series(&store).await;
-            let aims = configurator::body_weight::aims(&store, &setting.zone).await;
-            let components = configurator::composition::by_method(&store).await;
-            let ranges = configurator::ranges::today(&store, &setting.zone).await;
+            let read = async {
+                let page = configurator::body::Page::open(&store, &setting.zone).await?;
+                Ok::<_, configurator::next::NextFailure>((
+                    page.series().await?,
+                    page.aims(&setting.zone).await?,
+                    page.by_method().await?,
+                    page.ranges(&setting.zone).await?,
+                ))
+            }
+            .await;
             store.close().await;
-            match series
-                .map_err(configurator::next::NextFailure::from)
-                .and_then(|series| Ok((series, aims?, components?, ranges?)))
-            {
+            match read {
                 Ok((series, aims, components, ranges)) => {
                     body::page(&series, &aims, &components, &ranges, over(&query), &run)
                 }
@@ -475,13 +472,17 @@ async fn overnight_hrv(
                 Ok(store) => store,
                 Err(error) => return hrv::unreadable(&error.to_string()),
             };
-            let trended = configurator::per_device::overnight_hrv_trend(&store).await;
-            let ranges = configurator::ranges::today(&store, &setting.zone).await;
+            let read = async {
+                let page =
+                    configurator::per_device::OvernightHrv::open(&store, &setting.zone).await?;
+                Ok::<_, configurator::next::NextFailure>((
+                    page.trend().await?,
+                    page.ranges(&setting.zone).await?,
+                ))
+            }
+            .await;
             store.close().await;
-            match trended
-                .map_err(configurator::next::NextFailure::from)
-                .and_then(|trended| Ok((trended, ranges?)))
-            {
+            match read {
                 Ok((trended, ranges)) => hrv::page(&trended, &ranges, over(&query), &run),
                 Err(error) => hrv::unreadable(&error.to_string()),
             }
@@ -511,13 +512,17 @@ async fn pulse_wave_velocity_page(
                 Ok(store) => store,
                 Err(error) => return pulse_wave_velocity::unreadable(&error.to_string()),
             };
-            let series = configurator::pulse_wave_velocity::by_algorithm(&store).await;
-            let ranges = configurator::ranges::today(&store, &setting.zone).await;
+            let read = async {
+                let page =
+                    configurator::pulse_wave_velocity::Page::open(&store, &setting.zone).await?;
+                Ok::<_, configurator::next::NextFailure>((
+                    page.by_algorithm().await?,
+                    page.ranges(&setting.zone).await?,
+                ))
+            }
+            .await;
             store.close().await;
-            match series
-                .map_err(configurator::next::NextFailure::from)
-                .and_then(|series| Ok((series, ranges?)))
-            {
+            match read {
                 Ok((series, ranges)) => {
                     pulse_wave_velocity::page(&series, &ranges, over(&query), &run)
                 }
@@ -549,13 +554,17 @@ async fn resting_heart_rate(
                 Ok(store) => store,
                 Err(error) => return resting::unreadable(&error.to_string()),
             };
-            let trended = configurator::per_device::resting_heart_rate_trend(&store).await;
-            let ranges = configurator::ranges::today(&store, &setting.zone).await;
+            let read = async {
+                let page =
+                    configurator::per_device::RestingHeartRate::open(&store, &setting.zone).await?;
+                Ok::<_, configurator::next::NextFailure>((
+                    page.trend().await?,
+                    page.ranges(&setting.zone).await?,
+                ))
+            }
+            .await;
             store.close().await;
-            match trended
-                .map_err(configurator::next::NextFailure::from)
-                .and_then(|trended| Ok((trended, ranges?)))
-            {
+            match read {
                 Ok((trended, ranges)) => resting::page(&trended, &ranges, over(&query), &run),
                 Err(error) => resting::unreadable(&error.to_string()),
             }
@@ -585,13 +594,16 @@ async fn sleep_page(
                 Ok(store) => store,
                 Err(error) => return sleep::unreadable(&error.to_string()),
             };
-            let nights = configurator::sleep::nights(&store).await;
-            let ranges = configurator::ranges::today(&store, &setting.zone).await;
+            let read = async {
+                let page = configurator::sleep::Page::open(&store, &setting.zone).await?;
+                Ok::<_, configurator::next::NextFailure>((
+                    page.nights().await?,
+                    page.ranges(&setting.zone).await?,
+                ))
+            }
+            .await;
             store.close().await;
-            match nights
-                .map_err(configurator::next::NextFailure::from)
-                .and_then(|nights| Ok((nights, ranges?)))
-            {
+            match read {
                 Ok((nights, ranges)) => sleep::page(&nights, &ranges, over(&query), &run),
                 Err(error) => sleep::unreadable(&error.to_string()),
             }
@@ -611,7 +623,11 @@ async fn estimated_one_rep_max(State(runs): State<Arc<Runs>>, headers: HeaderMap
             Ok(store) => store,
             Err(error) => return one_rep_max::unreadable(&error.to_string()),
         };
-        let view = configurator::one_rep_max::view(&store, &setting.zone).await;
+        let view = async {
+            let page = configurator::one_rep_max::Page::open(&store, &setting.zone).await?;
+            Ok::<_, configurator::next::NextFailure>(page.view(&setting.zone).await?)
+        }
+        .await;
         store.close().await;
         match view {
             Ok(view) => one_rep_max::page(&view, &run),
@@ -631,7 +647,11 @@ async fn progress_page(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Mar
             Ok(store) => store,
             Err(error) => return progress::unreadable(&error.to_string()),
         };
-        let view = configurator::working::view(&store, &setting.zone).await;
+        let view = async {
+            let page = configurator::working::Page::open(&store, &setting.zone).await?;
+            Ok::<_, configurator::next::NextFailure>(page.view(&setting.zone).await?)
+        }
+        .await;
         store.close().await;
         match view {
             Ok(view) => progress::page(&view, &run),
@@ -652,7 +672,11 @@ async fn is_it_working(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Mar
             Ok(store) => store,
             Err(error) => return working::unreadable(&error.to_string()),
         };
-        let view = configurator::working::view(&store, &setting.zone).await;
+        let view = async {
+            let page = configurator::working::Page::open(&store, &setting.zone).await?;
+            Ok::<_, configurator::next::NextFailure>(page.view(&setting.zone).await?)
+        }
+        .await;
         store.close().await;
         match view {
             Ok(view) => working::page(&view, &run),
@@ -681,7 +705,6 @@ async fn equipment_shown(runs: &Runs, refused: Option<&equipment::Refused<'_>>) 
     }
 }
 
-/// Plan: the macrocycle in force, then the inputs to planning (#770).
 /// History, read afresh from the store once a run has collected what it
 /// reads (#772).
 async fn history_page(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
@@ -695,7 +718,9 @@ async fn history_page(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Mark
         let days = match configurator::store::Store::open(&setting.database).await {
             Err(error) => Err(error.to_string()),
             Ok(store) => {
-                let days = configurator::history::days(&store, &setting.zone).await;
+                let days = configurator::history::Page::open(&store, &setting.zone)
+                    .days(&setting.zone)
+                    .await;
                 store.close().await;
                 days.map_err(|error| error.to_string())
             }
@@ -730,8 +755,9 @@ async fn session_page(
         let session = match configurator::store::Store::open(&setting.database).await {
             Err(error) => Err(error.to_string()),
             Ok(store) => {
-                let session =
-                    configurator::history::session(&store, &setting.zone, on, number).await;
+                let session = configurator::history::Page::open(&store, &setting.zone)
+                    .session(&setting.zone, on, number)
+                    .await;
                 store.close().await;
                 session.map_err(|error| error.to_string())
             }
@@ -742,28 +768,35 @@ async fn session_page(
     .into_response()
 }
 
-async fn plan_page(State(runs): State<Arc<Runs>>) -> Markup {
-    let setting = runs.setting();
-    let macrocycle = match configurator::store::Store::open(&setting.database).await {
-        Err(error) => Err(error.to_string()),
-        Ok(store) => {
-            let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
-            let read = configurator::macrocycle::planned(
-                &store,
-                &setting.zone,
-                domain::schedule::DayPart::containing(here.datetime()),
-            )
-            .await;
-            store.close().await;
-            read.map(|planned| {
-                planned
-                    .as_ref()
-                    .map(application::macrocycle::Macrocycle::from)
-            })
-            .map_err(|error| error.to_string())
-        }
-    };
-    plan::page(&macrocycle)
+/// Plan: the macrocycle in force, then the inputs to planning (#770), read
+/// once a run has collected what it reads (#809).
+async fn plan_page(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
+    let collects = configurator::macrocycle::collects();
+    let run = opened(&runs, &headers, only(&collects)).await;
+    drawn(&runs, &collects, Place::Plan.path(), None, &run, async {
+        let setting = runs.setting();
+        let macrocycle = match configurator::store::Store::open(&setting.database).await {
+            Err(error) => Err(error.to_string()),
+            Ok(store) => {
+                let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
+                let read = configurator::macrocycle::planned(
+                    &store,
+                    &setting.zone,
+                    domain::schedule::DayPart::containing(here.datetime()),
+                )
+                .await;
+                store.close().await;
+                read.map(|planned| {
+                    planned
+                        .as_ref()
+                        .map(application::macrocycle::Macrocycle::from)
+                })
+                .map_err(|error| error.to_string())
+            }
+        };
+        plan::page(&macrocycle, &run)
+    })
+    .await
 }
 
 async fn equipment_page(State(runs): State<Arc<Runs>>) -> Markup {
@@ -1118,9 +1151,9 @@ mod tests {
                 credentials: None,
             })
         };
-        let collects = Ok(Scope::new([Part::Normalising(
+        let collects = Scope::new([Part::Normalising(
             LandingStream::try_from("hevy.workouts").expect("a stream"),
-        )]));
+        )]);
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

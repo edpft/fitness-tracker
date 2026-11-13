@@ -13,6 +13,8 @@ pub struct Composition<H> {
     history: H,
 }
 
+crate::graph::through!(Composition<H>);
+
 impl<H> Composition<H>
 where
     H: CompositionHistory + Sync,

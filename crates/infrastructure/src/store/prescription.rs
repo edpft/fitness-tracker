@@ -996,3 +996,12 @@ struct SetRow {
     rest_high_seconds: Option<i64>,
     warmup: i64,
 }
+
+/// What was prescribed (#809).
+impl application::Input for SqlitePrescribedWorkoutStore {
+    fn reads() -> application::Reads {
+        application::Reads::of([application::Node::Authored(
+            application::graph::Authored::Prescriptions,
+        )])
+    }
+}

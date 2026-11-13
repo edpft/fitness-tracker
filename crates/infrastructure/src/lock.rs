@@ -83,6 +83,7 @@ impl FileRunLock {
             Part::Fetching(stream) => format!("fetching.{stream}"),
             Part::Normalising(stream) => format!("normalising.{stream}"),
             Part::Canonicalising(layer) => format!("canonicalising.{}", layer.as_str()),
+            Part::FetchingCalendar(calendar) => format!("calendar.{}", calendar.as_str()),
         };
         self.directory.join(format!(".next.{name}.lock"))
     }

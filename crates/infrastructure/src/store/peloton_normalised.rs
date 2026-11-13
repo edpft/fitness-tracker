@@ -831,3 +831,10 @@ impl application::Input for PelotonSessionAccountReader {
         ])
     }
 }
+
+/// `ftp`, which Peloton's rides write (#809).
+impl application::Input for SqliteFtpHistory {
+    fn reads() -> application::Reads {
+        super::normalised(&[super::PelotonRideLandingStore::STREAM])
+    }
+}

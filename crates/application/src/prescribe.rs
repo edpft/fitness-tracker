@@ -193,6 +193,8 @@ pub struct Prescribing<H, P, G, S, L> {
     ports: PrescriptionPorts<H, P, G, S, L>,
 }
 
+crate::graph::through!(Prescribing<H, P, G, S, L>);
+
 impl<H, P, G, S, L> Prescribing<H, P, G, S, L> {
     pub const fn new(ports: PrescriptionPorts<H, P, G, S, L>) -> Self {
         Self { ports }

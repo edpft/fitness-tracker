@@ -22,6 +22,8 @@ pub struct Sleeping<S, R, W> {
     devices: DeviceRegister<R, W>,
 }
 
+crate::graph::through!(Sleeping<S, R, W>);
+
 impl<S, R, W> Sleeping<S, R, W>
 where
     S: SleepHistory + Sync,

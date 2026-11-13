@@ -36,6 +36,33 @@ use infrastructure::{
 
 use crate::wiring::SystemClock;
 
+/// A struct of what something reads through, which reads what each of them
+/// does (#809).
+///
+/// **Its fields are its declaration**: a page built as one has nothing to read
+/// with but them, so what it reads and what it declares cannot differ.
+macro_rules! page {
+    (
+        $(#[$meta:meta])*
+        $vis:vis struct $name:ident {
+            $($(#[$field_meta:meta])* $field:ident: $type:ty),+ $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        $vis struct $name {
+            $($(#[$field_meta])* $field: $type),+
+        }
+
+        impl application::graph::Input for $name {
+            fn reads() -> application::graph::Reads {
+                application::graph::Reads::default()
+                    $(.and(<$type as application::graph::Input>::reads()))+
+            }
+        }
+    };
+}
+pub(crate) use page;
+
 /// A stream's normalisation, over this build's run log and refusals.
 type Normalising<R, T, W> =
     Normalisation<R, T, W, SqliteRefusalStore, SqliteNormalisationRunLog, SystemClock>;

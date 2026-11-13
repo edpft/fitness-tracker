@@ -309,6 +309,8 @@ pub enum Part {
     /// One normalised layer.
     Normalising(LandingStream),
     Canonicalising(CanonicalLayer),
+    /// Asking one calendar's publisher whether it has changed (#809).
+    FetchingCalendar(Calendar),
     /// Refreshing the classes, committing and delivering, which only a run of
     /// the whole of `next` does.
     Delivering,

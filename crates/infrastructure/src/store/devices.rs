@@ -454,3 +454,20 @@ impl WearRecord for GarminWear {
         Ok(Wear::new(days))
     }
 }
+
+/// `device_sighting`, which Garmin's activities and days write (#809).
+impl application::Input for GarminRecordedDevices {
+    fn reads() -> application::Reads {
+        super::normalised(&[
+            super::GarminActivityLandingStore::STREAM,
+            super::GarminDailyHeartRateLandingStore::STREAM,
+        ])
+    }
+}
+
+/// `wear_day`, which Garmin's days write (#809).
+impl application::Input for GarminWear {
+    fn reads() -> application::Reads {
+        super::normalised(&[super::GarminDailyHeartRateLandingStore::STREAM])
+    }
+}

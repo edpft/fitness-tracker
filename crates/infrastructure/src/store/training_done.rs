@@ -117,3 +117,18 @@ impl TrainingDone for SqliteTrainingDone {
         Ok(sessions)
     }
 }
+
+/// The canonical gym sessions and rides, and the padel games Garmin's activities write (#809).
+impl application::Input for SqliteTrainingDone {
+    fn reads() -> application::Reads {
+        application::Reads::of([application::Node::Canonical(
+            application::CanonicalLayer::Gym,
+        )])
+        .and(application::Reads::of([application::Node::Canonical(
+            application::CanonicalLayer::Cycling,
+        )]))
+        .and(super::normalised(&[
+            super::GarminActivityLandingStore::STREAM,
+        ]))
+    }
+}

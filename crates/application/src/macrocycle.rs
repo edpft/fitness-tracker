@@ -80,6 +80,8 @@ pub struct Planned<W, C, D, H> {
     ports: PlanningPorts<W, C, D, H>,
 }
 
+crate::graph::through!(Planned<W, C, D, H>);
+
 impl<W, C, D, H> Planned<W, C, D, H>
 where
     W: StandingReader + Sync,

@@ -252,6 +252,8 @@ pub struct Microcycle<D, P, G, C, Y, L> {
     cycling_destination: DestinationName,
 }
 
+crate::graph::through!(Microcycle<D, P, G, C, Y, L>);
+
 impl<D, P, G, C, Y, L> Microcycle<D, P, G, C, Y, L>
 where
     D: DiaryStore + Sync,

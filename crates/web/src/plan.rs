@@ -14,16 +14,20 @@ use domain::{
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
-use crate::page::{self, PAGES, Place};
+use crate::{
+    page::{self, PAGES, Place},
+    run::View,
+};
 
 /// The page, with the macrocycle as planned today or the reason it could not
-/// be read.
-pub fn page(macrocycle: &Result<Option<Macrocycle>, String>) -> Markup {
+/// be read, and where a run collecting what it reads has got to (#809).
+pub fn page(macrocycle: &Result<Option<Macrocycle>, String>, run: &View) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
             head { (page::head(Place::Plan.name(), &[])) }
             body {
+                (page::following(run))
                 main.plan {
                     h1 { (Place::Plan.name()) }
                     @match macrocycle {
@@ -185,7 +189,7 @@ mod tests {
     /// as planned**, then the inputs (#770, #789).
     #[test]
     fn plan_opens_with_the_macrocycle() {
-        let shown = page(&Ok(Some(autumn()))).into_string();
+        let shown = page(&Ok(Some(autumn())), &crate::run::View::default()).into_string();
 
         assert!(shown.contains("2026-autumn"), "{shown}");
         assert!(
@@ -222,7 +226,7 @@ mod tests {
     /// **No plan in force, and the inputs are still listed.**
     #[test]
     fn no_plan_in_force_still_lists_the_inputs() {
-        let shown = page(&Ok(None)).into_string();
+        let shown = page(&Ok(None), &crate::run::View::default()).into_string();
 
         assert!(shown.contains("No plan is in force today."), "{shown}");
         assert!(shown.contains(r#"<a href="/schedule">"#), "{shown}");

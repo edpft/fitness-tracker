@@ -20,6 +20,8 @@ pub struct RideHeartRates<S, F, R, W> {
     devices: DeviceRegister<R, W>,
 }
 
+crate::graph::through!(RideHeartRates<S, F, R, W>);
+
 impl<S, F, R, W> RideHeartRates<S, F, R, W>
 where
     S: PerformedCyclingSessions + Sync,

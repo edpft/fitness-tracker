@@ -347,7 +347,7 @@ mod tests {
     /// tile (`progress::tests`).
     #[test]
     fn every_plan_page_is_listed_by_plan() {
-        let listed = crate::plan::page(&Ok(None)).into_string();
+        let listed = crate::plan::page(&Ok(None), &crate::run::View::default()).into_string();
 
         for page in &PAGES {
             if page.place == Place::Today {

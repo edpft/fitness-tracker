@@ -464,3 +464,12 @@ impl SqlitePelotonClassStore {
             .collect())
     }
 }
+
+/// The classes, as the catalogue last read them (#809).
+impl application::Input for SqlitePelotonClassStore {
+    fn reads() -> application::Reads {
+        application::Reads::of([application::Node::Generation(
+            application::Generation::Classes,
+        )])
+    }
+}

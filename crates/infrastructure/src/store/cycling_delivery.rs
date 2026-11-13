@@ -184,3 +184,12 @@ impl CyclingDeliveryStore for SqliteCyclingDeliveryStore {
             .map_err(|error| store_error(&error))
     }
 }
+
+/// Where each ride was put (#809).
+impl application::Input for SqliteCyclingDeliveryStore {
+    fn reads() -> application::Reads {
+        application::Reads::of([application::Node::Authored(
+            application::graph::Authored::Prescriptions,
+        )])
+    }
+}

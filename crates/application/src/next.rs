@@ -1136,15 +1136,6 @@ where
         let judge = self.judge(now).await?;
         self.gather(&everything.without(&joined), &judge, progress, &mut run)
             .await?;
-        for calendar in Calendar::ALL {
-            let started = start(progress, Step::FetchingCalendar(calendar));
-            let outcome = self
-                .ports
-                .holidays
-                .ask(calendar, judge.at.as_timestamp(), self.ports.refetch)
-                .await?;
-            finish(progress, &mut run, started, outcome);
-        }
 
         // 2. The next concurrent mesocycle, if the one before it has ended.
         let holidays = self.ports.holidays.holidays().await;
@@ -1236,6 +1227,17 @@ where
         }
         if scope.has(&Part::Delivering) {
             return Ok(true);
+        }
+        for calendar in Calendar::ALL {
+            if scope.has(&Part::FetchingCalendar(calendar))
+                && self
+                    .ports
+                    .holidays
+                    .due(calendar, judge.at.as_timestamp(), self.ports.refetch)
+                    .await?
+            {
+                return Ok(true);
+            }
         }
         self.stale(scope).await
     }
@@ -1360,7 +1362,7 @@ where
     }
 
     /// Every part this build collects: each walk, each normalised and
-    /// canonical layer, and delivering.
+    /// canonical layer, each calendar, and delivering.
     ///
     /// **Each catalogue entry as well as its walks**, so an entry with no
     /// access, whose walks are unknown, is still reported.
@@ -1389,6 +1391,7 @@ where
                 .map(Part::Normalising),
         );
         parts.extend(CANONICAL.map(Part::Canonicalising));
+        parts.extend(Calendar::ALL.map(Part::FetchingCalendar));
         Scope { parts }
     }
 
@@ -1489,6 +1492,17 @@ where
         run.extend(cycling?);
         run.extend(weigh_ins?);
         run.extend(watch?);
+        for calendar in Calendar::ALL {
+            if scope.has(&Part::FetchingCalendar(calendar)) {
+                let started = start(progress, Step::FetchingCalendar(calendar));
+                let outcome = self
+                    .ports
+                    .holidays
+                    .ask(calendar, judge.at.as_timestamp(), self.ports.refetch)
+                    .await?;
+                finish(progress, run, started, outcome);
+            }
+        }
 
         // **Every layer is current before the standing is read**, and for the
         // gym that is the whole of #361: deriving a stream deletes its rows,

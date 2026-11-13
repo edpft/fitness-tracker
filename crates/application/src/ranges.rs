@@ -14,6 +14,8 @@ pub struct CurrentRanges<P> {
     plans: P,
 }
 
+crate::graph::through!(CurrentRanges<P>);
+
 impl<P> CurrentRanges<P>
 where
     P: PlanStore + Sync,

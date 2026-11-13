@@ -479,6 +479,14 @@ impl application::calendars::KeptCalendars for Unreachable {
             },
         )))
     }
+    async fn due(
+        &self,
+        _calendar: application::Calendar,
+        _at: jiff::Timestamp,
+        _refetch: application::next::Refetch,
+    ) -> Result<bool, StoreError> {
+        Ok(true)
+    }
 }
 
 /// A publisher with nothing new, asked by a run (#809).
@@ -490,6 +498,14 @@ impl application::calendars::KeptCalendars for Answering {
         _refetch: application::next::Refetch,
     ) -> Result<Result<application::next::Found, application::next::StepFailure>, StoreError> {
         Ok(Ok(application::next::Found::Unchanged))
+    }
+    async fn due(
+        &self,
+        _calendar: application::Calendar,
+        _at: jiff::Timestamp,
+        _refetch: application::next::Refetch,
+    ) -> Result<bool, StoreError> {
+        Ok(false)
     }
 }
 
@@ -918,13 +934,6 @@ fn a_source_that_cannot_be_fetched_is_a_failed_step_and_the_run_carries_on() {
             (&Step::Fetching(withings.clone()), true),
             (&Step::Fetching(garmin.clone()), true),
             (&Step::Fetching(garmin_days), true),
-            (&Step::Normalising(hevy), true),
-            (&Step::Normalising(peloton), true),
-            (&Step::Normalising(withings), true),
-            (&Step::Normalising(garmin), true),
-            (&Step::Canonicalising(Discipline::Gym), true),
-            (&Step::Canonicalising(Discipline::Cycling), true),
-            (&Step::CanonicalisingWeighIns, true),
             // A calendar that cannot be asked is a failed step too (#809).
             (
                 &Step::FetchingCalendar(application::Calendar::School),
@@ -934,6 +943,13 @@ fn a_source_that_cannot_be_fetched_is_a_failed_step_and_the_run_carries_on() {
                 &Step::FetchingCalendar(application::Calendar::Public),
                 false
             ),
+            (&Step::Normalising(hevy), true),
+            (&Step::Normalising(peloton), true),
+            (&Step::Normalising(withings), true),
+            (&Step::Normalising(garmin), true),
+            (&Step::Canonicalising(Discipline::Gym), true),
+            (&Step::Canonicalising(Discipline::Cycling), true),
+            (&Step::CanonicalisingWeighIns, true),
         ]
     );
     assert!(matches!(

@@ -451,3 +451,12 @@ impl DiaryAuthor for SqliteDiaryStore {
         Ok(())
     }
 }
+
+/// When there is room to train (#809).
+impl application::Input for SqliteDiaryStore {
+    fn reads() -> application::Reads {
+        application::Reads::of([application::Node::Authored(
+            application::graph::Authored::Diary,
+        )])
+    }
+}

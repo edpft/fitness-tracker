@@ -5,18 +5,24 @@
 //! delivers to is the catalogue's to say.
 
 use application::{
-    Delivery, DeliveryError, MesocycleStore, PlanStore, PrescribedWorkoutStore,
-    PrescriptionDeliverer as _, PrescriptionDeliveryStore, PrescriptionDestination,
+    Delivery, DeliveryError, MesocycleStore, PrescribedWorkoutStore, PrescriptionDeliverer as _,
+    PrescriptionDeliveryStore, PrescriptionDestination,
     compare::{Comparing, ComparisonPorts},
     deliver::{Delivering, DeliveryPorts},
     prescribe::{Prescribing, PrescriptionPorts},
-    reschedule::Rescheduled,
 };
 use domain::normalised::OperatorZone;
-use infrastructure::HevyRoutinePreview;
+use infrastructure::{
+    HevyRoutinePreview, SqliteExerciseHistory, SqliteGenerationParameterStore,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore,
+};
 use jiff::civil::Date;
 
-use crate::{next::NextFailure, rescheduling, store::Store};
+use crate::{
+    next::NextFailure,
+    rescheduling::{self, GymMesocycles},
+    store::Store,
+};
 
 /// The gym's mesocycles, as the plan now stands.
 ///
@@ -30,38 +36,28 @@ pub async fn mesocycles(
     rescheduling::gym(store, zone).await
 }
 
+/// The gym's prescribing, against the plan as it now stands.
+pub type Prescriber = Prescribing<
+    SqliteExerciseHistory,
+    GymMesocycles,
+    SqliteGenerationParameterStore,
+    SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore,
+>;
+
 /// Prescribing, against the plan as it now stands.
 ///
 /// # Errors
 ///
 /// [`NextFailure`] if the store cannot be read.
-pub async fn prescriber(
-    store: &Store,
-    zone: &OperatorZone,
-) -> Result<
-    Prescribing<
-        impl application::ExerciseHistory + Send + Sync + use<>,
-        Rescheduled<
-            impl MesocycleStore + Send + Sync + use<>,
-            impl PlanStore + Send + Sync + use<>,
-        >,
-        impl application::GenerationParameterStore
-        + application::WorkoutStore
-        + application::ProgressionStore
-        + Send
-        + Sync
-        + use<>,
-        impl PrescribedWorkoutStore + Send + Sync + use<>,
-        impl application::PrescriptionLifecycle + Send + Sync + use<>,
-    >,
-    NextFailure,
-> {
+pub async fn prescriber(store: &Store, zone: &OperatorZone) -> Result<Prescriber, NextFailure> {
+    let pool = store.pool();
     Ok(Prescribing::new(PrescriptionPorts {
-        history: store.exercise_history(),
+        history: SqliteExerciseHistory::new(pool.clone()),
         mesocycles: rescheduling::gym(store, zone).await?,
-        parameters: store.parameters(),
-        prescriptions: store.prescriptions(zone),
-        lifecycle: store.gym_deliveries(),
+        parameters: SqliteGenerationParameterStore::new(pool.clone()),
+        prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
+        lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),
     }))
 }
 

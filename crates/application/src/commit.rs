@@ -142,6 +142,8 @@ pub struct Committing<P, G, H, R, B> {
     zone: OperatorZone,
 }
 
+crate::graph::through!(Committing<P, G, H, R, B>);
+
 impl<P, G, H, R, B> Committing<P, G, H, R, B>
 where
     P: PlanStore + Clone + Sync,

@@ -19,6 +19,8 @@
 //! asked for the id by the mesocycle's authored start, which only that
 //! mesocycle covers.
 
+use std::marker::PhantomData;
+
 use domain::planner::Arrangement as _;
 use domain::{
     cycling::{CyclingMesocycle, CyclingMesocycleId},
@@ -84,23 +86,37 @@ impl Reschedule {
 /// `plans` is where the whole plan is read from, because where one mesocycle
 /// now falls depends on every mesocycle before it; `store` is the discipline's
 /// own, and is asked only for identities.
-pub struct Rescheduled<S, P> {
+///
+/// **`W` is what the reschedule was walked from** (#809), so what it reads is
+/// read too: `()` where the use case holding this walks the plan itself.
+pub struct Rescheduled<S, P, W = ()> {
     store: S,
     plans: P,
     reschedule: Reschedule,
+    walked: PhantomData<fn() -> W>,
 }
+
+crate::graph::through!(Rescheduled<S, P, W>);
 
 impl<S, P> Rescheduled<S, P> {
     pub const fn new(store: S, plans: P, reschedule: Reschedule) -> Self {
+        Self::walked(store, plans, reschedule, &())
+    }
+}
+
+impl<S, P, W> Rescheduled<S, P, W> {
+    /// As the plan stands after `walk`, whose [`Reschedule`] this is.
+    pub const fn walked(store: S, plans: P, reschedule: Reschedule, _walk: &W) -> Self {
         Self {
             store,
             plans,
             reschedule,
+            walked: PhantomData,
         }
     }
 }
 
-impl<S: Sync, P: PlanStore + Sync> Rescheduled<S, P> {
+impl<S: Sync, P: PlanStore + Sync, W> Rescheduled<S, P, W> {
     /// Every plan in force, as authored and as it now stands.
     async fn both(&self) -> Result<Vec<(Plan, Plan)>, StoreError> {
         let mut both = Vec::new();
@@ -157,7 +173,7 @@ fn unfound(plan: &PlanName, start: Date) -> StoreError {
     }
 }
 
-impl<S: MesocycleStore + Sync, P: PlanStore + Sync> Rescheduled<S, P> {
+impl<S: MesocycleStore + Sync, P: PlanStore + Sync, W> Rescheduled<S, P, W> {
     async fn gym(&self, pick: Pick) -> Result<Option<MesocycleInForce>, StoreError> {
         for (authored, now) in self.both().await? {
             let (Some(authored_gym), Some(now_gym)) = (authored.gym(), now.gym()) else {
@@ -180,7 +196,7 @@ impl<S: MesocycleStore + Sync, P: PlanStore + Sync> Rescheduled<S, P> {
     }
 }
 
-impl<S: MesocycleStore + Sync, P: PlanStore + Sync> MesocycleStore for Rescheduled<S, P> {
+impl<S: MesocycleStore + Sync, P: PlanStore + Sync, W> MesocycleStore for Rescheduled<S, P, W> {
     async fn on(&self, date: Date) -> Result<Option<MesocycleInForce>, StoreError> {
         self.gym(Pick::On(date)).await
     }
@@ -234,7 +250,7 @@ impl<S: MesocycleStore + Sync, P: PlanStore + Sync> MesocycleStore for Reschedul
     }
 }
 
-impl<S: CyclingMesocycleStore + Sync, P: PlanStore + Sync> Rescheduled<S, P> {
+impl<S: CyclingMesocycleStore + Sync, P: PlanStore + Sync, W> Rescheduled<S, P, W> {
     async fn cycling(
         &self,
         pick: Pick,
@@ -257,8 +273,8 @@ impl<S: CyclingMesocycleStore + Sync, P: PlanStore + Sync> Rescheduled<S, P> {
     }
 }
 
-impl<S: CyclingMesocycleStore + Sync, P: PlanStore + Sync> CyclingMesocycleStore
-    for Rescheduled<S, P>
+impl<S: CyclingMesocycleStore + Sync, P: PlanStore + Sync, W> CyclingMesocycleStore
+    for Rescheduled<S, P, W>
 {
     async fn on(
         &self,
@@ -276,19 +292,45 @@ impl<S: CyclingMesocycleStore + Sync, P: PlanStore + Sync> CyclingMesocycleStore
 }
 
 /// Plans, as they now stand.
-#[derive(Debug, Clone)]
-pub struct ReschedulingPlans<P> {
+///
+/// **`W` is what the reschedule was walked from**, as for [`Rescheduled`].
+#[derive(Debug)]
+pub struct ReschedulingPlans<P, W = ()> {
     plans: P,
     reschedule: Reschedule,
+    walked: PhantomData<fn() -> W>,
+}
+
+crate::graph::through!(ReschedulingPlans<P, W>);
+
+impl<P: Clone, W> Clone for ReschedulingPlans<P, W> {
+    fn clone(&self) -> Self {
+        Self {
+            plans: self.plans.clone(),
+            reschedule: self.reschedule.clone(),
+            walked: PhantomData,
+        }
+    }
 }
 
 impl<P> ReschedulingPlans<P> {
     pub const fn new(plans: P, reschedule: Reschedule) -> Self {
-        Self { plans, reschedule }
+        Self::walked(plans, reschedule, &())
     }
 }
 
-impl<P: PlanStore + Sync> PlanStore for ReschedulingPlans<P> {
+impl<P, W> ReschedulingPlans<P, W> {
+    /// As the plans stand after `walk`, whose [`Reschedule`] this is.
+    pub const fn walked(plans: P, reschedule: Reschedule, _walk: &W) -> Self {
+        Self {
+            plans,
+            reschedule,
+            walked: PhantomData,
+        }
+    }
+}
+
+impl<P: PlanStore + Sync, W> PlanStore for ReschedulingPlans<P, W> {
     async fn windows(&self) -> Result<Vec<PlanWindow>, StoreError> {
         let mut windows = Vec::new();
         for window in self.plans.windows().await? {

@@ -22,6 +22,8 @@ pub struct FtpTests<S, F, W> {
     weigh_ins: W,
 }
 
+crate::graph::through!(FtpTests<S, F, W>);
+
 impl<S, F, W> FtpTests<S, F, W>
 where
     S: PerformedCyclingSessions + Sync,
@@ -68,6 +70,8 @@ pub struct TestHeartRates<S, R, W> {
     sessions: S,
     devices: DeviceRegister<R, W>,
 }
+
+crate::graph::through!(TestHeartRates<S, R, W>);
 
 impl<S, R, W> TestHeartRates<S, R, W>
 where

@@ -8,13 +8,13 @@
 use domain::{
     analytical::body_weight::{Aim, Series, aims},
     macrocycle::Macrocycle,
-    schedule::Holidays,
 };
 use jiff::civil::Date;
 
 use crate::{
-    error::{SourceError, StoreError},
-    ports::{PlanStore, WeighInHistory},
+    error::StoreError,
+    graph::through,
+    ports::{HolidayCalendar, PlanStore, WeighInHistory},
 };
 
 /// The body-weight use case.
@@ -41,16 +41,20 @@ where
 }
 
 /// What the plans intended over the current macrocycle's mesocycles (#689).
-pub struct Aims<P> {
+pub struct Aims<P, H> {
     plans: P,
+    holidays: H,
 }
 
-impl<P> Aims<P>
+through!(BodyWeight<W>, Aims<P, H>);
+
+impl<P, H> Aims<P, H>
 where
     P: PlanStore + Sync,
+    H: HolidayCalendar + Sync,
 {
-    pub const fn new(plans: P) -> Self {
-        Self { plans }
+    pub const fn new(plans: P, holidays: H) -> Self {
+        Self { plans, holidays }
     }
 
     /// Each started mesocycle's aim on `today`; none where the school
@@ -60,12 +64,11 @@ where
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
-    pub async fn on(
-        &self,
-        today: Date,
-        holidays: Result<Holidays, SourceError>,
-    ) -> Result<Vec<Aim>, StoreError> {
-        let Some(macrocycle) = holidays
+    pub async fn on(&self, today: Date) -> Result<Vec<Aim>, StoreError> {
+        let Some(macrocycle) = self
+            .holidays
+            .holidays()
+            .await
             .ok()
             .and_then(|holidays| Macrocycle::on(today, &holidays))
         else {

@@ -430,3 +430,17 @@ impl application::Input for GarminDailyHeartRateAccountReader {
         ])
     }
 }
+
+/// `overnight_hrv`, which Garmin's HRV writes (#809).
+impl application::Input for SqliteOvernightHrvHistory {
+    fn reads() -> application::Reads {
+        super::normalised(&[super::GarminHrvLandingStore::STREAM])
+    }
+}
+
+/// `resting_heart_rate`, which Garmin's days write (#809).
+impl application::Input for SqliteRestingHeartRateHistory {
+    fn reads() -> application::Reads {
+        super::normalised(&[super::GarminDailyHeartRateLandingStore::STREAM])
+    }
+}
