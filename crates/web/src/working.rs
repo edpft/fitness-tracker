@@ -201,16 +201,7 @@ fn each_week(macrocycle: &Macrocycle, today: Date) -> Markup {
         from: macrocycle.began,
         to: today,
     };
-    let mesocycles: Vec<(Date, Date, String)> = macrocycle
-        .mesocycles
-        .iter()
-        .zip(0..)
-        .filter(|(span, _)| span.start() <= today)
-        .filter_map(|(span, number): (_, u32)| {
-            let last = span.end().yesterday().ok()?.min(today);
-            Some((span.start(), last, format!("Mesocycle {number}")))
-        })
-        .collect();
+    let mesocycles = detail::mesocycles(&macrocycle.mesocycles, range);
     html! {
         section.card.weeks {
             h2 { "Each week against the expected result" }

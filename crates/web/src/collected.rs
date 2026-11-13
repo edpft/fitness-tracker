@@ -28,8 +28,7 @@ fn chart(path: &str) -> Option<Result<Scope, WiringError>> {
         "/working" => configurator::working::collects(),
         "/heart-rate" => configurator::heart_rate::collects(),
         "/ftp" => configurator::ftp_tests::collects(),
-        "/body-weight" => configurator::body_weight::collects(),
-        "/body-composition" => configurator::composition::collects(),
+        crate::body::PATH => configurator::body::collects(),
         "/resting-heart-rate" => configurator::per_device::resting_heart_rate_collects(),
         "/hrv" => configurator::per_device::overnight_hrv_collects(),
         "/pulse-wave-velocity" => configurator::pulse_wave_velocity::collects(),
@@ -138,7 +137,7 @@ mod tests {
                 .filter(|page| chart(page.path).is_some())
                 .count()
         );
-        assert_eq!(rows.len(), 12, "{names:?}");
+        assert_eq!(rows.len(), 11, "{names:?}");
         for row in &rows {
             assert!(row.reads.is_ok(), "{}", row.name);
         }
@@ -160,7 +159,7 @@ mod tests {
         let shown = matrix(&steps.iter().copied(), true).into_string();
 
         let rows: Vec<&str> = shown.split(r#"<div class="row">"#).skip(1).collect();
-        assert_eq!(rows.len(), 12, "{shown}");
+        assert_eq!(rows.len(), 11, "{shown}");
         for row in &rows {
             let dots: Vec<&str> = row.split(r#"<i class="dot "#).skip(1).collect();
             assert!(dots[0].starts_with("failed"), "{row}");

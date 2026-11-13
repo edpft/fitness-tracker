@@ -7,6 +7,7 @@
 //! adapter.
 
 mod at_power;
+mod body;
 mod collected;
 mod composition;
 mod curves;
@@ -36,7 +37,7 @@ use std::{collections::HashMap, convert::Infallible, net::SocketAddr, path::Path
 
 use axum::{
     Form, Router,
-    extract::{Path, Query, Request, State},
+    extract::{Path, Query, RawQuery, Request, State},
     http::{HeaderMap, header},
     middleware::{self, Next},
     response::{
@@ -144,8 +145,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
     let charts = Router::new()
         .route(at_power::PATH, get(heart_rate))
         .route(ftp::PATH, get(ftp_tests))
-        .route("/body-weight", get(body_weight))
-        .route("/body-composition", get(body_composition))
+        .route(body::PATH, get(body_page))
         .route(pulse_wave_velocity::PATH, get(pulse_wave_velocity_page))
         .route(hrv::PATH, get(overnight_hrv))
         .route(resting::PATH, get(resting_heart_rate))
@@ -160,6 +160,8 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .route("/", get(index))
         .route(Place::Plan.path(), get(plan_page))
         .merge(charts)
+        .route(body::REPLACED[0], get(to_body))
+        .route(body::REPLACED[1], get(to_body))
         .route("/equipment", get(equipment_page).post(equipment_post))
         .route(schedule::HERE, get(schedule_page).post(schedule_post))
         .route(workout::HERE, get(workout_page).post(workout_post))
@@ -397,75 +399,50 @@ async fn ftp_tests(
     .await
 }
 
-/// Body weight over a range, read afresh from the store.
-async fn body_weight(
+/// Body weight and body composition over a range, read afresh from the store
+/// (#786).
+async fn body_page(
     State(runs): State<Arc<Runs>>,
     query: Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Markup {
-    let collects = configurator::body_weight::collects();
+    let collects = configurator::body::collects();
     let run = opened(&runs, &headers, only(&collects)).await;
     drawn(
         &runs,
         &collects,
-        "/body-weight",
+        body::PATH,
         Some(over(&query)),
         &run,
         async {
             let setting = runs.setting();
             let store = match configurator::store::Store::open(&setting.database).await {
                 Ok(store) => store,
-                Err(error) => return weight::unreadable(&error.to_string()),
+                Err(error) => return body::unreadable(&error.to_string()),
             };
             let series = configurator::body_weight::series(&store).await;
             let aims = configurator::body_weight::aims(&store, &setting.zone).await;
+            let components = configurator::composition::by_method(&store).await;
             let ranges = configurator::ranges::today(&store, &setting.zone).await;
             store.close().await;
-            match series.and_then(|series| Ok((series, aims?, ranges?))) {
-                Ok((series, aims, ranges)) => {
-                    weight::page(&series, &aims, &ranges, over(&query), &run)
+            match series.and_then(|series| Ok((series, aims?, components?, ranges?))) {
+                Ok((series, aims, components, ranges)) => {
+                    body::page(&series, &aims, &components, &ranges, over(&query), &run)
                 }
-                Err(error) => weight::unreadable(&error.to_string()),
+                Err(error) => body::unreadable(&error.to_string()),
             }
         },
     )
     .await
 }
 
-/// Body composition over a range, one series per method, read afresh from the
-/// store.
-async fn body_composition(
-    State(runs): State<Arc<Runs>>,
-    query: Query<HashMap<String, String>>,
-    headers: HeaderMap,
-) -> Markup {
-    let collects = configurator::composition::collects();
-    let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(
-        &runs,
-        &collects,
-        "/body-composition",
-        Some(over(&query)),
-        &run,
-        async {
-            let setting = runs.setting();
-            let store = match configurator::store::Store::open(&setting.database).await {
-                Ok(store) => store,
-                Err(error) => return composition::unreadable(&error.to_string()),
-            };
-            let components = configurator::composition::by_method(&store).await;
-            let against = configurator::composition::against_phase(&store, &setting.zone).await;
-            let ranges = configurator::ranges::today(&store, &setting.zone).await;
-            store.close().await;
-            match components.and_then(|components| Ok((components, against?, ranges?))) {
-                Ok((components, against, ranges)) => {
-                    composition::page(&components, &against, &ranges, over(&query), &run)
-                }
-                Err(error) => composition::unreadable(&error.to_string()),
-            }
-        },
-    )
-    .await
+/// Body weight's and body composition's own pages, which are now one (#786),
+/// over the same range.
+async fn to_body(RawQuery(query): RawQuery) -> Redirect {
+    Redirect::permanent(&query.map_or_else(
+        || body::PATH.to_owned(),
+        |query| format!("{}?{query}", body::PATH),
+    ))
 }
 
 /// Overnight HRV over a range, one series per watch and the trend through

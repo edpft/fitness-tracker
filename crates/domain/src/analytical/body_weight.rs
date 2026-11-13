@@ -46,6 +46,7 @@ use jiff::civil::Date;
 use super::{
     Weighed,
     confidence::Noise,
+    expected::{Expected, each_mesocycle, over},
     range::Range,
     recomposition::NutritionPhase,
     since_start::{SinceStart, since_start},
@@ -397,17 +398,21 @@ pub struct Weight {
     /// The trend's first day in the macrocycle against its latest, in
     /// kilograms.
     pub change: SinceStart,
-    /// The change the aims expect over the same days, in kilograms.
+    /// The change the aims expect over the same days, in kilograms, over
+    /// the whole macrocycle rather than reset at each mesocycle.
     pub expected: Option<f64>,
+    /// Where the aims would have taken the trend, reset at each mesocycle's
+    /// start (#786): the line a chart draws.
+    pub aimed: Vec<Vec<Expected>>,
 }
 
 /// The trend from the macrocycle that `began` on a day to `today`, and where
 /// the aims would have taken it from its first day there.
 ///
-/// **Each day adds its mesocycle's aim, a seventh of a week's**, from the
-/// trend on the first day. A day no aim covers adds nothing (agreed with the
-/// operator, 2026-11-12), and a day whose aim states none leaves the rest of
-/// the line unknown. `None` where fewer than two trend days fall in it.
+/// **Reset at each mesocycle's start** ([`each_mesocycle`]): each day adds
+/// its mesocycle's aim, a seventh of a week's, from the trend on the
+/// mesocycle's first day. The whole macrocycle's expected change is not reset.
+/// `None` where no trend day falls in it.
 #[must_use]
 pub fn against_aims(
     trend: &[Vec<Trend>],
@@ -434,35 +439,43 @@ pub fn against_aims(
         began,
         today,
     )?;
-    let mut expected = Some(change.from);
-    let mut on = first.on;
-    let mut aimed = Vec::new();
-    for run in &days {
-        let mut aimed_run = Vec::new();
-        for day in run {
-            while on < day.on {
-                on = on.tomorrow().ok()?;
-                expected = expected.and_then(|mass| {
-                    aims.iter()
-                        .find(|aim| aim.span.covers(on))
-                        .map_or(Some(mass), |aim| {
-                            aim.per_week.map(|per_week| mass + per_week / 7.0)
-                        })
-                });
-            }
-            aimed_run.push(Aimed {
-                trend: *day,
-                expected,
-            });
-        }
-        aimed.push(aimed_run);
-    }
-    let last = aimed.last()?.last()?.expected;
+    let line: Vec<Vec<(Date, f64)>> = days
+        .iter()
+        .map(|run| {
+            run.iter()
+                .filter_map(|day| Some((day.on, kg(day)?)))
+                .collect()
+        })
+        .collect();
+    let aimed = each_mesocycle(&line, aims, began, today, |aim| aim.per_week);
+    let by_day: BTreeMap<Date, f64> = aimed
+        .iter()
+        .flatten()
+        .map(|day| (day.on, day.value))
+        .collect();
+    let days = days
+        .iter()
+        .map(|run| {
+            run.iter()
+                .map(|day| Aimed {
+                    trend: *day,
+                    expected: by_day.get(&day.on).copied(),
+                })
+                .collect()
+        })
+        .collect();
+    let last = days_last(&line)?;
     Some(Weight {
-        days: aimed,
+        days,
         change,
-        expected: last.map(|last| last - change.from),
+        expected: over(aims, first.on, last, |aim| aim.per_week),
+        aimed,
     })
+}
+
+/// The last day of a series of runs.
+fn days_last(runs: &[Vec<(Date, f64)>]) -> Option<Date> {
+    runs.iter().flatten().map(|(on, _)| *on).next_back()
 }
 
 fn kilograms(mass: Kg) -> Option<f64> {
@@ -512,17 +525,18 @@ mod against_aims_tests {
         assert!((expected + 1.0).abs() < 1e-9, "{expected}");
         let first = weight.days[0][0];
         assert_eq!(first.expected, Some(84.6));
-        let before_the_cut = weight.days[0][14];
-        assert_eq!(before_the_cut.trend.on, date(2026, 9, 28));
+        let the_cut = weight.days[0][15];
+        assert_eq!(the_cut.trend.on, date(2026, 9, 29));
         assert!(
-            (before_the_cut.expected.expect("aimed") - (84.6 - 0.25 / 7.0)).abs() < 1e-9,
-            "{before_the_cut:?}"
+            (the_cut.expected.expect("aimed") - (84.6 - 0.25 / 7.0)).abs() < 1e-9,
+            "measured from the cut's first day: {the_cut:?}"
         );
+        assert_eq!(weight.aimed.len(), 2, "reset where the cut starts");
         assert!(weight.change.by().abs() < 1e-9);
     }
 
     #[test]
-    fn a_mesocycle_with_no_aim_leaves_the_rest_unknown() {
+    fn a_mesocycle_with_no_aim_has_no_line() {
         let today = date(2026, 10, 12);
         let bulk = Aim {
             span: Span::new(date(2026, 9, 28), 4),
@@ -533,6 +547,7 @@ mod against_aims_tests {
         assert_eq!(weight.expected, None);
         assert_eq!(weight.days[0][13].expected, Some(84.6));
         assert_eq!(weight.days[0][14].expected, None);
+        assert_eq!(weight.aimed.len(), 1, "{:?}", weight.aimed);
     }
 
     #[test]
