@@ -4,21 +4,22 @@
 use application::body_weight::{Aims, BodyWeight};
 use infrastructure::{SqliteCalendarStore, SqliteCanonicalWeighInStore};
 
+use crate::store::Spanned;
 use crate::{rescheduling::Plans, store::Store};
 
 /// Every canonical weigh-in, and the trend through them.
-pub type Series = BodyWeight<SqliteCanonicalWeighInStore>;
+pub type Series = BodyWeight<Spanned<SqliteCanonicalWeighInStore>>;
 
 /// What the plans intended over this macrocycle's mesocycles, as they now
 /// stand (#689, #800).
-pub type Aimed = Aims<Plans, SqliteCalendarStore>;
+pub type Aimed = Aims<Plans, Spanned<SqliteCalendarStore>>;
 
 /// The series over `store`.
 pub(crate) fn series(store: &Store) -> Series {
-    BodyWeight::new(SqliteCanonicalWeighInStore::new(store.pool().clone()))
+    BodyWeight::new(store.adapter(SqliteCanonicalWeighInStore::new))
 }
 
 /// The aims of `plans`.
 pub(crate) fn aims_over(store: &Store, plans: Plans) -> Aimed {
-    Aims::new(plans, SqliteCalendarStore::new(store.pool().clone()))
+    Aims::new(plans, store.adapter(SqliteCalendarStore::new))
 }

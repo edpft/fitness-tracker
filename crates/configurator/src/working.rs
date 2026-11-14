@@ -14,6 +14,7 @@ use infrastructure::{
     SqliteTrainingDone,
 };
 
+use crate::store::Spanned;
 use crate::{
     body_weight::{self, Aimed},
     composition::{self, ByMethod},
@@ -32,22 +33,22 @@ page! {
     /// the register.
     pub struct Page {
         working: IsItWorking<
-            SqliteOvernightHrvHistory,
-            SqliteRestingHeartRateHistory,
-            SqliteStressHistory,
-            SqliteTrainingDone,
-            GarminRecordedDevices,
-            GarminWear,
+            Spanned<SqliteOvernightHrvHistory>,
+            Spanned<SqliteRestingHeartRateHistory>,
+            Spanned<SqliteStressHistory>,
+            Spanned<SqliteTrainingDone>,
+            Spanned<GarminRecordedDevices>,
+            Spanned<GarminWear>,
             Plans,
         >,
         ftp: ftp_tests::Tests,
         strength: one_rep_max::Tests,
         estimated: one_rep_max::Estimated,
         rides: RideHeartRates<
-            SqliteCanonicalCyclingSessionStore,
-            SqliteFtpHistory,
-            GarminRecordedDevices,
-            GarminWear,
+            Spanned<SqliteCanonicalCyclingSessionStore>,
+            Spanned<SqliteFtpHistory>,
+            Spanned<GarminRecordedDevices>,
+            Spanned<GarminWear>,
         >,
         weight: body_weight::Series,
         aims: Aimed,
@@ -68,14 +69,13 @@ impl Page {
     ///
     /// [`NextFailure`] if the store cannot be read.
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
-        let pool = store.pool();
         let plans = rescheduling::plans(store, zone).await?;
         Ok(Self {
             working: IsItWorking::new(
-                SqliteOvernightHrvHistory::new(pool.clone()),
-                SqliteRestingHeartRateHistory::new(pool.clone()),
-                SqliteStressHistory::new(pool.clone()),
-                SqliteTrainingDone::new(pool.clone()),
+                store.adapter(SqliteOvernightHrvHistory::new),
+                store.adapter(SqliteRestingHeartRateHistory::new),
+                store.adapter(SqliteStressHistory::new),
+                store.adapter(SqliteTrainingDone::new),
                 devices::register(store),
                 plans.clone(),
             )
@@ -84,8 +84,8 @@ impl Page {
             strength: one_rep_max::tests(store, zone).into(),
             estimated: one_rep_max::estimated(store, plans.clone()).into(),
             rides: RideHeartRates::new(
-                SqliteCanonicalCyclingSessionStore::new(pool.clone()),
-                SqliteFtpHistory::new(pool.clone()),
+                store.adapter(SqliteCanonicalCyclingSessionStore::new),
+                store.adapter(SqliteFtpHistory::new),
                 devices::register(store),
             )
             .into(),

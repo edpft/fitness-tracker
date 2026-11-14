@@ -31,4 +31,8 @@ doc-valid-idents = [
 disallowed-methods = [
   { path = "sqlx::Pool::begin", reason = "use `store::writing` or `store::reading` (#608)" },
   { path = "sqlx::Pool::try_begin", reason = "use `store::writing` or `store::reading` (#608)" },
+  # The store is opened as a `configurator::store::Store`, which holds the pool
+  # and hands out each adapter spanned, so that every call through a port is a
+  # `call` span (#816). An adapter's own tests open it raw: they are its ring.
+  { path = "infrastructure::connect", reason = "open a `Store`, which spans each call through a port (#816)" },
 ]

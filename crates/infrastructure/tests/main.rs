@@ -3,6 +3,10 @@
 //! Each file beside this one is a module of it, and the manifest turns off
 //! cargo's discovery of the rest, so a file not named here is not compiled.
 //! The `test-targets` check fails the gate on one.
+#![expect(
+    clippy::disallowed_methods,
+    reason = "an adapter's tests open the store raw: they are the adapter's ring (#816)"
+)]
 
 mod absence_migration;
 mod authored_data;

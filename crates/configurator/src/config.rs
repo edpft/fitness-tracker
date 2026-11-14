@@ -12,6 +12,7 @@ use domain::normalised::OperatorZone;
 use jiff::civil::Date;
 
 use crate::catalogue::{Credential, KnownSource};
+use crate::store::Store;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigError {
@@ -509,13 +510,17 @@ pub fn credentials_at(
 pub async fn stated_timezone(
     database: &std::path::Path,
 ) -> Result<Option<String>, application::StoreError> {
-    let Ok(pool) = infrastructure::connect(database).await else {
+    let Ok(store) = Store::open(database).await else {
         return Ok(None);
     };
-    let stated = infrastructure::SqliteOperatorSettingsStore::new(pool.clone())
-        .timezone()
+    let stated = store
+        .adapter(infrastructure::SqliteOperatorSettingsStore::new)
+        .call(
+            "SqliteOperatorSettingsStore::timezone",
+            infrastructure::SqliteOperatorSettingsStore::timezone,
+        )
         .await;
-    pool.close().await;
+    store.close().await;
     stated
 }
 

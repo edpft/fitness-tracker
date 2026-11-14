@@ -60,7 +60,7 @@ async fn stated_zones(
     store: &Store,
     declared: &OperatorZone,
 ) -> Result<StatedZones, CorrectionError> {
-    Ok(crate::wiring::stated_zones(store.pool(), declared).await?)
+    Ok(crate::wiring::stated_zones(store, declared).await?)
 }
 
 /// Every entry that reads as an exercise within the days given.
@@ -76,8 +76,11 @@ pub async fn reading_as(
     until: Option<Date>,
 ) -> Result<Vec<StandIn>, CorrectionError> {
     let zones = stated_zones(store, zone).await?;
-    Ok(HevyStandIns::new(store.pool().clone())
-        .reading_as(exercise, &zones, from, until)
+    Ok(store
+        .adapter(HevyStandIns::new)
+        .call("HevyStandIns::reading_as", |adapter| {
+            adapter.reading_as(exercise, &zones, from, until)
+        })
         .await?)
 }
 
@@ -92,11 +95,12 @@ pub async fn assert_exercise(
     reason: &CorrectionReason,
     terms: &NonEmpty<CorrectedTerm>,
 ) -> Result<CorrectionId, CorrectionError> {
-    Ok(
-        SqliteEditOverlayStore::new(store.pool().clone(), HevyWorkoutLandingStore::STREAM)?
-            .assert(actually, Timestamp::now(), reason, terms)
-            .await?,
-    )
+    Ok(store
+        .try_adapter_with(SqliteEditOverlayStore::new, HevyWorkoutLandingStore::STREAM)?
+        .call("SqliteEditOverlayStore::assert", |adapter| {
+            adapter.assert(actually, Timestamp::now(), reason, terms)
+        })
+        .await?)
 }
 
 /// Every set recorded with the given figures on a day.
@@ -111,12 +115,18 @@ pub async fn recording(
     on: Date,
 ) -> Result<Vec<FoundSet>, CorrectionError> {
     let zones = stated_zones(store, zone).await?;
-    let mut found = GarminRecordedSets::new(store.pool().clone())
-        .recording(recorded, &zones, on)
+    let mut found = store
+        .adapter(GarminRecordedSets::new)
+        .call("GarminRecordedSets::recording", |adapter| {
+            adapter.recording(recorded, &zones, on)
+        })
         .await?;
     found.extend(
-        infrastructure::hevy::HevyStandIns::new(store.pool().clone())
-            .recording(recorded, &zones, on)
+        store
+            .adapter(infrastructure::hevy::HevyStandIns::new)
+            .call("HevyStandIns::recording", |adapter| {
+                adapter.recording(recorded, &zones, on)
+            })
             .await?,
     );
     Ok(found)
@@ -148,8 +158,11 @@ pub async fn assert_figures(
             continue;
         };
         ids.push(
-            SqliteEditOverlayStore::new(store.pool().clone(), stream)?
-                .assert_figures(recorded, actually, at, reason, &sets)
+            store
+                .try_adapter_with(SqliteEditOverlayStore::new, stream)?
+                .call("SqliteEditOverlayStore::assert_figures", |adapter| {
+                    adapter.assert_figures(recorded, actually, at, reason, &sets)
+                })
                 .await?,
         );
     }
@@ -167,8 +180,9 @@ pub async fn all(store: &Store) -> Result<Vec<Correction>, CorrectionError> {
     let mut corrections = Vec::new();
     for stream in CORRECTED {
         corrections.extend(
-            SqliteEditOverlayStore::new(store.pool().clone(), stream)?
-                .all()
+            store
+                .try_adapter_with(SqliteEditOverlayStore::new, stream)?
+                .call("SqliteEditOverlayStore::all", SqliteEditOverlayStore::all)
                 .await?,
         );
     }
@@ -186,8 +200,11 @@ pub async fn all(store: &Store) -> Result<Vec<Correction>, CorrectionError> {
 /// [`CorrectionError`] if the store cannot be written.
 pub async fn retract(store: &Store, id: CorrectionId) -> Result<bool, CorrectionError> {
     for stream in CORRECTED {
-        if SqliteEditOverlayStore::new(store.pool().clone(), stream)?
-            .retract(id)
+        if store
+            .try_adapter_with(SqliteEditOverlayStore::new, stream)?
+            .call("SqliteEditOverlayStore::retract", |adapter| {
+                adapter.retract(id)
+            })
             .await?
         {
             return Ok(true);

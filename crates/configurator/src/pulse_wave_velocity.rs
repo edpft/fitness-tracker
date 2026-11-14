@@ -8,6 +8,7 @@ use domain::{
 };
 use infrastructure::SqlitePulseWaveVelocityHistory;
 
+use crate::store::Spanned;
 use crate::{
     graph::{page, read},
     next::NextFailure,
@@ -19,7 +20,7 @@ page! {
     /// What the pulse wave velocity page reads: the normalised Body Scan
     /// weigh-ins, whose vascular part holds it, and the ranges.
     pub struct Page {
-        series: PulseWaveVelocities<SqlitePulseWaveVelocityHistory>,
+        series: PulseWaveVelocities<Spanned<SqlitePulseWaveVelocityHistory>>,
         ranges: Current,
     }
 }
@@ -38,10 +39,8 @@ impl Page {
     /// [`NextFailure`] if the store cannot be read.
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
         Ok(Self {
-            series: PulseWaveVelocities::new(SqlitePulseWaveVelocityHistory::new(
-                store.pool().clone(),
-            ))
-            .into(),
+            series: PulseWaveVelocities::new(store.adapter(SqlitePulseWaveVelocityHistory::new))
+                .into(),
             ranges: ranges::over(store, zone).await?.into(),
         })
     }

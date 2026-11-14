@@ -18,6 +18,7 @@ use infrastructure::{
     SqliteCanonicalWeighInStore, SqliteFtpHistory,
 };
 
+use crate::store::Spanned;
 use crate::{
     devices,
     graph::{page, read},
@@ -27,8 +28,11 @@ use crate::{
 };
 
 /// Every test, oldest first, in watts and over body weight.
-pub(crate) type Tests =
-    FtpTests<SqliteCanonicalCyclingSessionStore, SqliteFtpHistory, SqliteCanonicalWeighInStore>;
+pub(crate) type Tests = FtpTests<
+    Spanned<SqliteCanonicalCyclingSessionStore>,
+    Spanned<SqliteFtpHistory>,
+    Spanned<SqliteCanonicalWeighInStore>,
+>;
 
 page! {
     /// What the FTP tests page reads: the canonical rides, the FTP derived
@@ -37,9 +41,9 @@ page! {
     pub struct Page {
         tests: Tests,
         heart_rates: TestHeartRates<
-            SqliteCanonicalCyclingSessionStore,
-            GarminRecordedDevices,
-            GarminWear,
+            Spanned<SqliteCanonicalCyclingSessionStore>,
+            Spanned<GarminRecordedDevices>,
+            Spanned<GarminWear>,
         >,
         ranges: Current,
     }
@@ -53,11 +57,10 @@ pub fn collects() -> Scope {
 
 /// The tests over `store`.
 pub(crate) fn over(store: &Store) -> Tests {
-    let pool = store.pool();
     FtpTests::new(
-        SqliteCanonicalCyclingSessionStore::new(pool.clone()),
-        SqliteFtpHistory::new(pool.clone()),
-        SqliteCanonicalWeighInStore::new(pool.clone()),
+        store.adapter(SqliteCanonicalCyclingSessionStore::new),
+        store.adapter(SqliteFtpHistory::new),
+        store.adapter(SqliteCanonicalWeighInStore::new),
     )
 }
 
@@ -71,7 +74,7 @@ impl Page {
         Ok(Self {
             tests: over(store).into(),
             heart_rates: TestHeartRates::new(
-                SqliteCanonicalCyclingSessionStore::new(store.pool().clone()),
+                store.adapter(SqliteCanonicalCyclingSessionStore::new),
                 devices::register(store),
             )
             .into(),

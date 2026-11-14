@@ -33,18 +33,19 @@ use infrastructure::{
     SqliteDerivationLedger, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
     SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
     SqliteNormalisedCyclingSessionReader, SqliteNormalisedGymSessionReader,
-    SqliteNormalisedWeighInReader, SqlitePelotonClassStore, SqlitePlanStore,
-    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, connect,
+    SqliteNormalisedWeighInReader, SqlitePlanStore, SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore,
     peloton::{
         PelotonClassSource, PelotonHoldingRides, PelotonProgrammes, PelotonRideDestination,
         catalogue::ClassCatalogue,
     },
 };
 
+use crate::store::{Spanned, Store};
 use crate::{
     access, catalogue,
     config::{SourceAccess, source_access_for},
-    telemetry::{self, Run, Spanned},
+    telemetry::{self, Run},
     wiring::{self, Command, Outcome, SystemClock, Unreported, WiringError},
 };
 
@@ -85,7 +86,7 @@ pub async fn run(
 ) -> Result<Report, NextFailure> {
     let if_going = run.if_going();
     let refetch = run.refetch();
-    let spanned = Spanned::new(progress, run.span);
+    let spanned = telemetry::Spanned::new(progress, run.span);
     let answered = over(
         database,
         zone,
@@ -127,7 +128,7 @@ pub async fn collect(
     progress: &(impl Progress + Sync),
 ) -> Result<Vec<Done>, NextFailure> {
     let refetch = run.refetch();
-    let spanned = Spanned::new(progress, run.span);
+    let spanned = telemetry::Spanned::new(progress, run.span);
     let answered = over(
         database,
         zone,
@@ -244,7 +245,7 @@ async fn over(
     asked: Asked<'_>,
     progress: &(impl Progress + Sync),
 ) -> Result<Answered, NextFailure> {
-    let pool = connect(database).await?;
+    let store = Store::open(database).await?;
 
     // **This build collects the gym from Hevy and cycling from Peloton**, and
     // the catalogue says so: a second source for either is an entry there and
@@ -265,12 +266,12 @@ async fn over(
         detail: error.to_string(),
     };
     let peloton = access::peloton(credentials);
-    let stored = SqlitePelotonClassStore::new(pool.clone());
+    let stored = store.peloton_classes();
     let classes = peloton.as_ref().ok().map(|peloton| &peloton.classes);
     let catalogue = ClassCatalogue::over(&stored, classes);
     let class_source = peloton
         .as_ref()
-        .map(|peloton| PelotonClassSource::new(&peloton.classes, &stored))
+        .map(|peloton| Spanned::new(PelotonClassSource::new(&peloton.classes, &stored)))
         .map_err(unreachable);
     let ride_destination = peloton
         .as_ref()
@@ -279,9 +280,9 @@ async fn over(
     let gym_destination = access::hevy_routines(known(Discipline::Gym)?.delivers_to(), credentials)
         .map_err(|error| unreachable(&error));
 
-    let plans = SqlitePlanStore::new(pool.clone(), zone.clone());
-    let parameters = SqliteGenerationParameterStore::new(pool.clone());
-    let deliveries = SqlitePrescriptionDeliveryStore::new(pool.clone());
+    let plans = store.adapter_with(SqlitePlanStore::new, zone.clone());
+    let parameters = store.adapter(SqliteGenerationParameterStore::new);
+    let deliveries = store.adapter(SqlitePrescriptionDeliveryStore::new);
     let next = Next::new(NextPorts {
         gym_records,
         cycling_records,
@@ -292,46 +293,47 @@ async fn over(
             database: database.to_path_buf(),
             zone: zone.clone(),
         },
-        canonical: canonical(&pool),
-        ledger: SqliteDerivationLedger::new(pool.clone()),
+        canonical: canonical(&store),
+        ledger: store.adapter(SqliteDerivationLedger::new),
         classes: class_source,
-        holidays: crate::holidays::calendars(&pool),
-        diary: SqliteDiaryStore::new(pool.clone()),
+        holidays: crate::holidays::calendars(&store),
+        diary: store.adapter(SqliteDiaryStore::new),
         plans: plans.clone(),
         microcycle: microcycle(
-            &pool,
+            &store,
             &plans,
             &deliveries,
-            crate::holidays::term(&pool).await,
+            crate::holidays::term(&store).await,
         )?,
         committing: Committing::new(
             CommitPorts {
                 plans: plans.clone(),
                 parameters: parameters.clone(),
-                holding: PelotonHoldingRides::new(catalogue),
-                ridden: SqliteCanonicalCyclingSessionStore::new(pool.clone()),
-                published: PelotonProgrammes::new(catalogue),
+                holding: Spanned::new(PelotonHoldingRides::new(catalogue)),
+                ridden: store.adapter(SqliteCanonicalCyclingSessionStore::new),
+                published: Spanned::new(PelotonProgrammes::new(catalogue)),
             },
             zone.clone(),
         ),
         gym: GymPorts {
-            history: SqliteExerciseHistory::new(pool.clone()),
-            mesocycles: SqliteGymMesocycleStore::new(pool.clone(), zone.clone()),
+            history: store.adapter(SqliteExerciseHistory::new),
+            mesocycles: store.adapter_with(SqliteGymMesocycleStore::new, zone.clone()),
             plans,
             parameters,
-            prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
+            prescriptions: store
+                .adapter_with(SqlitePrescribedWorkoutStore::new, zone.id().to_owned()),
             lifecycle: deliveries.clone(),
             deliveries,
             destination: gym_destination,
         },
         cycling: CyclingPorts {
-            riding: riding(&pool, zone, catalogue)?,
+            riding: riding(&store, zone, catalogue)?,
             destination: ride_destination,
         },
         // Beside the store, as extraction's are: a copy of the store elsewhere
         // is a separate system with its own lock.
         lock: FileRunLock::beside(database),
-        fetches: Fetches(SqliteExtractionRunLog::new(pool.clone())),
+        fetches: Fetches(store.adapter(SqliteExtractionRunLog::new)),
         zone: zone.clone(),
         refetch,
     });
@@ -363,14 +365,14 @@ pub fn prescribed_from(discipline: Discipline) -> Scope {
 }
 
 /// Each canonical layer, and the normalised layers it is built from.
-pub(crate) fn canonical(pool: &infrastructure::SqlitePool) -> crate::graph::Canonical {
+pub(crate) fn canonical(store: &Store) -> crate::graph::Canonical {
     CanonicalPorts {
-        normalised_gym: SqliteNormalisedGymSessionReader::new(pool.clone()),
-        canonical_gym: SqliteCanonicalGymSessionStore::new(pool.clone()),
-        normalised_cycling: SqliteNormalisedCyclingSessionReader::new(pool.clone()),
-        canonical_cycling: SqliteCanonicalCyclingSessionStore::new(pool.clone()),
-        normalised_weigh_ins: SqliteNormalisedWeighInReader::new(pool.clone()),
-        canonical_weigh_ins: SqliteCanonicalWeighInStore::new(pool.clone()),
+        normalised_gym: store.adapter(SqliteNormalisedGymSessionReader::new),
+        canonical_gym: store.adapter(SqliteCanonicalGymSessionStore::new),
+        normalised_cycling: store.adapter(SqliteNormalisedCyclingSessionReader::new),
+        canonical_cycling: store.adapter(SqliteCanonicalCyclingSessionStore::new),
+        normalised_weigh_ins: store.adapter(SqliteNormalisedWeighInReader::new),
+        canonical_weigh_ins: store.adapter(SqliteCanonicalWeighInStore::new),
     }
 }
 
@@ -391,29 +393,19 @@ pub fn build() -> Option<&'static str> {
 
 /// Where the plan stands, over this build's stores.
 pub(crate) fn microcycle(
-    pool: &infrastructure::SqlitePool,
-    plans: &SqlitePlanStore,
-    deliveries: &SqlitePrescriptionDeliveryStore,
+    store: &Store,
+    plans: &Spanned<SqlitePlanStore>,
+    deliveries: &Spanned<SqlitePrescriptionDeliveryStore>,
     term: Option<application::microcycle::Term>,
-) -> Result<
-    Microcycle<
-        SqliteDiaryStore,
-        SqlitePlanStore,
-        SqlitePrescriptionDeliveryStore,
-        SqliteCyclingDeliveryStore,
-        SqliteCanonicalGymSessionStore,
-        SqliteCanonicalCyclingSessionStore,
-    >,
-    NextFailure,
-> {
+) -> Result<crate::rescheduling::Microcycle, NextFailure> {
     let walk = Microcycle::new(
         MicrocyclePorts {
-            diary: SqliteDiaryStore::new(pool.clone()),
+            diary: store.adapter(SqliteDiaryStore::new),
             plans: plans.clone(),
             gym_deliveries: deliveries.clone(),
-            cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
-            gym_performed: SqliteCanonicalGymSessionStore::new(pool.clone()),
-            cycling_performed: SqliteCanonicalCyclingSessionStore::new(pool.clone()),
+            cycling_deliveries: store.adapter(SqliteCyclingDeliveryStore::new),
+            gym_performed: store.adapter(SqliteCanonicalGymSessionStore::new),
+            cycling_performed: store.adapter(SqliteCanonicalCyclingSessionStore::new),
         },
         destination(Discipline::Gym)?,
         destination(Discipline::Cycling)?,
@@ -426,7 +418,7 @@ pub(crate) fn microcycle(
 
 /// The extraction run log, read for when each stream was last fetched, and
 /// the clock that says how long ago that was (#612).
-struct Fetches(SqliteExtractionRunLog);
+struct Fetches(Spanned<SqliteExtractionRunLog>);
 
 impl FetchLog for Fetches {
     async fn fetched(&self, stream: &LandingStream) -> Result<Fetched, StoreError> {
@@ -545,12 +537,12 @@ pub const WATCH: &str = "garmin.activities";
 
 /// The cycling use case, over this build's stores and catalogue.
 pub type Riding<'a> = application::cycling::Riding<
-    SqliteCyclingMesocycleStore,
-    SqlitePlanStore,
-    PelotonHoldingRides<'a>,
-    SqliteCanonicalCyclingSessionStore,
-    SqliteFtpHistory,
-    SqliteCyclingDeliveryStore,
+    Spanned<SqliteCyclingMesocycleStore>,
+    Spanned<SqlitePlanStore>,
+    Spanned<PelotonHoldingRides<'a>>,
+    Spanned<SqliteCanonicalCyclingSessionStore>,
+    Spanned<SqliteFtpHistory>,
+    Spanned<SqliteCyclingDeliveryStore>,
 >;
 
 /// The cycling use case, over this build's stores and catalogue.
@@ -559,18 +551,18 @@ pub type Riding<'a> = application::cycling::Riding<
 ///
 /// [`NextFailure`] if the catalogue names no destination for cycling.
 pub fn riding<'a>(
-    pool: &infrastructure::SqlitePool,
+    store: &Store,
     zone: &OperatorZone,
     catalogue: ClassCatalogue<'a>,
 ) -> Result<Riding<'a>, NextFailure> {
     Ok(Riding::new(
         RidingPorts {
-            mesocycles: SqliteCyclingMesocycleStore::new(pool.clone()),
-            plans: SqlitePlanStore::new(pool.clone(), zone.clone()),
-            holding: PelotonHoldingRides::new(catalogue),
-            ridden: SqliteCanonicalCyclingSessionStore::new(pool.clone()),
-            ftp: SqliteFtpHistory::new(pool.clone()),
-            deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
+            mesocycles: store.adapter(SqliteCyclingMesocycleStore::new),
+            plans: store.adapter_with(SqlitePlanStore::new, zone.clone()),
+            holding: Spanned::new(PelotonHoldingRides::new(catalogue)),
+            ridden: store.adapter(SqliteCanonicalCyclingSessionStore::new),
+            ftp: store.adapter(SqliteFtpHistory::new),
+            deliveries: store.adapter(SqliteCyclingDeliveryStore::new),
         },
         destination(Discipline::Cycling)?,
     ))

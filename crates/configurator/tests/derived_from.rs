@@ -4,6 +4,10 @@
 //! **A correction is one of the layer's inputs**, so asserting one moves them
 //! and retracting it moves them back: the layer derived under the correction
 //! is then not the one the inputs describe, and is derived again.
+#![expect(
+    clippy::disallowed_methods,
+    reason = "what a derivation reads from is authored straight into the store it opens"
+)]
 
 use configurator::{catalogue, wiring};
 use domain::{

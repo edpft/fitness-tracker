@@ -18,6 +18,7 @@ use infrastructure::{
 };
 use jiff::civil::Date;
 
+use crate::store::Spanned;
 use crate::{
     next::NextFailure,
     rescheduling::{self, GymMesocycles},
@@ -38,11 +39,11 @@ pub async fn mesocycles(
 
 /// The gym's prescribing, against the plan as it now stands.
 pub type Prescriber = Prescribing<
-    SqliteExerciseHistory,
+    Spanned<SqliteExerciseHistory>,
     GymMesocycles,
-    SqliteGenerationParameterStore,
-    SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore,
+    Spanned<SqliteGenerationParameterStore>,
+    Spanned<SqlitePrescribedWorkoutStore>,
+    Spanned<SqlitePrescriptionDeliveryStore>,
 >;
 
 /// Prescribing, against the plan as it now stands.
@@ -51,13 +52,12 @@ pub type Prescriber = Prescribing<
 ///
 /// [`NextFailure`] if the store cannot be read.
 pub async fn prescriber(store: &Store, zone: &OperatorZone) -> Result<Prescriber, NextFailure> {
-    let pool = store.pool();
     Ok(Prescribing::new(PrescriptionPorts {
-        history: SqliteExerciseHistory::new(pool.clone()),
+        history: store.adapter(SqliteExerciseHistory::new),
         mesocycles: rescheduling::gym(store, zone).await?,
-        parameters: SqliteGenerationParameterStore::new(pool.clone()),
-        prescriptions: SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
-        lifecycle: SqlitePrescriptionDeliveryStore::new(pool.clone()),
+        parameters: store.adapter(SqliteGenerationParameterStore::new),
+        prescriptions: store.adapter_with(SqlitePrescribedWorkoutStore::new, zone.id().to_owned()),
+        lifecycle: store.adapter(SqlitePrescriptionDeliveryStore::new),
     }))
 }
 

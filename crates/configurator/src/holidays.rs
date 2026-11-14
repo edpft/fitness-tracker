@@ -6,10 +6,9 @@
 
 use application::{HolidayCalendar as _, SourceError, microcycle::Term};
 use domain::schedule::Holidays;
-use infrastructure::{
-    BankHolidays, GOV_UK_BANK_HOLIDAYS, SchoolCalendar, SqliteCalendarStore, SqlitePool,
-};
+use infrastructure::{BankHolidays, GOV_UK_BANK_HOLIDAYS, SchoolCalendar, SqliteCalendarStore};
 
+use crate::store::Spanned;
 use crate::store::Store;
 
 /// The school the operator's family follows, and the iCal feed its website
@@ -19,12 +18,12 @@ const SCHOOL_CALENDAR: &str = "https://hemplandprimary.co.uk/?rhc_action=get_ica
 
 /// Both calendars: kept in the store, and asked of the school and gov.uk.
 pub type Calendars =
-    application::calendars::Calendars<SqliteCalendarStore, SchoolCalendar, BankHolidays>;
+    application::calendars::Calendars<Spanned<SqliteCalendarStore>, SchoolCalendar, BankHolidays>;
 
-/// Both calendars, over the store in `pool`.
-pub(crate) fn calendars(pool: &SqlitePool) -> Calendars {
+/// Both calendars, over `store`.
+pub(crate) fn calendars(store: &Store) -> Calendars {
     Calendars::new(
-        SqliteCalendarStore::new(pool.clone()),
+        store.adapter(SqliteCalendarStore::new),
         SchoolCalendar::new(SCHOOL_CALENDAR),
         BankHolidays::new(GOV_UK_BANK_HOLIDAYS),
     )
@@ -37,7 +36,7 @@ pub(crate) fn calendars(pool: &SqlitePool) -> Calendars {
 /// [`SourceError`] if either has not been fetched yet, or what was kept
 /// cannot be read.
 pub async fn holidays(store: &Store) -> Result<Holidays, SourceError> {
-    calendars(store.pool()).holidays().await
+    calendars(store).holidays().await
 }
 
 /// What the walk through the plan starts a programme again against (#732):
@@ -45,9 +44,9 @@ pub async fn holidays(store: &Store) -> Result<Holidays, SourceError> {
 ///
 /// `None` where either calendar has not been fetched yet. Nothing starts again
 /// then, and a re-run lengthens its mesocycle as it did before.
-pub async fn term(pool: &SqlitePool) -> Option<Term> {
+pub async fn term(store: &Store) -> Option<Term> {
     Some(Term {
-        holidays: calendars(pool).holidays().await.ok()?,
+        holidays: calendars(store).holidays().await.ok()?,
         identify: infrastructure::peloton::provider::identify,
     })
 }

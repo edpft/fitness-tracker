@@ -10,15 +10,16 @@
 use application::devices::DeviceRegister;
 use infrastructure::{GarminRecordedDevices, GarminWear};
 
+use crate::store::Spanned;
 use crate::store::Store;
 
 /// Every device the record identifies, and the days a watch was worn.
-pub type Register = DeviceRegister<GarminRecordedDevices, GarminWear>;
+pub type Register = DeviceRegister<Spanned<GarminRecordedDevices>, Spanned<GarminWear>>;
 
 /// The register over `store`.
 pub(crate) fn register(store: &Store) -> Register {
     DeviceRegister::new(
-        GarminRecordedDevices::new(store.pool().clone()),
-        GarminWear::new(store.pool().clone()),
+        store.adapter(GarminRecordedDevices::new),
+        store.adapter(GarminWear::new),
     )
 }

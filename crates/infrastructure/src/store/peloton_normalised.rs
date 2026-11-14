@@ -797,21 +797,22 @@ impl application::FtpHistory for SqliteFtpHistory {
 /// from the ride table alone would report a derivation that has read 903
 /// records as having read 477, and never show it falling behind.
 #[derive(Debug, Clone)]
-pub struct PelotonRawExtent {
-    rides: PelotonRideLandingStore,
-    samples: PelotonRideSampleLandingStore,
+pub struct PelotonRawExtent<R = PelotonRideLandingStore, S = PelotonRideSampleLandingStore> {
+    rides: R,
+    samples: S,
 }
 
-impl PelotonRawExtent {
-    pub const fn new(
-        rides: PelotonRideLandingStore,
-        samples: PelotonRideSampleLandingStore,
-    ) -> Self {
+impl<R, S> PelotonRawExtent<R, S> {
+    pub const fn new(rides: R, samples: S) -> Self {
         Self { rides, samples }
     }
 }
 
-impl application::RawExtent for PelotonRawExtent {
+impl<R, S> application::RawExtent for PelotonRawExtent<R, S>
+where
+    R: application::LandingStore + Sync,
+    S: application::LandingStore + Sync,
+{
     async fn records(&self) -> Result<domain::landing::RecordCount, StoreError> {
         let rides = application::LandingStore::count(&self.rides).await?;
         let samples = application::LandingStore::count(&self.samples).await?;

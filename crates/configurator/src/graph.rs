@@ -34,6 +34,7 @@ use infrastructure::{
     WithingsWeighInTranslator, peloton::PelotonSessionTranslator,
 };
 
+use crate::store::Spanned;
 use crate::wiring::SystemClock;
 
 /// A struct of what something reads through, which reads what each of them
@@ -106,46 +107,77 @@ macro_rules! read {
 pub(crate) use read;
 
 /// A stream's normalisation, over this build's run log and refusals.
-type Normalising<R, T, W> =
-    Normalisation<R, T, W, SqliteRefusalStore, SqliteNormalisationRunLog, SystemClock>;
-
-pub(crate) type HevyWorkouts =
-    Normalising<HevySessionAccountReader, HevySessionTranslator, SqliteGymSessionStore>;
-pub(crate) type PelotonRides =
-    Normalising<PelotonSessionAccountReader, PelotonSessionTranslator, SqliteCyclingSessionStore>;
-pub(crate) type WithingsMeasurements =
-    Normalising<WithingsWeighInAccountReader, WithingsWeighInTranslator, SqliteWeighInStore>;
-pub(crate) type GarminHrv =
-    Normalising<GarminHrvAccountReader, GarminHrvTranslator, SqliteOvernightHrvStore>;
-pub(crate) type GarminActivities =
-    Normalising<GarminGymAccountReader, GarminActivityTranslator, SqliteGarminActivityStore>;
-pub(crate) type GarminDailyHeartRate = Normalising<
-    GarminDailyHeartRateAccountReader,
-    GarminDailyHeartRateTranslator,
-    SqliteDailyHeartRateStore,
+type Normalising<R, T, W> = Normalisation<
+    R,
+    T,
+    W,
+    Spanned<SqliteRefusalStore>,
+    Spanned<SqliteNormalisationRunLog>,
+    SystemClock,
 >;
-pub(crate) type GarminSleep =
-    Normalising<GarminSleepAccountReader, GarminSleepTranslator, SqliteSleepStore>;
-pub(crate) type GarminDailySummary =
-    Normalising<GarminDailySummaryAccountReader, GarminStressTranslator, SqliteStressStore>;
-pub(crate) type Spreadsheets =
-    Normalising<SpreadsheetFileAccountReader, SpreadsheetTranslator, SqliteSpreadsheetStore>;
-pub(crate) type Btwb = Normalising<BtwbExportAccountReader, BtwbTranslator, SqliteBtwbStore>;
+
+pub(crate) type HevyWorkouts = Normalising<
+    Spanned<HevySessionAccountReader>,
+    HevySessionTranslator,
+    Spanned<SqliteGymSessionStore>,
+>;
+pub(crate) type PelotonRides = Normalising<
+    Spanned<PelotonSessionAccountReader>,
+    PelotonSessionTranslator,
+    Spanned<SqliteCyclingSessionStore>,
+>;
+pub(crate) type WithingsMeasurements = Normalising<
+    Spanned<WithingsWeighInAccountReader>,
+    WithingsWeighInTranslator,
+    Spanned<SqliteWeighInStore>,
+>;
+pub(crate) type GarminHrv = Normalising<
+    Spanned<GarminHrvAccountReader>,
+    GarminHrvTranslator,
+    Spanned<SqliteOvernightHrvStore>,
+>;
+pub(crate) type GarminActivities = Normalising<
+    Spanned<GarminGymAccountReader>,
+    GarminActivityTranslator,
+    Spanned<SqliteGarminActivityStore>,
+>;
+pub(crate) type GarminDailyHeartRate = Normalising<
+    Spanned<GarminDailyHeartRateAccountReader>,
+    GarminDailyHeartRateTranslator,
+    Spanned<SqliteDailyHeartRateStore>,
+>;
+pub(crate) type GarminSleep = Normalising<
+    Spanned<GarminSleepAccountReader>,
+    GarminSleepTranslator,
+    Spanned<SqliteSleepStore>,
+>;
+pub(crate) type GarminDailySummary = Normalising<
+    Spanned<GarminDailySummaryAccountReader>,
+    GarminStressTranslator,
+    Spanned<SqliteStressStore>,
+>;
+pub(crate) type Spreadsheets = Normalising<
+    Spanned<SpreadsheetFileAccountReader>,
+    SpreadsheetTranslator,
+    Spanned<SqliteSpreadsheetStore>,
+>;
+pub(crate) type Btwb =
+    Normalising<Spanned<BtwbExportAccountReader>, BtwbTranslator, Spanned<SqliteBtwbStore>>;
 pub(crate) type MyFitnessPal = Normalising<
-    MyFitnessPalExportAccountReader,
+    Spanned<MyFitnessPalExportAccountReader>,
     MyFitnessPalWeighInTranslator,
-    SqliteMyFitnessPalStore,
+    Spanned<SqliteMyFitnessPalStore>,
 >;
 
 /// Each canonical layer, and the reader of the normalised layer it is built
 /// from.
 pub(crate) type Canonical = CanonicalPorts<
-    SqliteNormalisedGymSessionReader,
-    SqliteCanonicalGymSessionStore,
-    SqliteNormalisedCyclingSessionReader,
-    SqliteCanonicalCyclingSessionStore,
-    SqliteNormalisedWeighInReader,
-    SqliteCanonicalWeighInStore,
+    Spanned<SqliteNormalisedGymSessionReader>,
+    Spanned<SqliteCanonicalGymSessionStore>,
+    Spanned<SqliteNormalisedCyclingSessionReader>,
+    Spanned<SqliteCanonicalCyclingSessionStore>,
+    Spanned<SqliteNormalisedWeighInReader>,
+    Spanned<SqliteCanonicalWeighInStore>,
 >;
 
 /// The normalised layer of the stream named `name`, derived by `D`, and each
