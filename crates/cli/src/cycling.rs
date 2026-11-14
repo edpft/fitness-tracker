@@ -21,8 +21,6 @@
 //! zones still print, because a session that cannot say what a zone is in watts
 //! is still the session to ride.
 
-use std::path::Path;
-
 use application::{
     PlanAuthor as _, PlanStore as _, RidesPlaced,
     cycling::{PrescribedRide, RideDeliveryError, RidingError},
@@ -65,14 +63,13 @@ use crate::{Failure, exit, output};
 /// date, if the programmes that do have no riding day left, or if the session
 /// cannot be delivered.
 pub async fn next(
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     from: Date,
     ftp: Option<Ftp>,
     to: Result<&Peloton, &str>,
 ) -> Result<(), Failure> {
-    let store = Store::open(database).await?;
-    let ride = configurator::cycling::prescribed(&store, zone, from, ftp, to.ok())
+    let ride = configurator::cycling::prescribed(store, zone, from, ftp, to.ok())
         .await?
         .map_err(|error| riding_failure(from, &error))?;
 
@@ -85,7 +82,7 @@ pub async fn next(
         // so there was no way through from it at all (#121). What it replaced
         // is said, not silently discarded.
         Ok(peloton) => {
-            let placed = configurator::cycling::deliver(&store, zone, &ride, peloton, true)
+            let placed = configurator::cycling::deliver(store, zone, &ride, peloton, true)
                 .await?
                 .map_err(|error| delivery_failure(&error))?;
             delivered(&ride, &placed);
@@ -270,14 +267,13 @@ pub fn session(ride: &PrescribedRide) {
 /// date, if Peloton will not answer, or if the stack holds something and
 /// `replace` was not given.
 pub async fn deliver(
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     from: Date,
     replace: bool,
     peloton: &Peloton,
 ) -> Result<(), Failure> {
-    let store = Store::open(database).await?;
-    let ride = configurator::cycling::prescribed(&store, zone, from, None, Some(peloton))
+    let ride = configurator::cycling::prescribed(store, zone, from, None, Some(peloton))
         .await?
         .map_err(|error| riding_failure(from, &error))?;
 
@@ -288,7 +284,7 @@ pub async fn deliver(
         ride.next.date
     );
     println!();
-    let placed = configurator::cycling::deliver(&store, zone, &ride, peloton, replace)
+    let placed = configurator::cycling::deliver(store, zone, &ride, peloton, replace)
         .await?
         .map_err(|error| delivery_failure(&error))?;
     delivered(&ride, &placed);
@@ -353,12 +349,11 @@ fn whoever(instructor: Option<&str>) -> String {
 /// [`Failure`] if the store is unavailable, if no plan covers the week, if
 /// Peloton cannot be reached, or if every candidate class has been ridden.
 pub async fn hold(
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     start: Date,
     peloton: &Peloton,
 ) -> Result<(), Failure> {
-    let store = Store::open(database).await?;
     let plans = store.plans(zone);
 
     // The Monday of the week asked for. A microcycle begins on a Monday and a
@@ -391,7 +386,7 @@ pub async fn hold(
         })?;
 
     let held = configurator::cycling::holding(
-        &store,
+        store,
         peloton,
         start,
         SessionRole::new(Relative::Higher, Relative::Lower),

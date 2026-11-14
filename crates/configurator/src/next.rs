@@ -4,7 +4,6 @@
 //! adapters it runs over, so `cli` and `web` start the same run and neither
 //! composes it for itself (#398).
 
-use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use tracing::Instrument as _;
@@ -28,7 +27,7 @@ use domain::{
     schedule::DayPart,
 };
 use infrastructure::{
-    FileRunLock, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
+    SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
     SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteCyclingMesocycleStore,
     SqliteDerivationLedger, SqliteDiaryStore, SqliteExerciseHistory, SqliteExtractionRunLog,
     SqliteFtpHistory, SqliteGenerationParameterStore, SqliteGymMesocycleStore,
@@ -76,7 +75,7 @@ pub enum NextFailure {
 /// source that cannot be reached is a failed step in the report and nothing
 /// more (§ 36).
 pub async fn run(
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     credentials: &infrastructure::Credentials,
     now: DayPart,
@@ -88,7 +87,7 @@ pub async fn run(
     let refetch = run.refetch();
     let spanned = telemetry::Spanned::new(progress, run.span);
     let answered = over(
-        database,
+        store,
         zone,
         credentials,
         refetch,
@@ -119,7 +118,7 @@ pub async fn run(
 /// [`NextFailure`] if the store or a lock is unavailable. A source that cannot
 /// be reached is a failed step and nothing more (§ 36).
 pub async fn collect(
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     credentials: &infrastructure::Credentials,
     now: DayPart,
@@ -130,7 +129,7 @@ pub async fn collect(
     let refetch = run.refetch();
     let spanned = telemetry::Spanned::new(progress, run.span);
     let answered = over(
-        database,
+        store,
         zone,
         credentials,
         refetch,
@@ -154,7 +153,7 @@ pub async fn collect(
 ///
 /// [`NextFailure`] if the store is unavailable.
 pub async fn wanted(
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     credentials: &infrastructure::Credentials,
     now: DayPart,
@@ -163,7 +162,7 @@ pub async fn wanted(
 ) -> Result<bool, NextFailure> {
     use tracing::Instrument as _;
     match over(
-        database,
+        store,
         zone,
         credentials,
         frontend.refetch(),
@@ -200,8 +199,9 @@ impl Progress for Unheard {
 /// # Errors
 ///
 /// [`RunLockError::Unavailable`] if a lock cannot be tried.
-pub fn collecting(database: &Path, scope: &Scope) -> Result<bool, RunLockError> {
-    FileRunLock::beside(database)
+pub fn collecting(store: &Store, scope: &Scope) -> Result<bool, RunLockError> {
+    store
+        .run_lock()
         .held(scope.parts())
         .map(|held| !held.is_empty())
 }
@@ -238,26 +238,23 @@ fn unreachable_answer<T>() -> Result<T, NextFailure> {
 
 /// The use case over this build's adapters, asked `asked`.
 async fn over(
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     credentials: &infrastructure::Credentials,
     refetch: Refetch,
     asked: Asked<'_>,
     progress: &(impl Progress + Sync),
 ) -> Result<Answered, NextFailure> {
-    let store = Store::open(database).await?;
-
     // **This build collects the gym from Hevy and cycling from Peloton**, and
     // the catalogue says so: a second source for either is an entry there and
     // an arm in `wiring`.
     let gym = access_to(known(Discipline::Gym)?.collects(), credentials);
-    let gym_records = wiring::hevy_records(gym, database).await?;
+    let gym_records = wiring::hevy_records(gym, store)?;
     let cycling = access_to(known(Discipline::Cycling)?.collects(), credentials);
-    let cycling_records = wiring::peloton_records(cycling, database).await?;
-    let weigh_in_records =
-        wiring::withings_records(stream_access(WEIGH_INS, credentials), database).await?;
+    let cycling_records = wiring::peloton_records(cycling, store)?;
+    let weigh_in_records = wiring::withings_records(stream_access(WEIGH_INS, credentials), store)?;
     let (watch_records, watch_days) =
-        wiring::garmin_records(stream_access(WATCH, credentials), database).await?;
+        wiring::garmin_records(stream_access(WATCH, credentials), store)?;
 
     // **A credential that is absent costs what needs it, and nothing else.**
     // The catalogue answers choosing a class and building a mesocycle without
@@ -290,20 +287,20 @@ async fn over(
         watch_records,
         watch_days,
         normalised: Layers {
-            database: database.to_path_buf(),
+            store: store.clone(),
             zone: zone.clone(),
         },
-        canonical: canonical(&store),
+        canonical: canonical(store),
         ledger: store.adapter(SqliteDerivationLedger::new),
         classes: class_source,
-        holidays: crate::holidays::calendars(&store),
+        holidays: crate::holidays::calendars(store),
         diary: store.adapter(SqliteDiaryStore::new),
         plans: plans.clone(),
         microcycle: microcycle(
-            &store,
+            store,
             &plans,
             &deliveries,
-            crate::holidays::term(&store).await,
+            crate::holidays::term(store).await,
         )?,
         committing: Committing::new(
             CommitPorts {
@@ -327,12 +324,12 @@ async fn over(
             destination: gym_destination,
         },
         cycling: CyclingPorts {
-            riding: riding(&store, zone, catalogue)?,
+            riding: riding(store, zone, catalogue)?,
             destination: ride_destination,
         },
         // Beside the store, as extraction's are: a copy of the store elsewhere
         // is a separate system with its own lock.
-        lock: FileRunLock::beside(database),
+        lock: store.run_lock(),
         fetches: Fetches(store.adapter(SqliteExtractionRunLog::new)),
         zone: zone.clone(),
         refetch,
@@ -435,7 +432,7 @@ impl Clock for Fetches {
 /// Every stream this build derives, each through its own arm of
 /// [`wiring::run`], which is also how one is derived from the command line.
 struct Layers {
-    database: PathBuf,
+    store: Store,
     zone: OperatorZone,
 }
 
@@ -468,7 +465,7 @@ impl NormalisedLayers for Layers {
 
     async fn inputs(&self, stream: &LandingStream) -> Result<DerivedFrom, StoreError> {
         let known = Self::known(stream).map_err(|error| unavailable(&error))?;
-        wiring::inputs(known, &self.database, &self.zone)
+        wiring::inputs(known, &self.store, &self.zone)
             .await
             .map_err(|error| unavailable(&error))
     }
@@ -485,7 +482,7 @@ impl NormalisedLayers for Layers {
         match wiring::run(
             Command::Normalise(self.zone.clone(), Rederivation::Incremental),
             known,
-            &self.database,
+            &self.store,
             &Unreported,
         )
         .await
@@ -714,17 +711,28 @@ mod tests {
         use application::{NextLock as _, Taken};
 
         let directory = tempfile::TempDir::new().expect("a temporary directory");
-        let database = directory.path().join("fitness.db");
+        let store = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime")
+            .block_on(crate::store::Store::open(
+                &directory.path().join("fitness.db"),
+            ))
+            .expect("a store");
         let one_rep_max = one_rep_max::collects();
         let history = history::collects();
-        assert!(!super::collecting(&database, &one_rep_max).expect("tried"));
+        assert!(!super::collecting(&store, &one_rep_max).expect("tried"));
 
-        let Ok(Taken::All(_running)) = infrastructure::FileRunLock::beside(&database).try_acquire(
-            &std::collections::BTreeSet::from([Part::Canonicalising(CanonicalLayer::WeighIns)]),
-        ) else {
+        let Ok(Taken::All(_running)) =
+            store
+                .run_lock()
+                .try_acquire(&std::collections::BTreeSet::from([Part::Canonicalising(
+                    CanonicalLayer::WeighIns,
+                )]))
+        else {
             panic!("the run takes its part");
         };
-        assert!(super::collecting(&database, &one_rep_max).expect("tried"));
-        assert!(!super::collecting(&database, &history).expect("tried"));
+        assert!(super::collecting(&store, &one_rep_max).expect("tried"));
+        assert!(!super::collecting(&store, &history).expect("tried"));
     }
 }

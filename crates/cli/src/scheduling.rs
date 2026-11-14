@@ -24,7 +24,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     io::{IsTerminal, Write},
     num::NonZeroU8,
-    path::Path,
 };
 
 use application::{ScheduleError, schedule::weekdays};
@@ -205,14 +204,8 @@ fn no(typed: &str) -> bool {
     matches!(typed.to_lowercase().as_str(), "n" | "no")
 }
 
-async fn store(database: &Path) -> Result<Store, Failure> {
-    Store::open(database)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))
-}
-
 /// Ask for the ordinary pattern and record it.
-pub async fn add(database: &Path) -> Result<(), Failure> {
+pub async fn add(store: &Store) -> Result<(), Failure> {
     interactive()?;
 
     println!("When do you ordinarily have room to train?");
@@ -236,7 +229,7 @@ pub async fn add(database: &Path) -> Result<(), Failure> {
         "Which parts of each day do you have room to train?",
         &WEEKDAYS,
     )?;
-    let pattern = scheduling::add(&store(database).await?, from, zone, slots)
+    let pattern = scheduling::add(store, from, zone, slots)
         .await
         .map_err(refused)?;
 
@@ -245,7 +238,7 @@ pub async fn add(database: &Path) -> Result<(), Failure> {
 }
 
 /// Ask for an alteration and record it.
-pub async fn alter(database: &Path) -> Result<(), Failure> {
+pub async fn alter(store: &Store) -> Result<(), Failure> {
     interactive()?;
 
     println!("When are you free for a run of days, and why?");
@@ -289,10 +282,9 @@ pub async fn alter(database: &Path) -> Result<(), Failure> {
 
     // **Asked again rather than thrown away**: a reason refused at the last
     // question should not cost every answer before it.
-    let store = store(database).await?;
     let alteration = loop {
         let reason = ask("Why? ")?;
-        match scheduling::alter(&store, start, days, zone.clone(), slots.clone(), &reason).await {
+        match scheduling::alter(store, start, days, zone.clone(), slots.clone(), &reason).await {
             Err(ScheduleError::NoReason) => println!("  {}", ScheduleError::NoReason),
             recorded => break recorded.map_err(refused)?,
         }
@@ -313,29 +305,26 @@ fn date_or_today(typed: &str) -> Result<Date, String> {
 }
 
 /// Ask from when the operator is ill, and record it open.
-pub async fn ill(database: &Path) -> Result<(), Failure> {
+pub async fn ill(store: &Store) -> Result<(), Failure> {
     interactive()?;
 
     let from = ask_until("Ill from which date? [today] ", date_or_today)?;
-    let illness = scheduling::ill(&store(database).await?, from)
-        .await
-        .map_err(refused)?;
+    let illness = scheduling::ill(store, from).await.map_err(refused)?;
 
     output::illness_recorded(&illness);
     Ok(())
 }
 
 /// Ask from when the operator is better, and end the open illness there.
-pub async fn better(database: &Path) -> Result<(), Failure> {
+pub async fn better(store: &Store) -> Result<(), Failure> {
     interactive()?;
 
     // Refused before the question, so nobody types a date for nothing.
-    let store = store(database).await?;
-    scheduling::open_illness(&store).await.map_err(refused)?;
+    scheduling::open_illness(store).await.map_err(refused)?;
 
     let illness = loop {
         let on = ask_until("Better from which date? [today] ", date_or_today)?;
-        match scheduling::better(&store, on).await {
+        match scheduling::better(store, on).await {
             Err(early @ ScheduleError::Illness(_)) => println!("  {early}"),
             ended => break ended.map_err(refused)?,
         }
@@ -346,10 +335,8 @@ pub async fn better(database: &Path) -> Result<(), Failure> {
 }
 
 /// Report the ordinary pattern and everything that departs from it.
-pub async fn show(database: &Path) -> Result<(), Failure> {
-    let diary = scheduling::diary(&store(database).await?)
-        .await
-        .map_err(refused)?;
+pub async fn show(store: &Store) -> Result<(), Failure> {
+    let diary = scheduling::diary(store).await.map_err(refused)?;
 
     output::schedule(&diary);
     Ok(())

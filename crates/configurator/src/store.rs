@@ -15,6 +15,7 @@ mod spanned;
 pub use spanned::Spanned;
 
 use std::path::Path;
+use std::sync::Arc;
 
 use application::next::Canonicalising;
 use application::{
@@ -26,7 +27,7 @@ use application::{
 };
 use domain::normalised::OperatorZone;
 use infrastructure::{
-    SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
+    FileRunLock, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
     SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteDiaryStore,
     SqliteEquipmentStore, SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
     SqliteGymMesocycleStore, SqliteKeptDrawings, SqliteOperatorSettingsStore,
@@ -35,9 +36,14 @@ use infrastructure::{
 };
 
 /// The operator's store, opened.
+///
+/// **Opened once, by the process's entry point, and passed down** (#663).
+/// Nothing below `main` takes the database's path, so nothing below it can open
+/// a second pool: a clone shares this one's connections.
 #[derive(Clone)]
 pub struct Store {
     pool: SqlitePool,
+    path: Arc<Path>,
 }
 
 impl Store {
@@ -56,7 +62,15 @@ impl Store {
             pool: connect(database)
                 .instrument(crate::telemetry::opening())
                 .await?,
+            path: Arc::from(database),
         })
+    }
+
+    /// The locks that keep two runs from collecting the same stream, beside
+    /// this store: a copy of it elsewhere is a separate system with its own.
+    #[must_use]
+    pub fn run_lock(&self) -> FileRunLock {
+        FileRunLock::beside(&self.path)
     }
 
     /// The adapter `new` builds over the store, spanned.
@@ -270,10 +284,5 @@ impl Store {
         self.adapter(SqliteKeptDrawings::new)
             .call("SqliteKeptDrawings::kept", |adapter| adapter.kept(address))
             .await
-    }
-
-    /// Close it, so the next open sees everything written.
-    pub async fn close(self) {
-        self.pool.close().await;
     }
 }

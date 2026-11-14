@@ -12,7 +12,6 @@ use domain::normalised::OperatorZone;
 use jiff::civil::Date;
 
 use crate::catalogue::{Credential, KnownSource};
-use crate::store::Store;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigError {
@@ -496,32 +495,6 @@ pub fn credentials_at(
         Some(path) => Ok(infrastructure::Credentials::read(path)?),
         None => Ok(infrastructure::Credentials::default()),
     }
-}
-
-/// The zone the operator stated once, if the store holds one.
-///
-/// **A store that cannot be opened states nothing**, so the zone falls back to
-/// what the invocation passed, and the store's own failure is reported by
-/// whatever reads it next.
-///
-/// # Errors
-///
-/// [`application::StoreError`] if the store opens and cannot be read.
-pub async fn stated_timezone(
-    database: &std::path::Path,
-) -> Result<Option<String>, application::StoreError> {
-    let Ok(store) = Store::open(database).await else {
-        return Ok(None);
-    };
-    let stated = store
-        .adapter(infrastructure::SqliteOperatorSettingsStore::new)
-        .call(
-            "SqliteOperatorSettingsStore::timezone",
-            infrastructure::SqliteOperatorSettingsStore::timezone,
-        )
-        .await;
-    store.close().await;
-    stated
 }
 
 /// How a source is reached: its base URL and its credential, the environment

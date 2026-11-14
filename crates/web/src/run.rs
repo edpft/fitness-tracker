@@ -30,7 +30,7 @@ use crate::{collected, report};
 
 /// What the operator configured, which every run reads.
 pub struct Setting {
-    pub database: PathBuf,
+    pub store: configurator::store::Store,
     pub zone: OperatorZone,
     /// Where the credentials are kept, `None` where nothing says.
     ///
@@ -188,7 +188,7 @@ impl Runs {
                 Asked::Everything => true,
                 Asked::Only(going) => !going.parts().is_disjoint(scope.parts()),
             });
-        here || configurator::next::collecting(&self.setting.database, scope).unwrap_or(false)
+        here || configurator::next::collecting(&self.setting.store, scope).unwrap_or(false)
     }
 
     /// A run going over `asked`, as though this server had started one.
@@ -235,7 +235,7 @@ impl Runs {
         };
         let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
         configurator::next::wanted(
-            &setting.database,
+            &setting.store,
             &setting.zone,
             &credentials,
             DayPart::containing(here.datetime()),
@@ -331,7 +331,7 @@ impl Runs {
         let ending = match asked {
             Asked::Everything => Some(
                 match runtime.block_on(configurator::next::run(
-                    &setting.database,
+                    &setting.store,
                     &setting.zone,
                     &credentials,
                     DayPart::containing(here.datetime()),
@@ -347,7 +347,7 @@ impl Runs {
                 },
             ),
             Asked::Only(scope) => match runtime.block_on(configurator::next::collect(
-                &setting.database,
+                &setting.store,
                 &setting.zone,
                 &credentials,
                 DayPart::containing(here.datetime()),
@@ -539,8 +539,17 @@ mod tests {
     /// joins the front page's run.
     #[test]
     fn a_page_opened_mid_run_joins_it() {
+        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
         let runs = Arc::new(Runs::new(Setting {
-            database: std::path::PathBuf::from("unused.db"),
+            store: runtime
+                .block_on(configurator::store::Store::open(
+                    &directory.path().join("fitness.db"),
+                ))
+                .expect("the store"),
             zone: OperatorZone::try_from("Europe/London").expect("a zone"),
             credentials: None,
         }));
@@ -569,9 +578,18 @@ mod tests {
     #[test]
     fn a_page_is_collecting_while_a_run_reads_a_part_of_it() {
         let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let store = runtime
+            .block_on(configurator::store::Store::open(
+                &directory.path().join("fitness.db"),
+            ))
+            .expect("the store");
         let fresh = || {
             Runs::new(Setting {
-                database: directory.path().join("fitness.db"),
+                store: store.clone(),
                 zone: OperatorZone::try_from("Europe/London").expect("a zone"),
                 credentials: None,
             })

@@ -26,8 +26,6 @@
 //! `prescribe` finds the session unchanged and writes nothing (decision 0021),
 //! and `deliver` sends only into a place it does not already hold (0022).
 
-use std::path::Path;
-
 use crate::{
     Failure, catalogue, catalogue::KnownDiscipline, config::SourceAccess, output, prescribing,
     wiring, wiring::Command,
@@ -46,7 +44,7 @@ use domain::{
 /// reads the environment.
 pub async fn next(
     discipline: &KnownDiscipline,
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     date: Option<&str>,
     access: SourceAccess,
@@ -60,7 +58,7 @@ pub async fn next(
     // 1. What has been done. Printed before the run begins, so a long first
     //    collection says what it is doing.
     output::run_started(&stream);
-    let collected = crate::carry_out(Command::Extract(access), known, database, &stream).await?;
+    let collected = crate::carry_out(Command::Extract(access), known, store, &stream).await?;
     report(&stream, collected);
 
     // 2. What it means. Contacts no source: everything it needs is now landed.
@@ -68,7 +66,7 @@ pub async fn next(
     let derived = crate::carry_out(
         Command::Normalise(zone.clone(), Rederivation::Incremental),
         known,
-        database,
+        store,
         &stream,
     )
     .await?;
@@ -78,7 +76,7 @@ pub async fn next(
     //    the canonical layer (#350), and a derivation whose inputs have just
     //    changed is stale until it is rebuilt — so the session collected a moment
     //    ago would otherwise be invisible to the prescription derived from it.
-    crate::canonicalise::gym(database).await?;
+    crate::canonicalise::gym(store).await?;
     println!();
 
     // 4. What to do next, derived against the record the steps above have
@@ -89,18 +87,18 @@ pub async fn next(
     //    handed to both steps below, so they cannot disagree about which
     //    session they mean. Nothing planned has been said by now, and is not a
     //    failure.
-    let Some(date) = prescribing::next(database, zone, date).await? else {
+    let Some(date) = prescribing::next(store, zone, date).await? else {
         return Ok(());
     };
     let date = date.to_string();
-    prescribing::prescribe(database, zone, Some(&date)).await?;
+    prescribing::prescribe(store, zone, Some(&date)).await?;
     println!();
 
     // 5. Where to do it from. Reads what step 4 issued rather than deriving
     //    again, so a destination being unreachable costs a retry rather than a
     //    ladder position (§ 36).
     prescribing::deliver(
-        database,
+        store,
         zone,
         Some(&date),
         false,
@@ -126,7 +124,7 @@ const WEIGH_INS: &str = "withings.measurements";
 /// first session in the source still in use.
 pub async fn strength(
     discipline: &KnownDiscipline,
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     credentials: &configurator::Credentials,
 ) -> Result<(), Failure> {
@@ -144,7 +142,7 @@ pub async fn strength(
 
         output::run_started(&stream);
         let collected = match crate::source_access(known, None, credentials) {
-            Ok(access) => crate::carry_out(Command::Extract(access), known, database, &stream)
+            Ok(access) => crate::carry_out(Command::Extract(access), known, store, &stream)
                 .await
                 .map_err(Failure::from),
             Err(failure) => Err(failure),
@@ -158,7 +156,7 @@ pub async fn strength(
         let derived = crate::carry_out(
             Command::Normalise(zone.clone(), Rederivation::Incremental),
             known,
-            database,
+            store,
             &stream,
         )
         .await?;
@@ -167,11 +165,10 @@ pub async fn strength(
 
     // The report reads the canonical layer, which is a derivation of what the
     // loop above has just re-derived (#350, #409).
-    crate::canonicalise::gym(database).await?;
-    crate::canonicalise::body_weight(database).await?;
+    crate::canonicalise::gym(store).await?;
+    crate::canonicalise::body_weight(store).await?;
     println!();
 
-    let store = Store::open(database).await?;
     let figures = RelativeStrength::new(Rts, store.canonical_gym(), store.weigh_ins())
         .report(
             StartedAt::new(jiff::Timestamp::now(), zone.clone())

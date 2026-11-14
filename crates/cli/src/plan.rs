@@ -28,7 +28,6 @@
 //! wizards.
 
 use domain::planner::Arrangement as _;
-use std::path::Path;
 
 use application::{
     Authored, DiaryStore, PlanAuthor as _, PlanStore as _, PublishedCycling, PublishedRead,
@@ -134,7 +133,7 @@ const PAIRINGS: [Pairing; 2] = [
 /// those before any other — so authoring reads the store and contacts Peloton
 /// only for a class it has not reached yet.
 pub async fn generate(
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     microcycles: usize,
     sessions: usize,
@@ -169,7 +168,6 @@ pub async fn generate(
     // The days are read before anything is fetched: a schedule that says
     // nothing about the start date makes the whole run pointless, and finding
     // that out after a minute of requests is a minute wasted.
-    let store = Store::open(database).await?;
     let riding_days = cycling_weekdays(&store.diary(), start).await?;
 
     // **The count, not the read count.** How many classes have had their
@@ -177,7 +175,7 @@ pub async fn generate(
     // skeletons place before any other, so a catalogue with rows in it answers
     // this authoring whatever its overall progress. An *empty* catalogue is the
     // one case worth saying out loud, because then every class is a request.
-    let listed = configurator::cycling::listed(&store)
+    let listed = configurator::cycling::listed(store)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
     let programmes = pairing.names;
@@ -193,12 +191,12 @@ pub async fn generate(
     let peloton = peloton.as_ref();
     let mut read = Vec::new();
     for which in pairing.programmes {
-        read.push(fetch(&store, peloton, which).await?);
+        read.push(fetch(store, peloton, which).await?);
     }
     // **The test programme is read whichever pairing is chosen**, because it is
     // a programme in its own right rather than a microcycle borrowed from one of
     // them. Every cycling block opens by measuring FTP.
-    let testing = fetch(&store, peloton, PublishedCycling::Test).await?;
+    let testing = fetch(store, peloton, PublishedCycling::Test).await?;
 
     let offered: Vec<Offered> = read
         .iter()
@@ -221,7 +219,7 @@ pub async fn generate(
         .take(3)
         .collect();
     author(
-        &store,
+        store,
         zone,
         start,
         gym,

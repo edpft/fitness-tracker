@@ -18,10 +18,7 @@ mod scheduling;
 mod setup;
 mod wizard;
 
-use std::{
-    path::{Path, PathBuf},
-    process::ExitCode,
-};
+use std::{path::PathBuf, process::ExitCode};
 
 use application::{
     ExtractionError, NormalisationError, Rederivation, SourceError, StatusError, StoreError,
@@ -29,7 +26,7 @@ use application::{
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command as ClapCommand, value_parser};
 use domain::landing::LandingStream;
 
-use configurator::{catalogue, config, paths, wiring};
+use configurator::{catalogue, config, paths, store::Store, wiring};
 
 use catalogue::{KnownStream, ServedBy};
 use config::{ConfigError, SourceAccess};
@@ -193,11 +190,11 @@ fn command() -> ClapCommand {
 }
 
 /// `fitness canonicalise`, once its subcommand is in hand.
-async fn canonicalise_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Failure> {
+async fn canonicalise_command_run(sub: &ArgMatches, store: &Store) -> Result<(), Failure> {
     match sub.subcommand() {
-        Some(("gym", _)) => canonicalise::gym(database).await,
-        Some(("cycling", _)) => canonicalise::cycling(database).await,
-        Some(("body-weight", _)) => canonicalise::body_weight(database).await,
+        Some(("gym", _)) => canonicalise::gym(store).await,
+        Some(("cycling", _)) => canonicalise::cycling(store).await,
+        Some(("body-weight", _)) => canonicalise::body_weight(store).await,
         _ => Err(Failure::message(
             "no canonicalise command given",
             exit::USAGE,
@@ -894,7 +891,14 @@ struct Locations {
     /// What the operator stated once, read from the store. Unparsed: which of
     /// the flag, the variable and this one wins is decided in `config`.
     timezone: Option<String>,
+    /// Where the store is, for saying so and for keeping telemetry beside it.
     database: PathBuf,
+    /// The store, opened once for the command (#663).
+    store: Store,
+    /// Held to the end of the command, so that what it recorded is written
+    /// before it exits (#631). Started before the store is opened, so the
+    /// opening is recorded too.
+    recording: configurator::telemetry::Recording,
 }
 
 /// Resolve them, in the order a value earns precedence: what this invocation
@@ -936,38 +940,34 @@ async fn locations(matches: &ArgMatches) -> Result<Locations, Failure> {
         )
     })?;
 
-    // **Opened here and closed again, rather than held for the command.** Every
-    // command opens its own pool, and the zone is needed before it is known
-    // which one will run — including by commands that then never open a pool at
-    // all. One extra open of a local file is not worth threading a pool through
-    // dispatch to avoid.
-    let timezone = stated_timezone(&database).await?;
+    let recording = configurator::telemetry::record(&database);
+    // **Opened once, here, for whichever command runs** (#663), and passed to
+    // it: nothing below this takes the store's path, so nothing below it opens
+    // a second pool.
+    let store = Store::open(&database)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    let timezone = store
+        .timezone()
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
     Ok(Locations {
         credentials,
         timezone,
         database,
+        store,
+        recording,
     })
 }
 
-/// The zone the store holds, if it holds one.
-///
-/// **A store that will not open is not an error here.** `init` is the command
-/// that creates one, and refusing to run it because there is nothing to read
-/// would be a setup command that requires the thing it sets up.
-async fn stated_timezone(database: &Path) -> Result<Option<String>, Failure> {
-    config::stated_timezone(database)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))
-}
-
-async fn schedule_command_run(sub: &ArgMatches, database: &Path) -> Result<(), Failure> {
+async fn schedule_command_run(sub: &ArgMatches, store: &Store) -> Result<(), Failure> {
     match sub.subcommand() {
-        Some(("add", _)) => scheduling::add(database).await,
-        Some(("alter", _)) => scheduling::alter(database).await,
-        Some(("ill", _)) => scheduling::ill(database).await,
-        Some(("better", _)) => scheduling::better(database).await,
-        Some(("show", _)) => scheduling::show(database).await,
+        Some(("add", _)) => scheduling::add(store).await,
+        Some(("alter", _)) => scheduling::alter(store).await,
+        Some(("ill", _)) => scheduling::ill(store).await,
+        Some(("better", _)) => scheduling::better(store).await,
+        Some(("show", _)) => scheduling::show(store).await,
         _ => Err(Failure::message("no schedule command given", exit::USAGE)),
     }
 }
@@ -983,7 +983,7 @@ async fn authored_command(
     sub: &ArgMatches,
     credentials: &configurator::Credentials,
     stated_timezone: Option<&str>,
-    database: &Path,
+    store: &Store,
 ) -> Option<Result<(), Failure>> {
     // Every one of these needs the zone, and asking for it here would refuse
     // `init` — which is the command whose whole job is to obtain one.
@@ -995,21 +995,6 @@ async fn authored_command(
     };
 
     match name {
-        "init" => {
-            let prepared = match setup::init(
-                database,
-                sub.get_one::<String>("timezone").map(String::as_str),
-                sub.get_flag("force"),
-                sub.get_flag("credential-stdin"),
-            )
-            .await
-            {
-                Ok(prepared) => prepared,
-                Err(failure) => return Some(Err(failure)),
-            };
-            output::prepared(&prepared);
-            Some(Ok(()))
-        }
         "credentials" => Some(credentials_command_run(sub).await),
         "prescribe" => {
             let zone = match zone(sub) {
@@ -1018,7 +1003,7 @@ async fn authored_command(
             };
             Some(
                 prescribing::prescribe(
-                    database,
+                    store,
                     &zone,
                     sub.get_one::<String>("date").map(String::as_str),
                 )
@@ -1032,7 +1017,7 @@ async fn authored_command(
             };
             Some(
                 prescribing::compare(
-                    database,
+                    store,
                     &zone,
                     sub.get_one::<String>("date").map(String::as_str),
                 )
@@ -1044,39 +1029,39 @@ async fn authored_command(
                 Ok(zone) => zone,
                 Err(error) => return Some(Err(error.into())),
             };
-            Some(deliver_command_run(sub, &zone, database, credentials).await)
+            Some(deliver_command_run(sub, &zone, store, credentials).await)
         }
-        "next" => Some(next_command_run(sub, database, credentials, stated_timezone).await),
+        "next" => Some(next_command_run(sub, store, credentials, stated_timezone).await),
         "cycling" => {
             let zone = match zone(sub) {
                 Ok(zone) => zone,
                 Err(error) => return Some(Err(error.into())),
             };
-            Some(cycling_command_run(sub, &zone, database, credentials).await)
+            Some(cycling_command_run(sub, &zone, store, credentials).await)
         }
         "plan" => {
             let zone = match zone(sub) {
                 Ok(zone) => zone,
                 Err(error) => return Some(Err(error.into())),
             };
-            Some(plan_command_run(sub, database, &zone, credentials).await)
+            Some(plan_command_run(sub, store, &zone, credentials).await)
         }
         "workouts" => Some(match sub.subcommand() {
-            Some(("show", _)) => prescribing::workouts(database).await,
+            Some(("show", _)) => prescribing::workouts(store).await,
             _ => Err(Failure::message("no workouts command given", exit::USAGE)),
         }),
         name if catalogue::discipline(name).is_some() => {
-            Some(discipline_command_run(name, sub, credentials, stated_timezone, database).await)
+            Some(discipline_command_run(name, sub, credentials, stated_timezone, store).await)
         }
-        "canonicalise" => Some(canonicalise_command_run(sub, database).await),
-        "holidays" => Some(holidays::list(database).await),
-        "schedule" => Some(schedule_command_run(sub, database).await),
+        "canonicalise" => Some(canonicalise_command_run(sub, store).await),
+        "holidays" => Some(holidays::list(store).await),
+        "schedule" => Some(schedule_command_run(sub, store).await),
         "mesocycle" => {
             let zone = match zone(sub) {
                 Ok(zone) => zone,
                 Err(error) => return Some(Err(error.into())),
             };
-            Some(mesocycle_command_run(sub, database, &zone).await)
+            Some(mesocycle_command_run(sub, store, &zone).await)
         }
         _ => None,
     }
@@ -1085,7 +1070,7 @@ async fn authored_command(
 /// `next`, once its arguments are in hand.
 async fn next_command_run(
     sub: &ArgMatches,
-    database: &Path,
+    store: &Store,
     credentials: &configurator::Credentials,
     stated_timezone: Option<&str>,
 ) -> Result<(), Failure> {
@@ -1094,7 +1079,7 @@ async fn next_command_run(
         stated_timezone,
     )?;
     next::next(
-        database,
+        store,
         &zone,
         sub.get_one::<String>("date").map(String::as_str),
         sub.get_one::<String>("part").map(String::as_str),
@@ -1109,7 +1094,7 @@ async fn next_command_run(
 async fn deliver_command_run(
     sub: &ArgMatches,
     zone: &domain::normalised::OperatorZone,
-    database: &Path,
+    store: &Store,
     credentials: &configurator::Credentials,
 ) -> Result<(), Failure> {
     // The flat command names the build's only sink. A second one arrives with
@@ -1122,7 +1107,7 @@ async fn deliver_command_run(
         ));
     };
     prescribing::deliver(
-        database,
+        store,
         zone,
         sub.get_one::<String>("date").map(String::as_str),
         sub.get_flag("preview"),
@@ -1143,7 +1128,7 @@ async fn discipline_command_run(
     sub: &ArgMatches,
     credentials: &configurator::Credentials,
     stated_timezone: Option<&str>,
-    database: &Path,
+    store: &Store,
 ) -> Result<(), Failure> {
     let Some(discipline) = catalogue::discipline(name) else {
         return Err(Failure::message(
@@ -1156,10 +1141,10 @@ async fn discipline_command_run(
             strength.get_one::<String>("timezone").map(String::as_str),
             stated_timezone,
         )?;
-        return gym::strength(discipline, database, &zone, credentials).await;
+        return gym::strength(discipline, store, &zone, credentials).await;
     }
     if let Some(("corrections", corrections)) = sub.subcommand() {
-        return corrections_run(corrections, stated_timezone, database).await;
+        return corrections_run(corrections, stated_timezone, store).await;
     }
     if let Some(("templates", _)) = sub.subcommand() {
         return gym::templates(discipline, credentials).await;
@@ -1183,7 +1168,7 @@ async fn discipline_command_run(
 
     gym::next(
         discipline,
-        database,
+        store,
         &zone,
         next.get_one::<String>("date").map(String::as_str),
         access,
@@ -1196,7 +1181,7 @@ async fn discipline_command_run(
 async fn corrections_run(
     sub: &ArgMatches,
     stated_timezone: Option<&str>,
-    database: &Path,
+    store: &Store,
 ) -> Result<(), Failure> {
     match sub.subcommand() {
         Some(("add", add)) => {
@@ -1214,7 +1199,7 @@ async fn corrections_run(
             // an exercise or a set's figures, which is what it says either way.
             if add.get_one::<String>("recorded").is_some() {
                 return corrections::add_figures(
-                    database,
+                    store,
                     &zone,
                     &corrections::FigureAssertion {
                         on: text("on")?,
@@ -1227,7 +1212,7 @@ async fn corrections_run(
                 .await;
             }
             corrections::add(
-                database,
+                store,
                 &zone,
                 &corrections::Assertion {
                     was: text("was")?,
@@ -1239,13 +1224,13 @@ async fn corrections_run(
             )
             .await
         }
-        Some(("show", _)) => corrections::show(database).await,
+        Some(("show", _)) => corrections::show(store).await,
         Some(("remove", remove)) => {
             let id = remove
                 .get_one::<String>("correction")
                 .map(String::as_str)
                 .ok_or_else(|| Failure::message("no correction number given", exit::USAGE))?;
-            corrections::remove(database, id).await
+            corrections::remove(store, id).await
         }
         _ => Err(Failure::message(
             "no corrections command given",
@@ -1257,7 +1242,7 @@ async fn corrections_run(
 /// `plan`, once its arguments are in hand.
 async fn plan_command_run(
     sub: &ArgMatches,
-    database: &Path,
+    store: &Store,
     zone: &domain::normalised::OperatorZone,
     credentials: &configurator::Credentials,
 ) -> Result<(), Failure> {
@@ -1280,7 +1265,7 @@ async fn plan_command_run(
         ));
     }
     plan::generate(
-        database,
+        store,
         zone,
         count("microcycles")?,
         count("cycling-sessions")?,
@@ -1293,7 +1278,7 @@ async fn plan_command_run(
 async fn cycling_command_run(
     sub: &ArgMatches,
     zone: &domain::normalised::OperatorZone,
-    database: &Path,
+    store: &Store,
     credentials: &configurator::Credentials,
 ) -> Result<(), Failure> {
     let parse_date = |value: &str| -> Result<jiff::civil::Date, Failure> {
@@ -1308,7 +1293,7 @@ async fn cycling_command_run(
             None => jiff::Zoned::now().date(),
         };
         let peloton = configurator::access::peloton(credentials)?;
-        return cycling::hold(database, zone, from, &peloton).await;
+        return cycling::hold(store, zone, from, &peloton).await;
     }
 
     if let Some(("deliver", delivering)) = sub.subcommand() {
@@ -1317,14 +1302,7 @@ async fn cycling_command_run(
             None => jiff::Zoned::now().date(),
         };
         let peloton = configurator::access::peloton(credentials)?;
-        return cycling::deliver(
-            database,
-            zone,
-            from,
-            delivering.get_flag("replace"),
-            &peloton,
-        )
-        .await;
+        return cycling::deliver(store, zone, from, delivering.get_flag("replace"), &peloton).await;
     }
 
     let Some(("next", next)) = sub.subcommand() else {
@@ -1365,7 +1343,7 @@ async fn cycling_command_run(
     // sent nothing, which is the half that was missing (#184).
     let peloton = configurator::access::peloton(credentials).map_err(Failure::from);
     let to = to_peloton(&peloton);
-    cycling::next(database, zone, from, ftp, to).await
+    cycling::next(store, zone, from, ftp, to).await
 }
 
 /// The destination, or the reason there is not one.
@@ -1387,14 +1365,14 @@ pub(crate) fn to_peloton(
 /// Its own function only because the arm outgrew the match it lived in.
 async fn mesocycle_command_run(
     sub: &ArgMatches,
-    database: &Path,
+    store: &Store,
     zone: &domain::normalised::OperatorZone,
 ) -> Result<(), Failure> {
     match sub.subcommand() {
-        Some(("add", _)) => wizard::add(database, zone).await,
+        Some(("add", _)) => wizard::add(store, zone).await,
         Some(("show", show)) => {
             prescribing::standing(
-                database,
+                store,
                 zone,
                 show.get_one::<String>("date").map(String::as_str),
             )
@@ -1402,6 +1380,23 @@ async fn mesocycle_command_run(
         }
         _ => Err(Failure::message("no mesocycle command given", exit::USAGE)),
     }
+}
+
+/// `init`, and where the store it prepared is.
+async fn init_run(
+    sub: &ArgMatches,
+    store: &Store,
+    database: &std::path::Path,
+) -> Result<(), Failure> {
+    let prepared = setup::init(
+        store,
+        sub.get_one::<String>("timezone").map(String::as_str),
+        sub.get_flag("force"),
+        sub.get_flag("credential-stdin"),
+    )
+    .await?;
+    output::prepared(&prepared, database);
+    Ok(())
 }
 
 async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
@@ -1413,18 +1408,31 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
         credentials,
         timezone,
         database,
+        store,
+        recording: _recording,
     } = locations(matches).await?;
     let stated_timezone = timezone.as_deref();
-    // Held to the end of the command, so that what it recorded is written
-    // before it exits (#631).
-    let _recording = configurator::telemetry::record(&database);
 
-    if let Some(outcome) =
-        authored_command(name, sub, &credentials, stated_timezone, &database).await
+    if name == "init" {
+        return init_run(sub, &store, &database).await;
+    }
+
+    if let Some(outcome) = authored_command(name, sub, &credentials, stated_timezone, &store).await
     {
         return outcome;
     }
 
+    stream_command_run(name, sub, &credentials, stated_timezone, &store).await
+}
+
+/// The plumbing: a command over one stream, named by its catalogue entry.
+async fn stream_command_run(
+    name: &str,
+    sub: &ArgMatches,
+    credentials: &configurator::Credentials,
+    stated_timezone: Option<&str>,
+    store: &Store,
+) -> Result<(), Failure> {
     let known = named_stream(sub)?;
     let stream = known
         .landing_stream()
@@ -1454,7 +1462,7 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
                 (ServedBy::System(_), None) => Command::Extract(source_access(
                     known,
                     sub.get_one::<String>("base-url").cloned(),
-                    &credentials,
+                    credentials,
                 )?),
             };
             // Printed before the run begins, so a long first collection says
@@ -1498,7 +1506,7 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
         Command::Extract(access) => Some(access.origin().to_string()),
         _ => None,
     };
-    let outcome = match carry_out(command, known, &database, &stream).await {
+    let outcome = match carry_out(command, known, store, &stream).await {
         Ok(outcome) => outcome,
         Err(error) => return Err(rejected_credential(error, origin.as_deref())),
     };
@@ -1516,7 +1524,7 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
     // question and answering half of it is how a stale programme goes unnoticed.
     if reporting {
         prescription_status(
-            &database,
+            store,
             sub.get_one::<String>("timezone").map(String::as_str),
             stated_timezone,
         )
@@ -1582,7 +1590,7 @@ fn rejected_credential(error: WiringError, origin: Option<&str>) -> Failure {
 
 /// The prescription section of `status`, and why it may be absent.
 async fn prescription_status(
-    database: &Path,
+    store: &Store,
     declared: Option<&str>,
     stated_timezone: Option<&str>,
 ) -> Result<(), Failure> {
@@ -1598,7 +1606,7 @@ async fn prescription_status(
         );
         return Ok(());
     };
-    match prescribing::standing(database, &zone, None).await {
+    match prescribing::standing(store, &zone, None).await {
         Ok(()) => Ok(()),
         // An unauthored programme is a legitimate state for a store that only
         // extracts, so it is reported rather than made an exit code.
@@ -1685,7 +1693,7 @@ fn report(stream: &LandingStream, resumes: bool, outcome: Outcome) -> Option<Wir
 async fn carry_out(
     command: Command,
     known: &KnownStream,
-    database: &Path,
+    store: &Store,
     stream: &LandingStream,
 ) -> Result<Outcome, WiringError> {
     let progress =
@@ -1694,7 +1702,7 @@ async fn carry_out(
         Some(progress) => progress,
         None => &wiring::Unreported,
     };
-    let ran = wiring::run(command, known, database, walks).await;
+    let ran = wiring::run(command, known, store, walks).await;
     drop(progress);
     ran
 }

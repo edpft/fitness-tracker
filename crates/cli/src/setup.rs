@@ -41,7 +41,6 @@ use crate::{Failure, catalogue::Credential, config, exit, paths};
 
 /// What `init` found or made.
 pub struct Prepared {
-    pub database: PathBuf,
     pub credentials_path: PathBuf,
     pub zone: String,
     /// What became of the first versions of the programme and its progressions,
@@ -93,25 +92,11 @@ pub enum CredentialOutcome {
 /// [`Failure`] if no zone can be obtained, or if the store cannot be created or
 /// written.
 pub async fn init(
-    database: &Path,
+    store: &Store,
     declared: Option<&str>,
     force: bool,
     credential_from_stdin: bool,
 ) -> Result<Prepared, Failure> {
-    // **The store creates itself; its directory does not.**
-    paths::ensure_parent(database).map_err(|error| {
-        Failure::message(
-            format!(
-                "cannot create the directory for {}: {error}",
-                database.display()
-            ),
-            exit::STORE,
-        )
-    })?;
-    let store = Store::open(database)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-
     let in_force = store
         .timezone()
         .await
@@ -144,15 +129,13 @@ pub async fn init(
         }
     };
 
-    let parameters = seed_parameters(&store).await?;
-    store.close().await;
+    let parameters = seed_parameters(store).await?;
 
     let credentials_path =
         paths::credentials(&paths::SystemEnvironment).map_err(config::ConfigError::from)?;
     let credentials = obtain_credentials(&credentials_path, credential_from_stdin).await?;
 
     Ok(Prepared {
-        database: database.to_path_buf(),
         credentials_path,
         zone,
         parameters,

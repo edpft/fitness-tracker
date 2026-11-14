@@ -4,16 +4,14 @@
 //! school and by the government, and a run of `next` asks each whether it has
 //! changed. During either, the ordinary week cannot be assumed to hold.
 
-use std::path::Path;
-
 use configurator::store::Store;
 use domain::schedule::Holidays;
 
 use crate::{Failure, output};
 
 /// List every school and public holiday from today.
-pub async fn list(database: &Path) -> Result<(), Failure> {
-    output::holidays(&read(database).await?, jiff::Zoned::now().date());
+pub async fn list(store: &Store) -> Result<(), Failure> {
+    output::holidays(&read(store).await?, jiff::Zoned::now().date());
     Ok(())
 }
 
@@ -23,9 +21,7 @@ pub async fn list(database: &Path) -> Result<(), Failure> {
 /// # Errors
 ///
 /// [`Failure`] if the store cannot be opened, or either has not been fetched.
-pub async fn read(database: &Path) -> Result<Holidays, Failure> {
-    let store = Store::open(database).await?;
-    let holidays = configurator::holidays::holidays(&store).await;
-    store.close().await;
+pub async fn read(store: &Store) -> Result<Holidays, Failure> {
+    let holidays = configurator::holidays::holidays(store).await;
     Ok(holidays?)
 }
