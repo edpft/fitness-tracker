@@ -9,11 +9,12 @@ use application::{
 use domain::{macrocycle::PlannedMacrocycle, normalised::OperatorZone, schedule::DayPart};
 use infrastructure::{
     SqliteCanonicalCyclingSessionStore, SqliteDiaryStore, SqliteGenerationParameterStore,
-    SqlitePelotonClassStore, SqlitePlanStore,
+    SqlitePlanStore,
     peloton::{PelotonHoldingRides, PelotonProgrammes, catalogue::ClassCatalogue},
 };
 use tracing::Instrument as _;
 
+use crate::store::Spanned;
 use crate::{
     holidays::{self, Calendars},
     next::NextFailure,
@@ -39,13 +40,13 @@ pub enum PlannedFailure {
 type Planning<'a> = Planned<
     Walk,
     Committing<
-        SqlitePlanStore,
-        SqliteGenerationParameterStore,
-        PelotonHoldingRides<'a>,
-        SqliteCanonicalCyclingSessionStore,
-        PelotonProgrammes<'a>,
+        Spanned<SqlitePlanStore>,
+        Spanned<SqliteGenerationParameterStore>,
+        Spanned<PelotonHoldingRides<'a>>,
+        Spanned<SqliteCanonicalCyclingSessionStore>,
+        Spanned<PelotonProgrammes<'a>>,
     >,
-    SqliteDiaryStore,
+    Spanned<SqliteDiaryStore>,
     Calendars,
 >;
 
@@ -71,23 +72,22 @@ pub async fn planned(
     zone: &OperatorZone,
     now: DayPart,
 ) -> Result<Option<PlannedMacrocycle>, PlannedFailure> {
-    let pool = store.pool();
-    let classes = SqlitePelotonClassStore::new(pool.clone());
+    let classes = store.peloton_classes();
     let catalogue = ClassCatalogue::over(&classes, None);
     let use_case: Planning<'_> = Planned::new(PlanningPorts {
         walk: Walk::over(store, zone).await?,
         committing: Committing::new(
             CommitPorts {
-                plans: SqlitePlanStore::new(pool.clone(), zone.clone()),
-                parameters: SqliteGenerationParameterStore::new(pool.clone()),
-                holding: PelotonHoldingRides::new(catalogue),
-                ridden: SqliteCanonicalCyclingSessionStore::new(pool.clone()),
-                published: PelotonProgrammes::new(catalogue),
+                plans: store.adapter_with(SqlitePlanStore::new, zone.clone()),
+                parameters: store.adapter(SqliteGenerationParameterStore::new),
+                holding: Spanned::new(PelotonHoldingRides::new(catalogue)),
+                ridden: store.adapter(SqliteCanonicalCyclingSessionStore::new),
+                published: Spanned::new(PelotonProgrammes::new(catalogue)),
             },
             zone.clone(),
         ),
-        diary: SqliteDiaryStore::new(pool.clone()),
-        holidays: holidays::calendars(pool),
+        diary: store.adapter(SqliteDiaryStore::new),
+        holidays: holidays::calendars(store),
     });
     Ok(use_case
         .on(now)

@@ -7,6 +7,7 @@ use domain::{
 };
 use infrastructure::{SqliteCanonicalCyclingSessionStore, SqliteFtpHistory};
 
+use crate::store::Spanned;
 use crate::{
     devices,
     graph::{page, read},
@@ -21,10 +22,10 @@ page! {
     /// (#559, #569), and the ranges.
     pub struct Page {
         rides: RideHeartRates<
-            SqliteCanonicalCyclingSessionStore,
-            SqliteFtpHistory,
-            infrastructure::GarminRecordedDevices,
-            infrastructure::GarminWear,
+            Spanned<SqliteCanonicalCyclingSessionStore>,
+            Spanned<SqliteFtpHistory>,
+            Spanned<infrastructure::GarminRecordedDevices>,
+            Spanned<infrastructure::GarminWear>,
         >,
         ranges: Current,
     }
@@ -43,11 +44,10 @@ impl Page {
     ///
     /// [`NextFailure`] if the store cannot be read.
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
-        let pool = store.pool();
         Ok(Self {
             rides: RideHeartRates::new(
-                SqliteCanonicalCyclingSessionStore::new(pool.clone()),
-                SqliteFtpHistory::new(pool.clone()),
+                store.adapter(SqliteCanonicalCyclingSessionStore::new),
+                store.adapter(SqliteFtpHistory::new),
                 devices::register(store),
             )
             .into(),

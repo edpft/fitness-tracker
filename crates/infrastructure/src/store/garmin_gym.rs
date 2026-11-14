@@ -537,18 +537,18 @@ pub(super) async fn clear_measured(
 /// serves about one thing, and a standing that counted only the activities would
 /// report the layer up to date while a companion walk was half done.
 #[derive(Debug, Clone)]
-pub struct GarminGymRawExtent {
-    activities: GarminActivityLandingStore,
-    sets: GarminExerciseSetLandingStore,
-    recordings: GarminActivityFileLandingStore,
+pub struct GarminGymRawExtent<
+    A = GarminActivityLandingStore,
+    S = GarminExerciseSetLandingStore,
+    R = GarminActivityFileLandingStore,
+> {
+    activities: A,
+    sets: S,
+    recordings: R,
 }
 
-impl GarminGymRawExtent {
-    pub const fn new(
-        activities: GarminActivityLandingStore,
-        sets: GarminExerciseSetLandingStore,
-        recordings: GarminActivityFileLandingStore,
-    ) -> Self {
+impl<A, S, R> GarminGymRawExtent<A, S, R> {
+    pub const fn new(activities: A, sets: S, recordings: R) -> Self {
         Self {
             activities,
             sets,
@@ -557,7 +557,12 @@ impl GarminGymRawExtent {
     }
 }
 
-impl application::RawExtent for GarminGymRawExtent {
+impl<A, S, R> application::RawExtent for GarminGymRawExtent<A, S, R>
+where
+    A: application::LandingStore + Sync,
+    S: application::LandingStore + Sync,
+    R: application::LandingStore + Sync,
+{
     async fn records(&self) -> Result<domain::landing::RecordCount, StoreError> {
         let activities = application::LandingStore::count(&self.activities).await?;
         let sets = application::LandingStore::count(&self.sets).await?;

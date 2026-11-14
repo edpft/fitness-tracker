@@ -1460,12 +1460,18 @@ fn canonicalising_leaves_its_span_beside_the_store() {
 
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     let spans = telemetry(&directory.path().join("telemetry.db")).expect("telemetry.db reads");
-    let steps: Vec<_> = spans.iter().map(|span| span.step.as_deref()).collect();
+    let steps: Vec<_> = spans
+        .iter()
+        .filter(|span| span.name == "step")
+        .map(|span| span.step.as_deref())
+        .collect();
     assert_eq!(
         steps,
         [Some("opening"), Some("canonicalising")],
         "{spans:?}"
     );
+    // What it read and wrote through, each a call under the step (#816).
+    assert!(spans.iter().any(|span| span.name == "call"), "{spans:?}");
     let span = &spans[1];
     assert_eq!(span.name, "step");
     assert_eq!(span.layer.as_deref(), Some("gym"));

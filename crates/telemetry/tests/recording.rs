@@ -121,6 +121,47 @@ fn a_step_is_the_child_of_the_run_it_was_in() {
     assert_eq!(step.outcome, None);
 }
 
+/// **The calls of one name under one span are one row** (#816): how many, the
+/// rows they returned, and the time they took between them.
+#[test]
+fn calls_of_one_name_are_one_row_under_the_span_they_were_made_in() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("telemetry.db");
+
+    recorded(&database, None, || {
+        let step = tracing::info_span!("step", step = "reading");
+        let _inside = step.enter();
+        for rows in [3_u64, 4] {
+            let call = tracing::info_span!("call", call = "History::all", rows = Empty);
+            let _calling = call.enter();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            call.record("rows", rows);
+        }
+        for _ in 0..3 {
+            let _call = tracing::info_span!("call", call = "Plans::on", rows = Empty);
+        }
+    });
+
+    let rows = spans(&database).unwrap();
+    let step = rows.iter().find(|row| row.name == "step").unwrap();
+    let calls: Vec<&Row> = rows.iter().filter(|row| row.name == "call").collect();
+    assert_eq!(rows.len(), 3);
+    assert!(calls.iter().all(|call| call.parent == Some(step.id)));
+    let all = calls
+        .iter()
+        .find(|call| call.fields["call"] == "History::all")
+        .unwrap();
+    assert_eq!(all.fields["calls"], 2);
+    assert_eq!(all.fields["rows"], 7);
+    assert!(all.fields["spent"].as_f64().unwrap() >= 0.01);
+    let on = calls
+        .iter()
+        .find(|call| call.fields["call"] == "Plans::on")
+        .unwrap();
+    assert_eq!(on.fields["calls"], 3);
+    assert_eq!(on.fields.get("rows"), None);
+}
+
 /// **A run a page load started is that load's child, and the load ends when
 /// it is served** (#628): the run follows from the load rather than sitting
 /// inside it, which would hold the load open until the run ended.

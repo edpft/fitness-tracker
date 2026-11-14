@@ -15,16 +15,18 @@ use domain::{
     normalised::OperatorZone,
     planner::SessionRole,
 };
-use infrastructure::{
-    SqlitePelotonClassStore,
-    peloton::{
-        PelotonHoldingRides, PelotonRideDestination, catalogue::ClassCatalogue,
-        provider::PelotonProgrammes,
-    },
+use infrastructure::peloton::{
+    PelotonHoldingRides, PelotonRideDestination, catalogue::ClassCatalogue,
+    provider::PelotonProgrammes,
 };
 use jiff::civil::Date;
 
-use crate::{access::Peloton, next::NextFailure, rescheduling::Walk, store::Store};
+use crate::{
+    access::Peloton,
+    next::NextFailure,
+    rescheduling::Walk,
+    store::{Spanned, Store},
+};
 
 /// Cycling's prescribing, and the walk that says where the plan now stands.
 pub type Prescriber<'a> = (crate::next::Riding<'a>, Walk);
@@ -45,10 +47,10 @@ pub async fn prescribed(
     ftp: Option<Ftp>,
     peloton: Option<&Peloton>,
 ) -> Result<Result<PrescribedRide, RidingError>, NextFailure> {
-    let stored = SqlitePelotonClassStore::new(store.pool().clone());
+    let stored = store.peloton_classes();
     let catalogue = ClassCatalogue::over(&stored, peloton.map(|peloton| &peloton.classes));
     let (riding, walk): Prescriber<'_> = (
-        crate::next::riding(store.pool(), zone, catalogue)?,
+        crate::next::riding(store, zone, catalogue)?,
         Walk::over(store, zone).await?,
     );
     let reschedule = walk.reschedule(zone).await?;
@@ -68,12 +70,8 @@ pub async fn deliver(
     peloton: &Peloton,
     replace: bool,
 ) -> Result<Result<RidesPlaced, RideDeliveryError>, NextFailure> {
-    let stored = SqlitePelotonClassStore::new(store.pool().clone());
-    let riding = crate::next::riding(
-        store.pool(),
-        zone,
-        ClassCatalogue::new(&stored, &peloton.classes),
-    )?;
+    let stored = store.peloton_classes();
+    let riding = crate::next::riding(store, zone, ClassCatalogue::new(&stored, &peloton.classes))?;
     Ok(riding
         .deliver(
             ride,
@@ -96,9 +94,12 @@ pub async fn holding(
     higher: SessionRole,
     lower: SessionRole,
 ) -> Result<CyclingMesocycle, NoHoldingRide> {
-    let stored = SqlitePelotonClassStore::new(store.pool().clone());
+    let stored = store.peloton_classes();
     application::holding::mesocycle(
-        &PelotonHoldingRides::new(ClassCatalogue::new(&stored, &peloton.classes)),
+        &Spanned::new(PelotonHoldingRides::new(ClassCatalogue::new(
+            &stored,
+            &peloton.classes,
+        ))),
         &store.ridden_venues(),
         start,
         higher,
@@ -113,7 +114,7 @@ pub async fn holding(
 ///
 /// [`SourceError`] if the catalogue cannot be read.
 pub async fn listed(store: &Store) -> Result<u64, SourceError> {
-    let stored = SqlitePelotonClassStore::new(store.pool().clone());
+    let stored = store.peloton_classes();
     Ok(ClassCatalogue::stored(&stored).held().await?.listed)
 }
 
@@ -130,7 +131,9 @@ pub async fn published(
     peloton: Option<&Peloton>,
     which: PublishedCycling,
 ) -> Result<PublishedRead, SourceError> {
-    let stored = SqlitePelotonClassStore::new(store.pool().clone());
+    let stored = store.peloton_classes();
     let catalogue = ClassCatalogue::over(&stored, peloton.map(|peloton| &peloton.classes));
-    PelotonProgrammes::new(catalogue).read(which).await
+    Spanned::new(PelotonProgrammes::new(catalogue))
+        .read(which)
+        .await
 }

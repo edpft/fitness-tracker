@@ -10,6 +10,7 @@ use infrastructure::{
     GarminRecordedDevices, GarminWear, SqliteOvernightHrvHistory, SqliteRestingHeartRateHistory,
 };
 
+use crate::store::Spanned;
 use crate::{
     devices,
     graph::{page, read},
@@ -23,7 +24,7 @@ page! {
     /// record naming its watch, Garmin's recordings, which say what it is
     /// called (#559, #569), and the ranges.
     pub struct OvernightHrv {
-        nights: PerDevice<SqliteOvernightHrvHistory, (), GarminRecordedDevices, GarminWear>,
+        nights: PerDevice<Spanned<SqliteOvernightHrvHistory>, (), Spanned<GarminRecordedDevices>, Spanned<GarminWear>>,
         ranges: Current,
     }
 }
@@ -33,7 +34,7 @@ page! {
     /// record naming its watch, the register for the days before Garmin named
     /// one (#559, #569), and the ranges.
     pub struct RestingHeartRate {
-        days: PerDevice<(), SqliteRestingHeartRateHistory, GarminRecordedDevices, GarminWear>,
+        days: PerDevice<(), Spanned<SqliteRestingHeartRateHistory>, Spanned<GarminRecordedDevices>, Spanned<GarminWear>>,
         ranges: Current,
     }
 }
@@ -59,7 +60,7 @@ impl OvernightHrv {
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
         Ok(Self {
             nights: PerDevice::new(
-                SqliteOvernightHrvHistory::new(store.pool().clone()),
+                store.adapter(SqliteOvernightHrvHistory::new),
                 (),
                 devices::register(store),
             )
@@ -98,7 +99,7 @@ impl RestingHeartRate {
         Ok(Self {
             days: PerDevice::new(
                 (),
-                SqliteRestingHeartRateHistory::new(store.pool().clone()),
+                store.adapter(SqliteRestingHeartRateHistory::new),
                 devices::register(store),
             )
             .into(),

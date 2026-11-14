@@ -12,6 +12,7 @@ use infrastructure::{
     SqlitePrescribedWorkoutStore,
 };
 
+use crate::store::Spanned;
 use crate::{
     graph::{page, read},
     next::NextFailure,
@@ -21,15 +22,19 @@ use crate::{
 
 /// Each lift over the macrocycle in force, its mesocycles as the plans now
 /// stand (#800).
-pub(crate) type Estimated =
-    EstimatedOneRepMax<Rts, SqliteCanonicalGymSessionStore, SqliteCanonicalWeighInStore, Plans>;
+pub(crate) type Estimated = EstimatedOneRepMax<
+    Rts,
+    Spanned<SqliteCanonicalGymSessionStore>,
+    Spanned<SqliteCanonicalWeighInStore>,
+    Plans,
+>;
 
 /// Each lift's 1RM tests (#517).
 pub(crate) type Tests = OneRepMaxTests<
     Rts,
-    SqliteCanonicalGymSessionStore,
-    SqlitePlanStore,
-    SqlitePrescribedWorkoutStore,
+    Spanned<SqliteCanonicalGymSessionStore>,
+    Spanned<SqlitePlanStore>,
+    Spanned<SqlitePrescribedWorkoutStore>,
 >;
 
 page! {
@@ -50,20 +55,19 @@ pub fn collects() -> Scope {
 pub(crate) fn estimated(store: &Store, plans: Plans) -> Estimated {
     EstimatedOneRepMax::new(
         Rts,
-        SqliteCanonicalGymSessionStore::new(store.pool().clone()),
-        SqliteCanonicalWeighInStore::new(store.pool().clone()),
+        store.adapter(SqliteCanonicalGymSessionStore::new),
+        store.adapter(SqliteCanonicalWeighInStore::new),
         plans,
     )
 }
 
 /// Each lift's 1RM tests over `store`.
 pub(crate) fn tests(store: &Store, zone: &OperatorZone) -> Tests {
-    let pool = store.pool();
     OneRepMaxTests::new(
         Rts,
-        SqliteCanonicalGymSessionStore::new(pool.clone()),
-        SqlitePlanStore::new(pool.clone(), zone.clone()),
-        SqlitePrescribedWorkoutStore::new(pool.clone(), zone.id().to_owned()),
+        store.adapter(SqliteCanonicalGymSessionStore::new),
+        store.adapter_with(SqlitePlanStore::new, zone.clone()),
+        store.adapter_with(SqlitePrescribedWorkoutStore::new, zone.id().to_owned()),
     )
 }
 

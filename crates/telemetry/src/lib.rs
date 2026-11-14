@@ -15,8 +15,10 @@
 //! the times it reports (#629).
 
 use std::{
+    collections::BTreeMap,
     path::{Path, PathBuf},
     thread::JoinHandle,
+    time::{Duration, Instant},
 };
 
 use jiff::Timestamp;
@@ -37,9 +39,23 @@ use tracing_subscriber::{Layer, layer::Context, registry::LookupSpan};
 
 /// The span names recorded, and the only ones: anything else — a dependency's
 /// own instrumentation above all — is not this tool's telemetry.
-pub const NAMES: [&str; 8] = [
-    "command", "request", "run", "step", "gate", "check", "test", "job",
+pub const NAMES: [&str; 9] = [
+    "command", "request", "run", "step", "gate", "check", "test", "job", CALL,
 ];
+
+/// A call through a port (#816), named in its [`CALL`] field, with the rows
+/// it returned in [`ROWS`] where it returned a list.
+///
+/// **Not a row of its own.** The calls of one name under one recorded span
+/// are one row, with how many there were in `calls`, the rows they returned
+/// in [`ROWS`], and the seconds they took between them in `spent`: a read
+/// that looks something up once per day it covers would otherwise be a row a
+/// day, every time it is read. The row starts with the first call and ends
+/// with the last, so its `spent` is the time and its span is the extent.
+pub const CALL: &str = "call";
+
+/// The rows a [`CALL`] returned.
+pub const ROWS: &str = "rows";
 
 /// The field a span's outcome is recorded in, by [`Outcome::as_str`].
 pub const OUTCOME: &str = "outcome";
@@ -207,6 +223,69 @@ struct Open {
     fields: Map<String, Value>,
 }
 
+/// A [`CALL`] while it is open.
+struct Calling {
+    started_at: Timestamp,
+    started: Instant,
+    fields: Map<String, Value>,
+}
+
+/// The [`CALL`]s made under a recorded span, by name, until it closes.
+#[derive(Default)]
+struct Calls(BTreeMap<String, Tally>);
+
+/// The calls of one name under one recorded span.
+struct Tally {
+    calls: u64,
+    rows: Option<u64>,
+    spent: Duration,
+    started_at: Timestamp,
+    ended_at: Timestamp,
+}
+
+impl Calls {
+    fn add(&mut self, name: String, calling: &Calling) {
+        let rows = calling.fields.get(ROWS).and_then(Value::as_u64);
+        let tally = self.0.entry(name).or_insert_with(|| Tally {
+            calls: 0,
+            rows: None,
+            spent: Duration::ZERO,
+            started_at: calling.started_at,
+            ended_at: calling.started_at,
+        });
+        tally.calls += 1;
+        tally.rows = match (tally.rows, rows) {
+            (None, None) => None,
+            (sum, rows) => Some(sum.unwrap_or(0) + rows.unwrap_or(0)),
+        };
+        tally.spent += calling.started.elapsed();
+        tally.ended_at = Timestamp::now();
+    }
+
+    /// Each name's calls as one row under `parent`.
+    fn closed(self, parent: i64, build: Option<&String>) -> impl Iterator<Item = Closed> {
+        self.0.into_iter().map(move |(name, tally)| {
+            let mut fields = Map::new();
+            fields.insert(CALL.to_owned(), name.into());
+            fields.insert("calls".to_owned(), tally.calls.into());
+            if let Some(rows) = tally.rows {
+                fields.insert(ROWS.to_owned(), rows.into());
+            }
+            fields.insert("spent".to_owned(), tally.spent.as_secs_f64().into());
+            Closed {
+                id: span_id(),
+                parent: Some(parent),
+                name: CALL,
+                build: build.cloned(),
+                started_at: tally.started_at,
+                ended_at: tally.ended_at,
+                outcome: None,
+                fields,
+            }
+        })
+    }
+}
+
 /// A span once it has closed: one row.
 struct Closed {
     id: i64,
@@ -242,6 +321,16 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for Recorder {
         let Some(span) = context.span(id) else {
             return;
         };
+        if attributes.metadata().name() == CALL {
+            let mut fields = Map::new();
+            attributes.record(&mut Fields(&mut fields));
+            span.extensions_mut().insert(Calling {
+                started_at: Timestamp::now(),
+                started: Instant::now(),
+                fields,
+            });
+            return;
+        }
         let parent = span
             .scope()
             .skip(1)
@@ -257,10 +346,13 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for Recorder {
     }
 
     fn on_record(&self, id: &Id, values: &Record<'_>, context: Context<'_, S>) {
-        if let Some(span) = context.span(id)
-            && let Some(open) = span.extensions_mut().get_mut::<Open>()
-        {
+        let Some(span) = context.span(id) else {
+            return;
+        };
+        if let Some(open) = span.extensions_mut().get_mut::<Open>() {
             values.record(&mut Fields(&mut open.fields));
+        } else if let Some(calling) = span.extensions_mut().get_mut::<Calling>() {
+            values.record(&mut Fields(&mut calling.fields));
         }
     }
 
@@ -288,6 +380,30 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for Recorder {
         let Some(span) = context.span(&id) else {
             return;
         };
+        let calling = span.extensions_mut().remove::<Calling>();
+        if let Some(calling) = calling {
+            // Tallied on the nearest recorded span it was made in; a call
+            // made in none is not this tool's telemetry.
+            let name = match calling.fields.get(CALL) {
+                Some(Value::String(name)) => name.clone(),
+                _ => return,
+            };
+            if let Some(within) = span
+                .scope()
+                .skip(1)
+                .find(|ancestor| ancestor.extensions().get::<Open>().is_some())
+            {
+                let mut extensions = within.extensions_mut();
+                if extensions.get_mut::<Calls>().is_none() {
+                    extensions.insert(Calls::default());
+                }
+                if let Some(calls) = extensions.get_mut::<Calls>() {
+                    calls.add(name, &calling);
+                }
+            }
+            return;
+        }
+        let calls = span.extensions_mut().remove::<Calls>();
         let Some(Open {
             id,
             parent,
@@ -302,6 +418,12 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for Recorder {
             _ => None,
         };
         if let Some(spans) = self.spans.upgrade() {
+            for call in calls
+                .into_iter()
+                .flat_map(|calls| calls.closed(id, self.build.as_ref()))
+            {
+                let _ = spans.send(call);
+            }
             let _ = spans.send(Closed {
                 id,
                 parent,

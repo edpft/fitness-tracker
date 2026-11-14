@@ -24,6 +24,7 @@ use infrastructure::{
     SqlitePrescriptionDeliveryStore,
 };
 
+use crate::store::Spanned;
 use crate::{
     graph::reads,
     next::{NextFailure, destination},
@@ -32,20 +33,20 @@ use crate::{
 
 /// The walk through the plan, over this build's stores.
 pub(crate) type Microcycle = application::microcycle::Microcycle<
-    SqliteDiaryStore,
-    SqlitePlanStore,
-    SqlitePrescriptionDeliveryStore,
-    SqliteCyclingDeliveryStore,
-    SqliteCanonicalGymSessionStore,
-    SqliteCanonicalCyclingSessionStore,
+    Spanned<SqliteDiaryStore>,
+    Spanned<SqlitePlanStore>,
+    Spanned<SqlitePrescriptionDeliveryStore>,
+    Spanned<SqliteCyclingDeliveryStore>,
+    Spanned<SqliteCanonicalGymSessionStore>,
+    Spanned<SqliteCanonicalCyclingSessionStore>,
 >;
 
 reads! {
     /// The walk through the plan, within the term the calendars give it.
     pub struct Walk {
         microcycle: Microcycle,
-        diary: SqliteDiaryStore,
-        calendars: SqliteCalendarStore,
+        diary: Spanned<SqliteDiaryStore>,
+        calendars: Spanned<SqliteCalendarStore>,
     }
 }
 
@@ -54,10 +55,11 @@ reads! {
 ///
 /// A rerun test week is in the mesocycle it reruns, though what was written
 /// when that mesocycle started gave it one week fewer.
-pub type Plans = ReschedulingPlans<SqlitePlanStore, Walk>;
+pub type Plans = ReschedulingPlans<Spanned<SqlitePlanStore>, Walk>;
 
 /// The gym's mesocycles, as the plan now stands.
-pub type GymMesocycles = Rescheduled<SqliteGymMesocycleStore, SqlitePlanStore, Walk>;
+pub type GymMesocycles =
+    Rescheduled<Spanned<SqliteGymMesocycleStore>, Spanned<SqlitePlanStore>, Walk>;
 
 impl Walk {
     /// The walk over `store`, within the term the calendars give it as last
@@ -67,22 +69,21 @@ impl Walk {
     ///
     /// [`NextFailure`] if the build names no destination for a discipline.
     pub(crate) async fn over(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
-        let pool = store.pool();
         let mut walk = Self {
             microcycle: Microcycle::new(
                 application::microcycle::MicrocyclePorts {
-                    diary: SqliteDiaryStore::new(pool.clone()),
-                    plans: SqlitePlanStore::new(pool.clone(), zone.clone()),
-                    gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
-                    cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
-                    gym_performed: SqliteCanonicalGymSessionStore::new(pool.clone()),
-                    cycling_performed: SqliteCanonicalCyclingSessionStore::new(pool.clone()),
+                    diary: store.adapter(SqliteDiaryStore::new),
+                    plans: store.adapter_with(SqlitePlanStore::new, zone.clone()),
+                    gym_deliveries: store.adapter(SqlitePrescriptionDeliveryStore::new),
+                    cycling_deliveries: store.adapter(SqliteCyclingDeliveryStore::new),
+                    gym_performed: store.adapter(SqliteCanonicalGymSessionStore::new),
+                    cycling_performed: store.adapter(SqliteCanonicalCyclingSessionStore::new),
                 },
                 destination(domain::planner::Discipline::Gym)?,
                 destination(domain::planner::Discipline::Cycling)?,
             ),
-            diary: SqliteDiaryStore::new(pool.clone()),
-            calendars: SqliteCalendarStore::new(pool.clone()),
+            diary: store.adapter(SqliteDiaryStore::new),
+            calendars: store.adapter(SqliteCalendarStore::new),
         };
         // **Not where either calendar has not been fetched yet** (#732).
         // Nothing starts again then, and a re-run lengthens its mesocycle as
@@ -130,7 +131,7 @@ impl StandingReader for Walk {
 pub async fn plans(store: &Store, zone: &OperatorZone) -> Result<Plans, NextFailure> {
     let walk = Walk::over(store, zone).await?;
     Ok(Plans::walked(
-        SqlitePlanStore::new(store.pool().clone(), zone.clone()),
+        store.adapter_with(SqlitePlanStore::new, zone.clone()),
         walk.reschedule(zone).await?,
         &walk,
     ))
@@ -144,8 +145,8 @@ pub async fn plans(store: &Store, zone: &OperatorZone) -> Result<Plans, NextFail
 pub async fn gym(store: &Store, zone: &OperatorZone) -> Result<GymMesocycles, NextFailure> {
     let walk = Walk::over(store, zone).await?;
     Ok(GymMesocycles::walked(
-        SqliteGymMesocycleStore::new(store.pool().clone(), zone.clone()),
-        SqlitePlanStore::new(store.pool().clone(), zone.clone()),
+        store.adapter_with(SqliteGymMesocycleStore::new, zone.clone()),
+        store.adapter_with(SqlitePlanStore::new, zone.clone()),
         walk.reschedule(zone).await?,
         &walk,
     ))

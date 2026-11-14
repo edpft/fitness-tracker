@@ -8,6 +8,7 @@ use domain::{
 };
 use infrastructure::{GarminRecordedDevices, GarminWear, SqliteSleepHistory};
 
+use crate::store::Spanned;
 use crate::{
     devices,
     graph::{page, read},
@@ -21,7 +22,7 @@ page! {
     /// register for the nights before Garmin named one (#559, #569), and the
     /// ranges.
     pub struct Page {
-        nights: Sleeping<SqliteSleepHistory, GarminRecordedDevices, GarminWear>,
+        nights: Sleeping<Spanned<SqliteSleepHistory>, Spanned<GarminRecordedDevices>, Spanned<GarminWear>>,
         ranges: Current,
     }
 }
@@ -41,7 +42,7 @@ impl Page {
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
         Ok(Self {
             nights: Sleeping::new(
-                SqliteSleepHistory::new(store.pool().clone()),
+                store.adapter(SqliteSleepHistory::new),
                 devices::register(store),
             )
             .into(),

@@ -12,6 +12,7 @@ use infrastructure::{
 };
 use jiff::civil::Date;
 
+use crate::store::Spanned;
 use crate::{
     graph::{page, read},
     one_rep_max,
@@ -23,9 +24,9 @@ page! {
     /// games Garmin's activities give, and which sessions were 1RM tests.
     pub struct Page {
         history: History<
-            SqliteCanonicalGymSessionStore,
-            SqliteCanonicalCyclingSessionStore,
-            SqlitePadelGames,
+            Spanned<SqliteCanonicalGymSessionStore>,
+            Spanned<SqliteCanonicalCyclingSessionStore>,
+            Spanned<SqlitePadelGames>,
         >,
         tests: one_rep_max::Tests,
     }
@@ -41,12 +42,11 @@ impl Page {
     /// The page over `store`.
     #[must_use]
     pub fn open(store: &Store, zone: &OperatorZone) -> Self {
-        let pool = store.pool();
         Self {
             history: History::new(
-                SqliteCanonicalGymSessionStore::new(pool.clone()),
-                SqliteCanonicalCyclingSessionStore::new(pool.clone()),
-                SqlitePadelGames::new(pool.clone()),
+                store.adapter(SqliteCanonicalGymSessionStore::new),
+                store.adapter(SqliteCanonicalCyclingSessionStore::new),
+                store.adapter(SqlitePadelGames::new),
             )
             .into(),
             tests: one_rep_max::tests(store, zone).into(),

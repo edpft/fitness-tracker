@@ -3,12 +3,13 @@
 use application::composition::Composition;
 use infrastructure::SqliteCompositionHistory;
 
+use crate::store::Spanned;
 use crate::store::Store;
 
 /// Every component anything measured, one series per method.
-pub type ByMethod = Composition<SqliteCompositionHistory>;
+pub type ByMethod = Composition<Spanned<SqliteCompositionHistory>>;
 
 /// The composition over `store`.
 pub(crate) fn over(store: &Store) -> ByMethod {
-    Composition::new(SqliteCompositionHistory::new(store.pool().clone()))
+    Composition::new(store.adapter(SqliteCompositionHistory::new))
 }
