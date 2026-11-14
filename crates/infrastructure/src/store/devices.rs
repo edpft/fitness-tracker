@@ -455,19 +455,27 @@ impl WearRecord for GarminWear {
     }
 }
 
-/// `device_sighting`, which Garmin's activities and days write (#809).
+/// `device_sighting` (#809).
 impl application::Input for GarminRecordedDevices {
     fn reads() -> application::Reads {
-        super::normalised(&[
-            super::GarminActivityLandingStore::STREAM,
-            super::GarminDailyHeartRateLandingStore::STREAM,
-        ])
+        super::tables(&[super::table::DEVICE_SIGHTING])
     }
 }
 
-/// `wear_day`, which Garmin's days write (#809).
+/// `wear_day` (#809).
 impl application::Input for GarminWear {
     fn reads() -> application::Reads {
-        super::normalised(&[super::GarminDailyHeartRateLandingStore::STREAM])
+        super::tables(&[super::table::WEAR_DAY])
+    }
+}
+
+/// The watch's gym sessions, its padel games, and the devices each activity names (#809).
+impl application::Output for SqliteGarminActivityStore {
+    fn writes() -> std::collections::BTreeSet<application::Table> {
+        super::writes(&[
+            super::table::GYM_SESSION,
+            super::table::PADEL_GAME,
+            super::table::DEVICE_SIGHTING,
+        ])
     }
 }

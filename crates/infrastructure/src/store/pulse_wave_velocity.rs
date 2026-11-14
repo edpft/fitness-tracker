@@ -62,9 +62,9 @@ impl PulseWaveVelocityHistory for SqlitePulseWaveVelocityHistory {
     }
 }
 
-/// The Body Scan's readings, which Withings writes (#809).
+/// The Body Scan's readings, and the weigh-ins they were taken at (#809).
 impl application::Input for SqlitePulseWaveVelocityHistory {
     fn reads() -> application::Reads {
-        super::normalised(&[super::WithingsMeasurementLandingStore::STREAM])
+        super::tables(&[super::table::BODY_SCAN, super::table::WEIGH_IN])
     }
 }

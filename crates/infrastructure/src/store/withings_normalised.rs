@@ -545,3 +545,14 @@ impl application::Input for WithingsWeighInAccountReader {
         super::landed(&[super::WithingsMeasurementLandingStore::STREAM])
     }
 }
+
+/// Withings' weigh-ins, their composition, and the Body Scan's readings (#809).
+impl application::Output for SqliteWeighInStore {
+    fn writes() -> std::collections::BTreeSet<application::Table> {
+        super::writes(&[
+            super::table::WEIGH_IN,
+            super::table::BODY_COMPOSITION,
+            super::table::BODY_SCAN,
+        ])
+    }
+}

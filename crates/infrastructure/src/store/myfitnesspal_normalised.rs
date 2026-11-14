@@ -275,3 +275,10 @@ impl application::Input for MyFitnessPalExportAccountReader {
         super::landed(&[super::MyFitnessPalExportLandingStore::STREAM])
     }
 }
+
+/// MyFitnessPal's weigh-ins (#809).
+impl application::Output for SqliteMyFitnessPalStore {
+    fn writes() -> std::collections::BTreeSet<application::Table> {
+        super::writes(&[super::table::WEIGH_IN])
+    }
+}

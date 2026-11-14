@@ -997,9 +997,10 @@ struct SetRow {
     warmup: i64,
 }
 
-/// What was prescribed (#809).
+/// What was prescribed, and whether a workout names it as performed (#809).
 impl application::Input for SqlitePrescribedWorkoutStore {
     fn reads() -> application::Reads {
         application::Reads::of([application::Node::PRESCRIPTIONS])
+            .and(super::tables(&[super::table::GYM_SESSION]))
     }
 }

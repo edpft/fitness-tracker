@@ -135,13 +135,13 @@ fn mass(grams: i64) -> Result<Kg, StoreError> {
     ))
 }
 
-/// Every normalised weigh-in's composition: Withings', the spreadsheets' and MyFitnessPal's (#809).
+/// Every normalised weigh-in's composition, and the Body Scan's parts (#809).
 impl application::Input for SqliteCompositionHistory {
     fn reads() -> application::Reads {
-        super::normalised(&[
-            super::WithingsMeasurementLandingStore::STREAM,
-            super::SpreadsheetFileLandingStore::STREAM,
-            super::MyFitnessPalExportLandingStore::STREAM,
+        super::tables(&[
+            super::table::BODY_COMPOSITION,
+            super::table::WEIGH_IN,
+            super::table::BODY_SCAN,
         ])
     }
 }

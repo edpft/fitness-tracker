@@ -468,22 +468,23 @@ fn weigh_in_id(id: i64) -> Result<NormalisedWeighInId, StoreError> {
     NormalisedWeighInId::try_from(id).map_err(|error| corrupt(&error))
 }
 
-/// `weigh_in`, which Withings, the spreadsheets and MyFitnessPal write (#809).
+/// `weigh_in` (#809).
 impl application::Input for SqliteNormalisedWeighInReader {
     fn reads() -> application::Reads {
-        super::normalised(&[
-            super::WithingsMeasurementLandingStore::STREAM,
-            super::SpreadsheetFileLandingStore::STREAM,
-            super::MyFitnessPalExportLandingStore::STREAM,
-        ])
+        super::tables(&[super::table::WEIGH_IN])
     }
 }
 
-/// The canonical weigh-ins (#809).
+/// The canonical weigh-ins, and the normalised weigh-ins and composition
+/// their fat-free mass is worked out from (#809).
 impl application::Input for SqliteCanonicalWeighInStore {
     fn reads() -> application::Reads {
         application::Reads::of([application::Node::Canonical(
             application::CanonicalLayer::WeighIns,
         )])
+        .and(super::tables(&[
+            super::table::WEIGH_IN,
+            super::table::BODY_COMPOSITION,
+        ]))
     }
 }

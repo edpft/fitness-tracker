@@ -503,14 +503,9 @@ fn guess_of(
     }
 }
 
-/// `gym_session`, which Hevy, the watch, the spreadsheets and Beyond The White Board write (#809).
+/// `gym_session` (#809).
 impl application::Input for SqliteNormalisedGymSessionReader {
     fn reads() -> application::Reads {
-        super::normalised(&[
-            super::HevyWorkoutLandingStore::STREAM,
-            super::GarminActivityLandingStore::STREAM,
-            super::SpreadsheetFileLandingStore::STREAM,
-            super::BtwbExportLandingStore::STREAM,
-        ])
+        super::tables(&[super::table::GYM_SESSION])
     }
 }

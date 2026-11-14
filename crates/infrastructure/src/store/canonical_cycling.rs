@@ -1072,10 +1072,10 @@ fn too_large(what: &str) -> StoreError {
     }
 }
 
-/// `cycling_session`, which Peloton writes (#809).
+/// `cycling_session` (#809).
 impl application::Input for SqliteNormalisedCyclingSessionReader {
     fn reads() -> application::Reads {
-        super::normalised(&[super::PelotonRideLandingStore::STREAM])
+        super::tables(&[super::table::CYCLING_SESSION])
     }
 }
 

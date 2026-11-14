@@ -292,9 +292,16 @@ impl application::Input for GarminDailySummaryAccountReader {
     }
 }
 
-/// `stress`, which Garmin's daily summaries write (#809).
+/// `stress` (#809).
 impl application::Input for SqliteStressHistory {
     fn reads() -> application::Reads {
-        super::normalised(&[super::GarminDailySummaryLandingStore::STREAM])
+        super::tables(&[super::table::STRESS])
+    }
+}
+
+/// Garmin's daily stress (#809).
+impl application::Output for SqliteStressStore {
+    fn writes() -> std::collections::BTreeSet<application::Table> {
+        super::writes(&[super::table::STRESS])
     }
 }

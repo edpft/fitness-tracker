@@ -19,10 +19,11 @@ pub enum Node {
     Landing(LandingStream),
     Normalised(LandingStream),
     Canonical(CanonicalLayer),
+    /// A table of the normalised layer, which several streams may write: it
+    /// is derived from every stream whose layer writes it.
+    Table(Table),
     /// The edit overlay, an input to that stream's normalised layer.
     Edits(LandingStream),
-    /// The match overlay, an input to the canonical layer.
-    Matches,
     // § III, what we intend and what we consult: not layered.
     /// § 12.
     Authored(Authored),
@@ -94,6 +95,27 @@ impl Calendar {
     }
 }
 
+/// A table of the normalised layer, by the name its SQL gives it (#809).
+///
+/// **The join between a stream's layer and what reads it.** A writer names
+/// the tables it writes and a reader the tables it reads, each beside its own
+/// SQL, so a reader never lists the streams that write its table: a stream
+/// that starts writing one is read wherever that table is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Table(&'static str);
+
+impl Table {
+    #[must_use]
+    pub const fn named(name: &'static str) -> Self {
+        Self(name)
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
 /// What a derivation, a page or a prescription reads.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Reads(BTreeSet<Node>);
@@ -135,6 +157,16 @@ impl FromIterator<Node> for Reads {
 /// does not declare: it has nothing else to read with.
 pub trait Input {
     fn reads() -> Reads;
+}
+
+/// A port that writes the normalised layer, and the tables it writes (#809).
+///
+/// **Named beside the SQL that writes them**, as [`Input`] is beside the SQL
+/// that reads. A stream's layer is in the graph only through its writer, so a
+/// writer that does not say what it writes is not one a stream can be
+/// normalised through.
+pub trait Output {
+    fn writes() -> BTreeSet<Table>;
 }
 
 /// What a port that writes and reads nothing reads.
@@ -217,6 +249,19 @@ impl Derivation {
             reads: D::reads(),
         }
     }
+
+    /// The derivation of `node` by `D`, and of each table `D` writes from
+    /// `node` among the others that write it.
+    pub fn writing<D: Input + Output>(node: Node) -> impl Iterator<Item = Self> {
+        let tables = D::writes().into_iter().map({
+            let node = node.clone();
+            move |table| Self {
+                node: Node::Table(table),
+                reads: Reads::of([node.clone()]),
+            }
+        });
+        std::iter::once(Self::of::<D>(node)).chain(tables)
+    }
 }
 
 /// Every derivation this build makes: the union of their declarations.
@@ -284,9 +329,10 @@ impl Graph {
                 }
                 // **Refreshed only by a run that delivers** (#246), which is
                 // the only one that prescribes from them.
+                // **A table is no step of its own**: its streams' layers are.
                 Node::Generation(Generation::Classes | Generation::Equipment)
+                | Node::Table(_)
                 | Node::Edits(_)
-                | Node::Matches
                 | Node::Authored(_)
                 | Node::Interpretive(_) => None,
             })
@@ -337,6 +383,42 @@ mod tests {
                 Part::Fetching(stream("peloton.rides")),
                 Part::Normalising(stream("peloton.rides")),
                 Part::Canonicalising(CanonicalLayer::Cycling),
+            ]
+        );
+    }
+
+    struct Writer;
+    impl Input for Writer {
+        fn reads() -> Reads {
+            Reads::default()
+        }
+    }
+    impl super::Output for Writer {
+        fn writes() -> std::collections::BTreeSet<super::Table> {
+            [super::Table::named("gym_session")].into()
+        }
+    }
+
+    /// **A table is read from every stream that writes it** (#809): a reader
+    /// names the table, never its writers, so one writing it later is read
+    /// with no change to the reader.
+    #[test]
+    fn a_table_is_derived_from_every_stream_writing_it() {
+        let graph = Graph::of(
+            ["hevy.workouts", "btwb.exports"]
+                .into_iter()
+                .flat_map(|name| Derivation::writing::<Writer>(Node::Normalised(stream(name)))),
+        );
+        assert_eq!(
+            graph
+                .parts(&Reads::of([Node::Table(super::Table::named(
+                    "gym_session"
+                ))]))
+                .into_iter()
+                .collect::<Vec<_>>(),
+            [
+                Part::Normalising(stream("btwb.exports")),
+                Part::Normalising(stream("hevy.workouts")),
             ]
         );
     }

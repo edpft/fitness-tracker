@@ -832,3 +832,10 @@ impl application::Input for HevySessionAccountReader {
         super::landed(&[super::HevyWorkoutLandingStore::STREAM])
     }
 }
+
+/// Hevy's sessions (#809).
+impl application::Output for SqliteGymSessionStore {
+    fn writes() -> std::collections::BTreeSet<application::Table> {
+        super::writes(&[super::table::GYM_SESSION])
+    }
+}

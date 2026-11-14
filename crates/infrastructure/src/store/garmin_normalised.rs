@@ -381,3 +381,10 @@ impl application::Input for GarminHrvAccountReader {
         ])
     }
 }
+
+/// Garmin's nights (#809).
+impl application::Output for SqliteOvernightHrvStore {
+    fn writes() -> std::collections::BTreeSet<application::Table> {
+        super::writes(&[super::table::OVERNIGHT_HRV])
+    }
+}

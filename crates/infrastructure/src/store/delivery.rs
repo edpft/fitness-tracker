@@ -349,9 +349,11 @@ impl PrescriptionLifecycle for SqlitePrescriptionDeliveryStore {
     }
 }
 
-/// Where each gym prescription was put (#809).
+/// Where each gym prescription was put, and whether a workout names it as
+/// performed (#809).
 impl application::Input for SqlitePrescriptionDeliveryStore {
     fn reads() -> application::Reads {
         application::Reads::of([application::Node::PRESCRIPTIONS])
+            .and(super::tables(&[super::table::GYM_SESSION]))
     }
 }
