@@ -38,10 +38,7 @@ pub async fn gym(database: &Path) -> Result<(), Failure> {
 pub async fn body_weight(database: &Path) -> Result<(), Failure> {
     let store = Store::open(database).await?;
     output::canonicalising_weigh_ins_started();
-    let done = store
-        .canonicalising()
-        .weigh_ins(Rederivation::Whole)
-        .await;
+    let done = store.canonicalising().weigh_ins(Rederivation::Whole).await;
     store.close().await;
     let done = done?;
     output::weigh_ins_canonicalised(&done);
