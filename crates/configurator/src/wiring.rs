@@ -10,7 +10,7 @@
 //! something it cannot do. That is a mistake rather than an invocation error,
 //! and it says so.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use application::{
     DerivationStatus, DerivationStatusReporter, DerivedFrom, ExtractionError,
@@ -29,7 +29,7 @@ use domain::{
     planner::Discipline,
 };
 use infrastructure::{
-    BtwbExportAccountReader, BtwbExportLandingStore, BtwbTranslator, FileRunLock, FolderFiles,
+    BtwbExportAccountReader, BtwbExportLandingStore, BtwbTranslator, FolderFiles,
     GarminActivityFileLandingStore, GarminActivityLandingStore, GarminActivityTranslator,
     GarminAuth, GarminBodyBatteryEventLandingStore, GarminBodyBatteryLandingStore,
     GarminCredentials, GarminDailyHeartRateAccountReader, GarminDailyHeartRateLandingStore,
@@ -230,26 +230,24 @@ pub enum WiringError {
 pub async fn run(
     command: Command,
     known: &KnownStream,
-    database: &Path,
+    store: &Store,
     walks: &dyn WalkReporter,
 ) -> Result<Outcome, WiringError> {
     match known.name().as_str() {
-        HevyWorkoutLandingStore::STREAM => hevy_workouts(command, database).await,
-        PelotonRideLandingStore::STREAM => peloton_rides(command, database, walks).await,
+        HevyWorkoutLandingStore::STREAM => hevy_workouts(command, store).await,
+        PelotonRideLandingStore::STREAM => peloton_rides(command, store, walks).await,
         WithingsMeasurementLandingStore::STREAM => {
-            withings_measurements(command, database, walks).await
+            withings_measurements(command, store, walks).await
         }
-        GarminHrvLandingStore::STREAM => garmin_hrv(command, database).await,
-        GarminActivityLandingStore::STREAM => garmin_activities(command, database, walks).await,
-        GarminDailyHeartRateLandingStore::STREAM => {
-            garmin_daily_heart_rate(command, database).await
-        }
-        GarminSleepLandingStore::STREAM => garmin_sleep(command, database).await,
-        GarminDailySummaryLandingStore::STREAM => garmin_daily_summary(command, database).await,
-        SpreadsheetFileLandingStore::STREAM => spreadsheet_files(command, database).await,
-        BtwbExportLandingStore::STREAM => btwb_exports(command, database).await,
-        MyFitnessPalExportLandingStore::STREAM => myfitnesspal_exports(command, database).await,
-        WahooFileLandingStore::STREAM => wahoo_files(command, database).await,
+        GarminHrvLandingStore::STREAM => garmin_hrv(command, store).await,
+        GarminActivityLandingStore::STREAM => garmin_activities(command, store, walks).await,
+        GarminDailyHeartRateLandingStore::STREAM => garmin_daily_heart_rate(command, store).await,
+        GarminSleepLandingStore::STREAM => garmin_sleep(command, store).await,
+        GarminDailySummaryLandingStore::STREAM => garmin_daily_summary(command, store).await,
+        SpreadsheetFileLandingStore::STREAM => spreadsheet_files(command, store).await,
+        BtwbExportLandingStore::STREAM => btwb_exports(command, store).await,
+        MyFitnessPalExportLandingStore::STREAM => myfitnesspal_exports(command, store).await,
+        WahooFileLandingStore::STREAM => wahoo_files(command, store).await,
         other => Err(WiringError::Unwired {
             stream: other.to_owned(),
         }),
@@ -278,31 +276,29 @@ pub fn derives(known: &KnownStream) -> bool {
 /// derivation here.
 pub async fn inputs(
     known: &KnownStream,
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
 ) -> Result<DerivedFrom, WiringError> {
     use application::RawExtent as _;
-
-    let store = Store::open(database).await?;
     let (records, overlay, version) = match known.name().as_str() {
         HevyWorkoutLandingStore::STREAM => (
-            records(&store, HevyWorkoutLandingStore::new).await?,
+            records(store, HevyWorkoutLandingStore::new).await?,
             Some(HevyWorkoutLandingStore::STREAM),
             HevySessionTranslator::VERSION,
         ),
         PelotonRideLandingStore::STREAM => (
-            peloton_rides_read(&store).await?,
+            peloton_rides_read(store).await?,
             None,
             PelotonSessionTranslator::VERSION,
         ),
         WithingsMeasurementLandingStore::STREAM => (
-            records(&store, WithingsMeasurementLandingStore::new).await?,
+            records(store, WithingsMeasurementLandingStore::new).await?,
             None,
             WithingsWeighInTranslator::VERSION,
         ),
         // The sleep record as well, which names each night's watch (#569).
         GarminHrvLandingStore::STREAM => (
-            with_sleep(&store.try_adapter(GarminHrvLandingStore::new)?, &store).await?,
+            with_sleep(&store.try_adapter(GarminHrvLandingStore::new)?, store).await?,
             None,
             GarminHrvTranslator::VERSION,
         ),
@@ -320,14 +316,14 @@ pub async fn inputs(
         GarminDailyHeartRateLandingStore::STREAM => (
             with_sleep(
                 &store.try_adapter(GarminDailyHeartRateLandingStore::new)?,
-                &store,
+                store,
             )
             .await?,
             None,
             GarminDailyHeartRateTranslator::VERSION,
         ),
         GarminSleepLandingStore::STREAM => (
-            records(&store, GarminSleepLandingStore::new).await?,
+            records(store, GarminSleepLandingStore::new).await?,
             None,
             GarminSleepTranslator::VERSION,
         ),
@@ -335,24 +331,24 @@ pub async fn inputs(
         GarminDailySummaryLandingStore::STREAM => (
             with_sleep(
                 &store.try_adapter(GarminDailySummaryLandingStore::new)?,
-                &store,
+                store,
             )
             .await?,
             None,
             GarminStressTranslator::VERSION,
         ),
         SpreadsheetFileLandingStore::STREAM => (
-            records(&store, SpreadsheetFileLandingStore::new).await?,
+            records(store, SpreadsheetFileLandingStore::new).await?,
             None,
             SpreadsheetTranslator::VERSION,
         ),
         BtwbExportLandingStore::STREAM => (
-            records(&store, BtwbExportLandingStore::new).await?,
+            records(store, BtwbExportLandingStore::new).await?,
             None,
             BtwbTranslator::VERSION,
         ),
         MyFitnessPalExportLandingStore::STREAM => (
-            records(&store, MyFitnessPalExportLandingStore::new).await?,
+            records(store, MyFitnessPalExportLandingStore::new).await?,
             None,
             MyFitnessPalWeighInTranslator::VERSION,
         ),
@@ -367,8 +363,8 @@ pub async fn inputs(
             });
         }
     };
-    let corrections = corrections(&store, overlay).await?;
-    let zones = stated_zones(&store, zone).await?;
+    let corrections = corrections(store, overlay).await?;
+    let zones = stated_zones(store, zone).await?;
     Ok(DerivedFrom::from(format!(
         "version {version}; records {records}; corrections {}; zone {zones}",
         corrections.join(","),
@@ -496,11 +492,7 @@ async fn with_sleep(
 /// watch was worn (#427), and here on its own, on the token every Garmin entry
 /// caches (#377). Both walks keep one resumption point, so whichever runs
 /// second asks only for the day the first left off at.
-async fn garmin_daily_heart_rate(
-    command: Command,
-    database: &Path,
-) -> Result<Outcome, WiringError> {
-    let store = Store::open(database).await?;
+async fn garmin_daily_heart_rate(command: Command, store: &Store) -> Result<Outcome, WiringError> {
     let landing = store.try_adapter(GarminDailyHeartRateLandingStore::new)?;
     let resumption = store.adapter(SqliteResumptionPointStore::new);
     let runs = store.adapter(SqliteExtractionRunLog::new);
@@ -509,21 +501,14 @@ async fn garmin_daily_heart_rate(
     match command {
         Command::ExtractFolder(_) => Err(WiringError::NotAFolder { stream }),
         Command::Extract(access) => {
-            let walk = Garmin::signed_in(access, stream, &store, database)?
-                .day(GarminDay::HeartRate, landing);
+            let walk = Garmin::signed_in(access, stream, store)?.day(GarminDay::HeartRate, landing);
             Ok(Outcome::Extracted(Box::new(
                 walk.extraction.extract().await?,
             )))
         }
         Command::Normalise(declared, rederivation) => {
-            let zones = stated_zones(&store, &declared).await?;
-            let terms = terms(
-                &store,
-                &zones,
-                None,
-                GarminDailyHeartRateTranslator::VERSION,
-            )
-            .await?;
+            let zones = stated_zones(store, &declared).await?;
+            let terms = terms(store, &zones, None, GarminDailyHeartRateTranslator::VERSION).await?;
             let normalisation: graph::GarminDailyHeartRate = Normalisation::new(
                 NormalisationPorts {
                     raw: store.try_adapter(GarminDailyHeartRateAccountReader::new)?,
@@ -576,8 +561,7 @@ async fn garmin_daily_heart_rate(
 ///
 /// **Collected two ways**, for the reason the wrist's day is: with the
 /// activities, and here on its own. Both walks keep one resumption point.
-async fn garmin_sleep(command: Command, database: &Path) -> Result<Outcome, WiringError> {
-    let store = Store::open(database).await?;
+async fn garmin_sleep(command: Command, store: &Store) -> Result<Outcome, WiringError> {
     let landing = store.try_adapter(GarminSleepLandingStore::new)?;
     let resumption = store.adapter(SqliteResumptionPointStore::new);
     let runs = store.adapter(SqliteExtractionRunLog::new);
@@ -586,15 +570,14 @@ async fn garmin_sleep(command: Command, database: &Path) -> Result<Outcome, Wiri
     match command {
         Command::ExtractFolder(_) => Err(WiringError::NotAFolder { stream }),
         Command::Extract(access) => {
-            let walk =
-                Garmin::signed_in(access, stream, &store, database)?.day(GarminDay::Sleep, landing);
+            let walk = Garmin::signed_in(access, stream, store)?.day(GarminDay::Sleep, landing);
             Ok(Outcome::Extracted(Box::new(
                 walk.extraction.extract().await?,
             )))
         }
         Command::Normalise(declared, rederivation) => {
-            let zones = stated_zones(&store, &declared).await?;
-            let terms = terms(&store, &zones, None, GarminSleepTranslator::VERSION).await?;
+            let zones = stated_zones(store, &declared).await?;
+            let terms = terms(store, &zones, None, GarminSleepTranslator::VERSION).await?;
             let normalisation: graph::GarminSleep = Normalisation::new(
                 NormalisationPorts {
                     raw: store.try_adapter(GarminSleepAccountReader::new)?,
@@ -647,8 +630,7 @@ async fn garmin_sleep(command: Command, database: &Path) -> Result<Outcome, Wiri
 ///
 /// **Collected two ways**, for the reason the wrist's day is: with the
 /// activities, and here on its own. Both walks keep one resumption point.
-async fn garmin_daily_summary(command: Command, database: &Path) -> Result<Outcome, WiringError> {
-    let store = Store::open(database).await?;
+async fn garmin_daily_summary(command: Command, store: &Store) -> Result<Outcome, WiringError> {
     let landing = store.try_adapter(GarminDailySummaryLandingStore::new)?;
     let resumption = store.adapter(SqliteResumptionPointStore::new);
     let runs = store.adapter(SqliteExtractionRunLog::new);
@@ -657,15 +639,15 @@ async fn garmin_daily_summary(command: Command, database: &Path) -> Result<Outco
     match command {
         Command::ExtractFolder(_) => Err(WiringError::NotAFolder { stream }),
         Command::Extract(access) => {
-            let walk = Garmin::signed_in(access, stream, &store, database)?
-                .day(GarminDay::DailySummary, landing);
+            let walk =
+                Garmin::signed_in(access, stream, store)?.day(GarminDay::DailySummary, landing);
             Ok(Outcome::Extracted(Box::new(
                 walk.extraction.extract().await?,
             )))
         }
         Command::Normalise(declared, rederivation) => {
-            let zones = stated_zones(&store, &declared).await?;
-            let terms = terms(&store, &zones, None, GarminStressTranslator::VERSION).await?;
+            let zones = stated_zones(store, &declared).await?;
+            let terms = terms(store, &zones, None, GarminStressTranslator::VERSION).await?;
             let normalisation: graph::GarminDailySummary = Normalisation::new(
                 NormalisationPorts {
                     raw: store.try_adapter(GarminDailySummaryAccountReader::new)?,
@@ -734,10 +716,9 @@ async fn garmin_daily_summary(command: Command, database: &Path) -> Result<Outco
 /// graphs it fetches are for rides this same command has just landed.
 async fn peloton_rides(
     command: Command,
-    database: &Path,
+    store: &Store,
     walks: &dyn WalkReporter,
 ) -> Result<Outcome, WiringError> {
-    let store = Store::open(database).await?;
     let landing = store.try_adapter(PelotonRideLandingStore::new)?;
     let samples_landing = store.try_adapter(PelotonRideSampleLandingStore::new)?;
     let resumption = store.adapter(SqliteResumptionPointStore::new);
@@ -758,15 +739,15 @@ async fn peloton_rides(
                 },
                 resumption,
                 runs,
-                database,
+                store,
                 walks,
             )
             .await
         }
         Command::Normalise(declared, rederivation) => {
-            let zones = stated_zones(&store, &declared).await?;
-            let terms = terms(&store, &zones, None, PelotonSessionTranslator::VERSION).await?;
-            let summary = peloton_normalisation(&store, zones, terms)?
+            let zones = stated_zones(store, &declared).await?;
+            let terms = terms(store, &zones, None, PelotonSessionTranslator::VERSION).await?;
+            let summary = peloton_normalisation(store, zones, terms)?
                 .normalise(rederivation)
                 .await?;
             Ok(Outcome::Derived(Box::new(summary)))
@@ -890,11 +871,11 @@ async fn collect_rides(
     landings: PelotonLandings,
     resumption: Spanned<SqliteResumptionPointStore>,
     runs: Spanned<SqliteExtractionRunLog>,
-    database: &Path,
+    store: &Store,
     walks: &dyn WalkReporter,
 ) -> Result<Outcome, WiringError> {
     let (((rides, graphs), details), account) =
-        peloton_walks(access, landings, resumption, runs, database)?;
+        peloton_walks(access, landings, resumption, runs, store)?;
     let ridden = walk(rides.stream, rides.extraction, walks).await;
     let sampled = walk(graphs.stream, graphs.extraction, walks).await;
     let detailed = walk(details.stream, details.extraction, walks).await;
@@ -930,7 +911,7 @@ fn peloton_walks(
     landings: PelotonLandings,
     resumption: Spanned<SqliteResumptionPointStore>,
     runs: Spanned<SqliteExtractionRunLog>,
-    database: &Path,
+    store: &Store,
 ) -> Result<
     PelotonWalks<
         impl WorkoutExtractor + Sync + use<>,
@@ -973,7 +954,7 @@ fn peloton_walks(
             landing,
             resumption: resumption.clone(),
             runs: runs.clone(),
-            lock: FileRunLock::beside(database),
+            lock: store.run_lock(),
             clock: SystemClock,
         }),
     };
@@ -988,7 +969,7 @@ fn peloton_walks(
             landing: samples_landing,
             resumption: resumption.clone(),
             runs: runs.clone(),
-            lock: FileRunLock::beside(database),
+            lock: store.run_lock(),
             clock: SystemClock,
         }),
     };
@@ -1003,7 +984,7 @@ fn peloton_walks(
             landing: details_landing,
             resumption: resumption.clone(),
             runs: runs.clone(),
-            lock: FileRunLock::beside(database),
+            lock: store.run_lock(),
             clock: SystemClock,
         }),
     };
@@ -1015,7 +996,7 @@ fn peloton_walks(
             landing: account_landing,
             resumption,
             runs,
-            lock: FileRunLock::beside(database),
+            lock: store.run_lock(),
             clock: SystemClock,
         }),
     };
@@ -1052,9 +1033,9 @@ fn peloton_normalisation(
 ///
 /// [`WiringError`] if the store is unavailable. A login that is absent or of
 /// the wrong kind is [`NoAccess`], which `next` reports and steps past.
-pub async fn peloton_records(
+pub fn peloton_records(
     access: Result<SourceAccess, NoAccess>,
-    database: &Path,
+    store: &Store,
 ) -> Result<
     Records<
         PelotonWalks<
@@ -1066,7 +1047,6 @@ pub async fn peloton_records(
     >,
     WiringError,
 > {
-    let store = Store::open(database).await?;
     let entry = LandingStream::try_from(PelotonRideLandingStore::STREAM)?;
     let walks = match access {
         Err(why) => Err(why),
@@ -1080,7 +1060,7 @@ pub async fn peloton_records(
             },
             store.adapter(SqliteResumptionPointStore::new),
             store.adapter(SqliteExtractionRunLog::new),
-            database,
+            store,
         ))?,
     };
     Ok(Records { entry, walks })
@@ -1096,8 +1076,7 @@ pub async fn peloton_records(
 /// **On the token every Garmin entry caches** (#377), so a run that collects
 /// this and the activities signs in once rather than once each. `next`
 /// collects it behind the activities, on their authenticator (#432).
-async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, WiringError> {
-    let store = Store::open(database).await?;
+async fn garmin_hrv(command: Command, store: &Store) -> Result<Outcome, WiringError> {
     let landing = store.try_adapter(GarminHrvLandingStore::new)?;
     let resumption = store.adapter(SqliteResumptionPointStore::new);
     let runs = store.adapter(SqliteExtractionRunLog::new);
@@ -1108,14 +1087,13 @@ async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, Wiring
         }),
         Command::Extract(access) => {
             let nights =
-                Garmin::signed_in(access, GarminHrvLandingStore::STREAM, &store, database)?
-                    .nights()?;
+                Garmin::signed_in(access, GarminHrvLandingStore::STREAM, store)?.nights()?;
             let summary = nights.extraction.extract().await?;
             Ok(Outcome::Extracted(Box::new(summary)))
         }
         Command::Normalise(declared, rederivation) => {
-            let zones = stated_zones(&store, &declared).await?;
-            let terms = terms(&store, &zones, None, GarminHrvTranslator::VERSION).await?;
+            let zones = stated_zones(store, &declared).await?;
+            let terms = terms(store, &zones, None, GarminHrvTranslator::VERSION).await?;
             let normalisation: graph::GarminHrv = Normalisation::new(
                 NormalisationPorts {
                     raw: store.try_adapter(GarminHrvAccountReader::new)?,
@@ -1189,10 +1167,9 @@ async fn garmin_hrv(command: Command, database: &Path) -> Result<Outcome, Wiring
 /// a translator against a guess.
 async fn garmin_activities(
     command: Command,
-    database: &Path,
+    store: &Store,
     walks: &dyn WalkReporter,
 ) -> Result<Outcome, WiringError> {
-    let store = Store::open(database).await?;
     let landing = store.try_adapter(GarminActivityLandingStore::new)?;
     let sets_landing = store.try_adapter(GarminExerciseSetLandingStore::new)?;
     let files_landing = store.try_adapter(GarminActivityFileLandingStore::new)?;
@@ -1203,11 +1180,11 @@ async fn garmin_activities(
         Command::ExtractFolder(_) => Err(WiringError::NotAFolder {
             stream: GarminActivityLandingStore::STREAM,
         }),
-        Command::Extract(access) => collect_activities(access, (&store, database), walks).await,
+        Command::Extract(access) => collect_activities(access, store, walks).await,
         Command::Normalise(declared, rederivation) => {
-            let zones = stated_zones(&store, &declared).await?;
+            let zones = stated_zones(store, &declared).await?;
             let terms = terms(
-                &store,
+                store,
                 &zones,
                 Some(GarminExerciseSetLandingStore::STREAM),
                 GarminActivityTranslator::VERSION,
@@ -1218,7 +1195,7 @@ async fn garmin_activities(
             // and this is that moment. It is keyed on `garmin.exercise_sets`
             // because a set is what the corrected figures belong to, and that
             // is the record whose content is wrong.
-            let overlay = overlay(&store, GarminExerciseSetLandingStore::STREAM).await?;
+            let overlay = overlay(store, GarminExerciseSetLandingStore::STREAM).await?;
 
             let normalisation: graph::GarminActivities = Normalisation::new(
                 NormalisationPorts {
@@ -1306,11 +1283,11 @@ async fn garmin_activities(
 /// entry.
 async fn collect_activities(
     access: SourceAccess,
-    (store, database): (&Store, &Path),
+    store: &Store,
     walks: &dyn WalkReporter,
 ) -> Result<Outcome, WiringError> {
-    let listed = Garmin::signed_in(access, GarminActivityLandingStore::STREAM, store, database)?
-        .activities()?;
+    let listed =
+        Garmin::signed_in(access, GarminActivityLandingStore::STREAM, store)?.activities()?;
     let mut each = Vec::with_capacity(listed.len());
     for application::next::Walk {
         stream, extraction, ..
@@ -1338,7 +1315,6 @@ struct Garmin<'a> {
     store: &'a Store,
     resumption: Spanned<SqliteResumptionPointStore>,
     runs: Spanned<SqliteExtractionRunLog>,
-    database: &'a Path,
 }
 
 impl<'a> Garmin<'a> {
@@ -1352,7 +1328,6 @@ impl<'a> Garmin<'a> {
         access: SourceAccess,
         stream: &str,
         store: &'a Store,
-        database: &'a Path,
     ) -> Result<Self, WiringError> {
         let SourceAccess::EmailPassword {
             base_url,
@@ -1377,7 +1352,6 @@ impl<'a> Garmin<'a> {
             store,
             resumption: store.adapter(SqliteResumptionPointStore::new),
             runs: store.adapter(SqliteExtractionRunLog::new),
-            database,
         })
     }
 
@@ -1594,7 +1568,7 @@ impl<'a> Garmin<'a> {
                 landing,
                 resumption: self.resumption.clone(),
                 runs: self.runs.clone(),
-                lock: FileRunLock::beside(self.database),
+                lock: self.store.run_lock(),
                 clock: SystemClock,
             })),
         }
@@ -1623,9 +1597,9 @@ impl<'a> Garmin<'a> {
 /// [`WiringError`] if the store is unavailable. A login that is absent or of
 /// the wrong kind is [`NoAccess`] for both, which `next` reports and steps
 /// past.
-pub async fn garmin_records(
+pub fn garmin_records(
     access: Result<SourceAccess, NoAccess>,
-    database: &Path,
+    store: &Store,
 ) -> Result<
     (
         Records<impl application::next::Walks + Sync + use<>>,
@@ -1633,14 +1607,13 @@ pub async fn garmin_records(
     ),
     WiringError,
 > {
-    let store = Store::open(database).await?;
     let activities = LandingStream::try_from(GarminActivityLandingStore::STREAM)?;
     let days = LandingStream::try_from(GarminDailyHeartRateLandingStore::STREAM)?;
     let built = match access {
         Err(why) => Err(why),
         Ok(access) => accessible(
-            Garmin::signed_in(access, GarminActivityLandingStore::STREAM, &store, database)
-                .and_then(|garmin| {
+            Garmin::signed_in(access, GarminActivityLandingStore::STREAM, store).and_then(
+                |garmin| {
                     let recordings = garmin.recordings()?;
                     let mut days = garmin.days()?;
                     let whole = WholeDays {
@@ -1650,7 +1623,8 @@ pub async fn garmin_records(
                     days.extend(garmin.summaries()?);
                     days.push(garmin.nights()?);
                     Ok((recordings, days, whole))
-                }),
+                },
+            ),
         )?,
     };
     let (recorded, daily) = match built {
@@ -1806,10 +1780,9 @@ fn today() -> jiff::civil::Date {
 /// the Body Scan's ECGs landed beside them (#270).
 async fn withings_measurements(
     command: Command,
-    database: &Path,
+    store: &Store,
     walks: &dyn WalkReporter,
 ) -> Result<Outcome, WiringError> {
-    let store = Store::open(database).await?;
     let landing = store.try_adapter(WithingsMeasurementLandingStore::new)?;
     let resumption = store.adapter(SqliteResumptionPointStore::new);
     let runs = store.adapter(SqliteExtractionRunLog::new);
@@ -1819,12 +1792,12 @@ async fn withings_measurements(
             stream: WithingsMeasurementLandingStore::STREAM,
         }),
         Command::Extract(access) => {
-            collect_withings(access, landing, resumption, runs, (store, database), walks).await
+            collect_withings(access, landing, resumption, runs, store, walks).await
         }
         Command::Normalise(declared, rederivation) => {
-            let zones = stated_zones(&store, &declared).await?;
-            let terms = terms(&store, &zones, None, WithingsWeighInTranslator::VERSION).await?;
-            let summary = withings_normalisation(&store, zones, terms)?
+            let zones = stated_zones(store, &declared).await?;
+            let terms = terms(store, &zones, None, WithingsWeighInTranslator::VERSION).await?;
+            let summary = withings_normalisation(store, zones, terms)?
                 .normalise(rederivation)
                 .await?;
             Ok(Outcome::Derived(Box::new(summary)))
@@ -1896,7 +1869,7 @@ async fn collect_withings(
     landing: Spanned<WithingsMeasurementLandingStore>,
     resumption: Spanned<SqliteResumptionPointStore>,
     runs: Spanned<SqliteExtractionRunLog>,
-    (store, database): (Store, &Path),
+    store: &Store,
     walks: &dyn WalkReporter,
 ) -> Result<Outcome, WiringError> {
     let (base_url, auth) = withings_auth(access)?;
@@ -1908,7 +1881,7 @@ async fn collect_withings(
             landing,
             resumption: resumption.clone(),
             runs: runs.clone(),
-            lock: FileRunLock::beside(database),
+            lock: store.run_lock(),
             clock: SystemClock,
         }),
         walks,
@@ -1923,7 +1896,7 @@ async fn collect_withings(
             landing: ecgs_landing,
             resumption: resumption.clone(),
             runs: runs.clone(),
-            lock: FileRunLock::beside(database),
+            lock: store.run_lock(),
             clock: SystemClock,
         }),
         walks,
@@ -1938,7 +1911,7 @@ async fn collect_withings(
             landing: signals_landing,
             resumption,
             runs,
-            lock: FileRunLock::beside(database),
+            lock: store.run_lock(),
             clock: SystemClock,
         }),
         walks,
@@ -1954,7 +1927,7 @@ fn hevy_walk(
     landing: Spanned<HevyWorkoutLandingStore>,
     resumption: Spanned<SqliteResumptionPointStore>,
     runs: Spanned<SqliteExtractionRunLog>,
-    database: &Path,
+    store: &Store,
 ) -> Result<application::next::Walk<impl WorkoutExtractor + Sync + use<>>, WiringError> {
     let SourceAccess::ApiKey {
         base_url, api_key, ..
@@ -1974,7 +1947,7 @@ fn hevy_walk(
             landing,
             resumption,
             runs,
-            lock: FileRunLock::beside(database),
+            lock: store.run_lock(),
             clock: SystemClock,
         }),
     })
@@ -1991,11 +1964,11 @@ fn hevy_walk(
 /// and this is that moment. A store that holds none yields an empty overlay and
 /// the derivation is the one it always was.
 async fn hevy_normalisation(
-    store: Store,
+    store: &Store,
     zones: StatedZones,
     terms: Terms,
 ) -> Result<graph::HevyWorkouts, WiringError> {
-    let overlay = overlay(&store, HevyWorkoutLandingStore::STREAM).await?;
+    let overlay = overlay(store, HevyWorkoutLandingStore::STREAM).await?;
     Ok(Normalisation::new(
         NormalisationPorts {
             raw: store.try_adapter(HevySessionAccountReader::new)?,
@@ -2047,7 +2020,7 @@ fn withings_walk(
     landing: Spanned<WithingsMeasurementLandingStore>,
     resumption: Spanned<SqliteResumptionPointStore>,
     runs: Spanned<SqliteExtractionRunLog>,
-    database: &Path,
+    store: &Store,
 ) -> Result<application::next::Walk<impl WorkoutExtractor + Sync + use<>>, WiringError> {
     let (base_url, auth) = withings_auth(access)?;
     Ok(application::next::Walk {
@@ -2058,7 +2031,7 @@ fn withings_walk(
             landing,
             resumption,
             runs,
-            lock: FileRunLock::beside(database),
+            lock: store.run_lock(),
             clock: SystemClock,
         }),
     })
@@ -2096,9 +2069,9 @@ fn withings_normalisation(
 ///
 /// [`WiringError`] if the store is unavailable. A credential that is absent or
 /// of the wrong kind is [`NoAccess`], which `next` reports and steps past.
-pub async fn withings_records(
+pub fn withings_records(
     access: Result<SourceAccess, NoAccess>,
-    database: &Path,
+    store: &Store,
 ) -> Result<
     Records<
         Daily<
@@ -2108,7 +2081,6 @@ pub async fn withings_records(
     >,
     WiringError,
 > {
-    let store = Store::open(database).await?;
     let entry = LandingStream::try_from(WithingsMeasurementLandingStore::STREAM)?;
     let newest = store.try_adapter(SqliteWeighInStore::new)?;
     let walks = match access {
@@ -2118,7 +2090,7 @@ pub async fn withings_records(
             store.try_adapter(WithingsMeasurementLandingStore::new)?,
             store.adapter(SqliteResumptionPointStore::new),
             store.adapter(SqliteExtractionRunLog::new),
-            database,
+            store,
         ))?
         .map(|walks| Daily {
             walks,
@@ -2135,11 +2107,10 @@ pub async fn withings_records(
 ///
 /// [`WiringError`] if the store is unavailable. A key that is absent or of the
 /// wrong kind is [`NoAccess`], which `next` reports and steps past.
-pub async fn hevy_records(
+pub fn hevy_records(
     access: Result<SourceAccess, NoAccess>,
-    database: &Path,
+    store: &Store,
 ) -> Result<Records<application::next::Walk<impl WorkoutExtractor + Sync + use<>>>, WiringError> {
-    let store = Store::open(database).await?;
     let entry = LandingStream::try_from(HevyWorkoutLandingStore::STREAM)?;
     let walks = match access {
         Err(why) => Err(why),
@@ -2148,7 +2119,7 @@ pub async fn hevy_records(
             store.try_adapter(HevyWorkoutLandingStore::new)?,
             store.adapter(SqliteResumptionPointStore::new),
             store.adapter(SqliteExtractionRunLog::new),
-            database,
+            store,
         ))?,
     };
     Ok(Records { entry, walks })
@@ -2167,8 +2138,7 @@ fn accessible<W>(built: Result<W, WiringError>) -> Result<Result<W, NoAccess>, W
 }
 
 /// Hevy's workout events feed, landed into the table shaped for it.
-async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, WiringError> {
-    let store = Store::open(database).await?;
+async fn hevy_workouts(command: Command, store: &Store) -> Result<Outcome, WiringError> {
     let landing = store.try_adapter(HevyWorkoutLandingStore::new)?;
     let resumption = store.adapter(SqliteResumptionPointStore::new);
     let runs = store.adapter(SqliteExtractionRunLog::new);
@@ -2178,16 +2148,16 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
             stream: HevyWorkoutLandingStore::STREAM,
         }),
         Command::Extract(access) => {
-            let summary = hevy_walk(access, landing, resumption, runs, database)?
+            let summary = hevy_walk(access, landing, resumption, runs, store)?
                 .extraction
                 .extract()
                 .await?;
             Ok(Outcome::Extracted(Box::new(summary)))
         }
         Command::Normalise(declared, rederivation) => {
-            let zones = stated_zones(&store, &declared).await?;
+            let zones = stated_zones(store, &declared).await?;
             let terms = terms(
-                &store,
+                store,
                 &zones,
                 Some(HevyWorkoutLandingStore::STREAM),
                 HevySessionTranslator::VERSION,
@@ -2239,8 +2209,7 @@ async fn hevy_workouts(command: Command, database: &Path) -> Result<Outcome, Wir
 /// The operator's historical spreadsheets: every file in the folder named, once
 /// per distinct content (#263), and derived into manual weigh-ins (#273) and
 /// manual gym sessions (#274).
-async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome, WiringError> {
-    let store = Store::open(database).await?;
+async fn spreadsheet_files(command: Command, store: &Store) -> Result<Outcome, WiringError> {
     let landing = store.try_adapter(SpreadsheetFileLandingStore::new)?;
     let resumption = store.adapter(SqliteResumptionPointStore::new);
     let runs = store.adapter(SqliteExtractionRunLog::new);
@@ -2252,7 +2221,7 @@ async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome,
                 landing,
                 resumption,
                 runs,
-                lock: FileRunLock::beside(database),
+                lock: store.run_lock(),
                 clock: SystemClock,
             });
             Ok(Outcome::Extracted(Box::new(extraction.extract().await?)))
@@ -2263,8 +2232,8 @@ async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome,
             given: "a credential",
         }),
         Command::Normalise(declared, rederivation) => {
-            let zones = stated_zones(&store, &declared).await?;
-            let terms = terms(&store, &zones, None, SpreadsheetTranslator::VERSION).await?;
+            let zones = stated_zones(store, &declared).await?;
+            let terms = terms(store, &zones, None, SpreadsheetTranslator::VERSION).await?;
             let normalisation: graph::Spreadsheets = Normalisation::new(
                 NormalisationPorts {
                     raw: store.try_adapter(SpreadsheetFileAccountReader::new)?,
@@ -2325,8 +2294,7 @@ async fn spreadsheet_files(command: Command, database: &Path) -> Result<Outcome,
 
 /// Beyond The White Board's export: the file it sent, landed whole (#265), and
 /// derived as the gym sessions it records (#285).
-async fn btwb_exports(command: Command, database: &Path) -> Result<Outcome, WiringError> {
-    let store = Store::open(database).await?;
+async fn btwb_exports(command: Command, store: &Store) -> Result<Outcome, WiringError> {
     let landing = store.try_adapter(BtwbExportLandingStore::new)?;
     let resumption = store.adapter(SqliteResumptionPointStore::new);
     let runs = store.adapter(SqliteExtractionRunLog::new);
@@ -2338,7 +2306,7 @@ async fn btwb_exports(command: Command, database: &Path) -> Result<Outcome, Wiri
                 landing,
                 resumption,
                 runs,
-                lock: FileRunLock::beside(database),
+                lock: store.run_lock(),
                 clock: SystemClock,
             });
             Ok(Outcome::Extracted(Box::new(extraction.extract().await?)))
@@ -2349,8 +2317,8 @@ async fn btwb_exports(command: Command, database: &Path) -> Result<Outcome, Wiri
             given: "a credential",
         }),
         Command::Normalise(declared, rederivation) => {
-            let zones = stated_zones(&store, &declared).await?;
-            let terms = terms(&store, &zones, None, BtwbTranslator::VERSION).await?;
+            let zones = stated_zones(store, &declared).await?;
+            let terms = terms(store, &zones, None, BtwbTranslator::VERSION).await?;
             let normalisation: graph::Btwb = Normalisation::new(
                 NormalisationPorts {
                     raw: store.try_adapter(BtwbExportAccountReader::new)?,
@@ -2405,8 +2373,7 @@ async fn btwb_exports(command: Command, database: &Path) -> Result<Outcome, Wiri
 
 /// MyFitnessPal's export: the file the operator decrypted, landed whole, and
 /// derived as the weights he logged in it (#242).
-async fn myfitnesspal_exports(command: Command, database: &Path) -> Result<Outcome, WiringError> {
-    let store = Store::open(database).await?;
+async fn myfitnesspal_exports(command: Command, store: &Store) -> Result<Outcome, WiringError> {
     let landing = store.try_adapter(MyFitnessPalExportLandingStore::new)?;
     let resumption = store.adapter(SqliteResumptionPointStore::new);
     let runs = store.adapter(SqliteExtractionRunLog::new);
@@ -2418,7 +2385,7 @@ async fn myfitnesspal_exports(command: Command, database: &Path) -> Result<Outco
                 landing,
                 resumption,
                 runs,
-                lock: FileRunLock::beside(database),
+                lock: store.run_lock(),
                 clock: SystemClock,
             });
             Ok(Outcome::Extracted(Box::new(extraction.extract().await?)))
@@ -2429,8 +2396,8 @@ async fn myfitnesspal_exports(command: Command, database: &Path) -> Result<Outco
             given: "a credential",
         }),
         Command::Normalise(declared, rederivation) => {
-            let zones = stated_zones(&store, &declared).await?;
-            let terms = terms(&store, &zones, None, MyFitnessPalWeighInTranslator::VERSION).await?;
+            let zones = stated_zones(store, &declared).await?;
+            let terms = terms(store, &zones, None, MyFitnessPalWeighInTranslator::VERSION).await?;
             let normalisation: graph::MyFitnessPal = Normalisation::new(
                 NormalisationPorts {
                     raw: store.try_adapter(MyFitnessPalExportAccountReader::new)?,
@@ -2491,8 +2458,7 @@ async fn myfitnesspal_exports(command: Command, database: &Path) -> Result<Outco
 
 /// The Wahoo app's recordings: every FIT file it shared to Dropbox, landed
 /// whole (#421). Nothing derives them yet.
-async fn wahoo_files(command: Command, database: &Path) -> Result<Outcome, WiringError> {
-    let store = Store::open(database).await?;
+async fn wahoo_files(command: Command, store: &Store) -> Result<Outcome, WiringError> {
     let landing = store.try_adapter(WahooFileLandingStore::new)?;
     let resumption = store.adapter(SqliteResumptionPointStore::new);
     let runs = store.adapter(SqliteExtractionRunLog::new);
@@ -2504,7 +2470,7 @@ async fn wahoo_files(command: Command, database: &Path) -> Result<Outcome, Wirin
                 landing,
                 resumption,
                 runs,
-                lock: FileRunLock::beside(database),
+                lock: store.run_lock(),
                 clock: SystemClock,
             });
             Ok(Outcome::Extracted(Box::new(extraction.extract().await?)))
@@ -2663,7 +2629,6 @@ mod tests {
                 },
                 GarminActivityLandingStore::STREAM,
                 &store,
-                &database,
             )
             .expect("a login");
             test(&garmin, &store).await

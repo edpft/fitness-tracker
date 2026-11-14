@@ -14,8 +14,6 @@
 //! succeeded or not: SQLite's worker threads hold the span each query ran in,
 //! and one still held when the command exits is never written (#804).
 
-use std::path::Path;
-
 use application::{Rederivation, next::Canonicalising};
 use configurator::store::Store;
 use domain::planner::Discipline;
@@ -23,11 +21,9 @@ use domain::planner::Discipline;
 use crate::{Failure, output};
 
 /// Rebuild the canonical gym layer and report what it now holds.
-pub async fn gym(database: &Path) -> Result<(), Failure> {
-    let store = Store::open(database).await?;
+pub async fn gym(store: &Store) -> Result<(), Failure> {
     output::canonicalising_started(Discipline::Gym);
     let done = store.canonicalising().gym(Rederivation::Whole).await;
-    store.close().await;
     let done = done?;
     output::canonicalised(done.read, done.written);
     Ok(())
@@ -35,22 +31,18 @@ pub async fn gym(database: &Path) -> Result<(), Failure> {
 
 /// Rebuild the canonical weigh-ins and report what they now hold, naming every
 /// weighing left out (#409).
-pub async fn body_weight(database: &Path) -> Result<(), Failure> {
-    let store = Store::open(database).await?;
+pub async fn body_weight(store: &Store) -> Result<(), Failure> {
     output::canonicalising_weigh_ins_started();
     let done = store.canonicalising().weigh_ins(Rederivation::Whole).await;
-    store.close().await;
     let done = done?;
     output::weigh_ins_canonicalised(&done);
     Ok(())
 }
 
 /// Rebuild the canonical cycling layer and report what it now holds.
-pub async fn cycling(database: &Path) -> Result<(), Failure> {
-    let store = Store::open(database).await?;
+pub async fn cycling(store: &Store) -> Result<(), Failure> {
     output::canonicalising_started(Discipline::Cycling);
     let done = store.canonicalising().cycling(Rederivation::Whole).await;
-    store.close().await;
     let done = done?;
     output::canonicalised(done.read, done.written);
     Ok(())

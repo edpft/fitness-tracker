@@ -36,8 +36,6 @@
 //! he undoes it in one; `remove` takes the number `show` prints, and both kinds
 //! of correction share one numbering for that reason.
 
-use std::path::Path;
-
 use configurator::{
     corrections::{self, FoundSet, StandIn},
     store::Store,
@@ -87,7 +85,7 @@ pub struct FigureAssertion<'a> {
 /// [`Failure`] if either exercise is not in the vocabulary, a date will not
 /// parse, no entry matches, or the store cannot be reached.
 pub async fn add(
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     assertion: &Assertion<'_>,
 ) -> Result<(), Failure> {
@@ -114,8 +112,7 @@ pub async fn add(
         ));
     }
 
-    let store = store(database).await?;
-    let found = corrections::reading_as(&store, was, zone, from, until)
+    let found = corrections::reading_as(store, was, zone, from, until)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
@@ -136,7 +133,7 @@ pub async fn add(
 
     report(&found, assertion.was, assertion.actually);
 
-    let id = corrections::assert_exercise(&store, actually, &reason, &terms)
+    let id = corrections::assert_exercise(store, actually, &reason, &terms)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
@@ -155,7 +152,7 @@ pub async fn add(
 /// [`Failure`] if either set of figures or the day will not parse, no set
 /// matches, or the store cannot be reached.
 pub async fn add_figures(
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     assertion: &FigureAssertion<'_>,
 ) -> Result<(), Failure> {
@@ -185,8 +182,7 @@ pub async fn add_figures(
         )
     })?;
 
-    let store = store(database).await?;
-    let found = corrections::recording(&store, recorded, zone, on)
+    let found = corrections::recording(store, recorded, zone, on)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
@@ -199,7 +195,7 @@ pub async fn add_figures(
 
     report_figures(&found, on, recorded, actually);
 
-    let ids = corrections::assert_figures(&store, recorded, actually, &reason, &found)
+    let ids = corrections::assert_figures(store, recorded, actually, &reason, &found)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
@@ -222,9 +218,8 @@ pub async fn add_figures(
 ///
 /// [`Failure`] if the store cannot be reached or holds a key the vocabulary no
 /// longer has.
-pub async fn show(database: &Path) -> Result<(), Failure> {
-    let store = store(database).await?;
-    let corrections = corrections::all(&store)
+pub async fn show(store: &Store) -> Result<(), Failure> {
+    let corrections = corrections::all(store)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
@@ -263,13 +258,12 @@ pub async fn show(database: &Path) -> Result<(), Failure> {
 /// # Errors
 ///
 /// [`Failure`] if there is no such correction, or the store cannot be written.
-pub async fn remove(database: &Path, id: &str) -> Result<(), Failure> {
+pub async fn remove(store: &Store, id: &str) -> Result<(), Failure> {
     let id: i64 = id
         .parse()
         .map_err(|_| Failure::message(format!("{id} is not a correction number"), exit::USAGE))?;
 
-    let store = store(database).await?;
-    let retracted = corrections::retract(&store, CorrectionId::from(id))
+    let retracted = corrections::retract(store, CorrectionId::from(id))
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
     if retracted {
@@ -407,10 +401,4 @@ fn within(from: Option<Date>, until: Option<Date>) -> String {
         (None, Some(last)) => format!("on or before {last}"),
         (None, None) => "in the record".to_owned(),
     }
-}
-
-async fn store(database: &Path) -> Result<Store, Failure> {
-    Store::open(database)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))
 }

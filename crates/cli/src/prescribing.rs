@@ -4,8 +4,6 @@
 //! the catalogue is one entry per thing this build can *collect*, and generation
 //! collects nothing. There is no `--source`, no credential and no run lock.
 
-use std::path::Path;
-
 use application::{
     GenerationParameterStore as _, MesocycleStore, PrescriptionDeliverer as _,
     ProgressionStore as _, WorkoutPrescriber as _, WorkoutStore as _, prescribe::NextSession,
@@ -24,10 +22,7 @@ use crate::{Failure, catalogue, config, exit, output};
 ///
 /// **Only the latest of each.** Superseded versions stay in the store, and a
 /// plan made before one was superseded goes on reading it.
-pub async fn workouts(database: &Path) -> Result<(), Failure> {
-    let store = Store::open(database)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+pub async fn workouts(store: &Store) -> Result<(), Failure> {
     let versions = store.parameters();
     let now = jiff::Timestamp::now();
     let failed = |error: application::StoreError| Failure::message(error.to_string(), exit::STORE);
@@ -78,16 +73,8 @@ pub async fn workouts(database: &Path) -> Result<(), Failure> {
 /// **Reads and prints, and issues nothing.** Asking where the ladder is should not
 /// put a prescription in the store — a report that changed what it reports on is
 /// worse than no report.
-pub async fn standing(
-    database: &Path,
-    zone: &OperatorZone,
-    on: Option<&str>,
-) -> Result<(), Failure> {
-    let store = Store::open(database)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-
-    let prescriber = prescribing::prescriber(&store, zone).await?;
+pub async fn standing(store: &Store, zone: &OperatorZone, on: Option<&str>) -> Result<(), Failure> {
+    let prescriber = prescribing::prescriber(store, zone).await?;
 
     // **A date, because programmes succeed one another** (decision 0012). With
     // one programme ever in force "the programme" was unambiguous; with three in
@@ -113,16 +100,12 @@ pub async fn standing(
 
 /// Issue the prescription for a date.
 pub async fn prescribe(
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     date: Option<&str>,
 ) -> Result<(), Failure> {
-    let store = Store::open(database)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-
-    let mesocycles = prescribing::mesocycles(&store, zone).await?;
-    let prescriber = prescribing::prescriber(&store, zone).await?;
+    let mesocycles = prescribing::mesocycles(store, zone).await?;
+    let prescriber = prescribing::prescriber(store, zone).await?;
 
     let Some(date) = resolve(&mesocycles, zone, date).await? else {
         return Ok(());
@@ -175,14 +158,11 @@ async fn resolve(
 /// time this returns: it is an answer rather than a failure, so the run exits
 /// cleanly.
 pub async fn next(
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     from: Option<&str>,
 ) -> Result<Option<Date>, Failure> {
-    let store = Store::open(database)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    let mesocycles = prescribing::mesocycles(&store, zone).await?;
+    let mesocycles = prescribing::mesocycles(store, zone).await?;
 
     let from = match from {
         Some(text) => config::named_date(text).map_err(|error| Failure::usage(&error))?,
@@ -219,18 +199,14 @@ fn today(zone: &OperatorZone) -> Date {
 /// store, so a destination being unreachable costs a retry rather than a ladder
 /// position, and nothing here can advance a programme.
 pub async fn deliver(
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     date: Option<&str>,
     preview: bool,
     known: &'static catalogue::KnownSource,
     credentials: &configurator::Credentials,
 ) -> Result<(), Failure> {
-    let store = Store::open(database)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-
-    let mesocycles = prescribing::mesocycles(&store, zone).await?;
+    let mesocycles = prescribing::mesocycles(store, zone).await?;
     let Some(date) = resolve(&mesocycles, zone, date).await? else {
         return Ok(());
     };
@@ -239,7 +215,7 @@ pub async fn deliver(
         // **The store it writes to is thrown away**, so a preview cannot leave a
         // record claiming a session was delivered. The rendering is the real one.
         let (delivered, body) =
-            prescribing::preview(&store, zone, date)
+            prescribing::preview(store, zone, date)
                 .await
                 .map_err(|failure| match failure {
                     PreviewFailure::Next(failure) => Failure::from(failure),
@@ -250,7 +226,7 @@ pub async fn deliver(
     }
 
     let destination = configurator::access::hevy_routines(known, credentials)?;
-    let delivering = prescribing::delivering(&store, zone, destination).await?;
+    let delivering = prescribing::delivering(store, zone, destination).await?;
 
     let delivered = delivering
         .deliver(date)
@@ -267,16 +243,12 @@ pub async fn deliver(
 /// prescription because `prescribe` issued it, the performance because
 /// `normalise` derived it — so this contacts no source and records no judgement.
 pub async fn compare(
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     date: Option<&str>,
 ) -> Result<(), Failure> {
-    let store = Store::open(database)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-
-    let mesocycles = prescribing::mesocycles(&store, zone).await?;
-    let comparing = prescribing::comparing(&store, zone);
+    let mesocycles = prescribing::mesocycles(store, zone).await?;
+    let comparing = prescribing::comparing(store, zone);
 
     let Some(date) = resolve(&mesocycles, zone, date).await? else {
         return Ok(());

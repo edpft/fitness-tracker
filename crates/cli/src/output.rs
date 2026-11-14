@@ -1825,11 +1825,11 @@ pub fn credential(source: &str, path: &std::path::Path, outcome: &crate::setup::
 /// **The remaining steps are the point.** A setup command that says only
 /// "done" leaves an operator to discover the credential and the programme by
 /// running something else and failing.
-pub fn prepared(prepared: &crate::setup::Prepared) {
+pub fn prepared(prepared: &crate::setup::Prepared, store: &std::path::Path) {
     use crate::setup::{CredentialOutcome, ParameterOutcome};
 
     println!("ready to use");
-    println!("  store       {}", prepared.database.display());
+    println!("  store       {}", store.display());
     println!("  credentials {}", prepared.credentials_path.display());
     println!("  time zone   {}", prepared.zone);
     println!(

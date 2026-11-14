@@ -25,10 +25,7 @@
 //! vocabulary is accepted, and the numbers are a shortcut rather than a fence.
 
 use domain::planner::Arrangement as _;
-use std::{
-    io::{IsTerminal, Write},
-    path::Path,
-};
+use std::io::{IsTerminal, Write};
 
 use application::{
     DiaryStore as _, ExerciseHistory, GenerationParameterStore, PlanAuthor as _, PlanStore as _,
@@ -1051,12 +1048,9 @@ fn ask_climb(climbing: Climbing, diary: &Diary) -> Result<(PlanName, Authored), 
 ///
 /// [`Failure`] if there is nobody to ask, if the store holds no generation
 /// parameters or no schedule, or if what the answers make is refused.
-pub async fn add(database: &Path, zone: &OperatorZone) -> Result<(), Failure> {
+pub async fn add(store: &Store, zone: &OperatorZone) -> Result<(), Failure> {
     interactive()?;
 
-    let store = Store::open(database)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
     let history = store.exercise_history();
 
     // **Asked before the first question, not discovered after the last.** A

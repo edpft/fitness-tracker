@@ -6,11 +6,12 @@
 //! (#398). What is left here is the transport's: reading the clock and the
 //! flags, printing progress as each step runs, and rendering the report.
 
-use std::{io::Write as _, path::Path, sync::Mutex};
+use std::{io::Write as _, sync::Mutex};
 
 use application::next::{Done, NextError, Prescribed, Progress, Step, Undelivered, WhatIsNext};
 use configurator::{
     next::NextFailure,
+    store::Store,
     telemetry::{Frontend, Run},
 };
 use domain::{
@@ -29,7 +30,7 @@ use crate::{Failure, config, cycling, exit, output};
 /// delivered. A source that cannot be reached while collecting is a failed step
 /// and nothing more (§ 36): the record already landed still answers.
 pub async fn next(
-    database: &Path,
+    store: &Store,
     zone: &OperatorZone,
     date: Option<&str>,
     part: Option<&str>,
@@ -40,7 +41,7 @@ pub async fn next(
     // **Boxed, because the run is large**: it holds every source's walk, and a
     // third (#409) took it past what a stack frame should carry.
     let report = Box::pin(configurator::next::run(
-        database,
+        store,
         zone,
         credentials,
         now,

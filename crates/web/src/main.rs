@@ -120,9 +120,12 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         None => configurator::paths::store(&configurator::paths::SystemEnvironment)
             .map_err(|error| error.to_string())?,
     };
-    let stated = configurator::config::stated_timezone(&database)
+    // **Opened once, here, and shared by every page** (#663): a pool per page
+    // load cost each one more than the reads it was opened for.
+    let store = configurator::store::Store::open(&database)
         .await
         .map_err(|error| error.to_string())?;
+    let stated = store.timezone().await.map_err(|error| error.to_string())?;
     let zone = configurator::config::timezone(
         matches.get_one::<String>("timezone").map(String::as_str),
         stated.as_deref(),
@@ -136,7 +139,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
     // Held until the server stops, when what it was given is written.
     let _recording = configurator::telemetry::record(&database);
     let runs = Arc::new(Runs::new(Setting {
-        database,
+        store,
         zone,
         credentials,
     }));
@@ -254,14 +257,7 @@ async fn drawn<T>(
     if runs.collecting(scope) {
         return Box::pin(meanwhile(runs, here, &address, run)).await;
     }
-    let read = match configurator::store::Store::open(&runs.setting().database).await {
-        Ok(store) => {
-            let read = read(&store).await;
-            store.close().await;
-            read
-        }
-        Err(error) => Err(error.into()),
-    };
+    let read = read(&runs.setting().store).await;
     let drawn = configurator::telemetry::rendering(|| render(read));
     if runs.collecting(scope) {
         Box::pin(meanwhile(runs, here, &address, run)).await
@@ -278,14 +274,13 @@ async fn drawn<T>(
 /// **A drawing that cannot be read is one not kept**: the placeholder costs a
 /// wait, and saying the store is unreadable would be wrong about the page.
 async fn meanwhile(runs: &Runs, here: &str, address: &str, run: &run::View) -> Markup {
-    let kept = match configurator::store::Store::open(&runs.setting().database).await {
-        Ok(store) => {
-            let kept = store.kept_drawing(address).await;
-            store.close().await;
-            kept.ok().flatten()
-        }
-        Err(_) => None,
-    };
+    let kept = runs
+        .setting()
+        .store
+        .kept_drawing(address)
+        .await
+        .ok()
+        .flatten();
     kept.map_or_else(
         || {
             configurator::telemetry::served(Served::Placeholder);
@@ -304,14 +299,11 @@ async fn meanwhile(runs: &Runs, here: &str, address: &str, run: &run::View) -> M
 /// time the page is opened with nothing collecting, and a run writing to the
 /// store must not hold up the page that is already drawn.
 fn keep(runs: &Runs, address: String, drawn: &Markup) {
-    let database = runs.setting().database.clone();
+    let store = runs.setting().store.clone();
     let drawing = drawn.0.clone();
     tokio::spawn(
         async move {
-            if let Ok(store) = configurator::store::Store::open(&database).await {
-                let _kept = store.keep_drawing(&address, &drawing).await;
-                store.close().await;
-            }
+            let _kept = store.keep_drawing(&address, &drawing).await;
         }
         .instrument(configurator::telemetry::keeping()),
     );
@@ -644,12 +636,8 @@ async fn is_it_working(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Mar
 /// The equipment, read afresh from the store, with the last post if it was
 /// refused.
 async fn equipment_shown(runs: &Runs, refused: Option<&equipment::Refused<'_>>) -> Markup {
-    let store = match configurator::store::Store::open(&runs.setting().database).await {
-        Ok(store) => store,
-        Err(error) => return equipment::unreadable(&error.to_string()),
-    };
-    let facts = configurator::equipment::facts(&store).await;
-    store.close().await;
+    let store = &runs.setting().store;
+    let facts = configurator::equipment::facts(store).await;
     match facts {
         Ok(facts) => equipment::page(
             &facts,
@@ -763,21 +751,18 @@ async fn equipment_post(
 ) -> Response {
     let refusal = match equipment::asked(&form) {
         Err(refusal) => Some(refusal),
-        Ok(asked) => match configurator::store::Store::open(&runs.setting().database).await {
-            Err(error) => Some(input::Refusal::whole(error.to_string())),
-            Ok(store) => {
-                let done = match asked {
-                    equipment::Asked::Declare(statement, from) => {
-                        configurator::equipment::declare(&store, &statement, from).await
-                    }
-                    equipment::Asked::Correct(fact, statement) => {
-                        configurator::equipment::correct(&store, fact, &statement).await
-                    }
-                };
-                store.close().await;
-                done.err().map(|error| equipment::refusal(&error))
-            }
-        },
+        Ok(asked) => {
+            let store = &runs.setting().store;
+            let done = match asked {
+                equipment::Asked::Declare(statement, from) => {
+                    configurator::equipment::declare(store, &statement, from).await
+                }
+                equipment::Asked::Correct(fact, statement) => {
+                    configurator::equipment::correct(store, fact, &statement).await
+                }
+            };
+            done.err().map(|error| equipment::refusal(&error))
+        }
     };
     match refusal {
         None => Redirect::to("/equipment").into_response(),
@@ -800,12 +785,8 @@ async fn schedule_shown(
     tapped: Option<&schedule::Tapped>,
     refused: Option<&input::Refusal>,
 ) -> Markup {
-    let store = match configurator::store::Store::open(&runs.setting().database).await {
-        Ok(store) => store,
-        Err(error) => return schedule::unreadable(&error.to_string()),
-    };
-    let diary = configurator::scheduling::diary(&store).await;
-    store.close().await;
+    let store = &runs.setting().store;
+    let diary = configurator::scheduling::diary(store).await;
     let today = configurator::equipment::today(&runs.setting().zone);
     let monday = domain::planner::commencing(week.unwrap_or(today));
     match diary {
@@ -846,37 +827,30 @@ async fn schedule_post(
         schedule::Asked::ThisWeek(tapped) | schedule::Asked::FromNowOn(tapped) => Some(tapped),
         schedule::Asked::Ill(_) | schedule::Asked::Better => None,
     };
-    let refused = match configurator::store::Store::open(&runs.setting().database).await {
-        Err(error) => Some(input::Refusal::of("week", error.to_string())),
-        Ok(store) => {
-            let today = configurator::equipment::today(&runs.setting().zone);
-            let done = match &asked {
-                schedule::Asked::ThisWeek(tapped) => configurator::scheduling::alter_week(
-                    &store,
-                    tapped.monday,
-                    &tapped.slots,
-                    &tapped.reason,
-                )
+    let store = &runs.setting().store;
+    let today = configurator::equipment::today(&runs.setting().zone);
+    let done = match &asked {
+        schedule::Asked::ThisWeek(tapped) => configurator::scheduling::alter_week(
+            store,
+            tapped.monday,
+            &tapped.slots,
+            &tapped.reason,
+        )
+        .await
+        .map(drop),
+        schedule::Asked::FromNowOn(tapped) => {
+            configurator::scheduling::from_week(store, tapped.monday, tapped.slots.clone())
                 .await
-                .map(drop),
-                schedule::Asked::FromNowOn(tapped) => {
-                    configurator::scheduling::from_week(&store, tapped.monday, tapped.slots.clone())
-                        .await
-                        .map(drop)
-                }
-                schedule::Asked::Ill(from) => {
-                    configurator::scheduling::ill(&store, *from).await.map(drop)
-                }
-                schedule::Asked::Better | schedule::Asked::Redrawn(_) => {
-                    configurator::scheduling::better(&store, today)
-                        .await
-                        .map(drop)
-                }
-            };
-            store.close().await;
-            done.err().map(|error| schedule::refusal(&error))
+                .map(drop)
+        }
+        schedule::Asked::Ill(from) => configurator::scheduling::ill(store, *from).await.map(drop),
+        schedule::Asked::Better | schedule::Asked::Redrawn(_) => {
+            configurator::scheduling::better(store, today)
+                .await
+                .map(drop)
         }
     };
+    let refused = done.err().map(|error| schedule::refusal(&error));
     let week = tapped.map(|tapped| tapped.monday);
     match refused {
         None => Redirect::to(&week.map_or_else(
@@ -897,16 +871,12 @@ async fn workout_shown(
     intensity: Relative,
     refused: Option<&workout::Refused<'_>>,
 ) -> Markup {
-    let store = match configurator::store::Store::open(&runs.setting().database).await {
-        Ok(store) => store,
-        Err(error) => return workout::unreadable(&error.to_string()),
-    };
+    let store = &runs.setting().store;
     let zone = &runs.setting().zone;
     let today = configurator::equipment::today(zone);
-    let found = configurator::fills::on(&store, zone, today).await;
-    let in_force = configurator::design::in_force(&store).await;
-    let facts = configurator::equipment::facts(&store).await;
-    store.close().await;
+    let found = configurator::fills::on(store, zone, today).await;
+    let in_force = configurator::design::in_force(store).await;
+    let facts = configurator::equipment::facts(store).await;
     match (found, in_force, facts) {
         (Ok(found), Ok(in_force), Ok(facts)) => workout::page(
             &workout::Shown {
@@ -946,14 +916,7 @@ async fn workout_post(
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
     let intensity = intensity_of(form.iter().map(|(key, value)| (key, value)));
-    let refusal = match configurator::store::Store::open(&runs.setting().database).await {
-        Err(error) => Some(input::Refusal::whole(error.to_string())),
-        Ok(store) => {
-            let refusal = workout_written(&store, &runs.setting().zone, &form).await;
-            store.close().await;
-            refusal
-        }
-    };
+    let refusal = workout_written(&runs.setting().store, &runs.setting().zone, &form).await;
     match refusal {
         None => Redirect::to(&format!(
             "{}?intensity={}",
@@ -1095,9 +1058,17 @@ mod tests {
     #[test]
     fn a_page_is_kept_as_it_was_while_its_data_is_collected() {
         let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let database = directory.path().join("fitness.db");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        // A server started afresh opens the store afresh, as `serve` does.
         let fresh = || {
             Runs::new(Setting {
-                database: directory.path().join("fitness.db"),
+                store: runtime
+                    .block_on(configurator::store::Store::open(&database))
+                    .expect("the store"),
                 zone: OperatorZone::try_from("Europe/London").expect("a zone"),
                 credentials: None,
             })
@@ -1105,10 +1076,6 @@ mod tests {
         let collects = Scope::new([Part::Normalising(
             LandingStream::try_from("hevy.workouts").expect("a stream"),
         )]);
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("a runtime");
         let drawn = |runs: &Runs, over: Option<Over>, shown: &'static str| {
             runtime
                 .block_on(super::drawn(
@@ -1123,30 +1090,14 @@ mod tests {
                 .into_string()
         };
 
-        // Migrated before anything is drawn, as `serve` does in reading the
-        // zone, so the keeping does not race a first open.
-        let database = directory.path().join("fitness.db");
-        runtime.block_on(async {
-            configurator::store::Store::open(&database)
-                .await
-                .expect("the store")
-                .close()
-                .await;
-        });
-
         let runs = fresh();
         assert!(drawn(&runs, None, "Front squat 92.5kg").contains("Front squat 92.5kg"));
         // Kept without the page waiting on it, so wait for it here.
         let mut kept = None;
         for _ in 0..100 {
-            kept = runtime.block_on(async {
-                let store = configurator::store::Store::open(&database)
-                    .await
-                    .expect("the store");
-                let kept = store.kept_drawing("/estimated-1rm").await.expect("a read");
-                store.close().await;
-                kept
-            });
+            kept = runtime
+                .block_on(runs.setting().store.kept_drawing("/estimated-1rm"))
+                .expect("a read");
             if kept.is_some() {
                 break;
             }
@@ -1253,37 +1204,39 @@ mod tests {
     /// **Every route is recorded, listed or not** (#804): the equipment page
     /// and a page that does not exist were never on the list the chart pages
     /// were, and each is a `request`. **A drawn page's parts are its
-    /// children**: opening the store, each read, rendering, and keeping it.
+    /// children**: each read, rendering, keeping it, and on a chart's page,
+    /// checking whether a run is due. **None of them is opening the store.**
     #[test]
     fn every_page_load_is_recorded_with_a_span_for_each_part() {
         use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
         use tracing_subscriber::layer::SubscriberExt as _;
 
         let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        // Opened before anything is recorded, as `serve` opens it before it
+        // serves anything.
         let runs = std::sync::Arc::new(Runs::new(Setting {
-            database: directory.path().join("fitness.db"),
+            store: runtime
+                .block_on(configurator::store::Store::open(
+                    &directory.path().join("fitness.db"),
+                ))
+                .expect("the store"),
             zone: OperatorZone::try_from("Europe/London").expect("a zone"),
             credentials: None,
         }));
         let opening = Opening::default();
         let _recording =
             tracing::subscriber::set_default(tracing_subscriber::registry().with(opening.clone()));
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("a runtime");
         runtime.block_on(async {
-            configurator::store::Store::open(&runs.setting().database)
-                .await
-                .expect("the store")
-                .close()
-                .await;
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
                 .await
                 .expect("a port");
             let address = listener.local_addr().expect("an address");
             tokio::spawn(async move { axum::serve(listener, super::app(runs)).await });
-            for path in ["/equipment", "/nowhere", "/history/2026-11-02/1"] {
+            for path in ["/equipment", "/nowhere", "/history/2026-11-02/1", "/hrv"] {
                 let mut stream = tokio::net::TcpStream::connect(address)
                     .await
                     .expect("a connection");
@@ -1308,22 +1261,43 @@ mod tests {
         };
         request("/equipment");
         request("/nowhere");
-        let session = request("/history/2026-11-02/1");
-        let parts: Vec<String> = opened
+        let parts = |page: &str| -> Vec<String> {
+            let load = request(page);
+            opened
+                .values()
+                .filter(|step| {
+                    step.name == "step"
+                        && step.under.as_ref().map(tracing::span::Id::into_u64) == Some(load)
+                })
+                .map(|step| {
+                    step.fields.get("read").map_or_else(
+                        || step.fields["step"].clone(),
+                        |read| format!("{} {read}", step.fields["step"]),
+                    )
+                })
+                .collect()
+        };
+        let session = parts("/history/2026-11-02/1");
+        for part in ["reading tests", "rendering", "keeping"] {
+            assert!(
+                session.iter().any(|seen| seen == part),
+                "{part}: {session:?}"
+            );
+        }
+        let chart = parts("/hrv");
+        assert!(chart.iter().any(|seen| seen == "checking"), "{chart:?}");
+        // **No page load opens the store** (#663), neither drawing the page nor
+        // checking whether a run is due: it was opened once, before serving.
+        let openings: Vec<_> = opened
             .values()
             .filter(|step| {
                 step.name == "step"
-                    && step.under.as_ref().map(tracing::span::Id::into_u64) == Some(session)
-            })
-            .map(|step| {
-                step.fields.get("read").map_or_else(
-                    || step.fields["step"].clone(),
-                    |read| format!("{} {read}", step.fields["step"]),
-                )
+                    && step
+                        .fields
+                        .get("step")
+                        .is_some_and(|step| step == "opening")
             })
             .collect();
-        for part in ["opening", "reading tests", "rendering", "keeping"] {
-            assert!(parts.iter().any(|seen| seen == part), "{part}: {parts:?}");
-        }
+        assert!(openings.is_empty(), "{} openings", openings.len());
     }
 }

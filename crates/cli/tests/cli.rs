@@ -870,6 +870,8 @@ fn credentials_stores_one_sources_key_from_standard_input() {
     let mut child = Command::new(BINARY)
         .env_remove("HEVY_API_KEY")
         .env_remove("XDG_STATE_HOME")
+        .env_remove("FITNESS_TRACKER_DATABASE")
+        .env_remove("XDG_DATA_HOME")
         .env("HOME", home.path())
         .env(
             "HEVY_API_BASE_URL",
@@ -913,6 +915,8 @@ fn withings_credentials_are_not_taken_from_a_pipe() {
         .env_remove("WITHINGS_CLIENT_SECRET")
         .env_remove("WITHINGS_REDIRECT_URI")
         .env_remove("XDG_STATE_HOME")
+        .env_remove("FITNESS_TRACKER_DATABASE")
+        .env_remove("XDG_DATA_HOME")
         .env("HOME", home.path())
         .args(["credentials", "withings", "--stdin"])
         .stdin(std::process::Stdio::null())
