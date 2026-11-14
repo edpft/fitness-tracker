@@ -3664,6 +3664,38 @@ pub trait DerivationLedger {
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
+/// How many times a node that nothing derives has been written (#805).
+///
+/// **Of an input, not a layer.** A derived layer is versioned by the
+/// [`DerivationLedger`]; the plan, the diary and the rest are written by the
+/// operator or kept as a source last served them, and this counts the writes.
+/// A node never written is at revision zero.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Revision(u64);
+
+impl From<u64> for Revision {
+    fn from(count: u64) -> Self {
+        Self(count)
+    }
+}
+
+impl Revision {
+    pub const fn value(self) -> u64 {
+        self.0
+    }
+}
+
+/// Where each node that nothing derives stands (#805).
+pub trait Revisions {
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn revision(
+        &self,
+        node: &crate::graph::Node,
+    ) -> impl Future<Output = Result<Revision, StoreError>> + Send;
+}
+
 /// Every normalised layer this build derives, whichever streams a run fetches.
 ///
 /// **All of them** (the operator, 2026-10-18: *"everything that's needed for

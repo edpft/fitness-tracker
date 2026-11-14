@@ -9,6 +9,7 @@
 
 use std::collections::BTreeMap;
 
+use super::authoring::Authoring;
 use application::{GenerationParameterStore, ProgressionStore, StoreError, WorkoutStore};
 use domain::{
     measure::{Duration, Kg, RepCount},
@@ -21,7 +22,7 @@ use domain::{
     sequence::NonEmpty,
 };
 use jiff::Timestamp;
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 
 use super::{corrupt, equipment::read_facts, store_error};
 
@@ -202,18 +203,22 @@ fn ramp(steps: Vec<(i64, i64)>) -> Result<NonEmpty<WarmupStep>, StoreError> {
 /// primary progression (#192), as one store.
 #[derive(Debug, Clone)]
 pub struct SqliteGenerationParameterStore {
-    pool: SqlitePool,
+    store: Authoring<Self>,
 }
 
 impl SqliteGenerationParameterStore {
     pub const fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            store: Authoring::new(pool),
+        }
     }
 }
 
 impl GenerationParameterStore for SqliteGenerationParameterStore {
     async fn scales_on(&self, date: jiff::civil::Date) -> Result<Scales, StoreError> {
-        Ok(read_facts(&self.pool).await?.scales_on(date))
+        Ok(read_facts(&mut *self.store.reading().await?)
+            .await?
+            .scales_on(date))
     }
 
     async fn bands_on(
@@ -221,7 +226,7 @@ impl GenerationParameterStore for SqliteGenerationParameterStore {
         specific: &domain::gym::equipment::Specific,
         date: jiff::civil::Date,
     ) -> Result<Option<domain::gym::equipment::BandRange>, StoreError> {
-        Ok(read_facts(&self.pool)
+        Ok(read_facts(&mut *self.store.reading().await?)
             .await?
             .bands
             .get(specific)
@@ -254,7 +259,7 @@ fn named(level: &str, name: String) -> Result<Named, StoreError> {
 
 /// A workout's reps stated narrower than the workout, over its default.
 async fn read_reps(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     of: &str,
     stamp: &str,
     default: AccessoryScheme,
@@ -271,7 +276,7 @@ async fn read_reps(
         of,
         stamp
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
     for found in rep_rows {
@@ -287,7 +292,7 @@ async fn read_reps(
 
 /// A workout's rest stated narrower than the workout, over its default.
 async fn read_rest(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     of: &str,
     stamp: &str,
     workout: Rest,
@@ -309,7 +314,7 @@ async fn read_rest(
         of,
         stamp
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
     for found in rest_rows {
@@ -435,7 +440,10 @@ async fn write_rest(
     Ok(())
 }
 
-async fn read_linear_rest(pool: &SqlitePool, stamp: &str) -> Result<LinearRest, StoreError> {
+async fn read_linear_rest(
+    conn: &mut SqliteConnection,
+    stamp: &str,
+) -> Result<LinearRest, StoreError> {
     let rest = sqlx::query!(
         r#"
         SELECT top_set_low AS "top_set_low!: i64", top_set_high AS "top_set_high: i64",
@@ -446,7 +454,7 @@ async fn read_linear_rest(pool: &SqlitePool, stamp: &str) -> Result<LinearRest, 
         "#,
         stamp
     )
-    .fetch_one(pool)
+    .fetch_one(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
     Ok(LinearRest {
@@ -497,7 +505,7 @@ impl WorkoutStore for SqliteGenerationParameterStore {
             r#"SELECT authored_at AS "authored_at!: String" FROM workout WHERE intensity = ?"#,
             of
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
         let Some(stamp) = latest_at(stamps, at)? else {
@@ -516,19 +524,19 @@ impl WorkoutStore for SqliteGenerationParameterStore {
             of,
             stamp
         )
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
 
         let reps = read_reps(
-            &self.pool,
+            &mut *self.store.reading().await?,
             of,
             &stamp,
             scheme(row.reps_low, row.reps_high, row.sets)?,
         )
         .await?;
         let rest = read_rest(
-            &self.pool,
+            &mut *self.store.reading().await?,
             of,
             &stamp,
             section_rest(
@@ -559,9 +567,7 @@ impl WorkoutStore for SqliteGenerationParameterStore {
         at: Timestamp,
         workout: &Workout,
     ) -> Result<(), StoreError> {
-        let mut tx = super::writing(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
+        let mut tx = self.store.writing().await?;
 
         let of = intensity.as_str();
         let stamp = at.to_string();
@@ -589,14 +595,14 @@ impl WorkoutStore for SqliteGenerationParameterStore {
             rest.superset_high,
             static_hold
         )
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
 
         write_reps(&mut tx, of, &stamp, &workout.reps).await?;
         write_rest(&mut tx, of, &stamp, &workout.rest).await?;
 
-        tx.commit().await.map_err(|error| store_error(&error))
+        tx.commit().await
     }
 }
 
@@ -608,7 +614,7 @@ impl ProgressionStore for SqliteGenerationParameterStore {
         let stamps = sqlx::query_scalar!(
             r#"SELECT authored_at AS "authored_at!: String" FROM linear_progression"#
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
         let Some(stamp) = latest_at(stamps, at)? else {
@@ -636,7 +642,7 @@ impl ProgressionStore for SqliteGenerationParameterStore {
             "#,
             stamp
         )
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
         let steps = sqlx::query!(
@@ -648,10 +654,10 @@ impl ProgressionStore for SqliteGenerationParameterStore {
             "#,
             stamp
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
-        let rest = read_linear_rest(&self.pool, &stamp).await?;
+        let rest = read_linear_rest(&mut *self.store.reading().await?, &stamp).await?;
 
         Ok(Some((
             stamp_from_storage(&stamp)?,
@@ -699,9 +705,7 @@ impl ProgressionStore for SqliteGenerationParameterStore {
         at: Timestamp,
         linear: &LinearProgression,
     ) -> Result<(), StoreError> {
-        let mut tx = super::writing(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
+        let mut tx = self.store.writing().await?;
 
         let stamp = at.to_string();
         let light_of_heavy = bp_for_storage(linear.light_of_heavy);
@@ -755,7 +759,7 @@ impl ProgressionStore for SqliteGenerationParameterStore {
             second_drop,
             second_reclimb
         )
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
 
@@ -772,14 +776,14 @@ impl ProgressionStore for SqliteGenerationParameterStore {
                 of_top_set,
                 reps
             )
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|error| store_error(&error))?;
         }
 
         write_linear_rest(&mut tx, &stamp, &linear.rest).await?;
 
-        tx.commit().await.map_err(|error| store_error(&error))
+        tx.commit().await
     }
 
     async fn sbs_at(
@@ -789,7 +793,7 @@ impl ProgressionStore for SqliteGenerationParameterStore {
         let stamps = sqlx::query_scalar!(
             r#"SELECT authored_at AS "authored_at!: String" FROM sbs_progression"#
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
         let Some(stamp) = latest_at(stamps, at)? else {
@@ -804,7 +808,7 @@ impl ProgressionStore for SqliteGenerationParameterStore {
             "#,
             stamp
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
         let rest = sqlx::query!(
@@ -818,7 +822,7 @@ impl ProgressionStore for SqliteGenerationParameterStore {
             "#,
             stamp
         )
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
 
@@ -842,16 +846,14 @@ impl ProgressionStore for SqliteGenerationParameterStore {
     }
 
     async fn author_sbs(&self, at: Timestamp, sbs: &SbsProgression) -> Result<(), StoreError> {
-        let mut tx = super::writing(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
+        let mut tx = self.store.writing().await?;
 
         let stamp = at.to_string();
         sqlx::query!(
             "INSERT INTO sbs_progression (authored_at) VALUES (?)",
             stamp
         )
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
 
@@ -868,7 +870,7 @@ impl ProgressionStore for SqliteGenerationParameterStore {
                 of_top_set,
                 reps
             )
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|error| store_error(&error))?;
         }
@@ -895,11 +897,11 @@ impl ProgressionStore for SqliteGenerationParameterStore {
             attempt_low,
             attempt_high
         )
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
 
-        tx.commit().await.map_err(|error| store_error(&error))
+        tx.commit().await
     }
 }
 
@@ -907,5 +909,11 @@ impl ProgressionStore for SqliteGenerationParameterStore {
 impl application::Input for SqliteGenerationParameterStore {
     fn reads() -> application::Reads {
         application::Reads::of([application::Node::WORKOUTS])
+    }
+}
+
+impl application::Authors for SqliteGenerationParameterStore {
+    fn authors() -> std::collections::BTreeSet<application::Node> {
+        [application::Node::WORKOUTS].into()
     }
 }

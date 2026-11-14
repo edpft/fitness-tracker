@@ -11,18 +11,32 @@ use domain::schedule::Holidays;
 use jiff::Timestamp;
 use sqlx::SqlitePool;
 
-use super::store_error;
+use super::{authoring::Authoring, store_error};
 use crate::calendar::{public::public_holidays, school::school_holidays};
 
 /// Each calendar, kept.
 #[derive(Debug, Clone)]
 pub struct SqliteCalendarStore {
-    pool: SqlitePool,
+    store: Authoring<Self>,
 }
 
 impl SqliteCalendarStore {
     pub const fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            store: Authoring::new(pool),
+        }
+    }
+}
+
+/// **Both calendars, whichever was written**: a store kept as its publisher
+/// last served it is written by a run, and a revision too many is one redraw.
+impl application::Authors for SqliteCalendarStore {
+    fn authors() -> std::collections::BTreeSet<application::Node> {
+        Calendar::ALL
+            .map(|calendar| {
+                application::Node::Generation(application::Generation::Calendar(calendar))
+            })
+            .into()
     }
 }
 
@@ -40,7 +54,7 @@ impl CalendarStore for SqliteCalendarStore {
             "#,
             name
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
         row.map(|row| {
@@ -69,6 +83,7 @@ impl CalendarStore for SqliteCalendarStore {
     ) -> Result<(), StoreError> {
         let name = calendar.as_str();
         let asked = asked.to_string();
+        let mut tx = self.store.writing().await?;
         sqlx::query!(
             r#"
             INSERT INTO calendar (name, served, etag, last_modified, asked_at)
@@ -85,24 +100,25 @@ impl CalendarStore for SqliteCalendarStore {
             served.last_modified,
             asked
         )
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
-        Ok(())
+        tx.commit().await
     }
 
     async fn unchanged(&self, calendar: Calendar, asked: Timestamp) -> Result<(), StoreError> {
         let name = calendar.as_str();
         let asked = asked.to_string();
+        let mut tx = self.store.writing().await?;
         sqlx::query!(
             "UPDATE calendar SET asked_at = ? WHERE name = ?",
             asked,
             name
         )
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
-        Ok(())
+        tx.commit().await
     }
 }
 

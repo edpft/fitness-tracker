@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO node_revision (node, revision) VALUES (?, 1)\n                 ON CONFLICT (node) DO UPDATE SET revision = revision + 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "5011ae1ddbbe99f97702a3f6aa54560569055ca0c819b013d8c9ff7a8566d461"
+}

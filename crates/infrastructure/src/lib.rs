@@ -44,6 +44,7 @@ pub use spreadsheets::{
     SpreadsheetEntity, SpreadsheetSessionTranslator, SpreadsheetTranslator,
     SpreadsheetWeighInTranslator, Workbook,
 };
+pub use store::{Authoring, CanonicalGymReading, Held, Reading, SqliteRevisions, Writing};
 pub use store::{
     BtwbExportAccountReader, BtwbExportLandingStore, GarminActivityFileLandingStore,
     GarminActivityLandingStore, GarminDailyHeartRateAccountReader,
@@ -70,7 +71,6 @@ pub use store::{
     SqliteWeighInStore, WahooFileLandingStore, WithingsMeasurementLandingStore,
     WithingsWeighInAccountReader, connect,
 };
-pub use store::{CanonicalGymReading, Held};
 pub use store::{
     GarminBodyBatteryEventLandingStore, GarminBodyBatteryLandingStore,
     GarminDailySummaryLandingStore, GarminDetectedMoveLandingStore, GarminFitnessAgeLandingStore,

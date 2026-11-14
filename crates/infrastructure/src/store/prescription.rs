@@ -12,6 +12,7 @@
 //! it either. FR-010's
 //! idempotence is therefore the schema's rather than a caller's to remember.
 
+use super::authoring::Authoring;
 use application::{PrescribedWorkoutId, PrescribedWorkoutStore, SessionOrdinal, StoreError};
 use domain::{
     gym::{
@@ -30,7 +31,7 @@ use domain::{
     sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::civil::Date;
-use sqlx::{Sqlite, SqlitePool, Transaction};
+use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction};
 
 /// A session's role, from the two columns that carry it.
 fn role_of(intensity: &str, volume: &str) -> Result<SessionRole, StoreError> {
@@ -42,7 +43,7 @@ use super::{corrupt, store_error};
 
 #[derive(Debug, Clone)]
 pub struct SqlitePrescribedWorkoutStore {
-    pool: SqlitePool,
+    store: Authoring<Self>,
     /// The zone every issued date is recorded against. Configuration rather than
     /// programme data (§ II.3), so it arrives with the adapter.
     zone: String,
@@ -50,7 +51,10 @@ pub struct SqlitePrescribedWorkoutStore {
 
 impl SqlitePrescribedWorkoutStore {
     pub const fn new(pool: SqlitePool, zone: String) -> Self {
-        Self { pool, zone }
+        Self {
+            store: Authoring::new(pool),
+            zone,
+        }
     }
 }
 
@@ -424,9 +428,7 @@ fn ordinal_of(position: usize) -> Result<i64, StoreError> {
 
 impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
     async fn issue(&self, workout: &PrescribedWorkout) -> Result<PrescribedWorkoutId, StoreError> {
-        let mut tx = super::writing(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
+        let mut tx = self.store.writing().await?;
 
         let mesocycle = workout.mesocycle().as_i64();
         let issued_for = workout.issued_for().to_string();
@@ -471,7 +473,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             target_grams,
             issued_at
         )
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?
         .id;
@@ -488,7 +490,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
                 position,
                 is_superset
             )
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|error| store_error(&error))?;
 
@@ -505,7 +507,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
                     member,
                     slot
                 )
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(|error| store_error(&error))?;
             }
@@ -515,7 +517,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             }
         }
 
-        tx.commit().await.map_err(|error| store_error(&error))?;
+        tx.commit().await?;
         Ok(PrescribedWorkoutId::new(id))
     }
 
@@ -561,14 +563,14 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             "#,
             key
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?
         else {
             return Ok(None);
         };
 
-        let shape = read_shape(&self.pool, row.id).await?;
+        let shape = read_shape(&mut *self.store.reading().await?, row.id).await?;
 
         let derived_from = read_origin(
             Origin {
@@ -632,7 +634,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
             name,
             key
         )
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?
         .counted;
@@ -643,7 +645,7 @@ impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
 }
 
 /// The issued shape, rebuilt from its four tables.
-async fn read_shape(pool: &SqlitePool, workout: i64) -> Result<WorkoutShape, StoreError> {
+async fn read_shape(conn: &mut SqliteConnection, workout: i64) -> Result<WorkoutShape, StoreError> {
     let items = sqlx::query!(
         r#"
         SELECT position AS "position!: i64", is_superset AS "is_superset!: i64"
@@ -651,7 +653,7 @@ async fn read_shape(pool: &SqlitePool, workout: i64) -> Result<WorkoutShape, Sto
         "#,
         workout
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
 
@@ -667,11 +669,11 @@ async fn read_shape(pool: &SqlitePool, workout: i64) -> Result<WorkoutShape, Sto
             workout,
             item.position
         )
-        .fetch_all(pool)
+        .fetch_all(&mut *conn)
         .await
         .map_err(|error| store_error(&error))?;
 
-        let exercises = read_exercises(pool, workout, item.position).await?;
+        let exercises = read_exercises(&mut *conn, workout, item.position).await?;
 
         let mut slot_ids = Vec::with_capacity(slots.len());
         for slot in slots {
@@ -704,7 +706,7 @@ async fn read_shape(pool: &SqlitePool, workout: i64) -> Result<WorkoutShape, Sto
 }
 
 async fn read_exercises(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     workout: i64,
     item: i64,
 ) -> Result<Vec<PrescribedExercise>, StoreError> {
@@ -720,7 +722,7 @@ async fn read_exercises(
         workout,
         item
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
 
@@ -742,7 +744,7 @@ async fn read_exercises(
             item,
             row.position
         )
-        .fetch_all(pool)
+        .fetch_all(&mut *conn)
         .await
         .map_err(|error| store_error(&error))?;
 
@@ -764,7 +766,7 @@ async fn read_exercises(
         let mut exercise = rebuild_exercise(&row.exercise, &row.measure, &sets)?;
         if let PrescribedExercise::ForReps { assisted, .. } = &mut exercise {
             *assisted = read_assisted(
-                pool,
+                &mut *conn,
                 (workout, item, row.position),
                 row.assisted_maker,
                 row.assisted_model,
@@ -779,7 +781,7 @@ async fn read_exercises(
 
 /// The bands a prescribed exercise named, if it named any (#454).
 async fn read_assisted(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     (workout, item, position): (i64, i64, i64),
     maker: Option<String>,
     model: Option<String>,
@@ -799,7 +801,7 @@ async fn read_assisted(
         item,
         position
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?
     .into_iter()
@@ -1002,5 +1004,11 @@ impl application::Input for SqlitePrescribedWorkoutStore {
     fn reads() -> application::Reads {
         application::Reads::of([application::Node::PRESCRIPTIONS])
             .and(super::tables(&[super::table::GYM_SESSION]))
+    }
+}
+
+impl application::Authors for SqlitePrescribedWorkoutStore {
+    fn authors() -> std::collections::BTreeSet<application::Node> {
+        [application::Node::PRESCRIPTIONS].into()
     }
 }

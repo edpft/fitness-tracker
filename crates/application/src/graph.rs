@@ -31,6 +31,12 @@ pub enum Node {
     Interpretive(Interpretive),
     /// § 14.
     Generation(Generation),
+    // What changes with no write at all (#805).
+    /// Today's date, which a page measured "to today" reads: a day passing
+    /// changes it with nothing new in the store.
+    Date,
+    /// The part of the day now, which where the plan stands is judged at.
+    DayPart,
 }
 
 /// What is authored, by name, so a driven adapter declaring that it reads one
@@ -167,6 +173,17 @@ pub trait Input {
 /// normalised through.
 pub trait Output {
     fn writes() -> BTreeSet<Table>;
+}
+
+/// A port that writes a node nothing derives, and which (#805).
+///
+/// **Named beside the SQL that writes them**, as [`Output`] is. A page drawn
+/// from one of these nodes is drawn again when its [`Revision`] moves, so a
+/// writer that does not say what it authors is one whose writes no page sees.
+///
+/// [`Revision`]: crate::ports::Revision
+pub trait Authors {
+    fn authors() -> BTreeSet<Node>;
 }
 
 /// What a port that writes and reads nothing reads.
@@ -334,7 +351,9 @@ impl Graph {
                 | Node::Table(_)
                 | Node::Edits(_)
                 | Node::Authored(_)
-                | Node::Interpretive(_) => None,
+                | Node::Interpretive(_)
+                | Node::Date
+                | Node::DayPart => None,
             })
             .collect()
     }
