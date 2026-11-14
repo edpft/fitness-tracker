@@ -20,7 +20,7 @@ use infrastructure::{
 
 use crate::{
     devices,
-    graph::page,
+    graph::{page, read},
     next::NextFailure,
     ranges::{self, Current},
     store::Store,
@@ -69,12 +69,13 @@ impl Page {
     /// [`NextFailure`] if the store cannot be read.
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
         Ok(Self {
-            tests: over(store),
+            tests: over(store).into(),
             heart_rates: TestHeartRates::new(
                 SqliteCanonicalCyclingSessionStore::new(store.pool().clone()),
                 devices::register(store),
-            ),
-            ranges: ranges::over(store, zone).await?,
+            )
+            .into(),
+            ranges: ranges::over(store, zone).await?.into(),
         })
     }
 
@@ -84,7 +85,7 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn tests(&self) -> Result<Vec<Test>, StoreError> {
-        self.tests.tests().await
+        read!(self.tests.tests()).await
     }
 
     /// The heart rate each test was ridden at, oldest first (#548).
@@ -93,7 +94,7 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn heart_rates(&self) -> Result<Vec<TestHeartRate>, StoreError> {
-        self.heart_rates.heart_rates().await
+        read!(self.heart_rates.heart_rates()).await
     }
 
     /// The ranges today.
@@ -102,6 +103,6 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn ranges(&self, zone: &OperatorZone) -> Result<Ranges, StoreError> {
-        ranges::today(&self.ranges, zone).await
+        read!(self.ranges, |of| ranges::today(of, zone)).await
     }
 }

@@ -12,7 +12,7 @@ use infrastructure::{
 
 use crate::{
     devices,
-    graph::page,
+    graph::{page, read},
     next::NextFailure,
     ranges::{self, Current},
     store::Store,
@@ -62,8 +62,9 @@ impl OvernightHrv {
                 SqliteOvernightHrvHistory::new(store.pool().clone()),
                 (),
                 devices::register(store),
-            ),
-            ranges: ranges::over(store, zone).await?,
+            )
+            .into(),
+            ranges: ranges::over(store, zone).await?.into(),
         })
     }
 
@@ -74,7 +75,7 @@ impl OvernightHrv {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn trend(&self) -> Result<Vec<Trended>, StoreError> {
-        self.nights.overnight_hrv_trend().await
+        read!(self.nights.overnight_hrv_trend()).await
     }
 
     /// The ranges today.
@@ -83,7 +84,7 @@ impl OvernightHrv {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn ranges(&self, zone: &OperatorZone) -> Result<Ranges, StoreError> {
-        ranges::today(&self.ranges, zone).await
+        read!(self.ranges, |of| ranges::today(of, zone)).await
     }
 }
 
@@ -99,8 +100,9 @@ impl RestingHeartRate {
                 (),
                 SqliteRestingHeartRateHistory::new(store.pool().clone()),
                 devices::register(store),
-            ),
-            ranges: ranges::over(store, zone).await?,
+            )
+            .into(),
+            ranges: ranges::over(store, zone).await?.into(),
         })
     }
 
@@ -111,7 +113,7 @@ impl RestingHeartRate {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn trend(&self) -> Result<Vec<resting::Trended>, StoreError> {
-        self.days.resting_heart_rate_trend().await
+        read!(self.days.resting_heart_rate_trend()).await
     }
 
     /// The ranges today.
@@ -120,6 +122,6 @@ impl RestingHeartRate {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn ranges(&self, zone: &OperatorZone) -> Result<Ranges, StoreError> {
-        ranges::today(&self.ranges, zone).await
+        read!(self.ranges, |of| ranges::today(of, zone)).await
     }
 }

@@ -9,6 +9,10 @@
 //!
 //! It contacts nothing, and there is nothing to refuse or resume: the inputs are
 //! already in our terms. Each rebuild is a `step` span, as `next`'s are (#633).
+//!
+//! **The store is closed before the command ends**, whether the rebuild
+//! succeeded or not: SQLite's worker threads hold the span each query ran in,
+//! and one still held when the command exits is never written (#804).
 
 use std::path::Path;
 
@@ -22,7 +26,9 @@ use crate::{Failure, output};
 pub async fn gym(database: &Path) -> Result<(), Failure> {
     let store = Store::open(database).await?;
     output::canonicalising_started(Discipline::Gym);
-    let done = store.canonicalising().gym(Rederivation::Whole).await?;
+    let done = store.canonicalising().gym(Rederivation::Whole).await;
+    store.close().await;
+    let done = done?;
     output::canonicalised(done.read, done.written);
     Ok(())
 }
@@ -32,10 +38,9 @@ pub async fn gym(database: &Path) -> Result<(), Failure> {
 pub async fn body_weight(database: &Path) -> Result<(), Failure> {
     let store = Store::open(database).await?;
     output::canonicalising_weigh_ins_started();
-    let done = store
-        .canonicalising()
-        .weigh_ins(Rederivation::Whole)
-        .await?;
+    let done = store.canonicalising().weigh_ins(Rederivation::Whole).await;
+    store.close().await;
+    let done = done?;
     output::weigh_ins_canonicalised(&done);
     Ok(())
 }
@@ -44,7 +49,9 @@ pub async fn body_weight(database: &Path) -> Result<(), Failure> {
 pub async fn cycling(database: &Path) -> Result<(), Failure> {
     let store = Store::open(database).await?;
     output::canonicalising_started(Discipline::Cycling);
-    let done = store.canonicalising().cycling(Rederivation::Whole).await?;
+    let done = store.canonicalising().cycling(Rederivation::Whole).await;
+    store.close().await;
+    let done = done?;
     output::canonicalised(done.read, done.written);
     Ok(())
 }

@@ -1403,6 +1403,7 @@ fn a_refused_credential_refuses_both_walks_and_claims_no_success() {
 #[derive(Debug)]
 struct Span {
     name: String,
+    step: Option<String>,
     layer: Option<String>,
     read: Option<i64>,
     written: Option<i64>,
@@ -1421,11 +1422,12 @@ fn telemetry(database: &Path) -> Result<Vec<Span>, Box<dyn std::error::Error>> {
         let options = sqlx::sqlite::SqliteConnectOptions::new().filename(database);
         let mut connection = sqlx::SqliteConnection::connect_with(&options).await?;
         let rows = sqlx::query(
-            "SELECT name, json_extract(fields, '$.layer') AS layer,
+            "SELECT name, json_extract(fields, '$.step') AS step,
+                    json_extract(fields, '$.layer') AS layer,
                     json_extract(fields, '$.read') AS read,
                     json_extract(fields, '$.written') AS written,
                     started_at, ended_at, outcome
-             FROM span",
+             FROM span ORDER BY started_at",
         )
         .fetch_all(&mut connection)
         .await?;
@@ -1433,6 +1435,7 @@ fn telemetry(database: &Path) -> Result<Vec<Span>, Box<dyn std::error::Error>> {
             .map(|row| {
                 Ok(Span {
                     name: row.try_get("name")?,
+                    step: row.try_get("step")?,
                     layer: row.try_get("layer")?,
                     read: row.try_get("read")?,
                     written: row.try_get("written")?,
@@ -1446,9 +1449,10 @@ fn telemetry(database: &Path) -> Result<Vec<Span>, Box<dyn std::error::Error>> {
 }
 
 /// A rebuild leaves one span in the `telemetry.db` beside the store it was
-/// given, with the layer, what it read and wrote, and when (#631).
+/// given, with the layer, what it read and wrote, and when (#631), and
+/// opening the store leaves one more (#804).
 #[test]
-fn canonicalising_leaves_one_span_beside_the_store() {
+fn canonicalising_leaves_its_span_beside_the_store() {
     let directory = TempDir::new().expect("a temporary directory is available");
     let database = directory.path().join("store.db");
 
@@ -1456,8 +1460,13 @@ fn canonicalising_leaves_one_span_beside_the_store() {
 
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     let spans = telemetry(&directory.path().join("telemetry.db")).expect("telemetry.db reads");
-    assert_eq!(spans.len(), 1, "{spans:?}");
-    let span = &spans[0];
+    let steps: Vec<_> = spans.iter().map(|span| span.step.as_deref()).collect();
+    assert_eq!(
+        steps,
+        [Some("opening"), Some("canonicalising")],
+        "{spans:?}"
+    );
+    let span = &spans[1];
     assert_eq!(span.name, "step");
     assert_eq!(span.layer.as_deref(), Some("gym"));
     assert_eq!((span.read, span.written), (Some(0), Some(0)));

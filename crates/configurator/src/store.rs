@@ -37,8 +37,11 @@ impl Store {
     ///
     /// [`StoreError`] if it cannot be opened or migrated.
     pub async fn open(database: &Path) -> Result<Self, StoreError> {
+        use tracing::Instrument as _;
         Ok(Self {
-            pool: connect(database).await?,
+            pool: connect(database)
+                .instrument(crate::telemetry::opening())
+                .await?,
         })
     }
 

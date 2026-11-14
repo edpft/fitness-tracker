@@ -9,7 +9,7 @@ use domain::{
 use infrastructure::SqlitePulseWaveVelocityHistory;
 
 use crate::{
-    graph::page,
+    graph::{page, read},
     next::NextFailure,
     ranges::{self, Current},
     store::Store,
@@ -40,8 +40,9 @@ impl Page {
         Ok(Self {
             series: PulseWaveVelocities::new(SqlitePulseWaveVelocityHistory::new(
                 store.pool().clone(),
-            )),
-            ranges: ranges::over(store, zone).await?,
+            ))
+            .into(),
+            ranges: ranges::over(store, zone).await?.into(),
         })
     }
 
@@ -51,7 +52,7 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn by_algorithm(&self) -> Result<Vec<Series>, StoreError> {
-        self.series.by_algorithm().await
+        read!(self.series.by_algorithm()).await
     }
 
     /// The ranges today.
@@ -60,6 +61,6 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn ranges(&self, zone: &OperatorZone) -> Result<Ranges, StoreError> {
-        ranges::today(&self.ranges, zone).await
+        read!(self.ranges, |of| ranges::today(of, zone)).await
     }
 }

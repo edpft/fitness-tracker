@@ -25,7 +25,7 @@ use infrastructure::{
 };
 
 use crate::{
-    graph::page,
+    graph::reads,
     next::{NextFailure, destination},
     store::Store,
 };
@@ -40,7 +40,7 @@ pub(crate) type Microcycle = application::microcycle::Microcycle<
     SqliteCanonicalCyclingSessionStore,
 >;
 
-page! {
+reads! {
     /// The walk through the plan, within the term the calendars give it.
     pub struct Walk {
         microcycle: Microcycle,
