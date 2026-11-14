@@ -160,6 +160,7 @@ pub async fn wanted(
     scope: &Scope,
     frontend: telemetry::Frontend,
 ) -> Result<bool, NextFailure> {
+    use tracing::Instrument as _;
     match over(
         database,
         zone,
@@ -168,6 +169,7 @@ pub async fn wanted(
         Asked::Wanted { scope, now },
         &Unheard,
     )
+    .instrument(telemetry::checking())
     .await?
     {
         Answered::Wanted(wanted) => Ok(wanted),

@@ -12,7 +12,11 @@ use infrastructure::{
 };
 use jiff::civil::Date;
 
-use crate::{graph::page, one_rep_max, store::Store};
+use crate::{
+    graph::{page, read},
+    one_rep_max,
+    store::Store,
+};
 
 page! {
     /// What History reads: the canonical gym and cycling sessions, the padel
@@ -43,8 +47,9 @@ impl Page {
                 SqliteCanonicalGymSessionStore::new(pool.clone()),
                 SqliteCanonicalCyclingSessionStore::new(pool.clone()),
                 SqlitePadelGames::new(pool.clone()),
-            ),
-            tests: one_rep_max::tests(store, zone),
+            )
+            .into(),
+            tests: one_rep_max::tests(store, zone).into(),
         }
     }
 
@@ -55,8 +60,8 @@ impl Page {
     /// [`StoreError`] if the store cannot be read.
     pub async fn days(&self, zone: &OperatorZone) -> Result<Vec<Day>, StoreError> {
         let today = crate::equipment::today(zone);
-        let tests = self.tests.tests(today).await?;
-        self.history.days(today, &tests).await
+        let tests = read!(self.tests.tests(today)).await?;
+        read!(self.history.days(today, &tests)).await
     }
 
     /// The session `number` of those done `on`, where there is one.
@@ -70,7 +75,7 @@ impl Page {
         on: Date,
         number: Number,
     ) -> Result<Option<Session>, StoreError> {
-        let tests = self.tests.tests(crate::equipment::today(zone)).await?;
-        self.history.session(on, number, &tests).await
+        let tests = read!(self.tests.tests(crate::equipment::today(zone))).await?;
+        read!(self.history.session(on, number, &tests)).await
     }
 }

@@ -13,7 +13,7 @@ use domain::{
 use crate::{
     body_weight::{self, Aimed},
     composition::{self, ByMethod},
-    graph::page,
+    graph::{page, read},
     next::NextFailure,
     ranges::{self, Current},
     rescheduling,
@@ -46,10 +46,10 @@ impl Page {
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
         let plans = rescheduling::plans(store, zone).await?;
         Ok(Self {
-            series: body_weight::series(store),
-            aims: body_weight::aims_over(store, plans.clone()),
-            composition: composition::over(store),
-            ranges: application::ranges::CurrentRanges::new(plans),
+            series: body_weight::series(store).into(),
+            aims: body_weight::aims_over(store, plans.clone()).into(),
+            composition: composition::over(store).into(),
+            ranges: application::ranges::CurrentRanges::new(plans).into(),
         })
     }
 
@@ -59,7 +59,7 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn series(&self) -> Result<Series, StoreError> {
-        self.series.series().await
+        read!(self.series.series()).await
     }
 
     /// What the plans intended over this macrocycle's mesocycles, today.
@@ -68,7 +68,7 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn aims(&self, zone: &OperatorZone) -> Result<Vec<Aim>, StoreError> {
-        self.aims.on(crate::equipment::today(zone)).await
+        read!(self.aims.on(crate::equipment::today(zone))).await
     }
 
     /// Every component anything measured, one series per method.
@@ -77,7 +77,7 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn by_method(&self) -> Result<Vec<ComponentSeries>, StoreError> {
-        self.composition.by_method().await
+        read!(self.composition.by_method()).await
     }
 
     /// The ranges today.
@@ -86,6 +86,6 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn ranges(&self, zone: &OperatorZone) -> Result<Ranges, StoreError> {
-        ranges::today(&self.ranges, zone).await
+        read!(self.ranges, |of| ranges::today(of, zone)).await
     }
 }

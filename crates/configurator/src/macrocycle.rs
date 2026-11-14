@@ -12,6 +12,7 @@ use infrastructure::{
     SqlitePelotonClassStore, SqlitePlanStore,
     peloton::{PelotonHoldingRides, PelotonProgrammes, catalogue::ClassCatalogue},
 };
+use tracing::Instrument as _;
 
 use crate::{
     holidays::{self, Calendars},
@@ -88,5 +89,8 @@ pub async fn planned(
         diary: SqliteDiaryStore::new(pool.clone()),
         holidays: holidays::calendars(pool),
     });
-    Ok(use_case.on(now).await?)
+    Ok(use_case
+        .on(now)
+        .instrument(crate::telemetry::reading("macrocycle"))
+        .await?)
 }

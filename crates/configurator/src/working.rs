@@ -18,7 +18,7 @@ use crate::{
     body_weight::{self, Aimed},
     composition::{self, ByMethod},
     devices, ftp_tests,
-    graph::page,
+    graph::{page, read},
     next::NextFailure,
     one_rep_max, rescheduling,
     rescheduling::Plans,
@@ -78,18 +78,20 @@ impl Page {
                 SqliteTrainingDone::new(pool.clone()),
                 devices::register(store),
                 plans.clone(),
-            ),
-            ftp: ftp_tests::over(store),
-            strength: one_rep_max::tests(store, zone),
-            estimated: one_rep_max::estimated(store, plans.clone()),
+            )
+            .into(),
+            ftp: ftp_tests::over(store).into(),
+            strength: one_rep_max::tests(store, zone).into(),
+            estimated: one_rep_max::estimated(store, plans.clone()).into(),
             rides: RideHeartRates::new(
                 SqliteCanonicalCyclingSessionStore::new(pool.clone()),
                 SqliteFtpHistory::new(pool.clone()),
                 devices::register(store),
-            ),
-            weight: body_weight::series(store),
-            aims: body_weight::aims_over(store, plans),
-            composition: composition::over(store),
+            )
+            .into(),
+            weight: body_weight::series(store).into(),
+            aims: body_weight::aims_over(store, plans).into(),
+            composition: composition::over(store).into(),
         })
     }
 
@@ -101,26 +103,23 @@ impl Page {
     /// [`StoreError`] if the store cannot be read.
     pub async fn view(&self, zone: &OperatorZone) -> Result<View, StoreError> {
         let today = crate::equipment::today(zone);
-        let ftp = self.ftp.tests().await?;
-        let strength = self.strength.tests(today).await?;
-        let estimated = self.estimated.view(today).await?.lifts;
-        let at_power = domain::analytical::heart_rate_at_power::trended(&self.rides.rides().await?);
-        let weight = self.weight.series().await?;
-        let aims = self.aims.on(today).await?;
-        let composition = self.composition.by_method().await?;
-        self.working
-            .view(
-                today,
-                &Readings {
-                    ftp: &ftp,
-                    strength: &strength,
-                    estimated: &estimated,
-                    at_power: &at_power,
-                    weight: &weight,
-                    aims: &aims,
-                    composition: &composition,
-                },
-            )
-            .await
+        let ftp = read!(self.ftp.tests()).await?;
+        let strength = read!(self.strength.tests(today)).await?;
+        let estimated = read!(self.estimated.view(today)).await?.lifts;
+        let at_power =
+            domain::analytical::heart_rate_at_power::trended(&read!(self.rides.rides()).await?);
+        let weight = read!(self.weight.series()).await?;
+        let aims = read!(self.aims.on(today)).await?;
+        let composition = read!(self.composition.by_method()).await?;
+        let readings = Readings {
+            ftp: &ftp,
+            strength: &strength,
+            estimated: &estimated,
+            at_power: &at_power,
+            weight: &weight,
+            aims: &aims,
+            composition: &composition,
+        };
+        read!(self.working.view(today, &readings)).await
     }
 }

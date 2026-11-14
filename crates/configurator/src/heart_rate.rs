@@ -9,7 +9,7 @@ use infrastructure::{SqliteCanonicalCyclingSessionStore, SqliteFtpHistory};
 
 use crate::{
     devices,
-    graph::page,
+    graph::{page, read},
     next::NextFailure,
     ranges::{self, Current},
     store::Store,
@@ -49,8 +49,9 @@ impl Page {
                 SqliteCanonicalCyclingSessionStore::new(pool.clone()),
                 SqliteFtpHistory::new(pool.clone()),
                 devices::register(store),
-            ),
-            ranges: ranges::over(store, zone).await?,
+            )
+            .into(),
+            ranges: ranges::over(store, zone).await?.into(),
         })
     }
 
@@ -60,7 +61,7 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn rides(&self) -> Result<Vec<RideHeartRate>, StoreError> {
-        self.rides.rides().await
+        read!(self.rides.rides()).await
     }
 
     /// The ranges today.
@@ -69,6 +70,6 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn ranges(&self, zone: &OperatorZone) -> Result<Ranges, StoreError> {
-        ranges::today(&self.ranges, zone).await
+        read!(self.ranges, |of| ranges::today(of, zone)).await
     }
 }

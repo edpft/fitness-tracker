@@ -10,7 +10,7 @@ use infrastructure::{GarminRecordedDevices, GarminWear, SqliteSleepHistory};
 
 use crate::{
     devices,
-    graph::page,
+    graph::{page, read},
     next::NextFailure,
     ranges::{self, Current},
     store::Store,
@@ -43,8 +43,9 @@ impl Page {
             nights: Sleeping::new(
                 SqliteSleepHistory::new(store.pool().clone()),
                 devices::register(store),
-            ),
-            ranges: ranges::over(store, zone).await?,
+            )
+            .into(),
+            ranges: ranges::over(store, zone).await?.into(),
         })
     }
 
@@ -54,7 +55,7 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn nights(&self) -> Result<Vec<Trended>, StoreError> {
-        self.nights.nights().await
+        read!(self.nights.nights()).await
     }
 
     /// The ranges today.
@@ -63,6 +64,6 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn ranges(&self, zone: &OperatorZone) -> Result<Ranges, StoreError> {
-        ranges::today(&self.ranges, zone).await
+        read!(self.ranges, |of| ranges::today(of, zone)).await
     }
 }

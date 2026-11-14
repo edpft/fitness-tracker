@@ -140,37 +140,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         zone,
         credentials,
     }));
-    // **Only the chart pages are recorded** (#628): each is a page drawn from
-    // the store, and how long that takes is what is in question.
-    let charts = Router::new()
-        .route(at_power::PATH, get(heart_rate))
-        .route(ftp::PATH, get(ftp_tests))
-        .route(body::PATH, get(body_page))
-        .route(pulse_wave_velocity::PATH, get(pulse_wave_velocity_page))
-        .route(hrv::PATH, get(overnight_hrv))
-        .route(resting::PATH, get(resting_heart_rate))
-        .route("/sleep", get(sleep_page))
-        .route(one_rep_max::PATH, get(estimated_one_rep_max))
-        .route(working::PATH, get(is_it_working))
-        .route(progress::PATH, get(progress_page))
-        .route(Place::History.path(), get(history_page))
-        .route("/history/{on}/{number}", get(session_page))
-        .route_layer(middleware::from_fn(recorded));
-    let app = Router::new()
-        .route("/", get(index))
-        .route(Place::Plan.path(), get(plan_page))
-        .merge(charts)
-        .route(body::REPLACED[0], get(to_body))
-        .route(body::REPLACED[1], get(to_body))
-        .route("/equipment", get(equipment_page).post(equipment_post))
-        .route(schedule::HERE, get(schedule_page).post(schedule_post))
-        .route(workout::HERE, get(workout_page).post(workout_post))
-        .route("/run/events", get(events))
-        .route("/run/step", get(step))
-        .route("/htmx.min.js", get(htmx))
-        .route("/sse.min.js", get(sse))
-        .route(page::STYLESHEET, get(stylesheet))
-        .with_state(runs);
+    let app = app(runs);
 
     let Some(address) = matches.get_one::<SocketAddr>("listen") else {
         return Err("--listen is required".to_owned());
@@ -184,7 +154,41 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-/// Each chart page load as a `request` span (#628), whatever it was served.
+/// Every page and what they load.
+///
+/// **Every route is recorded** (#804), because the layer is on the whole
+/// router: a page added later is recorded without being listed anywhere.
+fn app(runs: Arc<Runs>) -> Router {
+    Router::new()
+        .route("/", get(index))
+        .route(Place::Plan.path(), get(plan_page))
+        .route(at_power::PATH, get(heart_rate))
+        .route(ftp::PATH, get(ftp_tests))
+        .route(body::PATH, get(body_page))
+        .route(pulse_wave_velocity::PATH, get(pulse_wave_velocity_page))
+        .route(hrv::PATH, get(overnight_hrv))
+        .route(resting::PATH, get(resting_heart_rate))
+        .route("/sleep", get(sleep_page))
+        .route(one_rep_max::PATH, get(estimated_one_rep_max))
+        .route(working::PATH, get(is_it_working))
+        .route(progress::PATH, get(progress_page))
+        .route(Place::History.path(), get(history_page))
+        .route("/history/{on}/{number}", get(session_page))
+        .route(body::REPLACED[0], get(to_body))
+        .route(body::REPLACED[1], get(to_body))
+        .route("/equipment", get(equipment_page).post(equipment_post))
+        .route(schedule::HERE, get(schedule_page).post(schedule_post))
+        .route(workout::HERE, get(workout_page).post(workout_post))
+        .route("/run/events", get(events))
+        .route("/run/step", get(step))
+        .route("/htmx.min.js", get(htmx))
+        .route("/sse.min.js", get(sse))
+        .route(page::STYLESHEET, get(stylesheet))
+        .with_state(runs)
+        .layer(middleware::from_fn(recorded))
+}
+
+/// Each page load as a `request` span (#628, #804), whatever it was served.
 async fn recorded(request: Request, next: Next) -> Response {
     let span = configurator::telemetry::request(
         request.uri().path(),
@@ -228,13 +232,17 @@ fn only(collects: &application::next::Scope) -> Asked {
 /// **The last drawing is kept in the store** (#605), so a page opened just
 /// after `fitness-web` restarts, which is when a run is surest to be going, is
 /// shown at once rather than the placeholder.
-async fn drawn(
+///
+/// **Read, then rendered, as separate arguments** (#804), so the store's
+/// time and the page's are each a span of the load, whichever page it is.
+async fn drawn<T>(
     runs: &Runs,
     scope: &application::next::Scope,
     here: &str,
     over: Option<domain::analytical::range::Over>,
     run: &run::View,
-    read: impl Future<Output = Markup>,
+    read: impl AsyncFnOnce(&configurator::store::Store) -> Result<T, Unreadable>,
+    render: impl FnOnce(Result<T, Unreadable>) -> Markup,
 ) -> Markup {
     if let Some(over) = over {
         configurator::telemetry::ranged(range::name(over));
@@ -246,7 +254,15 @@ async fn drawn(
     if runs.collecting(scope) {
         return Box::pin(meanwhile(runs, here, &address, run)).await;
     }
-    let drawn = read.await;
+    let read = match configurator::store::Store::open(&runs.setting().database).await {
+        Ok(store) => {
+            let read = read(&store).await;
+            store.close().await;
+            read
+        }
+        Err(error) => Err(error.into()),
+    };
+    let drawn = configurator::telemetry::rendering(|| render(read));
     if runs.collecting(scope) {
         Box::pin(meanwhile(runs, here, &address, run)).await
     } else {
@@ -290,12 +306,30 @@ async fn meanwhile(runs: &Runs, here: &str, address: &str, run: &run::View) -> M
 fn keep(runs: &Runs, address: String, drawn: &Markup) {
     let database = runs.setting().database.clone();
     let drawing = drawn.0.clone();
-    tokio::spawn(async move {
-        if let Ok(store) = configurator::store::Store::open(&database).await {
-            let _kept = store.keep_drawing(&address, &drawing).await;
-            store.close().await;
+    tokio::spawn(
+        async move {
+            if let Ok(store) = configurator::store::Store::open(&database).await {
+                let _kept = store.keep_drawing(&address, &drawing).await;
+                store.close().await;
+            }
         }
-    });
+        .instrument(configurator::telemetry::keeping()),
+    );
+}
+
+/// Why a page could not be read, as it says so.
+struct Unreadable(String);
+
+impl<E: std::fmt::Display> From<E> for Unreadable {
+    fn from(error: E) -> Self {
+        Self(error.to_string())
+    }
+}
+
+impl Unreadable {
+    fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// The range `?over=` names.
@@ -328,30 +362,19 @@ async fn heart_rate(
         at_power::PATH,
         Some(tests_over(&query)),
         &run,
-        async {
-            let setting = runs.setting();
-            let store = match configurator::store::Store::open(&setting.database).await {
-                Ok(store) => store,
-                Err(error) => return at_power::unreadable(&error.to_string()),
-            };
-            let read = async {
-                let page = configurator::heart_rate::Page::open(&store, &setting.zone).await?;
-                Ok::<_, configurator::next::NextFailure>((
-                    page.rides().await?,
-                    page.ranges(&setting.zone).await?,
-                ))
-            }
-            .await;
-            store.close().await;
-            match read {
-                Ok((rides, ranges)) => at_power::page(
-                    &domain::analytical::heart_rate_at_power::trended(&rides),
-                    &ranges,
-                    tests_over(&query),
-                    &run,
-                ),
-                Err(error) => at_power::unreadable(&error.to_string()),
-            }
+        async |store| {
+            let zone = &runs.setting().zone;
+            let page = configurator::heart_rate::Page::open(store, zone).await?;
+            Ok((page.rides().await?, page.ranges(zone).await?))
+        },
+        |read| match read {
+            Ok((rides, ranges)) => at_power::page(
+                &domain::analytical::heart_rate_at_power::trended(&rides),
+                &ranges,
+                tests_over(&query),
+                &run,
+            ),
+            Err(error) => at_power::unreadable(error.as_str()),
         },
     )
     .await
@@ -372,28 +395,20 @@ async fn ftp_tests(
         ftp::PATH,
         Some(tests_over(&query)),
         &run,
-        async {
-            let setting = runs.setting();
-            let store = match configurator::store::Store::open(&setting.database).await {
-                Ok(store) => store,
-                Err(error) => return ftp::unreadable(&error.to_string()),
-            };
-            let read = async {
-                let page = configurator::ftp_tests::Page::open(&store, &setting.zone).await?;
-                Ok::<_, configurator::next::NextFailure>((
-                    page.tests().await?,
-                    page.heart_rates().await?,
-                    page.ranges(&setting.zone).await?,
-                ))
+        async |store| {
+            let zone = &runs.setting().zone;
+            let page = configurator::ftp_tests::Page::open(store, zone).await?;
+            Ok((
+                page.tests().await?,
+                page.heart_rates().await?,
+                page.ranges(zone).await?,
+            ))
+        },
+        |read| match read {
+            Ok((tests, heart_rates, ranges)) => {
+                ftp::page(&tests, &heart_rates, &ranges, tests_over(&query), &run)
             }
-            .await;
-            store.close().await;
-            match read {
-                Ok((tests, heart_rates, ranges)) => {
-                    ftp::page(&tests, &heart_rates, &ranges, tests_over(&query), &run)
-                }
-                Err(error) => ftp::unreadable(&error.to_string()),
-            }
+            Err(error) => ftp::unreadable(error.as_str()),
         },
     )
     .await
@@ -414,29 +429,21 @@ async fn body_page(
         body::PATH,
         Some(over(&query)),
         &run,
-        async {
-            let setting = runs.setting();
-            let store = match configurator::store::Store::open(&setting.database).await {
-                Ok(store) => store,
-                Err(error) => return body::unreadable(&error.to_string()),
-            };
-            let read = async {
-                let page = configurator::body::Page::open(&store, &setting.zone).await?;
-                Ok::<_, configurator::next::NextFailure>((
-                    page.series().await?,
-                    page.aims(&setting.zone).await?,
-                    page.by_method().await?,
-                    page.ranges(&setting.zone).await?,
-                ))
+        async |store| {
+            let zone = &runs.setting().zone;
+            let page = configurator::body::Page::open(store, zone).await?;
+            Ok((
+                page.series().await?,
+                page.aims(zone).await?,
+                page.by_method().await?,
+                page.ranges(zone).await?,
+            ))
+        },
+        |read| match read {
+            Ok((series, aims, components, ranges)) => {
+                body::page(&series, &aims, &components, &ranges, over(&query), &run)
             }
-            .await;
-            store.close().await;
-            match read {
-                Ok((series, aims, components, ranges)) => {
-                    body::page(&series, &aims, &components, &ranges, over(&query), &run)
-                }
-                Err(error) => body::unreadable(&error.to_string()),
-            }
+            Err(error) => body::unreadable(error.as_str()),
         },
     )
     .await
@@ -466,26 +473,14 @@ async fn overnight_hrv(
         hrv::PATH,
         Some(over(&query)),
         &run,
-        async {
-            let setting = runs.setting();
-            let store = match configurator::store::Store::open(&setting.database).await {
-                Ok(store) => store,
-                Err(error) => return hrv::unreadable(&error.to_string()),
-            };
-            let read = async {
-                let page =
-                    configurator::per_device::OvernightHrv::open(&store, &setting.zone).await?;
-                Ok::<_, configurator::next::NextFailure>((
-                    page.trend().await?,
-                    page.ranges(&setting.zone).await?,
-                ))
-            }
-            .await;
-            store.close().await;
-            match read {
-                Ok((trended, ranges)) => hrv::page(&trended, &ranges, over(&query), &run),
-                Err(error) => hrv::unreadable(&error.to_string()),
-            }
+        async |store| {
+            let zone = &runs.setting().zone;
+            let page = configurator::per_device::OvernightHrv::open(store, zone).await?;
+            Ok((page.trend().await?, page.ranges(zone).await?))
+        },
+        |read| match read {
+            Ok((trended, ranges)) => hrv::page(&trended, &ranges, over(&query), &run),
+            Err(error) => hrv::unreadable(error.as_str()),
         },
     )
     .await
@@ -506,28 +501,14 @@ async fn pulse_wave_velocity_page(
         pulse_wave_velocity::PATH,
         Some(over(&query)),
         &run,
-        async {
-            let setting = runs.setting();
-            let store = match configurator::store::Store::open(&setting.database).await {
-                Ok(store) => store,
-                Err(error) => return pulse_wave_velocity::unreadable(&error.to_string()),
-            };
-            let read = async {
-                let page =
-                    configurator::pulse_wave_velocity::Page::open(&store, &setting.zone).await?;
-                Ok::<_, configurator::next::NextFailure>((
-                    page.by_algorithm().await?,
-                    page.ranges(&setting.zone).await?,
-                ))
-            }
-            .await;
-            store.close().await;
-            match read {
-                Ok((series, ranges)) => {
-                    pulse_wave_velocity::page(&series, &ranges, over(&query), &run)
-                }
-                Err(error) => pulse_wave_velocity::unreadable(&error.to_string()),
-            }
+        async |store| {
+            let zone = &runs.setting().zone;
+            let page = configurator::pulse_wave_velocity::Page::open(store, zone).await?;
+            Ok((page.by_algorithm().await?, page.ranges(zone).await?))
+        },
+        |read| match read {
+            Ok((series, ranges)) => pulse_wave_velocity::page(&series, &ranges, over(&query), &run),
+            Err(error) => pulse_wave_velocity::unreadable(error.as_str()),
         },
     )
     .await
@@ -548,26 +529,14 @@ async fn resting_heart_rate(
         resting::PATH,
         Some(over(&query)),
         &run,
-        async {
-            let setting = runs.setting();
-            let store = match configurator::store::Store::open(&setting.database).await {
-                Ok(store) => store,
-                Err(error) => return resting::unreadable(&error.to_string()),
-            };
-            let read = async {
-                let page =
-                    configurator::per_device::RestingHeartRate::open(&store, &setting.zone).await?;
-                Ok::<_, configurator::next::NextFailure>((
-                    page.trend().await?,
-                    page.ranges(&setting.zone).await?,
-                ))
-            }
-            .await;
-            store.close().await;
-            match read {
-                Ok((trended, ranges)) => resting::page(&trended, &ranges, over(&query), &run),
-                Err(error) => resting::unreadable(&error.to_string()),
-            }
+        async |store| {
+            let zone = &runs.setting().zone;
+            let page = configurator::per_device::RestingHeartRate::open(store, zone).await?;
+            Ok((page.trend().await?, page.ranges(zone).await?))
+        },
+        |read| match read {
+            Ok((trended, ranges)) => resting::page(&trended, &ranges, over(&query), &run),
+            Err(error) => resting::unreadable(error.as_str()),
         },
     )
     .await
@@ -588,25 +557,14 @@ async fn sleep_page(
         sleep::PATH,
         Some(over(&query)),
         &run,
-        async {
-            let setting = runs.setting();
-            let store = match configurator::store::Store::open(&setting.database).await {
-                Ok(store) => store,
-                Err(error) => return sleep::unreadable(&error.to_string()),
-            };
-            let read = async {
-                let page = configurator::sleep::Page::open(&store, &setting.zone).await?;
-                Ok::<_, configurator::next::NextFailure>((
-                    page.nights().await?,
-                    page.ranges(&setting.zone).await?,
-                ))
-            }
-            .await;
-            store.close().await;
-            match read {
-                Ok((nights, ranges)) => sleep::page(&nights, &ranges, over(&query), &run),
-                Err(error) => sleep::unreadable(&error.to_string()),
-            }
+        async |store| {
+            let zone = &runs.setting().zone;
+            let page = configurator::sleep::Page::open(store, zone).await?;
+            Ok((page.nights().await?, page.ranges(zone).await?))
+        },
+        |read| match read {
+            Ok((nights, ranges)) => sleep::page(&nights, &ranges, over(&query), &run),
+            Err(error) => sleep::unreadable(error.as_str()),
         },
     )
     .await
@@ -617,23 +575,22 @@ async fn sleep_page(
 async fn estimated_one_rep_max(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
     let collects = configurator::one_rep_max::collects();
     let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(&runs, &collects, one_rep_max::PATH, None, &run, async {
-        let setting = runs.setting();
-        let store = match configurator::store::Store::open(&setting.database).await {
-            Ok(store) => store,
-            Err(error) => return one_rep_max::unreadable(&error.to_string()),
-        };
-        let view = async {
-            let page = configurator::one_rep_max::Page::open(&store, &setting.zone).await?;
-            Ok::<_, configurator::next::NextFailure>(page.view(&setting.zone).await?)
-        }
-        .await;
-        store.close().await;
-        match view {
+    drawn(
+        &runs,
+        &collects,
+        one_rep_max::PATH,
+        None,
+        &run,
+        async |store| {
+            let zone = &runs.setting().zone;
+            let page = configurator::one_rep_max::Page::open(store, zone).await?;
+            Ok(page.view(zone).await?)
+        },
+        |view| match view {
             Ok(view) => one_rep_max::page(&view, &run),
-            Err(error) => one_rep_max::unreadable(&error.to_string()),
-        }
-    })
+            Err(error) => one_rep_max::unreadable(error.as_str()),
+        },
+    )
     .await
 }
 
@@ -641,23 +598,22 @@ async fn estimated_one_rep_max(State(runs): State<Arc<Runs>>, headers: HeaderMap
 async fn progress_page(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
     let collects = configurator::working::collects();
     let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(&runs, &collects, progress::PATH, None, &run, async {
-        let setting = runs.setting();
-        let store = match configurator::store::Store::open(&setting.database).await {
-            Ok(store) => store,
-            Err(error) => return progress::unreadable(&error.to_string()),
-        };
-        let view = async {
-            let page = configurator::working::Page::open(&store, &setting.zone).await?;
-            Ok::<_, configurator::next::NextFailure>(page.view(&setting.zone).await?)
-        }
-        .await;
-        store.close().await;
-        match view {
+    drawn(
+        &runs,
+        &collects,
+        progress::PATH,
+        None,
+        &run,
+        async |store| {
+            let zone = &runs.setting().zone;
+            let page = configurator::working::Page::open(store, zone).await?;
+            Ok(page.view(zone).await?)
+        },
+        |view| match view {
             Ok(view) => progress::page(&view, &run),
-            Err(error) => progress::unreadable(&error.to_string()),
-        }
-    })
+            Err(error) => progress::unreadable(error.as_str()),
+        },
+    )
     .await
 }
 
@@ -666,23 +622,22 @@ async fn progress_page(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Mar
 async fn is_it_working(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
     let collects = configurator::working::collects();
     let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(&runs, &collects, working::PATH, None, &run, async {
-        let setting = runs.setting();
-        let store = match configurator::store::Store::open(&setting.database).await {
-            Ok(store) => store,
-            Err(error) => return working::unreadable(&error.to_string()),
-        };
-        let view = async {
-            let page = configurator::working::Page::open(&store, &setting.zone).await?;
-            Ok::<_, configurator::next::NextFailure>(page.view(&setting.zone).await?)
-        }
-        .await;
-        store.close().await;
-        match view {
+    drawn(
+        &runs,
+        &collects,
+        working::PATH,
+        None,
+        &run,
+        async |store| {
+            let zone = &runs.setting().zone;
+            let page = configurator::working::Page::open(store, zone).await?;
+            Ok(page.view(zone).await?)
+        },
+        |view| match view {
             Ok(view) => working::page(&view, &run),
-            Err(error) => working::unreadable(&error.to_string()),
-        }
-    })
+            Err(error) => working::unreadable(error.as_str()),
+        },
+    )
     .await
 }
 
@@ -710,23 +665,21 @@ async fn equipment_shown(runs: &Runs, refused: Option<&equipment::Refused<'_>>) 
 async fn history_page(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
     let collects = configurator::history::collects();
     let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(&runs, &collects, Place::History.path(), None, &run, async {
-        let setting = runs.setting();
-        let today = jiff::Timestamp::now()
-            .to_zoned(setting.zone.as_time_zone())
-            .date();
-        let days = match configurator::store::Store::open(&setting.database).await {
-            Err(error) => Err(error.to_string()),
-            Ok(store) => {
-                let days = configurator::history::Page::open(&store, &setting.zone)
-                    .days(&setting.zone)
-                    .await;
-                store.close().await;
-                days.map_err(|error| error.to_string())
-            }
-        };
-        history::page(&days, today)
-    })
+    let zone = &runs.setting().zone;
+    let today = jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date();
+    drawn(
+        &runs,
+        &collects,
+        Place::History.path(),
+        None,
+        &run,
+        async |store| {
+            Ok(configurator::history::Page::open(store, zone)
+                .days(zone)
+                .await?)
+        },
+        |days| history::page(&days.map_err(|error| error.0), today),
+    )
     .await
 }
 
@@ -750,20 +703,20 @@ async fn session_page(
     let here = history::address(on, number);
     let collects = configurator::history::collects();
     let run = runs.view();
-    drawn(&runs, &collects, &here, None, &run, async {
-        let setting = runs.setting();
-        let session = match configurator::store::Store::open(&setting.database).await {
-            Err(error) => Err(error.to_string()),
-            Ok(store) => {
-                let session = configurator::history::Page::open(&store, &setting.zone)
-                    .session(&setting.zone, on, number)
-                    .await;
-                store.close().await;
-                session.map_err(|error| error.to_string())
-            }
-        };
-        history::session(&here, on, &session)
-    })
+    let zone = &runs.setting().zone;
+    drawn(
+        &runs,
+        &collects,
+        &here,
+        None,
+        &run,
+        async |store| {
+            Ok(configurator::history::Page::open(store, zone)
+                .session(zone, on, number)
+                .await?)
+        },
+        |session| history::session(&here, on, &session.map_err(|error| error.0)),
+    )
     .await
     .into_response()
 }
@@ -773,29 +726,27 @@ async fn session_page(
 async fn plan_page(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
     let collects = configurator::macrocycle::collects();
     let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(&runs, &collects, Place::Plan.path(), None, &run, async {
-        let setting = runs.setting();
-        let macrocycle = match configurator::store::Store::open(&setting.database).await {
-            Err(error) => Err(error.to_string()),
-            Ok(store) => {
-                let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
-                let read = configurator::macrocycle::planned(
-                    &store,
-                    &setting.zone,
-                    domain::schedule::DayPart::containing(here.datetime()),
-                )
-                .await;
-                store.close().await;
-                read.map(|planned| {
-                    planned
-                        .as_ref()
-                        .map(application::macrocycle::Macrocycle::from)
-                })
-                .map_err(|error| error.to_string())
-            }
-        };
-        plan::page(&macrocycle, &run)
-    })
+    let zone = &runs.setting().zone;
+    drawn(
+        &runs,
+        &collects,
+        Place::Plan.path(),
+        None,
+        &run,
+        async |store| {
+            let here = jiff::Timestamp::now().to_zoned(zone.as_time_zone());
+            let planned = configurator::macrocycle::planned(
+                store,
+                zone,
+                domain::schedule::DayPart::containing(here.datetime()),
+            )
+            .await?;
+            Ok(planned
+                .as_ref()
+                .map(application::macrocycle::Macrocycle::from))
+        },
+        |macrocycle| plan::page(&macrocycle.map_err(|error| error.0), &run),
+    )
     .await
 }
 
@@ -1166,9 +1117,8 @@ mod tests {
                     "/estimated-1rm",
                     over,
                     &View::default(),
-                    async move {
-                        html! { main { p { (shown) } } }
-                    },
+                    async |_| Ok(()),
+                    |_| html! { main { p { (shown) } } },
                 ))
                 .into_string()
         };
@@ -1223,5 +1173,158 @@ mod tests {
         );
         assert!(shown.contains("<title>Estimated 1RM</title>"), "{shown}");
         assert!(!shown.contains("No test"), "{shown}");
+    }
+
+    /// A span as it was opened: its name, the fields that say what it is,
+    /// and the span it is under or follows from.
+    #[derive(Debug, Clone, Default)]
+    struct Opened {
+        name: &'static str,
+        fields: std::collections::BTreeMap<String, String>,
+        under: Option<tracing::span::Id>,
+    }
+
+    /// Every span opened, by id.
+    #[derive(Clone, Default)]
+    struct Opening(std::sync::Arc<std::sync::Mutex<std::collections::HashMap<u64, Opened>>>);
+
+    struct Fields<'a>(&'a mut std::collections::BTreeMap<String, String>);
+
+    impl tracing::field::Visit for Fields<'_> {
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            self.0.insert(
+                field.name().to_owned(),
+                format!("{value:?}").replace('"', ""),
+            );
+        }
+    }
+
+    impl<S> tracing_subscriber::Layer<S> for Opening
+    where
+        S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    {
+        fn on_new_span(
+            &self,
+            attributes: &tracing::span::Attributes<'_>,
+            id: &tracing::span::Id,
+            context: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            let mut opened = Opened {
+                name: attributes.metadata().name(),
+                under: context
+                    .span(id)
+                    .and_then(|span| span.parent().map(|parent| parent.id())),
+                ..Opened::default()
+            };
+            attributes.record(&mut Fields(&mut opened.fields));
+            if let Ok(mut opening) = self.0.lock() {
+                opening.insert(id.into_u64(), opened);
+            }
+        }
+
+        fn on_record(
+            &self,
+            id: &tracing::span::Id,
+            values: &tracing::span::Record<'_>,
+            _: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            if let Ok(mut opening) = self.0.lock()
+                && let Some(opened) = opening.get_mut(&id.into_u64())
+            {
+                values.record(&mut Fields(&mut opened.fields));
+            }
+        }
+
+        fn on_follows_from(
+            &self,
+            id: &tracing::span::Id,
+            follows: &tracing::span::Id,
+            _: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            if let Ok(mut opening) = self.0.lock()
+                && let Some(opened) = opening.get_mut(&id.into_u64())
+                && opened.under.is_none()
+            {
+                opened.under = Some(follows.clone());
+            }
+        }
+    }
+
+    /// **Every route is recorded, listed or not** (#804): the equipment page
+    /// and a page that does not exist were never on the list the chart pages
+    /// were, and each is a `request`. **A drawn page's parts are its
+    /// children**: opening the store, each read, rendering, and keeping it.
+    #[test]
+    fn every_page_load_is_recorded_with_a_span_for_each_part() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let runs = std::sync::Arc::new(Runs::new(Setting {
+            database: directory.path().join("fitness.db"),
+            zone: OperatorZone::try_from("Europe/London").expect("a zone"),
+            credentials: None,
+        }));
+        let opening = Opening::default();
+        let _recording =
+            tracing::subscriber::set_default(tracing_subscriber::registry().with(opening.clone()));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        runtime.block_on(async {
+            configurator::store::Store::open(&runs.setting().database)
+                .await
+                .expect("the store")
+                .close()
+                .await;
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("a port");
+            let address = listener.local_addr().expect("an address");
+            tokio::spawn(async move { axum::serve(listener, super::app(runs)).await });
+            for path in ["/equipment", "/nowhere", "/history/2026-11-02/1"] {
+                let mut stream = tokio::net::TcpStream::connect(address)
+                    .await
+                    .expect("a connection");
+                stream
+                    .write_all(
+                        format!("GET {path} HTTP/1.1\r\nHost: here\r\nConnection: close\r\n\r\n")
+                            .as_bytes(),
+                    )
+                    .await
+                    .expect("a request");
+                let mut response = Vec::new();
+                stream.read_to_end(&mut response).await.expect("a response");
+            }
+        });
+
+        let opened = opening.0.lock().expect("unpoisoned").clone();
+        let request = |page: &str| {
+            opened
+                .iter()
+                .find(|(_, opened)| opened.name == "request" && opened.fields["page"] == page)
+                .map(|(id, _)| *id)
+                .unwrap_or_else(|| panic!("{page} is recorded: {opened:?}"))
+        };
+        request("/equipment");
+        request("/nowhere");
+        let session = request("/history/2026-11-02/1");
+        let parts: Vec<String> = opened
+            .values()
+            .filter(|step| {
+                step.name == "step"
+                    && step.under.as_ref().map(tracing::span::Id::into_u64) == Some(session)
+            })
+            .map(|step| {
+                step.fields.get("read").map_or_else(
+                    || step.fields["step"].clone(),
+                    |read| format!("{} {read}", step.fields["step"]),
+                )
+            })
+            .collect();
+        for part in ["opening", "reading tests", "rendering", "keeping"] {
+            assert!(parts.iter().any(|seen| seen == part), "{part}: {parts:?}");
+        }
     }
 }

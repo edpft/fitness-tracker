@@ -99,11 +99,11 @@ impl<C: Canonicalising + Sync> Canonicalising for Traced<C> {
     }
 }
 
-/// A chart page load as a `request` span (#628).
+/// A page load as a `request` span (#628, #804).
 ///
 /// Its page, and whether it is a redraw: the page asking for itself again as
 /// htmx. Its range and how it was served are recorded as the page learns
-/// them, and a run it starts is its child.
+/// them, and a run it starts and each part of drawing it are its children.
 pub fn request(page: &str, redraw: bool) -> Span {
     tracing::info_span!(
         "request",
@@ -115,6 +115,79 @@ pub fn request(page: &str, redraw: bool) -> Span {
         due = Empty,
         outcome = Empty,
     )
+}
+
+/// A part of drawing a page as a `step` span under its load (#804): what the
+/// load's time went on, and so what a slow one is told apart into.
+///
+/// A step, as delivering is under a run (#741), since a part of a page load
+/// is a part like any other and needs no span name of its own.
+fn drawing(step: &'static str) -> Span {
+    tracing::info_span!("step", step, read = Empty)
+}
+
+/// Opening the store.
+pub(crate) fn opening() -> Span {
+    drawing("opening")
+}
+
+/// Asking whether anything a page reads could hold anything new (#612).
+pub(crate) fn checking() -> Span {
+    drawing("checking")
+}
+
+/// Keeping a page as drawn (#605), as its own span: the page is served
+/// before it is kept, so this follows from the load rather than being timed
+/// within it.
+pub fn keeping() -> Span {
+    let span = tracing::info_span!(parent: None, "step", step = "keeping");
+    span.follows_from(Span::current());
+    span
+}
+
+/// Rendering a page from what was read.
+pub fn rendering<T>(render: impl FnOnce() -> T) -> T {
+    drawing("rendering").in_scope(render)
+}
+
+/// What a page reads through, which it can read only as a [`Reading`] (#804):
+/// so each read is a span, because there is no other way to make one.
+#[derive(Clone)]
+pub struct Read<T>(T);
+
+impl<T> From<T> for Read<T> {
+    fn from(of: T) -> Self {
+        Self(of)
+    }
+}
+
+/// A field of a page, named, as `page!` hands it out.
+pub struct Reading<'a, T> {
+    name: &'static str,
+    of: &'a Read<T>,
+}
+
+impl<'a, T> Reading<'a, T> {
+    /// Only `page!` names a field, so a read cannot go unspanned.
+    pub(crate) const fn named(name: &'static str, of: &'a Read<T>) -> Self {
+        Self { name, of }
+    }
+
+    /// What `read` reads through the field, as a `reading` step under the
+    /// page load with the field's name.
+    pub(crate) fn read<F: Future>(
+        self,
+        read: impl FnOnce(&'a T) -> F,
+    ) -> tracing::instrument::Instrumented<F> {
+        read(&self.of.0).instrument(reading(self.name))
+    }
+}
+
+/// Reading `name` for a page, where the page is not built by `page!`.
+pub(crate) fn reading(name: &'static str) -> Span {
+    let span = drawing("reading");
+    span.record("read", name);
+    span
 }
 
 /// How a chart page was served.

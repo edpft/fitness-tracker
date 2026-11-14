@@ -13,7 +13,7 @@ use infrastructure::{
 };
 
 use crate::{
-    graph::page,
+    graph::{page, read},
     next::NextFailure,
     rescheduling::{self, Plans},
     store::Store,
@@ -75,7 +75,7 @@ impl Page {
     /// [`NextFailure`] if the store cannot be read.
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
         Ok(Self {
-            estimated: estimated(store, rescheduling::plans(store, zone).await?),
+            estimated: estimated(store, rescheduling::plans(store, zone).await?).into(),
         })
     }
 
@@ -85,6 +85,6 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn view(&self, zone: &OperatorZone) -> Result<View, StoreError> {
-        self.estimated.view(crate::equipment::today(zone)).await
+        read!(self.estimated.view(crate::equipment::today(zone))).await
     }
 }
