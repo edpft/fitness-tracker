@@ -1,7 +1,16 @@
 <!--
 Sync Impact Report
-- Version: 9.1.0, amended 2026-11-10. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 10.0.0, amended 2026-11-14. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 10.0.0 — § 13 no longer says analytical results are re-derived on demand rather than stored.
+  MAJOR: a rule is removed, by deletion only, with nothing written in its place. It was read as
+  forbidding stored results, and pages re-derived everything they showed on every load. The
+  operator, 2026-11-14: *"The original idea was to make sure it was possible to receive higher
+  layers if lower layer changed, not that they always had to be re-derived"*; *"The key idea now
+  is the DAGs, and incremental derivation, we only derive what we need to derive based on what
+  changed."* That idea is not written here as a rule: it is built into the graph, where the
+  compiler keeps it. He was concerned that *"setting out all these rules"* had caused the
+  problem in the first place.
 - 9.1.0 — § I states what the system is for, not only what it keeps: the operator's goals, then
   planning, adapting, and keeping and understanding the data, and how it is in use. MINOR: no
   rule removed. § I had described a data store, which is the third of the three. The operator,
@@ -335,7 +344,7 @@ Consequences:
 
 The state is **derived from the relations and never stored**: a status column would be a second source of truth for a fact the delivery and the observation already carry between them, and the two could disagree.
 
-**13.** **Interpretive parameters.** Values consulted in order to interpret observations: heart-rate and power zones, FTP, the default timezone. Effect-dated and retained — the value in force at the time of the observation is the one that applies, and a superseded value is never overwritten or deleted. § 7 requires this: analytical results are re-derived on demand rather than stored (§ 5), so a lost past value makes past analysis unreproducible. Changing one does not rewrite an existing series; § 6 governs.
+**13.** **Interpretive parameters.** Values consulted in order to interpret observations: heart-rate and power zones, FTP, the default timezone. Effect-dated and retained — the value in force at the time of the observation is the one that applies, and a superseded value is never overwritten or deleted. § 7 requires this: a lost past value makes past analysis unreproducible. Changing one does not rewrite an existing series; § 6 governs.
 
 **14.** **Generation parameters.** Values consulted when programming, and only those that are facts about the world the training is run in rather than facts about how a workout or a progression prescribes: available plate increments, training availability, scheduling constraints, the family calendar. Only the current value is required. What was generated is recorded concretely in the authored record (§ 12), so the parameter that produced it needs no history and a superseded value answers no question. Where such a value is received from an external system it arrives through an adapter behind a port (§ 16), and need not be persisted at all.
 
@@ -431,4 +440,4 @@ Dependency updates were already exempt, and remain so for their own reason: what
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 9.1.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-11-10
+**Version**: 10.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-11-14
