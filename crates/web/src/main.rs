@@ -1304,8 +1304,7 @@ mod tests {
             opened
                 .iter()
                 .find(|(_, opened)| opened.name == "request" && opened.fields["page"] == page)
-                .map(|(id, _)| *id)
-                .unwrap_or_else(|| panic!("{page} is recorded: {opened:?}"))
+                .map_or_else(|| panic!("{page} is recorded: {opened:?}"), |(id, _)| *id)
         };
         request("/equipment");
         request("/nowhere");
