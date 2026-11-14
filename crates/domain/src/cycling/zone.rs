@@ -89,25 +89,6 @@ impl PowerZone {
         }
     }
 
-    /// The zone a power falls in, for a rider at `ftp`.
-    ///
-    /// **A band's upper bound is in it**, and anything above it is in the next:
-    /// 75% of FTP is zone two and 75.5% is zone three. Compared in integers, so
-    /// no rounding decides a boundary.
-    #[must_use]
-    pub fn at(power: Watts, ftp: Ftp) -> Self {
-        let share = u64::from(power.as_u32()) * 100;
-        let ftp = u64::from(ftp.watts().as_u32());
-        Self::ALL
-            .into_iter()
-            .find(|zone| {
-                zone.band()
-                    .upper_percent()
-                    .is_some_and(|upper| share <= u64::from(upper) * ftp)
-            })
-            .unwrap_or(Self::Seven)
-    }
-
     /// The share of FTP this zone spans.
     pub const fn band(self) -> ZoneBand {
         match self {
@@ -227,14 +208,6 @@ impl ZoneBand {
             lower: Some(lower),
             upper: None,
         }
-    }
-
-    pub const fn lower_percent(self) -> Option<u16> {
-        self.lower
-    }
-
-    pub const fn upper_percent(self) -> Option<u16> {
-        self.upper
     }
 
     /// The share of FTP this band is scored at, as one number.

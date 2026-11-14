@@ -139,11 +139,6 @@ impl Macrocycle {
         *self.holiday.weeks().start()
     }
 
-    /// The Sunday of the last week of term.
-    pub fn last_day_of_term(&self) -> Date {
-        self.transition().yesterday().unwrap_or(self.start)
-    }
-
     /// The Sunday of the last week the holiday touches, and so the last day
     /// of the macrocycle.
     pub fn last(&self) -> Date {

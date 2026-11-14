@@ -478,3 +478,12 @@ impl application::Input for SqliteNormalisedWeighInReader {
         ])
     }
 }
+
+/// The canonical weigh-ins (#809).
+impl application::Input for SqliteCanonicalWeighInStore {
+    fn reads() -> application::Reads {
+        application::Reads::of([application::Node::Canonical(
+            application::CanonicalLayer::WeighIns,
+        )])
+    }
+}

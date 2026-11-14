@@ -128,7 +128,6 @@ proptest! {
     #[test]
     fn an_arbitrary_exercise_holds_sets(exercise in reps_exercise()) {
         prop_assert!(exercise.set_count() >= 1);
-        prop_assert!(exercise.working_set_count() <= exercise.set_count());
     }
 
     /// An arbitrary shape has no empty exercise and no single-member superset,

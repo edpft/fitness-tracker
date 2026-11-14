@@ -8,7 +8,6 @@ use application::{
     collected::{Collected, Stage, collected},
     next::{Found, Scope, Step, StepFailure},
 };
-use configurator::wiring::WiringError;
 use domain::planner::Discipline;
 use maud::{Markup, html};
 
@@ -18,12 +17,12 @@ use crate::page::PAGES;
 struct Row {
     name: String,
     path: Option<&'static str>,
-    reads: Result<Scope, WiringError>,
+    reads: Scope,
 }
 
 /// What the chart page at `path` collects, `None` for a page that is not a
 /// chart.
-fn chart(path: &str) -> Option<Result<Scope, WiringError>> {
+fn chart(path: &str) -> Option<Scope> {
     Some(match path {
         "/working" => configurator::working::collects(),
         "/heart-rate" => configurator::heart_rate::collects(),
@@ -74,16 +73,11 @@ pub fn matrix<'a>(
                         Some(path) => a href=(path) { (row.name) },
                         None => span { (row.name) },
                     }
-                    @match &row.reads {
-                        Ok(reads) => {
-                            @for stage in Stage::ALL {
-                                @match collected(reads, stage, steps, going) {
-                                    Some(standing) => (dot(standing)),
-                                    None => span {},
-                                }
-                            }
+                    @for stage in Stage::ALL {
+                        @match collected(&row.reads, stage, steps, going) {
+                            Some(standing) => (dot(standing)),
+                            None => span {},
                         }
-                        Err(error) => span.failed.unread { (error) },
                     }
                 }
             }
@@ -138,15 +132,12 @@ mod tests {
                 .count()
         );
         assert_eq!(rows.len(), 11, "{names:?}");
-        for row in &rows {
-            assert!(row.reads.is_ok(), "{}", row.name);
-        }
     }
 
-    /// **On a store with no credentials every fetch is red**, sleep has no
-    /// canonicalise, and a stage the run has not reached pulses.
+    /// **On a store with no credentials every fetch is red**, and a stage the
+    /// run has not reached pulses.
     #[test]
-    fn no_credentials_reds_the_fetches_and_sleep_has_no_canonicalise() {
+    fn no_credentials_reds_the_fetches() {
         let failed: Result<Found, StepFailure> = Err(StepFailure::NoAccess(NoAccess {
             detail: "no credential".to_owned(),
         }));
@@ -165,11 +156,6 @@ mod tests {
             assert!(dots[0].starts_with("failed"), "{row}");
             assert!(dots[1].starts_with("unfinished"), "{row}");
         }
-        let sleep = rows
-            .iter()
-            .find(|row| row.contains(">Sleep<"))
-            .expect("a sleep row");
-        assert_eq!(sleep.matches(r#"<i class="dot "#).count(), 2, "{sleep}");
         assert!(
             rows[0].starts_with("<span>Gym sessions</span>"),
             "{}",

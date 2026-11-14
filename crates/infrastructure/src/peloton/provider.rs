@@ -245,6 +245,15 @@ pub fn identify(programme: &ExternalProgramme) -> Option<PublishedCycling> {
     }
 }
 
+/// The classes, as the catalogue last read them (#809).
+impl application::Input for PelotonProgrammes<'_> {
+    fn reads() -> application::Reads {
+        application::Reads::of([application::Node::Generation(
+            application::Generation::Classes,
+        )])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

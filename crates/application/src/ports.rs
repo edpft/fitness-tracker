@@ -309,6 +309,8 @@ pub enum Part {
     /// One normalised layer.
     Normalising(LandingStream),
     Canonicalising(CanonicalLayer),
+    /// Asking one calendar's publisher whether it has changed (#809).
+    FetchingCalendar(Calendar),
     /// Refreshing the classes, committing and delivering, which only a run of
     /// the whole of `next` does.
     Delivering,
@@ -2363,25 +2365,6 @@ pub trait RiddenVenues {
     fn ridden(&self) -> impl Future<Output = Result<BTreeSet<RideVenue>, StoreError>> + Send;
 }
 
-/// What the classes ridden prescribed, read from the local catalogue (#415).
-///
-/// **The catalogue only, never the source.** A chart reads what the store
-/// holds; a class it has not read yet is [`None`], and the next refresh
-/// reads it.
-pub trait ClassPrescriptions {
-    /// What the class at `venue` prescribes, or [`None`] where the catalogue
-    /// has not read it or it is not a session on its own.
-    ///
-    /// # Errors
-    ///
-    /// [`StoreError`] if the store is unavailable or holds something
-    /// unreadable.
-    fn prescribed(
-        &self,
-        venue: &RideVenue,
-    ) -> impl Future<Output = Result<Option<CyclingSession>, StoreError>> + Send;
-}
-
 /// What one listing of the class catalogue's source found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClassesListed {
@@ -2753,13 +2736,6 @@ pub enum Issuance {
     /// A performance names the session in force, so it stands and no derivation
     /// was attempted. § 12.1: what it records happened.
     Performed { reference: DeliveryReference },
-}
-
-impl Issuance {
-    /// Whether what is being reported was written by this call.
-    pub const fn is_fresh(&self) -> bool {
-        matches!(self, Self::Issued | Self::Superseded { .. })
-    }
 }
 
 /// A prescription, and enough to report it honestly.

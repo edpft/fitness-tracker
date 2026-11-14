@@ -10,10 +10,10 @@ use std::sync::OnceLock;
 use tracing::Instrument as _;
 
 use application::{
-    CanonicalLayer, Clock, DerivedFrom, FetchLog, Fetched, NormalisationError,
-    NormalisationSummary, NormalisedLayers, Rederivation, RunLockError, StoreError,
+    Clock, DerivedFrom, FetchLog, Fetched, NormalisationError, NormalisationSummary,
+    NormalisedLayers, Rederivation, RunLockError, StoreError,
     commit::{CommitPorts, Committing},
-    cycling::{Riding, RidingPorts},
+    cycling::RidingPorts,
     microcycle::{Microcycle, MicrocyclePorts},
     next::{
         CanonicalPorts, CyclingPorts, Done, GymPorts, IfGoing, Next, NextError, NextPorts,
@@ -350,51 +350,14 @@ async fn over(
     })
 }
 
-/// What a chart reads, from which the parts its page's run collects follow
-/// (#559).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Reads {
-    /// A landing stream, read as it landed.
-    Landed(&'static str),
-    /// A normalised layer, and every walk it is derived from.
-    Normalised(&'static str),
-    /// A canonical layer, and every normalised layer it is built from.
-    Canonical(CanonicalLayer),
-}
-
-/// The parts a run collecting what `reads` names takes: each part read, and
-/// every part it is derived from, as the graph has it (#809).
-///
-/// # Errors
-///
-/// [`WiringError`] if a name read is not a stream's.
-pub fn scope(reads: impl IntoIterator<Item = Reads>) -> Result<Scope, WiringError> {
-    let stream = |name: &str| LandingStream::try_from(name).map_err(WiringError::from);
-    let mut nodes = Vec::new();
-    for read in reads {
-        nodes.push(match read {
-            Reads::Landed(name) => application::graph::Node::Landing(stream(name)?),
-            Reads::Normalised(name) => application::graph::Node::Normalised(stream(name)?),
-            Reads::Canonical(layer) => application::graph::Node::Canonical(layer),
-        });
+/// What a discipline's next session is prescribed from (#666, #809): what its
+/// prescriber reads, and everything upstream of that.
+#[must_use]
+pub fn prescribed_from(discipline: Discipline) -> Scope {
+    match discipline {
+        Discipline::Gym => crate::graph::collects::<crate::prescribing::Prescriber>(),
+        Discipline::Cycling => crate::graph::collects::<crate::cycling::Prescriber<'static>>(),
     }
-    Ok(crate::graph::scope(&nodes.into_iter().collect()))
-}
-
-/// What a discipline's next session is prescribed from (#666).
-///
-/// The canonical layer of its sessions, which the gym's exercise history and
-/// cycling's ridden classes and FTP read, and everything that layer is built
-/// from.
-///
-/// # Errors
-///
-/// [`WiringError`] if a name read is not a stream's.
-pub fn prescribed_from(discipline: Discipline) -> Result<Scope, WiringError> {
-    scope([Reads::Canonical(match discipline {
-        Discipline::Gym => CanonicalLayer::Gym,
-        Discipline::Cycling => CanonicalLayer::Cycling,
-    })])
 }
 
 /// Each canonical layer, and the normalised layers it is built from.
@@ -579,6 +542,16 @@ pub const WEIGH_INS: &str = "withings.measurements";
 pub const WATCH: &str = "garmin.activities";
 
 /// The cycling use case, over this build's stores and catalogue.
+pub type Riding<'a> = application::cycling::Riding<
+    SqliteCyclingMesocycleStore,
+    SqlitePlanStore,
+    PelotonHoldingRides<'a>,
+    SqliteCanonicalCyclingSessionStore,
+    SqliteFtpHistory,
+    SqliteCyclingDeliveryStore,
+>;
+
+/// The cycling use case, over this build's stores and catalogue.
 ///
 /// # Errors
 ///
@@ -587,17 +560,7 @@ pub fn riding<'a>(
     pool: &infrastructure::SqlitePool,
     zone: &OperatorZone,
     catalogue: ClassCatalogue<'a>,
-) -> Result<
-    Riding<
-        SqliteCyclingMesocycleStore,
-        SqlitePlanStore,
-        PelotonHoldingRides<'a>,
-        SqliteCanonicalCyclingSessionStore,
-        SqliteFtpHistory,
-        SqliteCyclingDeliveryStore,
-    >,
-    NextFailure,
-> {
+) -> Result<Riding<'a>, NextFailure> {
     Ok(Riding::new(
         RidingPorts {
             mesocycles: SqliteCyclingMesocycleStore::new(pool.clone()),
@@ -630,9 +593,9 @@ fn known(discipline: Discipline) -> Result<&'static catalogue::KnownDiscipline, 
 #[cfg(test)]
 mod tests {
     use application::{CanonicalLayer, Part, next::Scope};
-    use domain::landing::LandingStream;
+    use domain::{landing::LandingStream, planner::Discipline};
 
-    use crate::{body_weight, composition, heart_rate, one_rep_max, per_device};
+    use crate::{body, heart_rate, history, macrocycle, one_rep_max, per_device, working};
 
     fn named(scope: &Scope) -> Vec<String> {
         scope
@@ -642,111 +605,132 @@ mod tests {
                 Part::Fetching(stream) => format!("fetching {stream}"),
                 Part::Normalising(stream) => format!("normalising {stream}"),
                 Part::Canonicalising(layer) => format!("canonicalising {}", layer.as_str()),
+                Part::FetchingCalendar(calendar) => format!("calendar {}", calendar.as_str()),
                 Part::Delivering => "delivering".to_owned(),
             })
             .collect()
     }
 
-    /// **Each chart's page collects what its chart reads and nothing else**
-    /// (#559): the HRV chart its nights, the sleep records naming each night's
-    /// watch and Garmin's recordings naming the watch (#569), never Hevy,
-    /// Withings or Peloton, and never a delivery.
+    fn stream(name: &str) -> LandingStream {
+        LandingStream::try_from(name).expect("a stream")
+    }
+
+    /// What the walk through the plan reads (#809): the sessions performed,
+    /// from every source of them, and the calendars its term comes from.
+    const WALKED: [&str; 16] = [
+        "fetching garmin.activities",
+        "fetching garmin.activity_files",
+        "fetching garmin.exercise_sets",
+        "fetching hevy.workouts",
+        "fetching peloton.account",
+        "fetching peloton.ride_samples",
+        "fetching peloton.rides",
+        "normalising btwb.exports",
+        "normalising garmin.activities",
+        "normalising hevy.workouts",
+        "normalising peloton.rides",
+        "normalising spreadsheets.files",
+        "canonicalising gym",
+        "canonicalising cycling",
+        "calendar school",
+        "calendar public",
+    ];
+
+    /// **Plan collects what it reads, as every page does** (#809): the walk,
+    /// and never a delivery. Prescribing either discipline reads where the
+    /// plan stands, and so the same.
     #[test]
-    fn each_chart_collects_what_it_reads() {
-        assert_eq!(
-            named(&per_device::overnight_hrv_collects().expect("a scope")),
-            [
-                "fetching garmin.activities",
-                "fetching garmin.activity_files",
-                "fetching garmin.daily_heart_rate",
-                "fetching garmin.exercise_sets",
-                "fetching garmin.hrv",
-                "fetching garmin.sleep",
-                "normalising garmin.activities",
-                "normalising garmin.daily_heart_rate",
-                "normalising garmin.hrv",
-            ]
-        );
-        assert_eq!(
-            named(&one_rep_max::collects().expect("a scope")),
-            [
-                "fetching garmin.activities",
-                "fetching garmin.activity_files",
-                "fetching garmin.exercise_sets",
-                "fetching hevy.workouts",
-                "fetching withings.measurements",
-                "normalising btwb.exports",
-                "normalising garmin.activities",
-                "normalising hevy.workouts",
-                "normalising myfitnesspal.exports",
-                "normalising spreadsheets.files",
-                "normalising withings.measurements",
-                "canonicalising gym",
-                "canonicalising weigh-ins",
-            ]
-        );
-        assert_eq!(
-            named(&body_weight::collects().expect("a scope")),
-            [
-                "fetching withings.measurements",
-                "normalising myfitnesspal.exports",
-                "normalising spreadsheets.files",
-                "normalising withings.measurements",
-                "canonicalising weigh-ins",
-            ]
-        );
+    fn plan_and_the_prescriptions_collect_the_walk() {
         for scope in [
-            per_device::resting_heart_rate_collects(),
-            heart_rate::collects(),
-            composition::collects(),
+            macrocycle::collects(),
+            super::prescribed_from(Discipline::Gym),
+            super::prescribed_from(Discipline::Cycling),
         ] {
-            let scope = scope.expect("a scope");
-            assert!(!scope.has(&Part::Delivering));
-            assert!(!scope.has(&Part::Fetching(
-                LandingStream::try_from("hevy.workouts").expect("a stream")
-            )));
-        }
-        assert!(
-            heart_rate::collects()
-                .expect("a scope")
-                .has(&Part::Canonicalising(CanonicalLayer::Cycling))
-        );
-        // #569: a ride's monitor is Peloton's account's, and a day's watch
-        // Garmin's own records'; the register is Garmin's, for history.
-        let account = Part::Fetching(LandingStream::try_from("peloton.account").expect("a stream"));
-        assert!(heart_rate::collects().expect("a scope").has(&account));
-        let resting = per_device::resting_heart_rate_collects().expect("a scope");
-        assert!(!resting.has(&account));
-        for part in [
-            Part::Fetching(LandingStream::try_from("garmin.sleep").expect("a stream")),
-            Part::Normalising(
-                LandingStream::try_from("garmin.daily_heart_rate").expect("a stream"),
-            ),
-            Part::Normalising(LandingStream::try_from("garmin.activities").expect("a stream")),
-        ] {
-            assert!(resting.has(&part), "{part:?}");
+            assert_eq!(named(&scope), WALKED);
         }
     }
 
+    /// **Each chart's page collects what its chart reads and nothing else**
+    /// (#559): the HRV chart its nights, the sleep records naming each night's
+    /// watch and Garmin's recordings naming the watch (#569), and the walk its
+    /// ranges are read from (#809); never Withings, and never a delivery.
+    #[test]
+    fn each_chart_collects_what_it_reads() {
+        let mut expected: Vec<String> = WALKED
+            .iter()
+            .chain(&[
+                "fetching garmin.daily_heart_rate",
+                "fetching garmin.hrv",
+                "fetching garmin.sleep",
+                "normalising garmin.daily_heart_rate",
+                "normalising garmin.hrv",
+            ])
+            .map(|part| (*part).to_owned())
+            .collect();
+        expected.sort();
+        let mut hrv = named(&per_device::overnight_hrv_collects());
+        hrv.sort();
+        assert_eq!(hrv, expected);
+
+        for scope in [
+            per_device::resting_heart_rate_collects(),
+            heart_rate::collects(),
+            per_device::overnight_hrv_collects(),
+        ] {
+            assert!(!scope.has(&Part::Delivering));
+            assert!(!scope.has(&Part::Fetching(stream("withings.measurements"))));
+        }
+        // #569: a ride's monitor is Peloton's account's, and a day's watch
+        // Garmin's own records'; the register is Garmin's, for history.
+        assert!(heart_rate::collects().has(&Part::Fetching(stream("peloton.account"))));
+        let resting = per_device::resting_heart_rate_collects();
+        assert!(!resting.has(&Part::Normalising(stream("garmin.hrv"))));
+        for part in [
+            Part::Fetching(stream("garmin.sleep")),
+            Part::Normalising(stream("garmin.daily_heart_rate")),
+            Part::Normalising(stream("garmin.activities")),
+        ] {
+            assert!(resting.has(&part), "{part:?}");
+        }
+        // Body weight is canonical, and composition every normalised weigh-in.
+        let body = body::collects();
+        for part in [
+            Part::Canonicalising(CanonicalLayer::WeighIns),
+            Part::Normalising(stream("myfitnesspal.exports")),
+        ] {
+            assert!(body.has(&part), "{part:?}");
+        }
+        assert!(one_rep_max::collects().has(&Part::Canonicalising(CanonicalLayer::WeighIns)));
+        assert!(working::collects().has(&Part::Normalising(stream("garmin.daily_summary"))));
+    }
+
+    /// **History reads no plan**, so it asks no calendar (#809).
+    #[test]
+    fn history_reads_the_sessions_and_not_the_plan() {
+        let history = history::collects();
+        assert!(history.has(&Part::Canonicalising(CanonicalLayer::Gym)));
+        assert!(!history.has(&Part::FetchingCalendar(application::Calendar::School)));
+    }
+
     /// **A run the terminal started is seen by its locks** (#467): the
-    /// estimated 1RM page is collecting while a run holds the gym's canonical
-    /// layer, and body weight, which does not read it, is not.
+    /// estimated 1RM page is collecting while a run holds the canonical
+    /// weigh-ins, and History, which does not read them, is not.
     #[test]
     fn a_run_holding_a_part_a_page_reads_is_collecting_it() {
         use application::{NextLock as _, Taken};
 
         let directory = tempfile::TempDir::new().expect("a temporary directory");
         let database = directory.path().join("fitness.db");
-        let one_rep_max = one_rep_max::collects().expect("a scope");
-        let body_weight = body_weight::collects().expect("a scope");
+        let one_rep_max = one_rep_max::collects();
+        let history = history::collects();
         assert!(!super::collecting(&database, &one_rep_max).expect("tried"));
 
         let Ok(Taken::All(_running)) = infrastructure::FileRunLock::beside(&database).try_acquire(
-            &std::collections::BTreeSet::from([Part::Canonicalising(CanonicalLayer::Gym)]),
+            &std::collections::BTreeSet::from([Part::Canonicalising(CanonicalLayer::WeighIns)]),
         ) else {
             panic!("the run takes its part");
         };
         assert!(super::collecting(&database, &one_rep_max).expect("tried"));
-        assert!(!super::collecting(&database, &body_weight).expect("tried"));
+        assert!(!super::collecting(&database, &history).expect("tried"));
     }
 }

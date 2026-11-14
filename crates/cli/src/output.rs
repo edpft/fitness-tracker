@@ -1227,6 +1227,12 @@ fn joining(parts: &std::collections::BTreeSet<application::Part>) -> String {
         named.insert(match part {
             Part::Fetching(stream) | Part::Normalising(stream) => stream.to_string(),
             Part::Canonicalising(layer) => format!("canonical {}", layer.as_str()),
+            Part::FetchingCalendar(application::Calendar::School) => {
+                "the school calendar".to_owned()
+            }
+            Part::FetchingCalendar(application::Calendar::Public) => {
+                "the public holidays".to_owned()
+            }
             Part::Delivering => continue,
         });
     }

@@ -7,30 +7,18 @@
 //! Another source of what a device recorded is another reader here, and nothing
 //! above this changes.
 
-use application::{StoreError, devices::DeviceRegister};
-use domain::device::Register;
-use infrastructure::{
-    GarminActivityLandingStore, GarminDailyHeartRateLandingStore, GarminRecordedDevices, GarminWear,
-};
+use application::devices::DeviceRegister;
+use infrastructure::{GarminRecordedDevices, GarminWear};
 
-use crate::{next::Reads, store::Store};
-
-/// What the register reads: Garmin's activities and days, normalised (#569).
-pub const READS: [Reads; 2] = [
-    Reads::Normalised(GarminActivityLandingStore::STREAM),
-    Reads::Normalised(GarminDailyHeartRateLandingStore::STREAM),
-];
+use crate::store::Store;
 
 /// Every device the record identifies, and the days a watch was worn.
-///
-/// # Errors
-///
-/// [`StoreError`] if the store cannot be read.
-pub async fn register(store: &Store) -> Result<Register, StoreError> {
+pub type Register = DeviceRegister<GarminRecordedDevices, GarminWear>;
+
+/// The register over `store`.
+pub(crate) fn register(store: &Store) -> Register {
     DeviceRegister::new(
         GarminRecordedDevices::new(store.pool().clone()),
         GarminWear::new(store.pool().clone()),
     )
-    .register()
-    .await
 }

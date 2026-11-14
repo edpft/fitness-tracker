@@ -47,8 +47,8 @@ use super::{
     Weighed,
     confidence::Noise,
     expected::{Expected, each_mesocycle, over},
+    nutrition_phase::NutritionPhase,
     range::Range,
-    recomposition::NutritionPhase,
     since_start::{SinceStart, since_start},
 };
 use crate::{macrocycle::Macrocycle, measure::Kg, plan::Span};
@@ -62,14 +62,6 @@ const WINDOW_DAYS: i64 = 7;
 /// How many of them must have a weigh-in for there to be a trend.
 const WEIGHED_DAYS: usize = 4;
 
-/// How many days either side of a day its weight change reads the trend
-/// (operator, 2026-11-02, #688).
-const HALF_SPAN_DAYS: i64 = 14;
-
-/// What weight change is called, so a different method is never mistaken for it.
-pub const CHANGE_METHOD: &str =
-    "the trend 14 days after less the trend 14 days before, a week at a time";
-
 /// The operator's aim in a cut, a week (2026-10-14, #252).
 pub const CUT_AIM_GRAMS_A_WEEK: i64 = -250;
 
@@ -79,17 +71,6 @@ pub enum Direction {
     Rising,
     Maintaining,
     Falling,
-}
-
-/// How fast the trend moved around one day.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct WeightChange {
-    /// The middle of the four weeks it measures.
-    pub on: Date,
-    /// Kilograms a week, negative when the trend fell.
-    pub per_week: f64,
-    /// How far either side its 95% band runs, in kilograms a week.
-    pub margin: Option<f64>,
 }
 
 /// What the plan intended over one mesocycle, a week.
@@ -111,27 +92,20 @@ pub struct Trend {
     pub margin: Option<f64>,
 }
 
-/// Every weigh-in, the trend through them, and how fast it moved.
+/// Every weigh-in, and the trend through them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Series {
     /// Oldest first, as [`body_weight`] orders them.
     pub weigh_ins: Vec<Weighed>,
     /// As [`trend`] gives it.
     pub trend: Vec<Vec<Trend>>,
-    /// As [`weight_change`] gives it.
-    pub weight_change: Vec<Vec<WeightChange>>,
 }
 
 impl Series {
     pub fn of(weigh_ins: Vec<Weighed>) -> Self {
         let weigh_ins = body_weight(weigh_ins);
         let trend = trend(&weigh_ins);
-        let weight_change = weight_change(&trend);
-        Self {
-            weigh_ins,
-            trend,
-            weight_change,
-        }
+        Self { weigh_ins, trend }
     }
 }
 
@@ -159,17 +133,6 @@ impl Series {
                 .collect(),
             trend: self
                 .trend
-                .iter()
-                .map(|run| {
-                    run.iter()
-                        .filter(|day| inside(day.on))
-                        .copied()
-                        .collect::<Vec<_>>()
-                })
-                .filter(|run| !run.is_empty())
-                .collect(),
-            weight_change: self
-                .weight_change
                 .iter()
                 .map(|run| {
                     run.iter()
@@ -280,65 +243,11 @@ fn mean_of_week(by_day: &BTreeMap<Date, Vec<u64>>, on: Date) -> Option<Kg> {
     Some(Kg::from_grams((total + count / 2) / count))
 }
 
-/// Weight change, oldest first, as unbroken runs of consecutive days.
-///
-/// The trend is the mean of the week *ending* on a day, so the trend centred
-/// on a day is the one 3 days after it. A day has a weight change wherever
-/// the trends centred 14 days either side of it both exist; their bands are
-/// independent, 4 weeks apart, so they add in quadrature.
-pub fn weight_change(trend: &[Vec<Trend>]) -> Vec<Vec<WeightChange>> {
-    let by_day: BTreeMap<Date, Trend> = trend.iter().flatten().map(|day| (day.on, *day)).collect();
-    let centre = (WINDOW_DAYS - 1) / 2;
-    let weeks = f64::from(i32::try_from(2 * HALF_SPAN_DAYS).unwrap_or(28)) / 7.0;
-    let mut runs: Vec<Vec<WeightChange>> = Vec::new();
-    let mut run: Vec<WeightChange> = Vec::new();
-    for (&ending, after) in &by_day {
-        let read = || {
-            let on = ending
-                .checked_sub(jiff::Span::new().days(HALF_SPAN_DAYS + centre))
-                .ok()?;
-            let before = by_day.get(
-                &ending
-                    .checked_sub(jiff::Span::new().days(2 * HALF_SPAN_DAYS))
-                    .ok()?,
-            )?;
-            let grams = i64::try_from(after.mass.as_grams()).ok()?
-                - i64::try_from(before.mass.as_grams()).ok()?;
-            let kilograms = f64::from(i32::try_from(grams).ok()?) / 1_000.0;
-            Some(WeightChange {
-                on,
-                per_week: kilograms / weeks,
-                margin: after
-                    .margin
-                    .zip(before.margin)
-                    .map(|(after, before)| after.hypot(before) / weeks),
-            })
-        };
-        match read() {
-            Some(change) => {
-                let follows = run
-                    .last()
-                    .is_none_or(|last| last.on.tomorrow().is_ok_and(|next| next == change.on));
-                if !follows {
-                    runs.push(std::mem::take(&mut run));
-                }
-                run.push(change);
-            }
-            None if run.is_empty() => {}
-            None => runs.push(std::mem::take(&mut run)),
-        }
-    }
-    if !run.is_empty() {
-        runs.push(run);
-    }
-    runs
-}
-
 /// What the plan intended over each of the macrocycle's mesocycles that has
 /// started by `today`, oldest first.
 ///
 /// **A mesocycle's phase is the macrocycle's on its first day**, assumed as
-/// [`super::recomposition`] assumes it. A week no mesocycle covers has no aim.
+/// [`super::nutrition_phase`] assumes it. A week no mesocycle covers has no aim.
 #[must_use]
 pub fn aims(macrocycle: Macrocycle, mesocycles: &[Span], today: Date) -> Vec<Aim> {
     let started = macrocycle.start()..=macrocycle.last().min(today);
@@ -489,7 +398,7 @@ mod against_aims_tests {
     use jiff::civil::{Date, date};
 
     use super::{Aim, Trend, against_aims};
-    use crate::{analytical::recomposition::NutritionPhase, measure::Kg, plan::Span};
+    use crate::{analytical::nutrition_phase::NutritionPhase, measure::Kg, plan::Span};
 
     const BEGAN: Date = date(2026, 9, 14);
 

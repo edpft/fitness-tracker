@@ -540,7 +540,7 @@ fn the_exercise_is_the_watchs_guess_and_says_so() {
 
     let named = sets.next().expect("the named set");
     assert!(
-        named.guess.from_the_source(),
+        matches!(named.guess, GuessedExercise::Proposed(_)),
         "the classifier proposed this one itself",
     );
     assert_eq!(
@@ -554,10 +554,6 @@ fn the_exercise_is_the_watchs_guess_and_says_so() {
     assert_eq!(
         carried.guess,
         GuessedExercise::FromItsRun(Guess::Exercise(RepsExercise::FrontSquatBarbell)),
-    );
-    assert!(
-        !carried.guess.from_the_source(),
-        "carried from its run, which is not the source saying it",
     );
 }
 
@@ -937,7 +933,6 @@ fn a_session_holds_the_readings_the_watch_wrote() {
         .map(|reading| (reading.at.as_seconds(), reading.beats_per_minute.as_u32()))
         .collect();
     assert_eq!(readings, vec![(0, 96), (1, 98), (10, 133)]);
-    assert_eq!(entity.reading_count(), 3);
 }
 
 #[test]
@@ -1053,7 +1048,6 @@ fn a_recording_holding_no_reading_is_a_session_with_none() {
         other => panic!("no session: {other:?}"),
     };
     assert!(session.recorded().heart_rate().is_none());
-    assert_eq!(session.reading_count(), 0);
     assert_eq!(session.set_count(), 2);
 }
 

@@ -41,7 +41,6 @@ use jiff::{
 };
 
 use super::{
-    hrv::Against,
     per_device::{DeviceSeries, Reading},
     range::{Range, runs_within},
 };
@@ -98,17 +97,6 @@ impl Fifth {
 pub struct Trend {
     pub on: Date,
     pub value: f64,
-}
-
-/// Time asleep, against the NHS's band.
-pub fn against_nhs(minutes: f64) -> Against {
-    if minutes < NHS.0 {
-        Against::Below
-    } else if minutes > NHS.1 {
-        Against::Above
-    } else {
-        Against::Within
-    }
 }
 
 /// Minutes asleep on each morning.
@@ -246,8 +234,8 @@ impl Trended {
 mod tests {
     use jiff::civil::{Date, date};
 
-    use super::{Fifth, Night, Reading, against_nhs, regularity, trend};
-    use crate::{analytical::hrv::Against, measure::PositiveDuration};
+    use super::{Fifth, Night, Reading, regularity, trend};
+    use crate::measure::PositiveDuration;
 
     fn night(on: Date, fell: (i8, i8), woke: (i8, i8)) -> Reading<Night> {
         let fell_on = if fell.0 >= 12 {
@@ -322,10 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn the_bands_are_the_nhs_and_windreds() {
-        assert_eq!(against_nhs(419.0), Against::Below);
-        assert_eq!(against_nhs(444.0), Against::Within);
-        assert_eq!(against_nhs(541.0), Against::Above);
+    fn the_bands_are_windreds() {
         assert_eq!(Fifth::of(71.5), Fifth::Lowest);
         assert_eq!(Fifth::of(85.0), Fifth::Fourth);
         assert_eq!(Fifth::of(90.3), Fifth::Highest);

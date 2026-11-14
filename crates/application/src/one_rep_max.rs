@@ -60,6 +60,8 @@ pub struct EstimatedOneRepMax<E, S, W, P> {
     plans: P,
 }
 
+crate::graph::through!(EstimatedOneRepMax<E, S, W, P>);
+
 impl<E, S, W, P> EstimatedOneRepMax<E, S, W, P>
 where
     E: OneRepMaxEstimator + Sync,
@@ -180,6 +182,8 @@ pub struct OneRepMaxTests<E, S, P, R> {
     plans: P,
     prescribed: R,
 }
+
+crate::graph::through!(OneRepMaxTests<E, S, P, R>);
 
 impl<E, S, P, R> OneRepMaxTests<E, S, P, R>
 where

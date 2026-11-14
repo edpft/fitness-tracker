@@ -378,3 +378,16 @@ fn grouped(rows: Vec<PerformanceRow>) -> Result<Vec<Performance>, StoreError> {
     }
     Ok(performances)
 }
+
+/// What was lifted, against what was prescribed for it (#809).
+impl application::Input for SqliteExerciseHistory {
+    fn reads() -> application::Reads {
+        application::Reads::of([application::Node::Canonical(
+            application::CanonicalLayer::Gym,
+        )])
+        .and(application::Reads::of([
+            application::Node::PLAN,
+            application::Node::PRESCRIPTIONS,
+        ]))
+    }
+}

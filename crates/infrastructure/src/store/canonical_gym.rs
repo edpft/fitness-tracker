@@ -1411,3 +1411,12 @@ pub(super) fn distance_sets(
     }
     Ok(sets)
 }
+
+/// The canonical gym sessions (#809).
+impl application::Input for SqliteCanonicalGymSessionStore {
+    fn reads() -> application::Reads {
+        application::Reads::of([application::Node::Canonical(
+            application::CanonicalLayer::Gym,
+        )])
+    }
+}

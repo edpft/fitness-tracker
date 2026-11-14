@@ -13,6 +13,8 @@ pub struct PulseWaveVelocities<H> {
     history: H,
 }
 
+crate::graph::through!(PulseWaveVelocities<H>);
+
 impl<H> PulseWaveVelocities<H>
 where
     H: PulseWaveVelocityHistory + Sync,

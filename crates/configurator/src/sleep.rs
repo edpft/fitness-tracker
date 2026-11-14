@@ -1,45 +1,68 @@
 //! A night's sleep, how long and when, one series per watch, over this
 //! build's store (#255).
 
-use application::{StoreError, devices::DeviceRegister, next::Scope, sleep::Sleeping};
-use domain::analytical::sleep::Trended;
-use infrastructure::{
-    GarminRecordedDevices, GarminSleepLandingStore, GarminWear, SqliteSleepHistory,
+use application::{StoreError, next::Scope, sleep::Sleeping};
+use domain::{
+    analytical::{range::Ranges, sleep::Trended},
+    normalised::OperatorZone,
 };
+use infrastructure::{GarminRecordedDevices, GarminWear, SqliteSleepHistory};
 
 use crate::{
     devices,
-    next::{self, Reads},
+    graph::page,
+    next::NextFailure,
+    ranges::{self, Current},
     store::Store,
-    wiring::WiringError,
 };
 
-/// What the sleep charts read: the nights, each naming its watch, and the
-/// register for the nights before Garmin named one (#559, #569).
-///
-/// # Errors
-///
-/// [`WiringError`] if a name read is not a stream's.
-pub fn collects() -> Result<Scope, WiringError> {
-    next::scope(
-        std::iter::once(Reads::Normalised(GarminSleepLandingStore::STREAM)).chain(devices::READS),
-    )
+page! {
+    /// What the sleep page reads: the nights, each naming its watch, the
+    /// register for the nights before Garmin named one (#559, #569), and the
+    /// ranges.
+    pub struct Page {
+        nights: Sleeping<SqliteSleepHistory, GarminRecordedDevices, GarminWear>,
+        ranges: Current,
+    }
 }
 
-/// Every night's sleep, one series per watch, with its trends.
-///
-/// # Errors
-///
-/// [`StoreError`] if the store cannot be read.
-pub async fn nights(store: &Store) -> Result<Vec<Trended>, StoreError> {
-    let pool = store.pool();
-    Sleeping::new(
-        SqliteSleepHistory::new(pool.clone()),
-        DeviceRegister::new(
-            GarminRecordedDevices::new(pool.clone()),
-            GarminWear::new(pool.clone()),
-        ),
-    )
-    .nights()
-    .await
+/// The parts a run collecting what the page reads takes.
+#[must_use]
+pub fn collects() -> Scope {
+    crate::graph::collects::<Page>()
+}
+
+impl Page {
+    /// The page over `store`.
+    ///
+    /// # Errors
+    ///
+    /// [`NextFailure`] if the store cannot be read.
+    pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
+        Ok(Self {
+            nights: Sleeping::new(
+                SqliteSleepHistory::new(store.pool().clone()),
+                devices::register(store),
+            ),
+            ranges: ranges::over(store, zone).await?,
+        })
+    }
+
+    /// Every night's sleep, one series per watch, with its trends.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub async fn nights(&self) -> Result<Vec<Trended>, StoreError> {
+        self.nights.nights().await
+    }
+
+    /// The ranges today.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub async fn ranges(&self, zone: &OperatorZone) -> Result<Ranges, StoreError> {
+        ranges::today(&self.ranges, zone).await
+    }
 }

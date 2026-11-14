@@ -1288,3 +1288,10 @@ fn count_of(value: i64) -> Result<RepCount, StoreError> {
     let count = u32::try_from(value).map_err(|_| corrupt(&"a count the domain cannot hold"))?;
     RepCount::new(count).map_err(|error| corrupt(&error))
 }
+
+/// The gym's mesocycles, committed from the plans (#809).
+impl application::Input for SqliteGymMesocycleStore {
+    fn reads() -> application::Reads {
+        application::Reads::of([application::Node::PLAN])
+    }
+}

@@ -902,3 +902,10 @@ impl ProgressionStore for SqliteGenerationParameterStore {
         tx.commit().await.map_err(|error| store_error(&error))
     }
 }
+
+/// How each workout and primary progression prescribes (#809).
+impl application::Input for SqliteGenerationParameterStore {
+    fn reads() -> application::Reads {
+        application::Reads::of([application::Node::WORKOUTS])
+    }
+}

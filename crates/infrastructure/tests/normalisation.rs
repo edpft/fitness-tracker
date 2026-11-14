@@ -43,7 +43,13 @@ fn the_corpus_translates_to_the_model_of_records_figures() {
     let supersets: usize = produced
         .workouts
         .iter()
-        .map(domain::gym::GymWorkout::superset_count)
+        .map(|workout| {
+            workout
+                .items()
+                .iter()
+                .filter(|item| matches!(item, domain::gym::WorkoutItem::Superset(_)))
+                .count()
+        })
         .sum();
 
     assert_eq!(produced.workouts.len(), 163, "workouts");

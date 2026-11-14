@@ -134,3 +134,14 @@ fn mass(grams: i64) -> Result<Kg, StoreError> {
         u64::try_from(grams).map_err(|error| corrupt(&error))?,
     ))
 }
+
+/// Every normalised weigh-in's composition: Withings', the spreadsheets' and MyFitnessPal's (#809).
+impl application::Input for SqliteCompositionHistory {
+    fn reads() -> application::Reads {
+        super::normalised(&[
+            super::WithingsMeasurementLandingStore::STREAM,
+            super::SpreadsheetFileLandingStore::STREAM,
+            super::MyFitnessPalExportLandingStore::STREAM,
+        ])
+    }
+}

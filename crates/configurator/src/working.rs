@@ -2,99 +2,125 @@
 //! store (#517): what Progress shows (#769).
 
 use application::{
-    CanonicalLayer,
-    devices::DeviceRegister,
+    StoreError,
+    heart_rate::RideHeartRates,
     next::Scope,
     working::{IsItWorking, Readings, View},
 };
 use domain::normalised::OperatorZone;
 use infrastructure::{
-    GarminActivityLandingStore, GarminDailyHeartRateLandingStore, GarminDailySummaryLandingStore,
-    GarminHrvLandingStore, GarminRecordedDevices, GarminWear, MyFitnessPalExportLandingStore,
-    SpreadsheetFileLandingStore, SqliteOvernightHrvHistory, SqliteRestingHeartRateHistory,
-    SqliteStressHistory, SqliteTrainingDone, WithingsMeasurementLandingStore,
+    GarminRecordedDevices, GarminWear, SqliteCanonicalCyclingSessionStore, SqliteFtpHistory,
+    SqliteOvernightHrvHistory, SqliteRestingHeartRateHistory, SqliteStressHistory,
+    SqliteTrainingDone,
 };
 
 use crate::{
-    body_weight, composition, devices, ftp_tests, heart_rate,
-    next::{self, NextFailure, Reads},
+    body_weight::{self, Aimed},
+    composition::{self, ByMethod},
+    devices, ftp_tests,
+    graph::page,
+    next::NextFailure,
     one_rep_max, rescheduling,
+    rescheduling::Plans,
     store::Store,
-    wiring::WiringError,
 };
 
-/// What the page reads.
-///
-/// The three response readings, each normalised; the training done, which is
-/// the canonical gym and cycling sessions and the padel games Garmin's
-/// activities derive; the canonical weigh-ins an FTP test and body weight are
-/// read from; every normalised weigh-in, for body composition; and the
-/// register.
-///
-/// # Errors
-///
-/// [`WiringError`] if a name read is not a stream's.
-pub fn collects() -> Result<Scope, WiringError> {
-    next::scope(
-        [
-            Reads::Normalised(GarminHrvLandingStore::STREAM),
-            Reads::Normalised(GarminDailyHeartRateLandingStore::STREAM),
-            Reads::Normalised(GarminDailySummaryLandingStore::STREAM),
-            Reads::Normalised(GarminActivityLandingStore::STREAM),
-            Reads::Canonical(CanonicalLayer::Gym),
-            Reads::Canonical(CanonicalLayer::Cycling),
-            Reads::Canonical(CanonicalLayer::WeighIns),
-            Reads::Normalised(WithingsMeasurementLandingStore::STREAM),
-            Reads::Normalised(SpreadsheetFileLandingStore::STREAM),
-            Reads::Normalised(MyFitnessPalExportLandingStore::STREAM),
-        ]
-        .into_iter()
-        .chain(devices::READS),
-    )
+page! {
+    /// What Progress reads: the three response readings, each normalised; the
+    /// training done; the FTP tests, the 1RM tests and estimates, heart rate
+    /// at a fixed power, body weight and its aims, and body composition; and
+    /// the register.
+    pub struct Page {
+        working: IsItWorking<
+            SqliteOvernightHrvHistory,
+            SqliteRestingHeartRateHistory,
+            SqliteStressHistory,
+            SqliteTrainingDone,
+            GarminRecordedDevices,
+            GarminWear,
+            Plans,
+        >,
+        ftp: ftp_tests::Tests,
+        strength: one_rep_max::Tests,
+        estimated: one_rep_max::Estimated,
+        rides: RideHeartRates<
+            SqliteCanonicalCyclingSessionStore,
+            SqliteFtpHistory,
+            GarminRecordedDevices,
+            GarminWear,
+        >,
+        weight: body_weight::Series,
+        aims: Aimed,
+        composition: ByMethod,
+    }
 }
 
-/// The macrocycle in force, through today, its mesocycles as the plans now
-/// stand (#800).
-///
-/// # Errors
-///
-/// [`NextFailure`] if the store cannot be read.
-pub async fn view(store: &Store, zone: &OperatorZone) -> Result<View, NextFailure> {
-    let today = jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date();
-    let pool = store.pool();
-    let plans = rescheduling::plans(store, zone).await?;
-    let ftp = ftp_tests::tests(store).await?;
-    let strength = one_rep_max::tests(store, zone).await?;
-    let estimated = one_rep_max::view_over(store, plans.clone(), zone)
-        .await?
-        .lifts;
-    let at_power =
-        domain::analytical::heart_rate_at_power::trended(&heart_rate::rides(store).await?);
-    let weight = body_weight::series(store).await?;
-    let aims = body_weight::aims_over(store, plans.clone(), zone).await?;
-    let composition = composition::by_method(store).await?;
-    Ok(IsItWorking::new(
-        SqliteOvernightHrvHistory::new(pool.clone()),
-        SqliteRestingHeartRateHistory::new(pool.clone()),
-        SqliteStressHistory::new(pool.clone()),
-        SqliteTrainingDone::new(pool.clone()),
-        DeviceRegister::new(
-            GarminRecordedDevices::new(pool.clone()),
-            GarminWear::new(pool.clone()),
-        ),
-        plans,
-    )
-    .view(
-        today,
-        &Readings {
-            ftp: &ftp,
-            strength: &strength,
-            estimated: &estimated,
-            at_power: &at_power,
-            weight: &weight,
-            aims: &aims,
-            composition: &composition,
-        },
-    )
-    .await?)
+/// The parts a run collecting what the page reads takes.
+#[must_use]
+pub fn collects() -> Scope {
+    crate::graph::collects::<Page>()
+}
+
+impl Page {
+    /// The page over `store`.
+    ///
+    /// # Errors
+    ///
+    /// [`NextFailure`] if the store cannot be read.
+    pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
+        let pool = store.pool();
+        let plans = rescheduling::plans(store, zone).await?;
+        Ok(Self {
+            working: IsItWorking::new(
+                SqliteOvernightHrvHistory::new(pool.clone()),
+                SqliteRestingHeartRateHistory::new(pool.clone()),
+                SqliteStressHistory::new(pool.clone()),
+                SqliteTrainingDone::new(pool.clone()),
+                devices::register(store),
+                plans.clone(),
+            ),
+            ftp: ftp_tests::over(store),
+            strength: one_rep_max::tests(store, zone),
+            estimated: one_rep_max::estimated(store, plans.clone()),
+            rides: RideHeartRates::new(
+                SqliteCanonicalCyclingSessionStore::new(pool.clone()),
+                SqliteFtpHistory::new(pool.clone()),
+                devices::register(store),
+            ),
+            weight: body_weight::series(store),
+            aims: body_weight::aims_over(store, plans),
+            composition: composition::over(store),
+        })
+    }
+
+    /// The macrocycle in force, through today, its mesocycles as the plans
+    /// now stand (#800).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub async fn view(&self, zone: &OperatorZone) -> Result<View, StoreError> {
+        let today = crate::equipment::today(zone);
+        let ftp = self.ftp.tests().await?;
+        let strength = self.strength.tests(today).await?;
+        let estimated = self.estimated.view(today).await?.lifts;
+        let at_power = domain::analytical::heart_rate_at_power::trended(&self.rides.rides().await?);
+        let weight = self.weight.series().await?;
+        let aims = self.aims.on(today).await?;
+        let composition = self.composition.by_method().await?;
+        self.working
+            .view(
+                today,
+                &Readings {
+                    ftp: &ftp,
+                    strength: &strength,
+                    estimated: &estimated,
+                    at_power: &at_power,
+                    weight: &weight,
+                    aims: &aims,
+                    composition: &composition,
+                },
+            )
+            .await
+    }
 }

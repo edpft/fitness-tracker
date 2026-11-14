@@ -58,11 +58,6 @@ impl<T, By: Copy> Attributed<T, By> {
         self.taken_from
     }
 
-    /// The value, given up, where a caller is past caring where it came from.
-    pub fn into_value(self) -> T {
-        self.value
-    }
-
     /// The same attribution over a value derived from this one.
     ///
     /// The attribution travels with it, because a value computed from one

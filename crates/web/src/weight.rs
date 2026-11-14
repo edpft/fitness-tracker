@@ -207,8 +207,8 @@ mod tests {
         analytical::{
             Weighed,
             body_weight::{Aim, Series},
+            nutrition_phase::NutritionPhase,
             range::{Over, Range, Ranges},
-            recomposition::NutritionPhase,
         },
         canonical::Occurred,
         measure::Kg,

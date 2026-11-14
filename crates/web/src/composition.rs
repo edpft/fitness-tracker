@@ -370,8 +370,8 @@ mod tests {
         analytical::{
             body_weight::Aim,
             composition::{ComponentSeries, Method, MethodSeries, Reading, Unit},
+            nutrition_phase::NutritionPhase,
             range::{Over, Range, Ranges},
-            recomposition::NutritionPhase,
         },
         body::Component,
     };

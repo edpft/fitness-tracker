@@ -27,13 +27,11 @@ pub struct PerDevice<N, D, R, W> {
     devices: DeviceRegister<R, W>,
 }
 
-impl<N, D, R, W> PerDevice<N, D, R, W>
-where
-    N: OvernightHrvHistory + Sync,
-    D: RestingHeartRateHistory + Sync,
-    R: RecordedDevices + Sync,
-    W: WearRecord + Sync,
-{
+crate::graph::through!(PerDevice<N, D, R, W>);
+
+/// **Each reading has its own block**, so a page reading only one passes `()`
+/// for the other and does not read it (#809).
+impl<N, D, R, W> PerDevice<N, D, R, W> {
     pub const fn new(nights: N, days: D, devices: DeviceRegister<R, W>) -> Self {
         Self {
             nights,
@@ -41,7 +39,15 @@ where
             devices,
         }
     }
+}
 
+impl<N, D, R, W> PerDevice<N, D, R, W>
+where
+    N: OvernightHrvHistory + Sync,
+    D: Sync,
+    R: RecordedDevices + Sync,
+    W: WearRecord + Sync,
+{
     /// Last night's average HRV, by morning, one series per watch.
     ///
     /// **On the watch each night's own record names** (#569): Garmin names it
@@ -76,7 +82,15 @@ where
             .map(Trended::of)
             .collect())
     }
+}
 
+impl<N, D, R, W> PerDevice<N, D, R, W>
+where
+    N: Sync,
+    D: RestingHeartRateHistory + Sync,
+    R: RecordedDevices + Sync,
+    W: WearRecord + Sync,
+{
     /// Each day's resting heart rate, one series per watch.
     ///
     /// # Errors

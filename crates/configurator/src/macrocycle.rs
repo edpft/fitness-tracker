@@ -4,17 +4,19 @@
 use application::{
     commit::{CommitError, CommitPorts, Committing},
     macrocycle::{Planned, PlanningPorts},
+    next::Scope,
 };
 use domain::{macrocycle::PlannedMacrocycle, normalised::OperatorZone, schedule::DayPart};
 use infrastructure::{
     SqliteCanonicalCyclingSessionStore, SqliteDiaryStore, SqliteGenerationParameterStore,
-    SqlitePelotonClassStore, SqlitePlanStore, SqlitePrescriptionDeliveryStore,
+    SqlitePelotonClassStore, SqlitePlanStore,
     peloton::{PelotonHoldingRides, PelotonProgrammes, catalogue::ClassCatalogue},
 };
 
 use crate::{
-    holidays,
-    next::{NextFailure, microcycle},
+    holidays::{self, Calendars},
+    next::NextFailure,
+    rescheduling::Walk,
     store::Store,
 };
 
@@ -25,6 +27,31 @@ pub enum PlannedFailure {
     Wiring(#[from] NextFailure),
     #[error(transparent)]
     Commit(#[from] CommitError),
+}
+
+/// What Plan reads: the walk through the plan and the calendars its term is
+/// read from, the plans and how each workout prescribes, the classes the
+/// cycling mesocycles are built from, the rides done, and the diary.
+///
+/// **Of the type `planned` builds**, so what Plan reads cannot differ from what
+/// it declares.
+type Planning<'a> = Planned<
+    Walk,
+    Committing<
+        SqlitePlanStore,
+        SqliteGenerationParameterStore,
+        PelotonHoldingRides<'a>,
+        SqliteCanonicalCyclingSessionStore,
+        PelotonProgrammes<'a>,
+    >,
+    SqliteDiaryStore,
+    Calendars,
+>;
+
+/// The parts a run collecting what Plan reads takes (#809).
+#[must_use]
+pub fn collects() -> Scope {
+    crate::graph::collects::<Planning<'static>>()
 }
 
 /// The macrocycle `now` falls in, as planned: `None` where the calendar does
@@ -44,16 +71,13 @@ pub async fn planned(
     now: DayPart,
 ) -> Result<Option<PlannedMacrocycle>, PlannedFailure> {
     let pool = store.pool();
-    let plans = SqlitePlanStore::new(pool.clone(), zone.clone());
-    let deliveries = SqlitePrescriptionDeliveryStore::new(pool.clone());
     let classes = SqlitePelotonClassStore::new(pool.clone());
     let catalogue = ClassCatalogue::over(&classes, None);
-    let walk = microcycle(pool, &plans, &deliveries, holidays::term(pool).await)?;
-    let use_case = Planned::new(PlanningPorts {
-        walk,
+    let use_case: Planning<'_> = Planned::new(PlanningPorts {
+        walk: Walk::over(store, zone).await?,
         committing: Committing::new(
             CommitPorts {
-                plans,
+                plans: SqlitePlanStore::new(pool.clone(), zone.clone()),
                 parameters: SqliteGenerationParameterStore::new(pool.clone()),
                 holding: PelotonHoldingRides::new(catalogue),
                 ridden: SqliteCanonicalCyclingSessionStore::new(pool.clone()),

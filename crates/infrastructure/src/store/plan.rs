@@ -326,3 +326,10 @@ fn ordinal(at: usize) -> Result<i64, StoreError> {
     i64::try_from(at.saturating_add(1))
         .map_err(|_| corrupt(&"more mesocycles than the store can number"))
 }
+
+/// The plans and their mesocycles (#809).
+impl application::Input for SqlitePlanStore {
+    fn reads() -> application::Reads {
+        application::Reads::of([application::Node::PLAN])
+    }
+}

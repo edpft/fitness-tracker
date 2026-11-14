@@ -24,7 +24,10 @@ use infrastructure::{
 };
 use jiff::civil::Date;
 
-use crate::{access::Peloton, next::NextFailure, rescheduling, store::Store};
+use crate::{access::Peloton, next::NextFailure, rescheduling::Walk, store::Store};
+
+/// Cycling's prescribing, and the walk that says where the plan now stands.
+pub type Prescriber<'a> = (crate::next::Riding<'a>, Walk);
 
 /// The ride at or after a date, as the plan now stands.
 ///
@@ -44,8 +47,11 @@ pub async fn prescribed(
 ) -> Result<Result<PrescribedRide, RidingError>, NextFailure> {
     let stored = SqlitePelotonClassStore::new(store.pool().clone());
     let catalogue = ClassCatalogue::over(&stored, peloton.map(|peloton| &peloton.classes));
-    let riding = crate::next::riding(store.pool(), zone, catalogue)?;
-    let reschedule = rescheduling::reschedule(store, zone).await?;
+    let (riding, walk): Prescriber<'_> = (
+        crate::next::riding(store.pool(), zone, catalogue)?,
+        Walk::over(store, zone).await?,
+    );
+    let reschedule = walk.reschedule(zone).await?;
     let diary = store.diary().diary().await?;
     Ok(riding.next(from, reschedule, &diary, ftp).await)
 }

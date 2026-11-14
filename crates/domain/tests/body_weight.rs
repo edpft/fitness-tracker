@@ -5,9 +5,9 @@ use std::num::NonZeroU8;
 use domain::{
     analytical::{
         Weighed,
-        body_weight::{Series, Trend, aims, body_weight, trend, weight_change},
+        body_weight::{Series, Trend, aims, body_weight, trend},
+        nutrition_phase::NutritionPhase,
         range::{Over, Range, Ranges},
-        recomposition::NutritionPhase,
     },
     canonical::Occurred,
     macrocycle::Macrocycle,
@@ -159,59 +159,6 @@ fn no_weigh_ins_is_no_trend() {
     assert!(trend(&[]).is_empty());
 }
 
-/// Daily from `from`, falling `grams_a_day` each day from `grams`.
-fn falling(from: Date, days: i32, grams: u64, grams_a_day: u64) -> Fallible<Vec<Weighed>> {
-    let mut series = Vec::new();
-    for offset in 0..days {
-        let on = from.checked_add(jiff::Span::new().days(offset))?;
-        series.push(dated(on, grams - grams_a_day * u64::try_from(offset)?));
-    }
-    Ok(series)
-}
-
-#[test]
-fn weight_change_is_the_trend_s_slope_a_week() {
-    // 40 g a day for 60 days from 2026-09-01: 0.28 kg a week, wherever both
-    // trends it reads are full weeks.
-    let series = falling(date(2026, 9, 1), 60, 85_000, 40).expect("a series");
-    let runs = weight_change(&trend(&series));
-    let change = runs
-        .iter()
-        .flatten()
-        .find(|change| change.on == date(2026, 10, 1))
-        .expect("a weight change mid-record");
-    assert!((change.per_week + 0.28).abs() < 1e-9, "{}", change.per_week);
-}
-
-#[test]
-fn weight_change_sits_at_the_middle_of_what_it_measures() {
-    // The trend starts on 09-04 (4 of 7 days), centred on 09-01; the first
-    // weight change reads it 14 days before its own day, 09-15. The last
-    // weigh-in is 10-30, whose trend is centred on 10-27, so the last weight
-    // change is 14 days before that: 17 days before the last weigh-in.
-    let series = daily(date(2026, 9, 1), 60, 84_000, &[]).expect("a series");
-    let runs = weight_change(&trend(&series));
-    assert_eq!(runs.len(), 1);
-    let run = runs.first().expect("one run");
-    assert_eq!(run.first().map(|change| change.on), Some(date(2026, 9, 15)));
-    assert_eq!(run.last().map(|change| change.on), Some(date(2026, 10, 13)));
-    assert!(run.iter().all(|change| change.per_week.abs() < 1e-9));
-}
-
-#[test]
-fn a_gap_in_the_trend_breaks_the_weight_change() {
-    // A fortnight with no weigh-ins from 09-29: no trend from 10-02 to 10-15.
-    let skip: Vec<Date> = (0..14)
-        .map(|offset| {
-            date(2026, 9, 29)
-                .checked_add(jiff::Span::new().days(offset))
-                .expect("a day")
-        })
-        .collect();
-    let series = daily(date(2026, 9, 1), 90, 84_000, &skip).expect("a series");
-    assert!(weight_change(&trend(&series)).len() > 1);
-}
-
 #[test]
 fn the_aim_is_the_cut_s_where_a_plan_says_cut() {
     let autumn = autumn().expect("the macrocycle");
@@ -290,7 +237,6 @@ fn autumn() -> Option<Macrocycle> {
 
 #[test]
 fn a_range_keeps_the_readings_of_its_own_days() {
-    // Weight change runs from 09-15, 14 days after the first trend's centre.
     let series = Series::of(daily(date(2026, 9, 1), 60, 84_000, &[]).expect("a series"));
     let within = series.within(Range {
         from: date(2026, 9, 15),
@@ -298,9 +244,9 @@ fn a_range_keeps_the_readings_of_its_own_days() {
     });
     assert_eq!(within.weigh_ins.len(), 7);
     assert_eq!(
-        within.weight_change.iter().flatten().count(),
+        within.trend.iter().flatten().count(),
         7,
-        "each day's weight change is the trend's, not the range's"
+        "each day's trend is the series', not the range's"
     );
     assert_eq!(
         within

@@ -28,7 +28,7 @@ impl Stage {
     /// The stage `part` is in, `None` for delivering.
     pub const fn of(part: &Part) -> Option<Self> {
         match part {
-            Part::Fetching(_) => Some(Self::Fetching),
+            Part::Fetching(_) | Part::FetchingCalendar(_) => Some(Self::Fetching),
             Part::Normalising(_) => Some(Self::Normalising),
             Part::Canonicalising(_) => Some(Self::Canonicalising),
             Part::Delivering => None,
@@ -68,9 +68,8 @@ pub fn parts(step: &Step) -> BTreeSet<Part> {
         Step::CanonicalisingWeighIns => {
             BTreeSet::from([Part::Canonicalising(CanonicalLayer::WeighIns)])
         }
-        Step::FetchingCalendar(_) | Step::RefreshingClasses | Step::Committing | Step::Skipping => {
-            BTreeSet::new()
-        }
+        Step::FetchingCalendar(calendar) => BTreeSet::from([Part::FetchingCalendar(*calendar)]),
+        Step::RefreshingClasses | Step::Committing | Step::Skipping => BTreeSet::new(),
     }
 }
 

@@ -1078,3 +1078,12 @@ impl application::Input for SqliteNormalisedCyclingSessionReader {
         super::normalised(&[super::PelotonRideLandingStore::STREAM])
     }
 }
+
+/// The canonical rides (#809).
+impl application::Input for SqliteCanonicalCyclingSessionStore {
+    fn reads() -> application::Reads {
+        application::Reads::of([application::Node::Canonical(
+            application::CanonicalLayer::Cycling,
+        )])
+    }
+}

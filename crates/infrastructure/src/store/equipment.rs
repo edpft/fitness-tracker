@@ -396,3 +396,12 @@ impl EquipmentStore for SqliteEquipmentStore {
         Ok(fact)
     }
 }
+
+/// The plates and fills to hand (#809).
+impl application::Input for SqliteEquipmentStore {
+    fn reads() -> application::Reads {
+        application::Reads::of([application::Node::Generation(
+            application::Generation::Equipment,
+        )])
+    }
+}

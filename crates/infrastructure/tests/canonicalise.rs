@@ -176,9 +176,7 @@ fn the_reader_sees_both_shapes() {
             accounts.len()
         );
         assert!(
-            accounts
-                .iter()
-                .any(domain::gym::NormalisedGymSession::has_items),
+            accounts.iter().any(|account| !account.items().is_empty()),
             "a log's exercises came back"
         );
         // Oldest first, § 9: the order is the reader's and not SQLite's.

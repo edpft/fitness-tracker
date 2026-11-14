@@ -119,6 +119,8 @@ pub struct History<G, C, P> {
     padel: P,
 }
 
+crate::graph::through!(History<G, C, P>);
+
 impl<G, C, P> History<G, C, P>
 where
     G: PerformedGymSessions + Sync,

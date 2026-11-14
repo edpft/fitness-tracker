@@ -1,50 +1,74 @@
-//! Heart rate per power zone, over this build's store (#152).
+//! Each main ride's heart rate, over this build's store (#152, #621).
 
-use application::{
-    CanonicalLayer, StoreError, devices::DeviceRegister, heart_rate::HeartRatePerZone, next::Scope,
+use application::{StoreError, heart_rate::RideHeartRates, next::Scope};
+use domain::{
+    analytical::{heart_rate::RideHeartRate, range::Ranges},
+    normalised::OperatorZone,
 };
-use domain::analytical::heart_rate::RideHeartRate;
-use infrastructure::{
-    GarminRecordedDevices, GarminWear, SqliteCanonicalCyclingSessionStore, SqliteFtpHistory,
-    SqlitePelotonClassStore,
-};
+use infrastructure::{SqliteCanonicalCyclingSessionStore, SqliteFtpHistory};
 
 use crate::{
     devices,
-    next::{self, Reads},
+    graph::page,
+    next::NextFailure,
+    ranges::{self, Current},
     store::Store,
-    wiring::WiringError,
 };
 
-/// What the heart rate chart reads: the canonical rides, the FTP derived with
-/// them and the monitor each was ridden with, and which watch was in use (#559,
-/// #569).
-///
-/// What each class prescribed is the catalogue's, as it stands.
-///
-/// # Errors
-///
-/// [`WiringError`] if a name read is not a stream's.
-pub fn collects() -> Result<Scope, WiringError> {
-    next::scope(std::iter::once(Reads::Canonical(CanonicalLayer::Cycling)).chain(devices::READS))
+page! {
+    /// What the heart rate page reads: the canonical rides, the FTP derived
+    /// with them, the monitor each was ridden with and which watch was in use
+    /// (#559, #569), and the ranges.
+    pub struct Page {
+        rides: RideHeartRates<
+            SqliteCanonicalCyclingSessionStore,
+            SqliteFtpHistory,
+            infrastructure::GarminRecordedDevices,
+            infrastructure::GarminWear,
+        >,
+        ranges: Current,
+    }
 }
 
-/// Every main ride's heart rate per power zone, oldest first.
-///
-/// # Errors
-///
-/// [`StoreError`] if the store cannot be read.
-pub async fn rides(store: &Store) -> Result<Vec<RideHeartRate>, StoreError> {
-    let pool = store.pool();
-    HeartRatePerZone::new(
-        SqliteCanonicalCyclingSessionStore::new(pool.clone()),
-        SqliteFtpHistory::new(pool.clone()),
-        SqlitePelotonClassStore::new(pool.clone()),
-        DeviceRegister::new(
-            GarminRecordedDevices::new(pool.clone()),
-            GarminWear::new(pool.clone()),
-        ),
-    )
-    .rides()
-    .await
+/// The parts a run collecting what the page reads takes.
+#[must_use]
+pub fn collects() -> Scope {
+    crate::graph::collects::<Page>()
+}
+
+impl Page {
+    /// The page over `store`.
+    ///
+    /// # Errors
+    ///
+    /// [`NextFailure`] if the store cannot be read.
+    pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
+        let pool = store.pool();
+        Ok(Self {
+            rides: RideHeartRates::new(
+                SqliteCanonicalCyclingSessionStore::new(pool.clone()),
+                SqliteFtpHistory::new(pool.clone()),
+                devices::register(store),
+            ),
+            ranges: ranges::over(store, zone).await?,
+        })
+    }
+
+    /// Every main ride's heart rate, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub async fn rides(&self) -> Result<Vec<RideHeartRate>, StoreError> {
+        self.rides.rides().await
+    }
+
+    /// The ranges today.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub async fn ranges(&self, zone: &OperatorZone) -> Result<Ranges, StoreError> {
+        ranges::today(&self.ranges, zone).await
+    }
 }

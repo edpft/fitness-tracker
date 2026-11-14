@@ -48,14 +48,3 @@ pub(crate) fn monday_of(date: Date) -> Date {
 /// month ago rather than about the block it would be anchoring, whatever the
 /// number says.
 pub const RECENT_WEEKS: i64 = 2;
-
-/// Whether a test taken on one date still anchors a programme starting on
-/// another.
-///
-/// Says nothing about *which lift* was tested: that is the caller's question,
-/// and a maximum in the wrong lift is not a stale test but a different one.
-#[must_use]
-pub fn is_recent_enough(tested: Date, start: Date) -> bool {
-    let weeks = weeks_between(tested, start);
-    (1..=RECENT_WEEKS).contains(&weeks)
-}

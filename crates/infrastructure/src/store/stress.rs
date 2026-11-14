@@ -291,3 +291,10 @@ impl application::Input for GarminDailySummaryAccountReader {
         ])
     }
 }
+
+/// `stress`, which Garmin's daily summaries write (#809).
+impl application::Input for SqliteStressHistory {
+    fn reads() -> application::Reads {
+        super::normalised(&[super::GarminDailySummaryLandingStore::STREAM])
+    }
+}

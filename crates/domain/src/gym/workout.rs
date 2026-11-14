@@ -262,13 +262,6 @@ impl GymWorkout {
             .map(PerformedExercise::set_count)
             .sum::<usize>()
     }
-
-    pub fn superset_count(&self) -> usize {
-        self.items
-            .iter()
-            .filter(|item| matches!(item, WorkoutItem::Superset(_)))
-            .count()
-    }
 }
 
 impl fmt::Display for GymWorkout {

@@ -1,67 +1,14 @@
-//! Body composition, one series per method, over this build's store (#256),
-//! and against the nutrition phase in force (#489).
+//! Body composition, one series per method, over this build's store (#256).
 
-use application::{
-    StoreError,
-    composition::{AgainstPhase, Composition, InForce},
-    next::Scope,
-};
-use domain::{analytical::composition::ComponentSeries, normalised::OperatorZone};
-use infrastructure::{
-    MyFitnessPalExportLandingStore, SpreadsheetFileLandingStore, SqliteCompositionHistory,
-    WithingsMeasurementLandingStore,
-};
+use application::composition::Composition;
+use infrastructure::SqliteCompositionHistory;
 
-use crate::{
-    holidays,
-    next::{self, NextFailure, Reads},
-    rescheduling,
-    store::Store,
-    wiring::WiringError,
-};
-
-/// What the body composition chart reads: every normalised weigh-in, whose
-/// components it plots by method (#559).
-///
-/// # Errors
-///
-/// [`WiringError`] if a name read is not a stream's.
-pub fn collects() -> Result<Scope, WiringError> {
-    next::scope([
-        Reads::Normalised(WithingsMeasurementLandingStore::STREAM),
-        Reads::Normalised(SpreadsheetFileLandingStore::STREAM),
-        Reads::Normalised(MyFitnessPalExportLandingStore::STREAM),
-    ])
-}
+use crate::store::Store;
 
 /// Every component anything measured, one series per method.
-///
-/// # Errors
-///
-/// [`StoreError`] if the store cannot be read.
-pub async fn by_method(store: &Store) -> Result<Vec<ComponentSeries>, StoreError> {
-    Composition::new(SqliteCompositionHistory::new(store.pool().clone()))
-        .by_method()
-        .await
-}
+pub type ByMethod = Composition<SqliteCompositionHistory>;
 
-/// The current macrocycle's periods, each against its nutrition phase, today,
-/// as the plans now stand (#800).
-///
-/// # Errors
-///
-/// [`NextFailure`] if the store cannot be read.
-pub async fn against_phase(
-    store: &Store,
-    zone: &OperatorZone,
-) -> Result<AgainstPhase, NextFailure> {
-    Ok(InForce::new(
-        SqliteCompositionHistory::new(store.pool().clone()),
-        rescheduling::plans(store, zone).await?,
-    )
-    .on(
-        crate::equipment::today(zone),
-        holidays::holidays(store).await,
-    )
-    .await?)
+/// The composition over `store`.
+pub(crate) fn over(store: &Store) -> ByMethod {
+    Composition::new(SqliteCompositionHistory::new(store.pool().clone()))
 }

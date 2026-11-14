@@ -90,6 +90,15 @@ impl HoldingRides for PelotonHoldingRides<'_> {
     }
 }
 
+/// The classes, as the catalogue last read them (#809).
+impl application::Input for PelotonHoldingRides<'_> {
+    fn reads() -> application::Reads {
+        application::Reads::of([application::Node::Generation(
+            application::Generation::Classes,
+        )])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

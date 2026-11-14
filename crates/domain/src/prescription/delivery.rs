@@ -242,16 +242,6 @@ pub enum PrescriptionState {
 }
 
 impl PrescriptionState {
-    /// May this be thrown away?
-    ///
-    /// The whole of what the three states are for.
-    pub const fn is_disposable(&self) -> bool {
-        match self {
-            Self::Drafted | Self::Published { .. } => true,
-            Self::Performed { .. } => false,
-        }
-    }
-
     /// The reference the destination gave it, once it has one.
     pub const fn reference(&self) -> Option<&DeliveryReference> {
         match self {

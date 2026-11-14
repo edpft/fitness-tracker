@@ -354,6 +354,12 @@ fn covered(parts: &std::collections::BTreeSet<application::Part>) -> String {
             Part::Fetching(stream) => format!("fetching {stream}"),
             Part::Normalising(stream) => format!("normalising {stream}"),
             Part::Canonicalising(layer) => format!("canonicalising {}", layer.as_str()),
+            Part::FetchingCalendar(application::Calendar::School) => {
+                "fetching the school calendar".to_owned()
+            }
+            Part::FetchingCalendar(application::Calendar::Public) => {
+                "fetching the public holidays".to_owned()
+            }
             Part::Delivering => "delivering".to_owned(),
         })
         .collect::<Vec<_>>()

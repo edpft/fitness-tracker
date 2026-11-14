@@ -477,7 +477,7 @@ mod aimed_tests {
 
     use super::{Method, MethodSeries, Reading, aimed};
     use crate::{
-        analytical::{body_weight::Aim, recomposition::NutritionPhase},
+        analytical::{body_weight::Aim, nutrition_phase::NutritionPhase},
         body::Component,
         plan::Span,
     };
