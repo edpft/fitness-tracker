@@ -297,9 +297,16 @@ impl application::Input for GarminSleepAccountReader {
     }
 }
 
-/// `sleep`, which Garmin's sleep writes (#809).
+/// `sleep` (#809).
 impl application::Input for SqliteSleepHistory {
     fn reads() -> application::Reads {
-        super::normalised(&[super::GarminSleepLandingStore::STREAM])
+        super::tables(&[super::table::SLEEP])
+    }
+}
+
+/// Garmin's sleep (#809).
+impl application::Output for SqliteSleepStore {
+    fn writes() -> std::collections::BTreeSet<application::Table> {
+        super::writes(&[super::table::SLEEP])
     }
 }

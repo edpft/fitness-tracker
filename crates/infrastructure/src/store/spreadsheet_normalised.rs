@@ -136,3 +136,14 @@ impl NormalisedEntityStore for SqliteSpreadsheetStore {
         Ok(WorkoutCount::from(weigh_ins.saturating_add(sessions)))
     }
 }
+
+/// The spreadsheets' sessions, and their weigh-ins and composition (#809).
+impl application::Output for SqliteSpreadsheetStore {
+    fn writes() -> std::collections::BTreeSet<application::Table> {
+        super::writes(&[
+            super::table::GYM_SESSION,
+            super::table::WEIGH_IN,
+            super::table::BODY_COMPOSITION,
+        ])
+    }
+}

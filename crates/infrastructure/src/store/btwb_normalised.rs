@@ -188,3 +188,10 @@ impl application::Input for BtwbExportAccountReader {
         super::landed(&[super::BtwbExportLandingStore::STREAM])
     }
 }
+
+/// Beyond The White Board's sessions (#809).
+impl application::Output for SqliteBtwbStore {
+    fn writes() -> std::collections::BTreeSet<application::Table> {
+        super::writes(&[super::table::GYM_SESSION])
+    }
+}

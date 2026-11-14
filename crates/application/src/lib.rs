@@ -57,7 +57,7 @@ pub use error::{
     StoreError,
 };
 /// What a port reads is part of the port (#809).
-pub use graph::{Calendar, Generation, Input, Node, Reads};
+pub use graph::{Calendar, Generation, Input, Node, Output, Reads, Table};
 pub use ports::{
     AccountReader, Authored, ByReason, CalendarPublisher, CalendarStore,
     CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalLayer, CanonicalWeighInStore,

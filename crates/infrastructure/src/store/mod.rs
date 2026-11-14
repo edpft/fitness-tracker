@@ -315,11 +315,41 @@ pub(crate) fn landed(streams: &[&str]) -> Reads {
         .collect()
 }
 
-/// What a port reading a normalised table these streams write reads (#809).
-pub(crate) fn normalised(streams: &[&str]) -> Reads {
-    streams
-        .iter()
-        .filter_map(|stream| domain::landing::LandingStream::try_from(*stream).ok())
-        .map(Node::Normalised)
-        .collect()
+/// What a port reading these normalised tables reads (#809): whatever writes
+/// them, which the graph knows and the reader does not.
+pub(crate) fn tables(tables: &[application::Table]) -> Reads {
+    tables.iter().copied().map(Node::Table).collect()
+}
+
+/// The tables a writer writes (#809).
+pub(crate) fn writes(
+    tables: &[application::Table],
+) -> std::collections::BTreeSet<application::Table> {
+    tables.iter().copied().collect()
+}
+
+/// The tables of the normalised layer, each named as its SQL names it and by
+/// the table its family hangs off (#809). A writer of `gym_workout` or
+/// `performed_set` writes [`table::GYM_SESSION`].
+pub(crate) mod table {
+    use application::Table;
+
+    /// A gym session, its workouts, items, exercises and sets, and what a
+    /// watch measured of it.
+    pub const GYM_SESSION: Table = Table::named("gym_session");
+    /// A ride, and the Bike+'s record of it.
+    pub const CYCLING_SESSION: Table = Table::named("cycling_session");
+    pub const FTP: Table = Table::named("ftp");
+    /// A weigh-in, and which account's it is.
+    pub const WEIGH_IN: Table = Table::named("weigh_in");
+    pub const BODY_COMPOSITION: Table = Table::named("body_composition");
+    /// The Body Scan's readings beyond the weigh-in.
+    pub const BODY_SCAN: Table = Table::named("body_scan_weigh_in");
+    pub const OVERNIGHT_HRV: Table = Table::named("overnight_hrv");
+    pub const RESTING_HEART_RATE: Table = Table::named("resting_heart_rate");
+    pub const WEAR_DAY: Table = Table::named("wear_day");
+    pub const SLEEP: Table = Table::named("sleep");
+    pub const STRESS: Table = Table::named("stress");
+    pub const PADEL_GAME: Table = Table::named("padel_game");
+    pub const DEVICE_SIGHTING: Table = Table::named("device_sighting");
 }

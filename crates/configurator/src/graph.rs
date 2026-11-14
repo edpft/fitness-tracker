@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 
 use application::{
     Part,
-    graph::{Derivation, Graph, Input, Node, Reads},
+    graph::{Derivation, Graph, Input, Node, Output, Reads},
     next::{CanonicalPorts, Scope},
     normalise::Normalisation,
 };
@@ -106,11 +106,12 @@ pub(crate) type Canonical = CanonicalPorts<
     SqliteCanonicalWeighInStore,
 >;
 
-/// The normalised layer of the stream named `name`, derived by `D`.
-fn normalised<D: Input>(name: &str) -> Option<Derivation> {
+/// The normalised layer of the stream named `name`, derived by `D`, and each
+/// table `D` writes, which is read wherever that table is (#809).
+fn normalised<D: Input + Output>(name: &str) -> Vec<Derivation> {
     LandingStream::try_from(name)
-        .ok()
-        .map(|stream| Derivation::of::<D>(Node::Normalised(stream)))
+        .map(|stream| Derivation::writing::<D>(Node::Normalised(stream)).collect())
+        .unwrap_or_default()
 }
 
 fn derivations() -> impl Iterator<Item = Derivation> {

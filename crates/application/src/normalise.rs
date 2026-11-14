@@ -17,7 +17,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::graph::{Input, Interpretive, Node, Reads};
+use crate::graph::{Input, Interpretive, Node, Output, Reads, Table};
 
 use domain::{
     landing::{LandedRecord, LandingRecordId, LandingStream, RecordCount, SourceRecordId},
@@ -108,6 +108,13 @@ impl<R: Input, T: Input, W, F, G, C> Input for Normalisation<R, T, W, F, G, C> {
         R::reads()
             .and(T::reads())
             .and(Reads::of([Node::Interpretive(Interpretive::Zones)]))
+    }
+}
+
+/// **It writes what its writer writes** (#809).
+impl<R, T, W: Output, F, G, C> Output for Normalisation<R, T, W, F, G, C> {
+    fn writes() -> std::collections::BTreeSet<Table> {
+        W::writes()
     }
 }
 

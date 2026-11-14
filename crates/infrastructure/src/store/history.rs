@@ -389,5 +389,6 @@ impl application::Input for SqliteExerciseHistory {
             application::Node::PLAN,
             application::Node::PRESCRIPTIONS,
         ]))
+        .and(super::tables(&[super::table::GYM_SESSION]))
     }
 }

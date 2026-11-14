@@ -832,9 +832,16 @@ impl application::Input for PelotonSessionAccountReader {
     }
 }
 
-/// `ftp`, which Peloton's rides write (#809).
+/// `ftp` (#809).
 impl application::Input for SqliteFtpHistory {
     fn reads() -> application::Reads {
-        super::normalised(&[super::PelotonRideLandingStore::STREAM])
+        super::tables(&[super::table::FTP])
+    }
+}
+
+/// Peloton's rides, and the FTP each was ridden at (#809).
+impl application::Output for SqliteCyclingSessionStore {
+    fn writes() -> std::collections::BTreeSet<application::Table> {
+        super::writes(&[super::table::CYCLING_SESSION, super::table::FTP])
     }
 }

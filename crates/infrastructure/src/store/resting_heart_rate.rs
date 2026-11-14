@@ -431,16 +431,23 @@ impl application::Input for GarminDailyHeartRateAccountReader {
     }
 }
 
-/// `overnight_hrv`, which Garmin's HRV writes (#809).
+/// `overnight_hrv` (#809).
 impl application::Input for SqliteOvernightHrvHistory {
     fn reads() -> application::Reads {
-        super::normalised(&[super::GarminHrvLandingStore::STREAM])
+        super::tables(&[super::table::OVERNIGHT_HRV])
     }
 }
 
-/// `resting_heart_rate`, which Garmin's days write (#809).
+/// `resting_heart_rate` (#809).
 impl application::Input for SqliteRestingHeartRateHistory {
     fn reads() -> application::Reads {
-        super::normalised(&[super::GarminDailyHeartRateLandingStore::STREAM])
+        super::tables(&[super::table::RESTING_HEART_RATE])
+    }
+}
+
+/// Garmin's days: each one's resting heart rate, and whether a watch was worn (#809).
+impl application::Output for SqliteDailyHeartRateStore {
+    fn writes() -> std::collections::BTreeSet<application::Table> {
+        super::writes(&[super::table::RESTING_HEART_RATE, super::table::WEAR_DAY])
     }
 }
