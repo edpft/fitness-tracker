@@ -2,7 +2,7 @@
 //! store (#517): what Progress shows (#769).
 
 use application::{
-    PlanStore as _, StoreError,
+    FtpHistory as _, StoreError,
     heart_rate::RideHeartRates,
     next::Scope,
     one_rep_max::Strength,
@@ -31,8 +31,8 @@ page! {
     /// What Progress reads: the three response readings, each normalised; the
     /// training done; the FTP tests, the 1RM tests and estimates, heart rate
     /// at a fixed power, body weight and its aims, and body composition; and
-    /// the weigh-ins, the register and the plans, each read once for every
-    /// reading over them (#817).
+    /// the weigh-ins, the register, the FTP series and the plans, each read
+    /// once for every reading over them (#817).
     pub struct Page {
         working: IsItWorking<
             Spanned<SqliteOvernightHrvHistory>,
@@ -42,7 +42,8 @@ page! {
         >,
         ftp: ftp_tests::Tests,
         strength: one_rep_max::Strength,
-        rides: RideHeartRates<Spanned<SqliteCanonicalCyclingSessionStore>, Spanned<SqliteFtpHistory>>,
+        rides: RideHeartRates<Spanned<SqliteCanonicalCyclingSessionStore>>,
+        ftp_history: Spanned<SqliteFtpHistory>,
         weight: body_weight::Series,
         devices: devices::Register,
         plans: Plans,
@@ -85,11 +86,9 @@ impl Page {
                 one_rep_max::tests(store, zone),
             )
             .into(),
-            rides: RideHeartRates::new(
-                store.adapter(SqliteCanonicalCyclingSessionStore::new),
-                store.adapter(SqliteFtpHistory::new),
-            )
-            .into(),
+            rides: RideHeartRates::new(store.adapter(SqliteCanonicalCyclingSessionStore::new))
+                .into(),
+            ftp_history: store.adapter(SqliteFtpHistory::new).into(),
             weight: body_weight::series(store).into(),
             devices: devices::register(store).into(),
             plans: rescheduling::plans(store, zone).await?.into(),
@@ -109,12 +108,14 @@ impl Page {
         let today = self.today.date();
         let weigh_ins = read!(self.weight.weigh_ins()).await?;
         let register = read!(self.devices.register()).await?;
-        let plans = read!(self.plans.plans()).await?;
-        let ftp = read!(self.ftp.tests(&weigh_ins)).await?;
-        let (strength, estimated) = read!(self.strength.read(today, &plans, &weigh_ins)).await?;
+        let (written, plans) = read!(self.plans.written_and_now()).await?;
+        let ftp_history = read!(self.ftp_history.series()).await?;
+        let ftp = read!(self.ftp.tests(&ftp_history, &weigh_ins)).await?;
+        let (strength, estimated) =
+            read!(self.strength.read(today, &written, &plans, &weigh_ins)).await?;
         let estimated = estimated.lifts;
         let at_power = domain::analytical::heart_rate_at_power::trended(
-            &read!(self.rides.rides(&register)).await?,
+            &read!(self.rides.rides(&register, &ftp_history)).await?,
         );
         let weight = Series::of(weigh_ins);
         let aims = read!(self.aims.on(today, &plans)).await?;

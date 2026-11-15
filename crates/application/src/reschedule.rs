@@ -327,6 +327,24 @@ impl<P, W> ReschedulingPlans<P, W> {
     }
 }
 
+impl<P: PlanStore + Sync, W> ReschedulingPlans<P, W> {
+    /// Every plan in force as written, and each as it now stands, from one
+    /// read (#817): for a page that reads both.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    pub async fn written_and_now(&self) -> Result<(Vec<Plan>, Vec<Plan>), StoreError> {
+        let written = self.plans.plans().await?;
+        let now = written
+            .iter()
+            .map(|plan| self.reschedule.apply(plan))
+            .collect::<Result<_, _>>()?;
+        Ok((written, now))
+    }
+}
+
 impl<P: PlanStore + Sync, W> PlanStore for ReschedulingPlans<P, W> {
     async fn windows(&self) -> Result<Vec<PlanWindow>, StoreError> {
         Ok(self.plans().await?.iter().map(Plan::window).collect())

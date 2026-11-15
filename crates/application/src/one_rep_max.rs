@@ -294,8 +294,9 @@ where
         Self { estimated, tests }
     }
 
-    /// Every lift's 1RM tests through `today`, and every lift over the
-    /// macrocycle in force on it among `walked`, the plans as they now stand:
+    /// Every lift's 1RM tests through `today` among `written`, the plans as
+    /// written, and every lift over the macrocycle in force on it among
+    /// `walked`, the plans as they now stand:
     /// what [`OneRepMaxTests::tests`] and [`EstimatedOneRepMax::view`] each
     /// give, the performances read once, from the earlier of the days each
     /// reads from.
@@ -306,11 +307,11 @@ where
     pub async fn read(
         &self,
         today: Date,
+        written: &[Plan],
         walked: &[Plan],
         weigh_ins: &[Weighed],
     ) -> Result<(Vec<Tests>, View), StoreError> {
-        let written = self.tests.plans.plans().await?;
-        let first = first_tested(&written, today);
+        let first = first_tested(written, today);
         let plan = in_force(walked, today);
         let from = [first, plan.map(|plan| plan.span().start())]
             .into_iter()
@@ -321,7 +322,7 @@ where
             None => Vec::new(),
         };
         let tests = match first {
-            Some(first) => self.tests.drawn(&written, &since(&sessions, first)).await?,
+            Some(first) => self.tests.drawn(written, &since(&sessions, first)).await?,
             None => untested(),
         };
         let view = plan.map_or_else(

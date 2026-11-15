@@ -1,38 +1,41 @@
 //! The FTP tests, in watts and over body weight (#469).
 //!
 //! **Each test's reading is `domain`'s** ([`tests`]); this finds the tests,
-//! the FTP each one gave, and hands them over with the canonical weigh-ins.
+//! the FTP each one gave in the series, and hands them over with the
+//! canonical weigh-ins.
 //! Nothing is written: every point re-derives from them exactly (§ 5).
 
-use domain::analytical::{
-    Weighed,
-    ftp_test::{Test, TestHeartRate, heart_rate, tests},
+use domain::{
+    analytical::{
+        Weighed,
+        ftp_test::{Test, TestHeartRate, heart_rate, tests},
+    },
+    cycling::Ftp,
 };
 
 use crate::{
     devices::DeviceRegister,
     error::StoreError,
-    ports::{FtpHistory, PerformedCyclingSessions, RecordedDevices, WearRecord},
+    ports::{PerformedCyclingSessions, RecordedDevices, WearRecord},
 };
 
 /// The use case.
-pub struct FtpTests<S, F> {
+pub struct FtpTests<S> {
     sessions: S,
-    ftp: F,
 }
 
-crate::graph::through!(FtpTests<S, F>);
+crate::graph::through!(FtpTests<S>);
 
-impl<S, F> FtpTests<S, F>
+impl<S> FtpTests<S>
 where
     S: PerformedCyclingSessions + Sync,
-    F: FtpHistory + Sync,
 {
-    pub const fn new(sessions: S, ftp: F) -> Self {
-        Self { sessions, ftp }
+    pub const fn new(sessions: S) -> Self {
+        Self { sessions }
     }
 
-    /// Every test, oldest first, each over the canonical weigh-in `weigh_ins`
+    /// Every test, oldest first, each with the FTP it gave in `ftp`, the
+    /// series oldest first, and over the canonical weigh-in `weigh_ins`
     /// places it at.
     ///
     /// **The FTP dated to the test's own day**: one in force from an earlier
@@ -42,14 +45,14 @@ where
     /// # Errors
     ///
     /// [`StoreError`] if any store is unavailable.
-    pub async fn tests(&self, weigh_ins: &[Weighed]) -> Result<Vec<Test>, StoreError> {
+    pub async fn tests(&self, ftp: &[Ftp], weigh_ins: &[Weighed]) -> Result<Vec<Test>, StoreError> {
         let mut tested = Vec::new();
         for started in self.sessions.tested().await? {
             let day = started.wall_clock().date();
-            if let Some(ftp) = self.ftp.in_force_on(day).await?
-                && ftp.from() == day
+            if let Some(given) = Ftp::in_force_on(ftp, day)
+                && given.from() == day
             {
-                tested.push((ftp, started));
+                tested.push((given, started));
             }
         }
         Ok(tests(&tested, weigh_ins))

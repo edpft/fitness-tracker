@@ -2379,6 +2379,15 @@ pub trait FtpHistory {
         &self,
         date: Date,
     ) -> impl Future<Output = Result<Option<Ftp>, StoreError>> + Send;
+
+    /// Every value, oldest first, in one read (#817): for a reader that
+    /// looks up many dates, which [`Ftp::in_force_on`] then reads.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    fn series(&self) -> impl Future<Output = Result<Vec<Ftp>, StoreError>> + Send;
 }
 
 /// The classes a holding microcycle could be built from.

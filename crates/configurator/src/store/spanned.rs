@@ -467,6 +467,7 @@ spanned! {
 spanned! {
     FtpHistory {
         fn in_force_on(&self, date: Date) -> Result<Option<Ftp>, StoreError>;
+        fn series(&self) -> Result<Vec<Ftp>, StoreError>;
     }
 }
 

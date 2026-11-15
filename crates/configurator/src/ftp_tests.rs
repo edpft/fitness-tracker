@@ -2,7 +2,7 @@
 //! (#469).
 
 use application::{
-    StoreError,
+    FtpHistory as _, StoreError,
     ftp_tests::{FtpTests, TestHeartRates},
     next::Scope,
 };
@@ -28,8 +28,7 @@ use crate::{
 };
 
 /// Every test, oldest first, in watts and over body weight.
-pub(crate) type Tests =
-    FtpTests<Spanned<SqliteCanonicalCyclingSessionStore>, Spanned<SqliteFtpHistory>>;
+pub(crate) type Tests = FtpTests<Spanned<SqliteCanonicalCyclingSessionStore>>;
 
 page! {
     /// What the FTP tests page reads: the canonical rides, the FTP derived
@@ -37,6 +36,7 @@ page! {
     /// the ranges.
     pub struct Page {
         tests: Tests,
+        ftp_history: Spanned<SqliteFtpHistory>,
         weight: body_weight::Series,
         heart_rates: TestHeartRates<
             Spanned<SqliteCanonicalCyclingSessionStore>,
@@ -62,10 +62,7 @@ pub fn reads() -> application::graph::Reads {
 
 /// The tests over `store`.
 pub(crate) fn over(store: &Store) -> Tests {
-    FtpTests::new(
-        store.adapter(SqliteCanonicalCyclingSessionStore::new),
-        store.adapter(SqliteFtpHistory::new),
-    )
+    FtpTests::new(store.adapter(SqliteCanonicalCyclingSessionStore::new))
 }
 
 impl Page {
@@ -77,6 +74,7 @@ impl Page {
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
         Ok(Self {
             tests: over(store).into(),
+            ftp_history: store.adapter(SqliteFtpHistory::new).into(),
             weight: body_weight::series(store).into(),
             heart_rates: TestHeartRates::new(
                 store.adapter(SqliteCanonicalCyclingSessionStore::new),
@@ -95,7 +93,8 @@ impl Page {
     /// [`StoreError`] if the store cannot be read.
     pub async fn tests(&self) -> Result<Vec<Test>, StoreError> {
         let weigh_ins = read!(self.weight.weigh_ins()).await?;
-        read!(self.tests.tests(&weigh_ins)).await
+        let ftp = read!(self.ftp_history.series()).await?;
+        read!(self.tests.tests(&ftp, &weigh_ins)).await
     }
 
     /// The heart rate each test was ridden at, oldest first (#548).
