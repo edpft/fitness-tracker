@@ -1,10 +1,10 @@
 //! The sessions he has done, newest first and by day, and one of them opened
 //! (#772).
 //!
-//! **Gym sessions, cycling sessions and padel games, and nothing measured**:
+//! **Gym sessions, cycling sessions and padel matches, and nothing measured**:
 //! the operator, 2026-11-10 (#749), *"Only sessions for now."* A gym or
 //! cycling session is the canonical one, so a ride's warm-up and cool-down are
-//! already parts of it rather than sessions of their own; a padel game is the
+//! already parts of it rather than sessions of their own; a padel match is the
 //! normalised one, which only the watch records. Nothing is written.
 
 use domain::{
@@ -20,7 +20,7 @@ use jiff::{
 use crate::{
     error::StoreError,
     one_rep_max::Tests,
-    ports::{PerformedCyclingSessions, PerformedGymSessions, PlayedPadelGame, PlayedPadelGames},
+    ports::{PerformedCyclingSessions, PerformedGymSessions, PlayedPadelMatch, PlayedPadelMatches},
 };
 
 /// Before anything the record holds.
@@ -39,7 +39,7 @@ pub enum Session {
         tested: Vec<RepsExercise>,
     },
     Cycling(Box<CanonicalCyclingSession>),
-    Padel(PlayedPadelGame),
+    Padel(PlayedPadelMatch),
 }
 
 impl Session {
@@ -48,7 +48,7 @@ impl Session {
         match self {
             Self::Gym { session, .. } => session.occurred().day(),
             Self::Cycling(session) => session.started_at().wall_clock().date(),
-            Self::Padel(game) => game.started_at.wall_clock().date(),
+            Self::Padel(played) => played.started_at.wall_clock().date(),
         }
     }
 
@@ -60,7 +60,7 @@ impl Session {
                 Occurred::On(_) => None,
             },
             Self::Cycling(session) => Some(session.started_at().instant()),
-            Self::Padel(game) => Some(game.started_at.instant()),
+            Self::Padel(played) => Some(played.started_at.instant()),
         }
     }
 
@@ -125,7 +125,7 @@ impl<G, C, P> History<G, C, P>
 where
     G: PerformedGymSessions + Sync,
     C: PerformedCyclingSessions + Sync,
-    P: PlayedPadelGames + Sync,
+    P: PlayedPadelMatches + Sync,
 {
     pub const fn new(gym: G, cycling: C, padel: P) -> Self {
         Self {
@@ -267,7 +267,7 @@ mod tests {
         PrescribedWorkoutId,
         error::StoreError,
         ports::{
-            PerformedCyclingSessions, PerformedGymSessions, PlayedPadelGame, PlayedPadelGames,
+            PerformedCyclingSessions, PerformedGymSessions, PlayedPadelMatch, PlayedPadelMatches,
         },
     };
 
@@ -307,10 +307,10 @@ mod tests {
         }
     }
 
-    struct Padel(Vec<PlayedPadelGame>);
+    struct Padel(Vec<PlayedPadelMatch>);
 
-    impl PlayedPadelGames for Padel {
-        async fn all(&self) -> Result<Vec<PlayedPadelGame>, StoreError> {
+    impl PlayedPadelMatches for Padel {
+        async fn all(&self) -> Result<Vec<PlayedPadelMatch>, StoreError> {
             Ok(self.0.clone())
         }
     }
@@ -389,7 +389,7 @@ mod tests {
                 gym(Occurred::On(date(2026, 11, 1)))?,
             ]),
             Rides(vec![test, sunday]),
-            Padel(vec![PlayedPadelGame {
+            Padel(vec![PlayedPadelMatch {
                 started_at: started(date(2026, 10, 27), 20, 0)?,
                 duration: PositiveDuration::from_seconds(5_400)?,
                 heart_rate: None,

@@ -1,6 +1,6 @@
-//! Every padel game, read back for History (#772).
+//! Every padel match, read back for History (#772).
 
-use application::{PlayedPadelGame, PlayedPadelGames, StoreError};
+use application::{PlayedPadelMatch, PlayedPadelMatches, StoreError};
 use domain::{
     measure::{BeatsPerMinute, HeartRateSummary, PositiveDuration},
     normalised::{OperatorZone, StartedAt},
@@ -9,27 +9,27 @@ use sqlx::SqlitePool;
 
 use super::{corrupt, store_error};
 
-/// The read side of the padel games.
+/// The read side of the padel matches.
 #[derive(Debug, Clone)]
-pub struct SqlitePadelGames {
+pub struct SqlitePadelMatches {
     pool: SqlitePool,
 }
 
-impl SqlitePadelGames {
+impl SqlitePadelMatches {
     pub const fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
 }
 
-impl PlayedPadelGames for SqlitePadelGames {
-    async fn all(&self) -> Result<Vec<PlayedPadelGame>, StoreError> {
+impl PlayedPadelMatches for SqlitePadelMatches {
+    async fn all(&self) -> Result<Vec<PlayedPadelMatch>, StoreError> {
         let rows = sqlx::query!(
             r#"
             SELECT started_at_utc AS "started_at!: String",
                    zone AS "zone!: String",
                    duration_seconds AS "duration!: i64",
                    average_bpm, highest_bpm
-            FROM padel_game
+            FROM padel_match
             ORDER BY started_at_utc, landing_record_id
             "#
         )
@@ -52,7 +52,7 @@ impl PlayedPadelGames for SqlitePadelGames {
                     }
                     _ => None,
                 };
-                Ok(PlayedPadelGame {
+                Ok(PlayedPadelMatch {
                     started_at: StartedAt::new(instant, zone),
                     duration,
                     heart_rate,
@@ -68,9 +68,9 @@ fn beats(bpm: i64) -> Result<BeatsPerMinute, StoreError> {
         .and_then(|bpm| BeatsPerMinute::new(bpm).map_err(|error| corrupt(&error)))
 }
 
-/// `padel_game` (#809).
-impl application::Input for SqlitePadelGames {
+/// `padel_match` (#809).
+impl application::Input for SqlitePadelMatches {
     fn reads() -> application::Reads {
-        super::tables(&[super::table::PADEL_GAME])
+        super::tables(&[super::table::PADEL_MATCH])
     }
 }

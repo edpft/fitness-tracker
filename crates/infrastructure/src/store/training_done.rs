@@ -2,7 +2,7 @@
 //!
 //! **Each kind from the layer that holds it**: a gym session and a cycling
 //! session from their canonical layers, where several sources' accounts of
-//! one visit or one ride are already one, and a padel game from the
+//! one visit or one ride are already one, and a padel match from the
 //! normalised, which only the watch records.
 //!
 //! **A gym session no source timed adds no hours**: a sheet and the gym's log
@@ -94,18 +94,18 @@ impl TrainingDone for SqliteTrainingDone {
             });
         }
 
-        let games = sqlx::query!(
+        let matches = sqlx::query!(
             r#"
             SELECT started_at_utc AS "started_at!: String",
                    zone AS "zone!: String",
                    duration_seconds AS "duration!: i64"
-            FROM padel_game
+            FROM padel_match
             "#
         )
         .fetch_all(&self.pool)
         .await
         .map_err(|error| store_error(&error))?;
-        for row in games {
+        for row in matches {
             sessions.push(Session {
                 on: day(&row.started_at, row.zone)?,
                 kind: Kind::Padel,
@@ -118,7 +118,7 @@ impl TrainingDone for SqliteTrainingDone {
     }
 }
 
-/// The canonical gym sessions and rides, and the padel games (#809).
+/// The canonical gym sessions and rides, and the padel matches (#809).
 impl application::Input for SqliteTrainingDone {
     fn reads() -> application::Reads {
         application::Reads::of([application::Node::Canonical(
@@ -127,6 +127,6 @@ impl application::Input for SqliteTrainingDone {
         .and(application::Reads::of([application::Node::Canonical(
             application::CanonicalLayer::Cycling,
         )]))
-        .and(super::tables(&[super::table::PADEL_GAME]))
+        .and(super::tables(&[super::table::PADEL_MATCH]))
     }
 }

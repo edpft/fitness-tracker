@@ -5,7 +5,7 @@
 //! *"Only sessions for now."*
 
 use application::{
-    PlayedPadelGame,
+    PlayedPadelMatch,
     history::{Day, Number, Session},
 };
 use domain::{
@@ -94,7 +94,7 @@ const fn name(session: &Session) -> &'static str {
     match session {
         Session::Gym { .. } => "Gym session",
         Session::Cycling(_) => "Cycling session",
-        Session::Padel(_) => "Padel game",
+        Session::Padel(_) => "Padel match",
     }
 }
 
@@ -107,14 +107,15 @@ fn facts(session: &Session) -> String {
             session.working_ride().average_power().value().to_string(),
         ]
         .join(" · "),
-        Session::Padel(game) => padel_facts(game).join(" · "),
+        Session::Padel(played) => padel_facts(played).join(" · "),
     }
 }
 
-fn padel_facts(game: &PlayedPadelGame) -> Vec<String> {
-    let mut facts = vec![length(Duration::from_seconds(game.duration.as_seconds()))];
+fn padel_facts(played: &PlayedPadelMatch) -> Vec<String> {
+    let mut facts = vec![length(Duration::from_seconds(played.duration.as_seconds()))];
     facts.extend(
-        game.heart_rate
+        played
+            .heart_rate
             .map(|heart_rate| heart_rate.average().to_string()),
     );
     facts
@@ -189,7 +190,7 @@ pub fn session(here: &str, on: Date, session: &Result<Option<Session>, String>) 
                     @match session {
                         Ok(Some(Session::Gym { session, tested })) => (gym(on, session, tested)),
                         Ok(Some(Session::Cycling(session))) => (cycling(session)),
-                        Ok(Some(Session::Padel(game))) => (padel(game)),
+                        Ok(Some(Session::Padel(played))) => (padel(played)),
                         Ok(None) => p.sub { "No such session on " (on.strftime("%A %-d %B %Y")) "." },
                         Err(error) => p.failed { "The session could not be read: " (error) },
                     }
@@ -200,11 +201,11 @@ pub fn session(here: &str, on: Date, session: &Result<Option<Session>, String>) 
     }
 }
 
-fn padel(game: &PlayedPadelGame) -> Markup {
+fn padel(played: &PlayedPadelMatch) -> Markup {
     html! {
-        p.sub { (game.started_at.wall_clock().strftime("%A %-d %B %Y, %H:%M")) }
-        p.sub { (padel_facts(game).join(" · ")) }
-        @if let Some(heart_rate) = game.heart_rate {
+        p.sub { (played.started_at.wall_clock().strftime("%A %-d %B %Y, %H:%M")) }
+        p.sub { (padel_facts(played).join(" · ")) }
+        @if let Some(heart_rate) = played.heart_rate {
             p.sub { "Highest " (heart_rate.highest()) }
         }
     }

@@ -22,7 +22,7 @@ use application::{
     NormalisationRunLog, NormalisedCyclingSessionReader, NormalisedEntityStore,
     NormalisedGymSessionReader, NormalisedWeighInReader, Occupant, Output, OvernightHrvHistory,
     Performances, PerformedCyclingSessions, PerformedGymSessions, PerformedSessionLog, PlanStore,
-    PlayedPadelGame, PlayedPadelGames, PrescribedWorkoutId, PrescribedWorkoutStore,
+    PlayedPadelMatch, PlayedPadelMatches, PrescribedWorkoutId, PrescribedWorkoutStore,
     PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore, PublishedCycling,
     PublishedProgrammes, PublishedRead, PulseWaveVelocityHistory, RawExtent, Reached, Reading,
     Reads, RecordedDevices, RefusalStore, RenderingDigest, RestingHeartRateHistory,
@@ -317,8 +317,8 @@ spanned! {
 }
 
 spanned! {
-    PlayedPadelGames {
-        fn all(&self) -> Result<Vec<PlayedPadelGame>, StoreError>;
+    PlayedPadelMatches {
+        fn all(&self) -> Result<Vec<PlayedPadelMatch>, StoreError>;
     }
 }
 

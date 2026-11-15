@@ -8,7 +8,7 @@ use application::{
 };
 use domain::normalised::OperatorZone;
 use infrastructure::{
-    SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore, SqlitePadelGames,
+    SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore, SqlitePadelMatches,
 };
 use jiff::civil::Date;
 
@@ -22,12 +22,12 @@ use crate::{
 
 page! {
     /// What History reads: the canonical gym and cycling sessions, the padel
-    /// games Garmin's activities give, and which sessions were 1RM tests.
+    /// matches Garmin's activities give, and which sessions were 1RM tests.
     pub struct Page {
         history: History<
             Spanned<SqliteCanonicalGymSessionStore>,
             Spanned<SqliteCanonicalCyclingSessionStore>,
-            Spanned<SqlitePadelGames>,
+            Spanned<SqlitePadelMatches>,
         >,
         tests: one_rep_max::Tests,
         today: Today,
@@ -54,7 +54,7 @@ impl Page {
             history: History::new(
                 store.adapter(SqliteCanonicalGymSessionStore::new),
                 store.adapter(SqliteCanonicalCyclingSessionStore::new),
-                store.adapter(SqlitePadelGames::new),
+                store.adapter(SqlitePadelMatches::new),
             )
             .into(),
             tests: one_rep_max::tests(store, zone).into(),

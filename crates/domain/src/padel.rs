@@ -1,10 +1,11 @@
-//! A padel game (#517).
+//! A padel match (#517).
 //!
-//! **A padel game, not an activity** (operator, 2026-11-11: *"no, it's a
-//! padel game"*). The watch files it in the same list as a gym session and a
-//! ride, and that list is where it was found, not what it is.
+//! **A padel match, not one of the watch's activities** (operator,
+//! 2026-11-11: *"no, it's a padel game"*; a match, 2026-11-15). The watch
+//! files it in the same list as a gym session and a ride, and that list is
+//! where it was found, not what it is.
 //!
-//! **It is training done, and nothing prescribes it.** A game occupies its
+//! **It is training done, and nothing prescribes it.** A match occupies its
 //! evening without being a slot ([`crate::schedule`]), and its hours count
 //! towards what resting heart rate, overnight HRV and stress are read against
 //! as a ride's and a gym session's do (operator, 2026-11-11: *"yes, all
@@ -22,9 +23,9 @@ use crate::{
     normalised::{NormalisedEntity, StartedAt},
 };
 
-/// Everything one game's record says, on its way into [`PadelGame`].
+/// Everything one match's record says, on its way into [`PadelMatch`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PadelGameRecord {
+pub struct PadelMatchRecord {
     pub started_at: StartedAt,
     pub duration: PositiveDuration,
     /// Absent where the watch stated none, as a gym session's is.
@@ -34,9 +35,9 @@ pub struct PadelGameRecord {
     pub provenance: Provenance,
 }
 
-/// One game of padel, as the watch that recorded it told it.
+/// One match of padel, as the watch that recorded it told it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PadelGame {
+pub struct PadelMatch {
     started_at: StartedAt,
     duration: PositiveDuration,
     heart_rate: Option<HeartRateSummary>,
@@ -45,8 +46,8 @@ pub struct PadelGame {
     provenance: Provenance,
 }
 
-impl PadelGame {
-    pub fn new(record: PadelGameRecord) -> Self {
+impl PadelMatch {
+    pub fn new(record: PadelMatchRecord) -> Self {
         Self {
             started_at: record.started_at,
             duration: record.duration,
@@ -82,13 +83,13 @@ impl PadelGame {
     }
 }
 
-impl NormalisedEntity for PadelGame {
+impl NormalisedEntity for PadelMatch {
     fn composes(&self) -> Vec<&SourceRecordId> {
         vec![&self.source_record_id]
     }
 }
 
-impl fmt::Display for PadelGame {
+impl fmt::Display for PadelMatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,

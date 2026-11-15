@@ -2,7 +2,7 @@
 //!
 //! **Every hour of it counts alike** (operator, 2026-11-11: *"yes, all
 //! activity hours"*): a gym session's, a cycling session's and a padel
-//! game's.
+//! match's.
 //!
 //! **Training carried forward and fading** is the standard account (Morton,
 //! Fitz-Clarke & Banister 1990): each session produces a response that decays
