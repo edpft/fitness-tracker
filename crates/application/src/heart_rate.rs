@@ -1,54 +1,49 @@
 //! Each main ride's heart rate (#152, #621).
 //!
 //! **The arithmetic is `domain`'s** ([`ride_heart_rate`]); this finds the
-//! rides, the FTP in force on each one's date and the device that sent each
-//! one's heart rate, and hands them over. Nothing is written: every point
-//! re-derives from them exactly (§ 5).
+//! rides and the FTP in force on each one's date, and hands them over with
+//! the register that says which device sent each one's heart rate. Nothing
+//! is written: every point re-derives from them exactly (§ 5).
 
-use domain::analytical::heart_rate::{RideHeartRate, ride_heart_rate};
+use domain::{
+    analytical::heart_rate::{RideHeartRate, ride_heart_rate},
+    device::Register,
+};
 
 use crate::{
-    devices::DeviceRegister,
     error::StoreError,
-    ports::{FtpHistory, PerformedCyclingSessions, RecordedDevices, WearRecord},
+    ports::{FtpHistory, PerformedCyclingSessions},
 };
 
 /// Each main ride's heart rate.
-pub struct RideHeartRates<S, F, R, W> {
+pub struct RideHeartRates<S, F> {
     sessions: S,
     ftp: F,
-    devices: DeviceRegister<R, W>,
 }
 
-crate::graph::through!(RideHeartRates<S, F, R, W>);
+crate::graph::through!(RideHeartRates<S, F>);
 
-impl<S, F, R, W> RideHeartRates<S, F, R, W>
+impl<S, F> RideHeartRates<S, F>
 where
     S: PerformedCyclingSessions + Sync,
     F: FtpHistory + Sync,
-    R: RecordedDevices + Sync,
-    W: WearRecord + Sync,
 {
-    pub const fn new(sessions: S, ftp: F, devices: DeviceRegister<R, W>) -> Self {
-        Self {
-            sessions,
-            ftp,
-            devices,
-        }
+    pub const fn new(sessions: S, ftp: F) -> Self {
+        Self { sessions, ftp }
     }
 
-    /// Every main ride, oldest first.
+    /// Every main ride, oldest first, its heart rate placed on a device by
+    /// `register`.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if any store is unavailable.
-    pub async fn rides(&self) -> Result<Vec<RideHeartRate>, StoreError> {
-        let register = self.devices.register().await?;
+    pub async fn rides(&self, register: &Register) -> Result<Vec<RideHeartRate>, StoreError> {
         let mut rides = Vec::new();
         for main in self.sessions.main_rides().await? {
             let date = main.started_at().value().wall_clock().date();
             let ftp = self.ftp.in_force_on(date).await?;
-            rides.push(ride_heart_rate(&main, ftp, &register));
+            rides.push(ride_heart_rate(&main, ftp, register));
         }
         Ok(rides)
     }

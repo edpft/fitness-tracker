@@ -455,6 +455,7 @@ spanned! {
 spanned! {
     PlanStore {
         fn windows(&self) -> Result<Vec<PlanWindow>, StoreError>;
+        fn plans(&self) -> Result<Vec<Plan>, StoreError>;
         fn named(&self, name: &PlanName) -> Result<Option<Plan>, StoreError>;
         fn author(&self, plan: &Plan) -> Result<PlanId, StoreError>;
         fn commit(&self, plan: &PlanName, gym: &[GymMesocycle], cycling: &[CyclingMesocycle]) -> Result<(), StoreError>;

@@ -22,12 +22,8 @@ page! {
     /// with them, the monitor each was ridden with and which watch was in use
     /// (#559, #569), and the ranges.
     pub struct Page {
-        rides: RideHeartRates<
-            Spanned<SqliteCanonicalCyclingSessionStore>,
-            Spanned<SqliteFtpHistory>,
-            Spanned<infrastructure::GarminRecordedDevices>,
-            Spanned<infrastructure::GarminWear>,
-        >,
+        rides: RideHeartRates<Spanned<SqliteCanonicalCyclingSessionStore>, Spanned<SqliteFtpHistory>>,
+        devices: devices::Register,
         ranges: Current,
         today: Today,
     }
@@ -56,9 +52,9 @@ impl Page {
             rides: RideHeartRates::new(
                 store.adapter(SqliteCanonicalCyclingSessionStore::new),
                 store.adapter(SqliteFtpHistory::new),
-                devices::register(store),
             )
             .into(),
+            devices: devices::register(store).into(),
             ranges: ranges::over(store, zone).await?.into(),
             today: Today::new(zone.clone()).into(),
         })
@@ -70,7 +66,8 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn rides(&self) -> Result<Vec<RideHeartRate>, StoreError> {
-        read!(self.rides.rides()).await
+        let register = read!(self.devices.register()).await?;
+        read!(self.rides.rides(&register)).await
     }
 
     /// The ranges today.

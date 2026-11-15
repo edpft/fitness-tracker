@@ -1,6 +1,6 @@
 //! Body weight and body composition, read together on one page (#786).
 
-use application::{StoreError, next::Scope};
+use application::{PlanStore as _, StoreError, next::Scope};
 use domain::{
     analytical::{
         body_weight::{Aim, Series},
@@ -16,19 +16,19 @@ use crate::{
     composition::{self, ByMethod},
     graph::{page, read},
     next::NextFailure,
-    ranges::Current,
-    rescheduling,
+    rescheduling::{self, Plans},
     store::Store,
 };
 
 page! {
     /// What the page reads: the canonical weigh-ins, what the plans aimed
-    /// them at, every normalised weigh-in's composition, and the ranges.
+    /// them at, every normalised weigh-in's composition, and the plans the
+    /// aims and the ranges are both read from (#817).
     pub struct Page {
         series: body_weight::Series,
         aims: Aimed,
         composition: ByMethod,
-        ranges: Current,
+        plans: Plans,
         today: Today,
     }
 }
@@ -52,12 +52,11 @@ impl Page {
     ///
     /// [`NextFailure`] if the store cannot be read.
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
-        let plans = rescheduling::plans(store, zone).await?;
         Ok(Self {
             series: body_weight::series(store).into(),
-            aims: body_weight::aims_over(store, plans.clone()).into(),
+            aims: body_weight::aims_over(store).into(),
             composition: composition::over(store).into(),
-            ranges: application::ranges::CurrentRanges::new(plans).into(),
+            plans: rescheduling::plans(store, zone).await?.into(),
             today: Today::new(zone.clone()).into(),
         })
     }
@@ -71,13 +70,17 @@ impl Page {
         read!(self.series.series()).await
     }
 
-    /// What the plans intended over this macrocycle's mesocycles, today.
+    /// What the plans intended over this macrocycle's mesocycles, and the
+    /// ranges, today: both from one read of the plans (#817).
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store cannot be read.
-    pub async fn aims(&self) -> Result<Vec<Aim>, StoreError> {
-        read!(self.aims.on(self.today.date())).await
+    pub async fn aims_and_ranges(&self) -> Result<(Vec<Aim>, Ranges), StoreError> {
+        let today = self.today.date();
+        let plans = read!(self.plans.plans()).await?;
+        let aims = read!(self.aims.on(today, &plans)).await?;
+        Ok((aims, application::ranges::of(today, &plans)))
     }
 
     /// Every component anything measured, one series per method.
@@ -87,15 +90,5 @@ impl Page {
     /// [`StoreError`] if the store cannot be read.
     pub async fn by_method(&self) -> Result<Vec<ComponentSeries>, StoreError> {
         read!(self.composition.by_method()).await
-    }
-
-    /// The ranges today.
-    ///
-    /// # Errors
-    ///
-    /// [`StoreError`] if the store cannot be read.
-    pub async fn ranges(&self) -> Result<Ranges, StoreError> {
-        let today = self.today.date();
-        read!(self.ranges, |of| of.on(today)).await
     }
 }

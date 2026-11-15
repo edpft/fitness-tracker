@@ -163,12 +163,8 @@ impl crate::drawn::Drawn for Page {
         zone: &domain::normalised::OperatorZone,
     ) -> Result<Self::Read, crate::drawn::Unreadable> {
         let page = configurator::body::Page::open(store, zone).await?;
-        Ok((
-            page.series().await?,
-            page.aims().await?,
-            page.by_method().await?,
-            page.ranges().await?,
-        ))
+        let (aims, ranges) = page.aims_and_ranges().await?;
+        Ok((page.series().await?, aims, page.by_method().await?, ranges))
     }
 
     fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {

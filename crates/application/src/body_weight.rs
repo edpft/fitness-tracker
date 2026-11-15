@@ -6,15 +6,19 @@
 //! chart's ([`crate::ranges`]).
 
 use domain::{
-    analytical::body_weight::{Aim, Series, aims},
+    analytical::{
+        Weighed,
+        body_weight::{Aim, Series, aims},
+    },
     macrocycle::Macrocycle,
+    plan::Plan,
 };
 use jiff::civil::Date;
 
 use crate::{
     error::StoreError,
     graph::through,
-    ports::{HolidayCalendar, PlanStore, WeighInHistory},
+    ports::{HolidayCalendar, WeighInHistory},
 };
 
 /// The body-weight use case.
@@ -36,35 +40,43 @@ where
     ///
     /// [`StoreError`] if the store is unavailable.
     pub async fn series(&self) -> Result<Series, StoreError> {
-        Ok(Series::of(self.weigh_ins.weigh_ins().await?))
+        Ok(Series::of(self.weigh_ins().await?))
+    }
+
+    /// Every canonical weigh-in, as the store holds them: for a page whose
+    /// other readings are over body weight too, which reads them once (#817).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    pub async fn weigh_ins(&self) -> Result<Vec<Weighed>, StoreError> {
+        self.weigh_ins.weigh_ins().await
     }
 }
 
 /// What the plans intended over the current macrocycle's mesocycles (#689).
-pub struct Aims<P, H> {
-    plans: P,
+pub struct Aims<H> {
     holidays: H,
 }
 
-through!(BodyWeight<W>, Aims<P, H>);
+through!(BodyWeight<W>, Aims<H>);
 
-impl<P, H> Aims<P, H>
+impl<H> Aims<H>
 where
-    P: PlanStore + Sync,
     H: HolidayCalendar + Sync,
 {
-    pub const fn new(plans: P, holidays: H) -> Self {
-        Self { plans, holidays }
+    pub const fn new(holidays: H) -> Self {
+        Self { holidays }
     }
 
-    /// Each started mesocycle's aim on `today`; none where the school
+    /// Each started mesocycle of `plans`' aim on `today`; none where the school
     /// calendar could not be read or `today` is past its reach, since then
     /// there is no macrocycle to assume a phase from.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
-    pub async fn on(&self, today: Date) -> Result<Vec<Aim>, StoreError> {
+    pub async fn on(&self, today: Date, plans: &[Plan]) -> Result<Vec<Aim>, StoreError> {
         let Some(macrocycle) = self
             .holidays
             .holidays()
@@ -74,12 +86,7 @@ where
         else {
             return Ok(Vec::new());
         };
-        let mut mesocycles = Vec::new();
-        for window in self.plans.windows().await? {
-            if let Some(plan) = self.plans.named(window.name()).await? {
-                mesocycles.extend(plan.mesocycle_spans());
-            }
-        }
+        let mesocycles: Vec<_> = plans.iter().flat_map(Plan::mesocycle_spans).collect();
         Ok(aims(macrocycle, &mesocycles, today))
     }
 }

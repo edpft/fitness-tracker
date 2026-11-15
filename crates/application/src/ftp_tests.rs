@@ -1,41 +1,39 @@
 //! The FTP tests, in watts and over body weight (#469).
 //!
 //! **Each test's reading is `domain`'s** ([`tests`]); this finds the tests,
-//! the FTP each one gave and the canonical weigh-ins, and hands them over.
+//! the FTP each one gave, and hands them over with the canonical weigh-ins.
 //! Nothing is written: every point re-derives from them exactly (§ 5).
 
-use domain::analytical::ftp_test::{Test, TestHeartRate, heart_rate, tests};
+use domain::analytical::{
+    Weighed,
+    ftp_test::{Test, TestHeartRate, heart_rate, tests},
+};
 
 use crate::{
     devices::DeviceRegister,
     error::StoreError,
-    ports::{FtpHistory, PerformedCyclingSessions, RecordedDevices, WearRecord, WeighInHistory},
+    ports::{FtpHistory, PerformedCyclingSessions, RecordedDevices, WearRecord},
 };
 
 /// The use case.
-pub struct FtpTests<S, F, W> {
+pub struct FtpTests<S, F> {
     sessions: S,
     ftp: F,
-    weigh_ins: W,
 }
 
-crate::graph::through!(FtpTests<S, F, W>);
+crate::graph::through!(FtpTests<S, F>);
 
-impl<S, F, W> FtpTests<S, F, W>
+impl<S, F> FtpTests<S, F>
 where
     S: PerformedCyclingSessions + Sync,
     F: FtpHistory + Sync,
-    W: WeighInHistory + Sync,
 {
-    pub const fn new(sessions: S, ftp: F, weigh_ins: W) -> Self {
-        Self {
-            sessions,
-            ftp,
-            weigh_ins,
-        }
+    pub const fn new(sessions: S, ftp: F) -> Self {
+        Self { sessions, ftp }
     }
 
-    /// Every test, oldest first.
+    /// Every test, oldest first, each over the canonical weigh-in `weigh_ins`
+    /// places it at.
     ///
     /// **The FTP dated to the test's own day**: one in force from an earlier
     /// day was not this test's, and a test whose effort gave none has no
@@ -44,7 +42,7 @@ where
     /// # Errors
     ///
     /// [`StoreError`] if any store is unavailable.
-    pub async fn tests(&self) -> Result<Vec<Test>, StoreError> {
+    pub async fn tests(&self, weigh_ins: &[Weighed]) -> Result<Vec<Test>, StoreError> {
         let mut tested = Vec::new();
         for started in self.sessions.tested().await? {
             let day = started.wall_clock().date();
@@ -54,7 +52,7 @@ where
                 tested.push((ftp, started));
             }
         }
-        Ok(tests(&tested, &self.weigh_ins.weigh_ins().await?))
+        Ok(tests(&tested, weigh_ins))
     }
 }
 

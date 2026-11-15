@@ -120,10 +120,7 @@ impl<S: Sync, P: PlanStore + Sync, W> Rescheduled<S, P, W> {
     /// Every plan in force, as authored and as it now stands.
     async fn both(&self) -> Result<Vec<(Plan, Plan)>, StoreError> {
         let mut both = Vec::new();
-        for window in self.plans.windows().await? {
-            let Some(authored) = self.plans.named(window.name()).await? else {
-                continue;
-            };
+        for authored in self.plans.plans().await? {
             let now = self.reschedule.apply(&authored)?;
             both.push((authored, now));
         }
@@ -332,14 +329,16 @@ impl<P, W> ReschedulingPlans<P, W> {
 
 impl<P: PlanStore + Sync, W> PlanStore for ReschedulingPlans<P, W> {
     async fn windows(&self) -> Result<Vec<PlanWindow>, StoreError> {
-        let mut windows = Vec::new();
-        for window in self.plans.windows().await? {
-            match self.named(window.name()).await? {
-                Some(plan) => windows.push(plan.window()),
-                None => windows.push(window),
-            }
-        }
-        Ok(windows)
+        Ok(self.plans().await?.iter().map(Plan::window).collect())
+    }
+
+    async fn plans(&self) -> Result<Vec<Plan>, StoreError> {
+        self.plans
+            .plans()
+            .await?
+            .iter()
+            .map(|plan| self.reschedule.apply(plan))
+            .collect()
     }
 
     async fn named(&self, name: &PlanName) -> Result<Option<Plan>, StoreError> {

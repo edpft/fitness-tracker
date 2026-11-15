@@ -2271,6 +2271,14 @@ pub trait PlanStore {
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
     fn windows(&self) -> impl Future<Output = Result<Vec<PlanWindow>, StoreError>> + Send;
 
+    /// Every plan in force, oldest first, in one read (#817): what a reader
+    /// of every plan asks for, rather than each [`Self::named`] in turn.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn plans(&self) -> impl Future<Output = Result<Vec<Plan>, StoreError>> + Send;
+
     /// The plan in force under a name, if there is one.
     ///
     /// **What makes a plan authorable in pieces while still being written

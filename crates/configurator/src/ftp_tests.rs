@@ -14,14 +14,13 @@ use domain::{
     normalised::OperatorZone,
 };
 use infrastructure::{
-    GarminRecordedDevices, GarminWear, SqliteCanonicalCyclingSessionStore,
-    SqliteCanonicalWeighInStore, SqliteFtpHistory,
+    GarminRecordedDevices, GarminWear, SqliteCanonicalCyclingSessionStore, SqliteFtpHistory,
 };
 
 use crate::clock::Today;
 use crate::store::Spanned;
 use crate::{
-    devices,
+    body_weight, devices,
     graph::{page, read},
     next::NextFailure,
     ranges::{self, Current},
@@ -29,11 +28,8 @@ use crate::{
 };
 
 /// Every test, oldest first, in watts and over body weight.
-pub(crate) type Tests = FtpTests<
-    Spanned<SqliteCanonicalCyclingSessionStore>,
-    Spanned<SqliteFtpHistory>,
-    Spanned<SqliteCanonicalWeighInStore>,
->;
+pub(crate) type Tests =
+    FtpTests<Spanned<SqliteCanonicalCyclingSessionStore>, Spanned<SqliteFtpHistory>>;
 
 page! {
     /// What the FTP tests page reads: the canonical rides, the FTP derived
@@ -41,6 +37,7 @@ page! {
     /// the ranges.
     pub struct Page {
         tests: Tests,
+        weight: body_weight::Series,
         heart_rates: TestHeartRates<
             Spanned<SqliteCanonicalCyclingSessionStore>,
             Spanned<GarminRecordedDevices>,
@@ -68,7 +65,6 @@ pub(crate) fn over(store: &Store) -> Tests {
     FtpTests::new(
         store.adapter(SqliteCanonicalCyclingSessionStore::new),
         store.adapter(SqliteFtpHistory::new),
-        store.adapter(SqliteCanonicalWeighInStore::new),
     )
 }
 
@@ -81,6 +77,7 @@ impl Page {
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
         Ok(Self {
             tests: over(store).into(),
+            weight: body_weight::series(store).into(),
             heart_rates: TestHeartRates::new(
                 store.adapter(SqliteCanonicalCyclingSessionStore::new),
                 devices::register(store),
@@ -97,7 +94,8 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn tests(&self) -> Result<Vec<Test>, StoreError> {
-        read!(self.tests.tests()).await
+        let weigh_ins = read!(self.weight.weigh_ins()).await?;
+        read!(self.tests.tests(&weigh_ins)).await
     }
 
     /// The heart rate each test was ridden at, oldest first (#548).

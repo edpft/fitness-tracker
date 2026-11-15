@@ -8,7 +8,7 @@
 
 use domain::{
     analytical::{
-        OneRepMaxEstimator,
+        OneRepMaxEstimator, Weighed,
         one_rep_max::{
             Against, LIFTS, Point, Reading, Relative, Trend, next_test, planned_tests, points,
             relative, sessions_of, trend,
@@ -25,7 +25,7 @@ use jiff::civil::Date;
 
 use crate::{
     error::StoreError,
-    ports::{Performances, PlanStore, PrescribedWorkoutStore, WeighInHistory},
+    ports::{Performances, PlanStore, PrescribedWorkoutStore},
 };
 
 /// Each lift over the macrocycle in force.
@@ -54,33 +54,28 @@ pub struct Lift {
 }
 
 /// The use case.
-pub struct EstimatedOneRepMax<E, S, W, P> {
+pub struct EstimatedOneRepMax<E, S> {
     estimator: E,
     sessions: S,
-    weigh_ins: W,
-    plans: P,
 }
 
-crate::graph::through!(EstimatedOneRepMax<E, S, W, P>);
+crate::graph::through!(EstimatedOneRepMax<E, S>);
 
-impl<E, S, W, P> EstimatedOneRepMax<E, S, W, P>
+impl<E, S> EstimatedOneRepMax<E, S>
 where
     E: OneRepMaxEstimator + Sync,
     S: Performances + Sync,
-    W: WeighInHistory + Sync,
-    P: PlanStore + Sync,
 {
-    pub const fn new(estimator: E, sessions: S, weigh_ins: W, plans: P) -> Self {
+    pub const fn new(estimator: E, sessions: S) -> Self {
         Self {
             estimator,
             sessions,
-            weigh_ins,
-            plans,
         }
     }
 
-    /// Every lift over the macrocycle in force on `today`, carried on to the
-    /// next planned test.
+    /// Every lift over the macrocycle in force on `today` among `plans`, as
+    /// they now stand (#800), carried on to the next planned test; each
+    /// relative to the canonical weigh-ins `weigh_ins`.
     ///
     /// **The macrocycle is the plan in force**, as the pages' ranges read it
     /// (#443): from its first day.
@@ -92,27 +87,32 @@ where
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
-    pub async fn view(&self, today: Date) -> Result<View, StoreError> {
-        let plans = plans_of(&self.plans).await?;
-        let Some(plan) = in_force(&plans, today) else {
+    pub async fn view(
+        &self,
+        today: Date,
+        plans: &[Plan],
+        weigh_ins: &[Weighed],
+    ) -> Result<View, StoreError> {
+        let Some(plan) = in_force(plans, today) else {
             return Ok(nothing::<E>(today));
         };
         // From the macrocycle's first day: no point before it is drawn, and
         // the next test is counted from the last session only where that is
         // today.
         let sessions = self.sessions.of(&LIFTS, plan.span().start(), today).await?;
-        self.drawn(today, &plans, plan, &sessions).await
+        Ok(self.drawn(today, plans, plan, &sessions, weigh_ins))
     }
 
     /// The view of `plan`, the one in force on `today`, from the performances
     /// of the lifts since its first day.
-    async fn drawn(
+    fn drawn(
         &self,
         today: Date,
         plans: &[Plan],
         plan: &Plan,
         sessions: &[Performance],
-    ) -> Result<View, StoreError> {
+        weigh_ins: &[Weighed],
+    ) -> View {
         let from = plan.span().start();
         let mut mesocycles: Vec<Date> = plan
             .gym()
@@ -121,9 +121,8 @@ where
             .map(|mesocycle| Occupies::span(mesocycle).start())
             .collect();
         mesocycles.sort_unstable();
-        let weigh_ins = self.weigh_ins.weigh_ins().await?;
         let yesterday = today.yesterday().unwrap_or(today);
-        Ok(View {
+        View {
             estimator: E::NAME,
             today,
             macrocycle: Some(from),
@@ -149,7 +148,7 @@ where
                                     sessions,
                                     lift,
                                     &[],
-                                    &weigh_ins,
+                                    weigh_ins,
                                     against,
                                 );
                                 (against, trend(&relative, from, next))
@@ -158,7 +157,7 @@ where
                     }
                 })
                 .collect(),
-        })
+        }
     }
 }
 
@@ -224,7 +223,7 @@ where
         from: Date,
         to: Date,
     ) -> Result<(Vec<Tests>, Vec<Performance>), StoreError> {
-        let plans = plans_of(&self.plans).await?;
+        let plans = self.plans.plans().await?;
         let Some(first) = first_tested(&plans, to) else {
             return Ok((untested(), Vec::new()));
         };
@@ -274,42 +273,45 @@ where
 /// **Each keeps its own plans.** The estimates are over the plan as it now
 /// stands (#800) and the tests are read against the plan as written, so the
 /// two are different readings and both are read.
-pub struct Strength<E, S, W, P, T, R> {
-    estimated: EstimatedOneRepMax<E, S, W, P>,
+pub struct Strength<E, S, T, R> {
+    estimated: EstimatedOneRepMax<E, S>,
     tests: OneRepMaxTests<E, S, T, R>,
 }
 
-crate::graph::through!(Strength<E, S, W, P, T, R>);
+crate::graph::through!(Strength<E, S, T, R>);
 
-impl<E, S, W, P, T, R> Strength<E, S, W, P, T, R>
+impl<E, S, T, R> Strength<E, S, T, R>
 where
     E: OneRepMaxEstimator + Sync,
     S: Performances + Sync,
-    W: WeighInHistory + Sync,
-    P: PlanStore + Sync,
     T: PlanStore + Sync,
     R: PrescribedWorkoutStore + Sync,
 {
     pub const fn new(
-        estimated: EstimatedOneRepMax<E, S, W, P>,
+        estimated: EstimatedOneRepMax<E, S>,
         tests: OneRepMaxTests<E, S, T, R>,
     ) -> Self {
         Self { estimated, tests }
     }
 
     /// Every lift's 1RM tests through `today`, and every lift over the
-    /// macrocycle in force on it: what [`OneRepMaxTests::tests`] and
-    /// [`EstimatedOneRepMax::view`] each give, the performances read once,
-    /// from the earlier of the days each reads from.
+    /// macrocycle in force on it among `walked`, the plans as they now stand:
+    /// what [`OneRepMaxTests::tests`] and [`EstimatedOneRepMax::view`] each
+    /// give, the performances read once, from the earlier of the days each
+    /// reads from.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
-    pub async fn read(&self, today: Date) -> Result<(Vec<Tests>, View), StoreError> {
-        let written = plans_of(&self.tests.plans).await?;
-        let walked = plans_of(&self.estimated.plans).await?;
+    pub async fn read(
+        &self,
+        today: Date,
+        walked: &[Plan],
+        weigh_ins: &[Weighed],
+    ) -> Result<(Vec<Tests>, View), StoreError> {
+        let written = self.tests.plans.plans().await?;
         let first = first_tested(&written, today);
-        let plan = in_force(&walked, today);
+        let plan = in_force(walked, today);
         let from = [first, plan.map(|plan| plan.span().start())]
             .into_iter()
             .flatten()
@@ -322,30 +324,16 @@ where
             Some(first) => self.tests.drawn(&written, &since(&sessions, first)).await?,
             None => untested(),
         };
-        let view = match plan {
-            Some(plan) => {
+        let view = plan.map_or_else(
+            || nothing::<E>(today),
+            |plan| {
                 let sessions = since(&sessions, plan.span().start());
                 self.estimated
-                    .drawn(today, &walked, plan, &sessions)
-                    .await?
-            }
-            None => nothing::<E>(today),
-        };
+                    .drawn(today, walked, plan, &sessions, weigh_ins)
+            },
+        );
         Ok((tests, view))
     }
-}
-
-/// Every plan `store` holds, each once.
-async fn plans_of<P: PlanStore + Sync>(store: &P) -> Result<Vec<Plan>, StoreError> {
-    let mut plans = Vec::new();
-    for window in store.windows().await? {
-        if let Some(plan) = store.named(window.name()).await?
-            && !plans.contains(&plan)
-        {
-            plans.push(plan);
-        }
-    }
-    Ok(plans)
 }
 
 /// The plan in force on `today`.

@@ -2,17 +2,16 @@
 //! store (#517): what Progress shows (#769).
 
 use application::{
-    StoreError,
+    PlanStore as _, StoreError,
     heart_rate::RideHeartRates,
     next::Scope,
     one_rep_max::Strength,
     working::{IsItWorking, Readings, View},
 };
-use domain::normalised::OperatorZone;
+use domain::{analytical::body_weight::Series, normalised::OperatorZone};
 use infrastructure::{
-    GarminRecordedDevices, GarminWear, SqliteCanonicalCyclingSessionStore, SqliteFtpHistory,
-    SqliteOvernightHrvHistory, SqliteRestingHeartRateHistory, SqliteStressHistory,
-    SqliteTrainingDone,
+    SqliteCanonicalCyclingSessionStore, SqliteFtpHistory, SqliteOvernightHrvHistory,
+    SqliteRestingHeartRateHistory, SqliteStressHistory, SqliteTrainingDone,
 };
 
 use crate::clock::Today;
@@ -32,26 +31,21 @@ page! {
     /// What Progress reads: the three response readings, each normalised; the
     /// training done; the FTP tests, the 1RM tests and estimates, heart rate
     /// at a fixed power, body weight and its aims, and body composition; and
-    /// the register.
+    /// the weigh-ins, the register and the plans, each read once for every
+    /// reading over them (#817).
     pub struct Page {
         working: IsItWorking<
             Spanned<SqliteOvernightHrvHistory>,
             Spanned<SqliteRestingHeartRateHistory>,
             Spanned<SqliteStressHistory>,
             Spanned<SqliteTrainingDone>,
-            Spanned<GarminRecordedDevices>,
-            Spanned<GarminWear>,
-            Plans,
         >,
         ftp: ftp_tests::Tests,
         strength: one_rep_max::Strength,
-        rides: RideHeartRates<
-            Spanned<SqliteCanonicalCyclingSessionStore>,
-            Spanned<SqliteFtpHistory>,
-            Spanned<GarminRecordedDevices>,
-            Spanned<GarminWear>,
-        >,
+        rides: RideHeartRates<Spanned<SqliteCanonicalCyclingSessionStore>, Spanned<SqliteFtpHistory>>,
         weight: body_weight::Series,
+        devices: devices::Register,
+        plans: Plans,
         aims: Aimed,
         composition: ByMethod,
         today: Today,
@@ -77,31 +71,29 @@ impl Page {
     ///
     /// [`NextFailure`] if the store cannot be read.
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
-        let plans = rescheduling::plans(store, zone).await?;
         Ok(Self {
             working: IsItWorking::new(
                 store.adapter(SqliteOvernightHrvHistory::new),
                 store.adapter(SqliteRestingHeartRateHistory::new),
                 store.adapter(SqliteStressHistory::new),
                 store.adapter(SqliteTrainingDone::new),
-                devices::register(store),
-                plans.clone(),
             )
             .into(),
             ftp: ftp_tests::over(store).into(),
             strength: Strength::new(
-                one_rep_max::estimated(store, plans.clone()),
+                one_rep_max::estimated(store),
                 one_rep_max::tests(store, zone),
             )
             .into(),
             rides: RideHeartRates::new(
                 store.adapter(SqliteCanonicalCyclingSessionStore::new),
                 store.adapter(SqliteFtpHistory::new),
-                devices::register(store),
             )
             .into(),
             weight: body_weight::series(store).into(),
-            aims: body_weight::aims_over(store, plans).into(),
+            devices: devices::register(store).into(),
+            plans: rescheduling::plans(store, zone).await?.into(),
+            aims: body_weight::aims_over(store).into(),
             composition: composition::over(store).into(),
             today: Today::new(zone.clone()).into(),
         })
@@ -115,13 +107,17 @@ impl Page {
     /// [`StoreError`] if the store cannot be read.
     pub async fn view(&self) -> Result<View, StoreError> {
         let today = self.today.date();
-        let ftp = read!(self.ftp.tests()).await?;
-        let (strength, estimated) = read!(self.strength.read(today)).await?;
+        let weigh_ins = read!(self.weight.weigh_ins()).await?;
+        let register = read!(self.devices.register()).await?;
+        let plans = read!(self.plans.plans()).await?;
+        let ftp = read!(self.ftp.tests(&weigh_ins)).await?;
+        let (strength, estimated) = read!(self.strength.read(today, &plans, &weigh_ins)).await?;
         let estimated = estimated.lifts;
-        let at_power =
-            domain::analytical::heart_rate_at_power::trended(&read!(self.rides.rides()).await?);
-        let weight = read!(self.weight.series()).await?;
-        let aims = read!(self.aims.on(today)).await?;
+        let at_power = domain::analytical::heart_rate_at_power::trended(
+            &read!(self.rides.rides(&register)).await?,
+        );
+        let weight = Series::of(weigh_ins);
+        let aims = read!(self.aims.on(today, &plans)).await?;
         let composition = read!(self.composition.by_method()).await?;
         let readings = Readings {
             ftp: &ftp,
@@ -132,6 +128,6 @@ impl Page {
             aims: &aims,
             composition: &composition,
         };
-        read!(self.working.view(today, &readings)).await
+        read!(self.working.view(today, &plans, &register, &readings)).await
     }
 }

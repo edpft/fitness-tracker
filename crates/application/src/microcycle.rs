@@ -608,18 +608,14 @@ where
     /// answers for the three weeks past where it was written to finish. Two
     /// plans never overlap, so the latest to have started is the one in force.
     async fn plan_begun_by(&self, date: Date) -> Result<Option<Plan>, StoreError> {
-        let Some(window) = self
+        Ok(self
             .ports
             .plans
-            .windows()
+            .plans()
             .await?
             .into_iter()
-            .filter(|window| window.span().start() <= date)
-            .max_by_key(|window| window.span().start())
-        else {
-            return Ok(None);
-        };
-        self.ports.plans.named(window.name()).await
+            .filter(|plan| plan.span().start() <= date)
+            .max_by_key(|plan| plan.span().start()))
     }
 
     /// Whether a session was put somewhere it could be performed (§ 12.1).

@@ -591,6 +591,10 @@ impl PlanStore for NoPlans {
         Ok(Vec::new())
     }
 
+    async fn plans(&self) -> Result<Vec<Plan>, StoreError> {
+        Ok(Vec::new())
+    }
+
     async fn named(&self, _name: &PlanName) -> Result<Option<Plan>, StoreError> {
         Ok(None)
     }

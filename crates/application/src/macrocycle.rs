@@ -9,16 +9,15 @@
 use domain::{
     cycling::CyclingProvenance,
     macrocycle::{MesocycleState, PlannedMacrocycle},
-    plan::{MesocycleOrdinal, Plan, PlanName, Span},
+    plan::{MesocycleOrdinal, PlanName, Span},
     prescription::GymMesocycle,
     schedule::DayPart,
 };
 
 use crate::{
     commit::CommitError,
-    error::StoreError,
     next::{MesocycleCommitter, StandingReader},
-    ports::{DiaryStore, HolidayCalendar, PlanStore},
+    ports::{DiaryStore, HolidayCalendar},
 };
 
 /// The planned macrocycle, mesocycle by mesocycle, as Plan lays it out.
@@ -111,17 +110,4 @@ where
             .planned(now, &holidays, &standing, &diary)
             .await
     }
-}
-
-/// Every plan in the store, the latest version of each, oldest first.
-pub(crate) async fn every<P: PlanStore + Sync>(store: &P) -> Result<Vec<Plan>, StoreError> {
-    let mut plans = Vec::new();
-    for window in store.windows().await? {
-        if let Some(plan) = store.named(window.name()).await?
-            && !plans.contains(&plan)
-        {
-            plans.push(plan);
-        }
-    }
-    Ok(plans)
 }

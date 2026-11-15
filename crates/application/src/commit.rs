@@ -540,18 +540,15 @@ async fn in_force<P: PlanStore + Sync>(
     plans: &ReschedulingPlans<P>,
     macrocycle: &Macrocycle,
 ) -> Result<Option<Plan>, StoreError> {
-    let windows = plans.windows().await?;
-    let Some(window) = windows
-        .iter()
-        .filter(|window| {
-            let start = window.span().start();
+    Ok(plans
+        .plans()
+        .await?
+        .into_iter()
+        .filter(|plan| {
+            let start = plan.span().start();
             start >= macrocycle.start() && start <= macrocycle.last()
         })
-        .max_by_key(|window| window.span().start())
-    else {
-        return Ok(None);
-    };
-    plans.named(window.name()).await
+        .max_by_key(|plan| plan.span().start()))
 }
 
 /// Which cycling mesocycle a committed one is, from where it was taken.

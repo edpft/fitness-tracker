@@ -38,21 +38,17 @@ use domain::{
         training_done::Carried,
     },
     body::Component,
-    device::Measurand,
+    device::{Measurand, Register},
     gym::exercise::RepsExercise,
-    plan::Span,
+    plan::{Plan, Span},
     planner::Discipline,
 };
 use jiff::civil::Date;
 
 use crate::{
-    devices::DeviceRegister,
     error::StoreError,
     one_rep_max::{Lift, Tests},
-    ports::{
-        OvernightHrvHistory, PlanStore, RecordedDevices, RestingHeartRateHistory, StressHistory,
-        TrainingDone, WearRecord,
-    },
+    ports::{OvernightHrvHistory, RestingHeartRateHistory, StressHistory, TrainingDone},
 };
 
 /// What the page says on a day.
@@ -155,48 +151,36 @@ pub struct Responding {
 }
 
 /// The use case.
-pub struct IsItWorking<N, D, S, T, R, W, P> {
+pub struct IsItWorking<N, D, S, T> {
     nights: N,
     days: D,
     stress: S,
     training: T,
-    devices: DeviceRegister<R, W>,
-    plans: P,
 }
 
-crate::graph::through!(IsItWorking<N, D, S, T, R, W, P>);
+crate::graph::through!(IsItWorking<N, D, S, T>);
 
-impl<N, D, S, T, R, W, P> IsItWorking<N, D, S, T, R, W, P>
+impl<N, D, S, T> IsItWorking<N, D, S, T>
 where
     N: OvernightHrvHistory + Sync,
     D: RestingHeartRateHistory + Sync,
     S: StressHistory + Sync,
     T: TrainingDone + Sync,
-    R: RecordedDevices + Sync,
-    W: WearRecord + Sync,
-    P: PlanStore + Sync,
 {
-    pub const fn new(
-        nights: N,
-        days: D,
-        stress: S,
-        training: T,
-        devices: DeviceRegister<R, W>,
-        plans: P,
-    ) -> Self {
+    pub const fn new(nights: N, days: D, stress: S, training: T) -> Self {
         Self {
             nights,
             days,
             stress,
             training,
-            devices,
-            plans,
         }
     }
 
     /// The macrocycle in force on `today`, read through `today`.
     ///
-    /// `readings` is what the other pages' use cases read.
+    /// `plans` are the plans as they now stand, `register` says which device
+    /// sent each reading, and `readings` is what the other pages' use cases
+    /// read: each is read once for the page (#817).
     ///
     /// **The macrocycle is the plan in force**, as the pages' ranges read it
     /// (#443), and its start is the plan's first day whatever was performed
@@ -205,8 +189,13 @@ where
     /// # Errors
     ///
     /// [`StoreError`] if any store is unavailable.
-    pub async fn view(&self, today: Date, readings: &Readings<'_>) -> Result<View, StoreError> {
-        let plans = crate::macrocycle::every(&self.plans).await?;
+    pub async fn view(
+        &self,
+        today: Date,
+        plans: &[Plan],
+        register: &Register,
+        readings: &Readings<'_>,
+    ) -> Result<View, StoreError> {
         let Some(plan) = plans.iter().find(|plan| plan.span().covers(today)) else {
             return Ok(View {
                 today,
@@ -220,7 +209,6 @@ where
             .filter(|start| *start < began)
             .max();
 
-        let register = self.devices.register().await?;
         let carried = Carried::through(&self.training.sessions().await?, today);
         let read = |reading: Answering, series: Option<(SentBy, BTreeMap<Date, f64>)>| {
             let (sent_by, days) = series.unzip();
@@ -231,7 +219,7 @@ where
             }
         };
         let resting = latest(
-            per_device(self.days.days().await?, Measurand::HeartRate, &register),
+            per_device(self.days.days().await?, Measurand::HeartRate, register),
             today,
         )
         .map(|series| {
@@ -243,7 +231,7 @@ where
             (series.sent_by, days)
         });
         let hrv = latest(
-            per_device(self.nights.nights().await?, Measurand::HeartRate, &register),
+            per_device(self.nights.nights().await?, Measurand::HeartRate, register),
             today,
         )
         .map(|series| {
@@ -255,7 +243,7 @@ where
             (series.sent_by, days)
         });
         let stress = latest(
-            per_device(self.stress.days().await?, Measurand::HeartRate, &register),
+            per_device(self.stress.days().await?, Measurand::HeartRate, register),
             today,
         )
         .map(|series| (series.sent_by, stress::whole_days(&series.readings)));

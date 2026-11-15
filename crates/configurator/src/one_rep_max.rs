@@ -2,18 +2,17 @@
 //! this build's store (#420, #253).
 
 use application::{
-    StoreError,
+    PlanStore as _, StoreError,
     next::Scope,
     one_rep_max::{EstimatedOneRepMax, OneRepMaxTests, View},
 };
 use domain::{analytical::Rts, normalised::OperatorZone};
-use infrastructure::{
-    SqliteCanonicalWeighInStore, SqlitePerformances, SqlitePlanStore, SqlitePrescribedWorkoutStore,
-};
+use infrastructure::{SqlitePerformances, SqlitePlanStore, SqlitePrescribedWorkoutStore};
 
 use crate::clock::Today;
 use crate::store::Spanned;
 use crate::{
+    body_weight,
     graph::{page, read},
     next::NextFailure,
     rescheduling::{self, Plans},
@@ -22,19 +21,12 @@ use crate::{
 
 /// Each lift over the macrocycle in force, its mesocycles as the plans now
 /// stand (#800).
-pub(crate) type Estimated = EstimatedOneRepMax<
-    Rts,
-    Spanned<SqlitePerformances>,
-    Spanned<SqliteCanonicalWeighInStore>,
-    Plans,
->;
+pub(crate) type Estimated = EstimatedOneRepMax<Rts, Spanned<SqlitePerformances>>;
 
 /// Each lift's 1RM tests and estimates, read once for both (#817).
 pub(crate) type Strength = application::one_rep_max::Strength<
     Rts,
     Spanned<SqlitePerformances>,
-    Spanned<SqliteCanonicalWeighInStore>,
-    Plans,
     Spanned<SqlitePlanStore>,
     Spanned<SqlitePrescribedWorkoutStore>,
 >;
@@ -52,6 +44,8 @@ page! {
     /// the canonical weigh-ins, and the plans as they now stand.
     pub struct Page {
         estimated: Estimated,
+        weight: body_weight::Series,
+        plans: Plans,
         today: Today,
     }
 }
@@ -68,14 +62,9 @@ pub fn reads() -> application::graph::Reads {
     <Page as application::graph::Input>::reads()
 }
 
-/// Each lift over the macrocycle in force in `plans`.
-pub(crate) fn estimated(store: &Store, plans: Plans) -> Estimated {
-    EstimatedOneRepMax::new(
-        Rts,
-        store.adapter(SqlitePerformances::new),
-        store.adapter(SqliteCanonicalWeighInStore::new),
-        plans,
-    )
+/// Each lift over the macrocycle in force.
+pub(crate) fn estimated(store: &Store) -> Estimated {
+    EstimatedOneRepMax::new(Rts, store.adapter(SqlitePerformances::new))
 }
 
 /// Each lift's 1RM tests over `store`.
@@ -96,7 +85,9 @@ impl Page {
     /// [`NextFailure`] if the store cannot be read.
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
         Ok(Self {
-            estimated: estimated(store, rescheduling::plans(store, zone).await?).into(),
+            estimated: estimated(store).into(),
+            weight: body_weight::series(store).into(),
+            plans: rescheduling::plans(store, zone).await?.into(),
             today: Today::new(zone.clone()).into(),
         })
     }
@@ -107,6 +98,8 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn view(&self) -> Result<View, StoreError> {
-        read!(self.estimated.view(self.today.date())).await
+        let plans = read!(self.plans.plans()).await?;
+        let weigh_ins = read!(self.weight.weigh_ins()).await?;
+        read!(self.estimated.view(self.today.date(), &plans, &weigh_ins)).await
     }
 }
