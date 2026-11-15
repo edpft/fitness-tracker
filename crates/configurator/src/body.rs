@@ -1,6 +1,8 @@
 //! Body weight and body composition, read together on one page (#786).
 
-use application::{PlanStore as _, StoreError, next::Scope};
+use std::future::ready;
+
+use application::{StoreError, next::Scope};
 use domain::{
     analytical::{
         body_weight::{Aim, Series},
@@ -12,7 +14,7 @@ use domain::{
 
 use crate::clock::Today;
 use crate::{
-    body_weight::{self, Aimed},
+    body_weight,
     composition::{self, ByMethod},
     graph::{page, read},
     next::NextFailure,
@@ -21,12 +23,11 @@ use crate::{
 };
 
 page! {
-    /// What the page reads: the canonical weigh-ins, what the plans aimed
-    /// them at, every normalised weigh-in's composition, and the plans the
-    /// aims and the ranges are both read from (#817).
+    /// What the page reads: the canonical weigh-ins, every normalised
+    /// weigh-in's composition, and the plans and holidays the walk read,
+    /// which the aims and the ranges are both drawn from (#817).
     pub struct Page {
         series: body_weight::Series,
-        aims: Aimed,
         composition: ByMethod,
         plans: Plans,
         today: Today,
@@ -54,7 +55,6 @@ impl Page {
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
         Ok(Self {
             series: body_weight::series(store).into(),
-            aims: body_weight::aims_over(store).into(),
             composition: composition::over(store).into(),
             plans: rescheduling::plans(store, zone).await?.into(),
             today: Today::new(zone.clone()).into(),
@@ -78,9 +78,11 @@ impl Page {
     /// [`StoreError`] if the store cannot be read.
     pub async fn aims_and_ranges(&self) -> Result<(Vec<Aim>, Ranges), StoreError> {
         let today = self.today.date();
-        let plans = read!(self.plans.plans()).await?;
-        let aims = read!(self.aims.on(today, &plans)).await?;
-        Ok((aims, application::ranges::of(today, &plans)))
+        let plans = read!(self.plans, ready).await;
+        Ok((
+            application::body_weight::aims_on(today, plans.now(), plans.holidays()),
+            application::ranges::of(today, plans.now()),
+        ))
     }
 
     /// Every component anything measured, one series per method.

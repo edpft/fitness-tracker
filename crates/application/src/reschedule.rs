@@ -28,7 +28,7 @@ use domain::{
     planner::{self, Completed, Missed, Rerun, RerunOrdinal},
     planner::{Discipline, SessionRole},
     prescription::{GymMesocycle, MesocycleId},
-    schedule::Diary,
+    schedule::{Diary, Holidays},
 };
 use jiff::civil::Date;
 
@@ -289,63 +289,83 @@ impl<S: CyclingMesocycleStore + Sync, P: PlanStore + Sync, W> CyclingMesocycleSt
 }
 
 /// Plans, as they now stand.
-///
-/// **`W` is what the reschedule was walked from**, as for [`Rescheduled`].
-#[derive(Debug)]
-pub struct ReschedulingPlans<P, W = ()> {
+#[derive(Debug, Clone)]
+pub struct ReschedulingPlans<P> {
     plans: P,
     reschedule: Reschedule,
-    walked: PhantomData<fn() -> W>,
 }
 
-crate::graph::through!(ReschedulingPlans<P, W>);
-
-impl<P: Clone, W> Clone for ReschedulingPlans<P, W> {
-    fn clone(&self) -> Self {
-        Self {
-            plans: self.plans.clone(),
-            reschedule: self.reschedule.clone(),
-            walked: PhantomData,
-        }
-    }
-}
+crate::graph::through!(ReschedulingPlans<P>);
 
 impl<P> ReschedulingPlans<P> {
     pub const fn new(plans: P, reschedule: Reschedule) -> Self {
-        Self::walked(plans, reschedule, &())
+        Self { plans, reschedule }
     }
 }
 
-impl<P, W> ReschedulingPlans<P, W> {
-    /// As the plans stand after `walk`, whose [`Reschedule`] this is.
-    pub const fn walked(plans: P, reschedule: Reschedule, _walk: &W) -> Self {
-        Self {
-            plans,
-            reschedule,
-            walked: PhantomData,
-        }
-    }
+/// Every plan in force, as written and as it now stands, and the holidays,
+/// as a walk read them (#817).
+///
+/// **Read once, by the walk.** The walk reads every plan and the school
+/// calendar to say where the plan stands, so a page draws its ranges, aims
+/// and estimates from what the walk read rather than reading them again.
+/// **`W` is the walk**, as for [`Rescheduled`], so a page holding these reads
+/// what the walk does.
+#[derive(Debug)]
+pub struct WalkedPlans<W> {
+    written: Vec<Plan>,
+    now: Vec<Plan>,
+    holidays: Option<Holidays>,
+    walked: PhantomData<fn() -> W>,
 }
 
-impl<P: PlanStore + Sync, W> ReschedulingPlans<P, W> {
-    /// Every plan in force as written, and each as it now stands, from one
-    /// read (#817): for a page that reads both.
+crate::graph::through!(WalkedPlans<W>);
+
+impl<W> WalkedPlans<W> {
+    /// `written`, the plans `walk` read, as they stand after its
+    /// `reschedule`, and the `holidays` its term was read in.
     ///
     /// # Errors
     ///
-    /// [`StoreError`] if the store is unavailable or holds something
-    /// unreadable.
-    pub async fn written_and_now(&self) -> Result<(Vec<Plan>, Vec<Plan>), StoreError> {
-        let written = self.plans.plans().await?;
+    /// [`StoreError`] if a plan will not reschedule.
+    pub fn new(
+        written: Vec<Plan>,
+        reschedule: &Reschedule,
+        holidays: Option<Holidays>,
+        _walk: &W,
+    ) -> Result<Self, StoreError> {
         let now = written
             .iter()
-            .map(|plan| self.reschedule.apply(plan))
+            .map(|plan| reschedule.apply(plan))
             .collect::<Result<_, _>>()?;
-        Ok((written, now))
+        Ok(Self {
+            written,
+            now,
+            holidays,
+            walked: PhantomData,
+        })
+    }
+
+    /// Every plan in force, as written.
+    #[must_use]
+    pub fn written(&self) -> &[Plan] {
+        &self.written
+    }
+
+    /// Every plan in force, as it now stands (#800).
+    #[must_use]
+    pub fn now(&self) -> &[Plan] {
+        &self.now
+    }
+
+    /// The school and public holidays, where the calendars could be read.
+    #[must_use]
+    pub const fn holidays(&self) -> Option<&Holidays> {
+        self.holidays.as_ref()
     }
 }
 
-impl<P: PlanStore + Sync, W> PlanStore for ReschedulingPlans<P, W> {
+impl<P: PlanStore + Sync> PlanStore for ReschedulingPlans<P> {
     async fn windows(&self) -> Result<Vec<PlanWindow>, StoreError> {
         Ok(self.plans().await?.iter().map(Plan::window).collect())
     }

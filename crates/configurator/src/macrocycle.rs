@@ -3,14 +3,14 @@
 
 use application::graph::{Input, Reads};
 use application::{
+    HolidayCalendar as _,
     commit::{CommitError, CommitPorts, Committing},
-    macrocycle::{Planned, PlanningPorts},
     next::Scope,
+    reschedule::WalkedPlans,
 };
 use domain::{macrocycle::PlannedMacrocycle, normalised::OperatorZone};
 use infrastructure::{
-    SqliteCanonicalCyclingSessionStore, SqliteDiaryStore, SqliteGenerationParameterStore,
-    SqlitePlanStore,
+    SqliteCanonicalCyclingSessionStore, SqliteGenerationParameterStore, SqlitePlanStore,
     peloton::{PelotonHoldingRides, PelotonProgrammes, catalogue::ClassCatalogue},
 };
 use tracing::Instrument as _;
@@ -33,30 +33,29 @@ pub enum PlannedFailure {
     Commit(#[from] CommitError),
 }
 
-/// What Plan reads: the walk through the plan and the calendars its term is
-/// read from, the plans and how each workout prescribes, the classes the
-/// cycling mesocycles are built from, the rides done, and the diary.
-///
-/// **Of the type `planned` builds**, so what Plan reads cannot differ from what
-/// it declares.
-type Planning<'a> = Planned<
-    Walk,
-    Committing<
-        Spanned<SqlitePlanStore>,
-        Spanned<SqliteGenerationParameterStore>,
-        Spanned<PelotonHoldingRides<'a>>,
-        Spanned<SqliteCanonicalCyclingSessionStore>,
-        Spanned<PelotonProgrammes<'a>>,
-    >,
-    Spanned<SqliteDiaryStore>,
-    Calendars,
+/// What builds Plan's planned mesocycles after the written ones: the plans,
+/// how each workout prescribes, the classes the cycling mesocycles are built
+/// from, and the rides done.
+type Committer<'a> = Committing<
+    Spanned<SqlitePlanStore>,
+    Spanned<SqliteGenerationParameterStore>,
+    Spanned<PelotonHoldingRides<'a>>,
+    Spanned<SqliteCanonicalCyclingSessionStore>,
+    Spanned<PelotonProgrammes<'a>>,
 >;
 
-/// What Plan reads: what planning does, and the part of the day it is
-/// planned from (#805).
+/// What Plan reads (#805).
+///
+/// The walk through the plan, which reads the plans, the diary and the
+/// calendars its term is read from; what the committer does; the calendars
+/// again where the walk could not read them; and the part of the day it is
+/// planned from.
 #[must_use]
 pub fn reads() -> Reads {
-    <Planning<'static> as Input>::reads().and(Now::reads())
+    Walk::reads()
+        .and(<Committer<'static> as Input>::reads())
+        .and(Calendars::reads())
+        .and(Now::reads())
 }
 
 /// The parts a run collecting what Plan reads takes (#809).
@@ -72,6 +71,9 @@ pub fn collects() -> Scope {
 /// Peloton classes already stored, as committing builds them without a login,
 /// so opening Plan reaches no source.
 ///
+/// **What the walk read is read once** (#817): the plans, the diary and the
+/// holidays it walked through are the ones the macrocycle is planned from.
+///
 /// # Errors
 ///
 /// [`PlannedFailure`] if the store or the school calendar cannot be read, or
@@ -83,23 +85,44 @@ pub async fn planned(
 ) -> Result<Option<PlannedMacrocycle>, PlannedFailure> {
     let classes = store.peloton_classes();
     let catalogue = ClassCatalogue::over(&classes, None);
-    let use_case: Planning<'_> = Planned::new(PlanningPorts {
-        walk: Walk::over(store, zone).await?,
-        committing: Committing::new(
-            CommitPorts {
-                plans: store.adapter_with(SqlitePlanStore::new, zone.clone()),
-                parameters: store.adapter(SqliteGenerationParameterStore::new),
-                holding: Spanned::new(PelotonHoldingRides::new(catalogue)),
-                ridden: store.adapter(SqliteCanonicalCyclingSessionStore::new),
-                published: Spanned::new(PelotonProgrammes::new(catalogue)),
-            },
-            zone.clone(),
-        ),
-        diary: store.adapter(SqliteDiaryStore::new),
-        holidays: holidays::calendars(store),
-    });
-    Ok(use_case
-        .on(now.day_part())
-        .instrument(crate::telemetry::reading("macrocycle"))
-        .await?)
+    let committer: Committer<'_> = Committing::new(
+        CommitPorts {
+            plans: store.adapter_with(SqlitePlanStore::new, zone.clone()),
+            parameters: store.adapter(SqliteGenerationParameterStore::new),
+            holding: Spanned::new(PelotonHoldingRides::new(catalogue)),
+            ridden: store.adapter(SqliteCanonicalCyclingSessionStore::new),
+            published: Spanned::new(PelotonProgrammes::new(catalogue)),
+        },
+        zone.clone(),
+    );
+    let walk = Walk::over(store, zone).await?;
+    async {
+        let walked = walk
+            .walked_on(now.day_part())
+            .await
+            .map_err(CommitError::from)?;
+        // The calendars are read again only where the walk could not read
+        // them, so that their failure is said as it always was.
+        let holidays = match walk.holidays() {
+            Some(holidays) => holidays.clone(),
+            None => holidays::calendars(store)
+                .holidays()
+                .await
+                .map_err(CommitError::from)?,
+        };
+        let plans = WalkedPlans::new(walked.written, &walked.reschedule, None, &walk)
+            .map_err(CommitError::from)?;
+        committer
+            .planned_among(
+                now.day_part(),
+                &holidays,
+                &walked.standing,
+                &walked.diary,
+                plans.now(),
+            )
+            .await
+    }
+    .instrument(crate::telemetry::reading("macrocycle"))
+    .await
+    .map_err(PlannedFailure::from)
 }

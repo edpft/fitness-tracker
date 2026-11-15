@@ -12,12 +12,16 @@
 //! it in their types.
 
 use application::{
-    DiaryStore as _, HolidayCalendar as _, StoreError,
+    DiaryStore as _, HolidayCalendar as _, PlanStore as _, StoreError,
     microcycle::{Standing, Term},
     next::StandingReader,
-    reschedule::{Reschedule, Rescheduled, ReschedulingPlans},
+    reschedule::{Reschedule, Rescheduled, WalkedPlans},
 };
-use domain::{normalised::OperatorZone, schedule::DayPart};
+use domain::{
+    normalised::OperatorZone,
+    plan::Plan,
+    schedule::{DayPart, Diary, Holidays},
+};
 use infrastructure::{
     SqliteCalendarStore, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
     SqliteCyclingDeliveryStore, SqliteDiaryStore, SqliteGymMesocycleStore, SqlitePlanStore,
@@ -45,17 +49,29 @@ reads! {
     /// The walk through the plan, within the term the calendars give it.
     pub struct Walk {
         microcycle: Microcycle,
+        plans: Spanned<SqlitePlanStore>,
         diary: Spanned<SqliteDiaryStore>,
         calendars: Spanned<SqliteCalendarStore>,
     }
 }
 
-/// The plans, as they now stand: what Plan reads, so every mesocycle a chart
-/// is read over or an aim is drawn across has the days Plan shows (#800).
+/// What a walk read, and where it says the plan stands: each read once, for
+/// whatever reads them after (#817).
+pub(crate) struct Walked {
+    /// Every plan in force, as written.
+    pub(crate) written: Vec<Plan>,
+    pub(crate) diary: Diary,
+    pub(crate) standing: Standing,
+    pub(crate) reschedule: Reschedule,
+}
+
+/// The plans, as written and as they now stand: what Plan reads, so every
+/// mesocycle a chart is read over or an aim is drawn across has the days Plan
+/// shows (#800), as the walk read them (#817).
 ///
 /// A rerun test week is in the mesocycle it reruns, though what was written
 /// when that mesocycle started gave it one week fewer.
-pub type Plans = ReschedulingPlans<Spanned<SqlitePlanStore>, Walk>;
+pub type Plans = WalkedPlans<Walk>;
 
 /// The gym's mesocycles, as the plan now stands.
 pub type GymMesocycles =
@@ -82,6 +98,7 @@ impl Walk {
                 destination(domain::planner::Discipline::Gym)?,
                 destination(domain::planner::Discipline::Cycling)?,
             ),
+            plans: store.adapter_with(SqlitePlanStore::new, zone.clone()),
             diary: store.adapter(SqliteDiaryStore::new),
             calendars: store.adapter(SqliteCalendarStore::new),
         };
@@ -108,12 +125,45 @@ impl Walk {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub(crate) async fn reschedule(&self, zone: &OperatorZone) -> Result<Reschedule, StoreError> {
+        Ok(self.walked(zone).await?.reschedule)
+    }
+
+    /// Which weeks were lost, as [`Self::reschedule`] says, with the plans
+    /// and the diary it read to say so.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub(crate) async fn walked(&self, zone: &OperatorZone) -> Result<Walked, StoreError> {
         let here = jiff::Timestamp::now().to_zoned(zone.as_time_zone());
+        self.walked_on(DayPart::containing(here.datetime())).await
+    }
+
+    /// Where the plan stands on `now`, and the plans and the diary read to
+    /// say so.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub(crate) async fn walked_on(&self, now: DayPart) -> Result<Walked, StoreError> {
+        let written = self.plans.plans().await?;
+        let diary = self.diary.diary().await?;
         let standing = self
             .microcycle
-            .standing(DayPart::containing(here.datetime()))
+            .standing_among(now, &written, &diary)
             .await?;
-        Ok(standing.reschedule(self.diary.diary().await?))
+        Ok(Walked {
+            written,
+            reschedule: standing.reschedule(diary.clone()),
+            standing,
+            diary,
+        })
+    }
+
+    /// The school and public holidays the walk's term was read in, where
+    /// the calendars could be read.
+    pub(crate) fn holidays(&self) -> Option<&Holidays> {
+        self.microcycle.holidays()
     }
 }
 
@@ -130,11 +180,14 @@ impl StandingReader for Walk {
 /// [`NextFailure`] if the store cannot be read.
 pub async fn plans(store: &Store, zone: &OperatorZone) -> Result<Plans, NextFailure> {
     let walk = Walk::over(store, zone).await?;
-    Ok(Plans::walked(
-        store.adapter_with(SqlitePlanStore::new, zone.clone()),
-        walk.reschedule(zone).await?,
+    let walked = walk.walked(zone).await?;
+    let holidays = walk.holidays().cloned();
+    Ok(Plans::new(
+        walked.written,
+        &walked.reschedule,
+        holidays,
         &walk,
-    ))
+    )?)
 }
 
 /// The gym's mesocycles as the plan now stands, walked over `store`.

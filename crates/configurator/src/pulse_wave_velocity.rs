@@ -70,6 +70,6 @@ impl Page {
     /// [`StoreError`] if the store cannot be read.
     pub async fn ranges(&self) -> Result<Ranges, StoreError> {
         let today = self.today.date();
-        read!(self.ranges, |of| of.on(today)).await
+        read!(self.ranges, |plans| ranges::on(plans, today)).await
     }
 }

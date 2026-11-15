@@ -176,8 +176,10 @@ where
             return Ok(None);
         };
         let plans =
-            ReschedulingPlans::new(self.ports.plans.clone(), standing.reschedule(diary.clone()));
-        let Some(plan) = in_force(&plans, &macrocycle).await? else {
+            ReschedulingPlans::new(self.ports.plans.clone(), standing.reschedule(diary.clone()))
+                .plans()
+                .await?;
+        let Some(plan) = in_force(&plans, &macrocycle) else {
             return Ok(None);
         };
         let Some(chain) = plan.chain() else {
@@ -252,12 +254,37 @@ where
         standing: &Standing,
         diary: &Diary,
     ) -> Result<Option<PlannedMacrocycle>, CommitError> {
+        if Macrocycle::on(now.date, holidays).is_none() {
+            return Ok(None);
+        }
+        let plans =
+            ReschedulingPlans::new(self.ports.plans.clone(), standing.reschedule(diary.clone()))
+                .plans()
+                .await?;
+        self.planned_among(now, holidays, standing, diary, &plans)
+            .await
+    }
+
+    /// The macrocycle `now` falls in, as [`Self::planned`] plans it, among
+    /// `plans`, every plan in force as it now stands: for a reader that read
+    /// them already, as the walk does (#817).
+    ///
+    /// # Errors
+    ///
+    /// [`CommitError`] if a mesocycle the macrocycle would choose will not
+    /// build.
+    pub async fn planned_among(
+        &self,
+        now: DayPart,
+        holidays: &Holidays,
+        standing: &Standing,
+        diary: &Diary,
+        plans: &[Plan],
+    ) -> Result<Option<PlannedMacrocycle>, CommitError> {
         let Some(macrocycle) = Macrocycle::on(now.date, holidays) else {
             return Ok(None);
         };
-        let plans =
-            ReschedulingPlans::new(self.ports.plans.clone(), standing.reschedule(diary.clone()));
-        let Some(mut plan) = in_force(&plans, &macrocycle).await? else {
+        let Some(mut plan) = in_force(plans, &macrocycle) else {
             return Ok(None);
         };
         let Some(chain) = plan.chain() else {
@@ -536,19 +563,15 @@ where
 }
 
 /// The plan this macrocycle is following: the latest to start inside it.
-async fn in_force<P: PlanStore + Sync>(
-    plans: &ReschedulingPlans<P>,
-    macrocycle: &Macrocycle,
-) -> Result<Option<Plan>, StoreError> {
-    Ok(plans
-        .plans()
-        .await?
-        .into_iter()
+fn in_force(plans: &[Plan], macrocycle: &Macrocycle) -> Option<Plan> {
+    plans
+        .iter()
         .filter(|plan| {
             let start = plan.span().start();
             start >= macrocycle.start() && start <= macrocycle.last()
         })
-        .max_by_key(|plan| plan.span().start()))
+        .max_by_key(|plan| plan.span().start())
+        .cloned()
 }
 
 /// Which cycling mesocycle a committed one is, from where it was taken.

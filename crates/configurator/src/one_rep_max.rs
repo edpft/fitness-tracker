@@ -1,8 +1,10 @@
 //! Estimated 1RM as a trend, and over body weight and fat-free mass, over
 //! this build's store (#420, #253).
 
+use std::future::ready;
+
 use application::{
-    PlanStore as _, StoreError,
+    StoreError,
     next::Scope,
     one_rep_max::{EstimatedOneRepMax, OneRepMaxTests, View},
 };
@@ -98,8 +100,12 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn view(&self) -> Result<View, StoreError> {
-        let plans = read!(self.plans.plans()).await?;
+        let plans = read!(self.plans, ready).await;
         let weigh_ins = read!(self.weight.weigh_ins()).await?;
-        read!(self.estimated.view(self.today.date(), &plans, &weigh_ins)).await
+        read!(
+            self.estimated
+                .view(self.today.date(), plans.now(), &weigh_ins)
+        )
+        .await
     }
 }

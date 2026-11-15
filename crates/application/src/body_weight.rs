@@ -12,19 +12,18 @@ use domain::{
     },
     macrocycle::Macrocycle,
     plan::Plan,
+    schedule::Holidays,
 };
 use jiff::civil::Date;
 
-use crate::{
-    error::StoreError,
-    graph::through,
-    ports::{HolidayCalendar, WeighInHistory},
-};
+use crate::{error::StoreError, graph::through, ports::WeighInHistory};
 
 /// The body-weight use case.
 pub struct BodyWeight<W> {
     weigh_ins: W,
 }
+
+through!(BodyWeight<W>);
 
 impl<W> BodyWeight<W>
 where
@@ -54,39 +53,17 @@ where
     }
 }
 
-/// What the plans intended over the current macrocycle's mesocycles (#689).
-pub struct Aims<H> {
-    holidays: H,
-}
-
-through!(BodyWeight<W>, Aims<H>);
-
-impl<H> Aims<H>
-where
-    H: HolidayCalendar + Sync,
-{
-    pub const fn new(holidays: H) -> Self {
-        Self { holidays }
-    }
-
-    /// Each started mesocycle of `plans`' aim on `today`; none where the school
-    /// calendar could not be read or `today` is past its reach, since then
-    /// there is no macrocycle to assume a phase from.
-    ///
-    /// # Errors
-    ///
-    /// [`StoreError`] if the store is unavailable.
-    pub async fn on(&self, today: Date, plans: &[Plan]) -> Result<Vec<Aim>, StoreError> {
-        let Some(macrocycle) = self
-            .holidays
-            .holidays()
-            .await
-            .ok()
-            .and_then(|holidays| Macrocycle::on(today, &holidays))
-        else {
-            return Ok(Vec::new());
-        };
-        let mesocycles: Vec<_> = plans.iter().flat_map(Plan::mesocycle_spans).collect();
-        Ok(aims(macrocycle, &mesocycles, today))
-    }
+/// What `plans`, as they now stand, intended over the mesocycles of the
+/// macrocycle `today` falls in (#689).
+///
+/// None where the school calendar could not be read, `holidays` being
+/// `None`, or `today` is past its reach, since then there is no macrocycle
+/// to assume a phase from.
+#[must_use]
+pub fn aims_on(today: Date, plans: &[Plan], holidays: Option<&Holidays>) -> Vec<Aim> {
+    let Some(macrocycle) = holidays.and_then(|holidays| Macrocycle::on(today, holidays)) else {
+        return Vec::new();
+    };
+    let mesocycles: Vec<_> = plans.iter().flat_map(Plan::mesocycle_spans).collect();
+    aims(macrocycle, &mesocycles, today)
 }
