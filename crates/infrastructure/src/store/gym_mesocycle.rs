@@ -27,6 +27,7 @@
 
 use std::{collections::BTreeMap, num::NonZeroU8};
 
+use super::authoring::Authoring;
 use application::{FillChangeStore, MesocycleInForce, MesocycleStore, StoreError};
 use domain::{
     gym::{
@@ -51,7 +52,7 @@ use jiff::{
     Timestamp,
     civil::{Date, Weekday},
 };
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 
 use super::{corrupt, store_error};
 
@@ -158,7 +159,7 @@ impl SlotRows {
 
 #[derive(Debug, Clone)]
 pub struct SqliteGymMesocycleStore {
-    pool: SqlitePool,
+    store: Authoring,
     /// The zone the operator declares they train in.
     ///
     /// Configuration rather than programme data, so it is supplied here and not
@@ -171,7 +172,10 @@ pub struct SqliteGymMesocycleStore {
 
 impl SqliteGymMesocycleStore {
     pub const fn new(pool: SqlitePool, zone: OperatorZone) -> Self {
-        Self { pool, zone }
+        Self {
+            store: Authoring::new(pool),
+            zone,
+        }
     }
 }
 
@@ -186,7 +190,7 @@ impl SqliteGymMesocycleStore {
 /// be the same joins written twice with two chances to disagree about which
 /// authoring is current.
 pub(super) async fn in_force(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     zone: &OperatorZone,
 ) -> Result<Vec<(i64, MesocycleInForce)>, StoreError> {
     let rows = sqlx::query!(
@@ -218,24 +222,25 @@ pub(super) async fn in_force(
         ORDER BY m.start_date ASC, m.id ASC
         "#
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
 
-    let planned = first_authored(pool).await?;
+    let planned = first_authored(&mut *conn).await?;
     let mut mesocycles = Vec::with_capacity(rows.len());
     for row in rows {
         let planned_at = *planned
             .get(&row.plan_name)
             .ok_or_else(|| corrupt(&"a mesocycle whose plan was never authored"))?;
-        let fills = read_fills(pool, row.id).await?;
-        let interruptions = read_interruptions(pool, row.id).await?;
+        let fills = read_fills(&mut *conn, row.id).await?;
+        let interruptions = read_interruptions(&mut *conn, row.id).await?;
 
         let start = row
             .start_date
             .parse::<Date>()
             .map_err(|_| corrupt(&"a start date that is not a date"))?;
-        let calendar = calendar_of(pool, zone, start, row.duration_weeks, &interruptions).await?;
+        let calendar =
+            calendar_of(&mut *conn, zone, start, row.duration_weeks, &interruptions).await?;
 
         let plan = PlanName::try_from(row.plan_name).map_err(|error| corrupt(&error))?;
         let pattern =
@@ -246,7 +251,7 @@ pub(super) async fn in_force(
         // no microcycles of it: the session is the chart's to say (#336).
         let provided = match (row.template.as_str(), programme.clone()) {
             ("recovery", _) | (_, None) => None,
-            (_, Some(programme)) => Some(read_provided(pool, row.id, programme).await?),
+            (_, Some(programme)) => Some(read_provided(&mut *conn, row.id, programme).await?),
         };
 
         let common = Common {
@@ -280,7 +285,7 @@ pub(super) async fn in_force(
             }
         };
 
-        let changes = read_changes(pool, row.id).await?;
+        let changes = read_changes(&mut *conn, row.id).await?;
         mesocycles.push((
             row.plan,
             MesocycleInForce {
@@ -303,11 +308,13 @@ pub(super) async fn in_force(
 /// the programme or its progressions; only a new plan does. Compared as instants
 /// rather than as text, because a timestamp prints only the fractional digits it
 /// needs.
-async fn first_authored(pool: &SqlitePool) -> Result<BTreeMap<String, Timestamp>, StoreError> {
+async fn first_authored(
+    conn: &mut SqliteConnection,
+) -> Result<BTreeMap<String, Timestamp>, StoreError> {
     let rows = sqlx::query!(
         r#"SELECT name AS "name!: String", authored_at AS "authored_at!: String" FROM plan"#
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
     let mut first: BTreeMap<String, Timestamp> = BTreeMap::new();
@@ -343,13 +350,13 @@ fn carried(mut mesocycles: Vec<(i64, MesocycleInForce)>) -> Vec<(i64, MesocycleI
 /// the operator, and a block is rebuilt against the one in force when it
 /// started.
 async fn calendar_of(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     zone: &OperatorZone,
     start: Date,
     duration_weeks: i64,
     interruptions: &[Skip],
 ) -> Result<Calendar, StoreError> {
-    let week = super::schedule::training_week(pool, start, Discipline::Gym)
+    let week = super::schedule::training_week(&mut *conn, start, Discipline::Gym)
         .await?
         .ok_or_else(|| {
             corrupt(&format!(
@@ -395,7 +402,7 @@ fn programme_of(
 }
 
 async fn read_provided(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     mesocycle: i64,
     published: ExternalProgramme,
 ) -> Result<ProvidedFrom, StoreError> {
@@ -408,7 +415,7 @@ async fn read_provided(
         "#,
         mesocycle
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
 
@@ -670,7 +677,7 @@ fn read_anchor(
 
 impl MesocycleStore for SqliteGymMesocycleStore {
     async fn on(&self, date: Date) -> Result<Option<MesocycleInForce>, StoreError> {
-        Ok(in_force(&self.pool, &self.zone)
+        Ok(in_force(&mut *self.store.reading().await?, &self.zone)
             .await?
             .into_iter()
             .map(|(_, found)| found)
@@ -681,7 +688,7 @@ impl MesocycleStore for SqliteGymMesocycleStore {
         // The latest mesocycle that has finished by this date. `in_force` is
         // ordered by start, so the last one whose span ends at or before the
         // date is the one immediately before it.
-        Ok(in_force(&self.pool, &self.zone)
+        Ok(in_force(&mut *self.store.reading().await?, &self.zone)
             .await?
             .into_iter()
             .map(|(_, found)| found)
@@ -691,7 +698,7 @@ impl MesocycleStore for SqliteGymMesocycleStore {
     async fn following(&self, date: Date) -> Result<Option<MesocycleInForce>, StoreError> {
         // Ordered by start, so the first one beginning after the date is the
         // next in the sequence.
-        Ok(in_force(&self.pool, &self.zone)
+        Ok(in_force(&mut *self.store.reading().await?, &self.zone)
             .await?
             .into_iter()
             .map(|(_, found)| found)
@@ -723,7 +730,7 @@ impl MesocycleStore for SqliteGymMesocycleStore {
             r#"SELECT EXISTS (SELECT 1 FROM gym_mesocycle WHERE id = ?) AS "held!: bool""#,
             id
         )
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))
     }
@@ -902,7 +909,7 @@ const fn provided_of(mesocycle: &GymMesocycle) -> Option<&ProvidedFrom> {
 /// Split out of `current` so that function stays inside the line budget, and
 /// because "assemble the fills" is a whole job on its own: the rows are flat, and
 /// any of them may alternate by role.
-async fn read_fills(pool: &SqlitePool, mesocycle: i64) -> Result<SlotFills, StoreError> {
+async fn read_fills(conn: &mut SqliteConnection, mesocycle: i64) -> Result<SlotFills, StoreError> {
     let fill_rows = sqlx::query!(
         r#"
         SELECT slot AS "slot!: String", intensity AS "intensity: String",
@@ -914,7 +921,7 @@ async fn read_fills(pool: &SqlitePool, mesocycle: i64) -> Result<SlotFills, Stor
         "#,
         mesocycle
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
 
@@ -1022,7 +1029,10 @@ async fn write_calendar(
 ///
 /// Ordered by the stored date so a rebuilt programme reads back the same
 /// calendar it was authored with, whatever order the rows were written in.
-async fn read_interruptions(pool: &SqlitePool, mesocycle: i64) -> Result<Vec<Skip>, StoreError> {
+async fn read_interruptions(
+    conn: &mut SqliteConnection,
+    mesocycle: i64,
+) -> Result<Vec<Skip>, StoreError> {
     let rows = sqlx::query!(
         r#"
         SELECT start_date AS "start_date!: String", days AS "days!: i64"
@@ -1032,7 +1042,7 @@ async fn read_interruptions(pool: &SqlitePool, mesocycle: i64) -> Result<Vec<Ski
         "#,
         mesocycle
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
 
@@ -1073,7 +1083,10 @@ fn gating_of(
 }
 
 /// Every change to one mesocycle's fills (#454).
-async fn read_changes(pool: &SqlitePool, mesocycle: i64) -> Result<FillChanges, StoreError> {
+async fn read_changes(
+    conn: &mut SqliteConnection,
+    mesocycle: i64,
+) -> Result<FillChanges, StoreError> {
     let rows = sqlx::query!(
         r#"
         SELECT slot AS "slot!: String",
@@ -1092,7 +1105,7 @@ async fn read_changes(pool: &SqlitePool, mesocycle: i64) -> Result<FillChanges, 
         "#,
         mesocycle
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
     let mut changes = Vec::new();
@@ -1140,13 +1153,15 @@ impl FillChangeStore for SqliteGymMesocycleStore {
         mesocycle: MesocycleId,
         change: &FillChange,
     ) -> Result<(), StoreError> {
-        write_change(&self.pool, mesocycle, change).await
+        let mut tx = self.store.writing::<Self>().await?;
+        write_change(&mut tx, mesocycle, change).await?;
+        tx.commit().await
     }
 }
 
 /// Record a change to one mesocycle's fills (#454).
 async fn write_change(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     mesocycle: MesocycleId,
     change: &FillChange,
 ) -> Result<(), StoreError> {
@@ -1186,7 +1201,7 @@ async fn write_change(
         sets,
         reps
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
     Ok(())
@@ -1293,5 +1308,11 @@ fn count_of(value: i64) -> Result<RepCount, StoreError> {
 impl application::Input for SqliteGymMesocycleStore {
     fn reads() -> application::Reads {
         application::Reads::of([application::Node::PLAN])
+    }
+}
+
+impl application::Authors for SqliteGymMesocycleStore {
+    fn authors() -> std::collections::BTreeSet<application::Node> {
+        [application::Node::PLAN].into()
     }
 }

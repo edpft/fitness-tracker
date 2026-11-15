@@ -44,13 +44,14 @@ pub use spreadsheets::{
     SpreadsheetEntity, SpreadsheetSessionTranslator, SpreadsheetTranslator,
     SpreadsheetWeighInTranslator, Workbook,
 };
+pub use store::{Authoring, CanonicalGymReading, Held, Reading, SqliteRevisions, Writing};
 pub use store::{
     BtwbExportAccountReader, BtwbExportLandingStore, GarminActivityFileLandingStore,
     GarminActivityLandingStore, GarminDailyHeartRateAccountReader,
     GarminDailyHeartRateLandingStore, GarminExerciseSetLandingStore, GarminGymAccountReader,
     GarminGymRawExtent, GarminHrvAccountReader, GarminHrvLandingStore, GarminRecordedDevices,
     GarminSleepAccountReader, GarminWear, HevySessionAccountReader, HevyWorkoutLandingStore,
-    MyFitnessPalExportAccountReader, MyFitnessPalExportLandingStore, OverlayError,
+    KeptDrawing, MyFitnessPalExportAccountReader, MyFitnessPalExportLandingStore, OverlayError,
     PelotonAccountLandingStore, PelotonRawExtent, PelotonRideDetailLandingStore,
     PelotonRideLandingStore, PelotonRideSampleLandingStore, PelotonSessionAccountReader,
     SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SqliteBtwbStore,
@@ -70,7 +71,6 @@ pub use store::{
     SqliteWeighInStore, WahooFileLandingStore, WithingsMeasurementLandingStore,
     WithingsWeighInAccountReader, connect,
 };
-pub use store::{CanonicalGymReading, Held};
 pub use store::{
     GarminBodyBatteryEventLandingStore, GarminBodyBatteryLandingStore,
     GarminDailySummaryLandingStore, GarminDetectedMoveLandingStore, GarminFitnessAgeLandingStore,

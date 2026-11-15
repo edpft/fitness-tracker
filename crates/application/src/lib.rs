@@ -24,6 +24,7 @@ pub mod cycling;
 pub mod deliver;
 pub mod design;
 pub mod devices;
+pub mod drawing;
 pub mod equipment;
 pub mod error;
 pub mod extract;
@@ -51,13 +52,14 @@ pub mod status;
 pub mod strength;
 pub mod working;
 
+/// What a port reads is part of the port (#809).
+pub use drawing::DrawnFrom;
 pub use error::{
     ComparisonError, DeliveryError, DesignError, EquipmentError, ExtractionError, FillChangeError,
     NormalisationError, PrescriptionError, RunLockError, ScheduleError, SourceError, StatusError,
     StoreError,
 };
-/// What a port reads is part of the port (#809).
-pub use graph::{Calendar, Generation, Input, Node, Output, Reads, Table};
+pub use graph::{Authors, Calendar, Generation, Input, Node, Output, Reads, Table};
 pub use ports::{
     AccountReader, Authored, ByReason, CalendarPublisher, CalendarStore,
     CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalLayer, CanonicalWeighInStore,
@@ -78,10 +80,10 @@ pub use ports::{
     PrescriptionLifecycle, ProgressionStore, PublishedCell, PublishedCycling, PublishedProgrammes,
     PublishedRead, PulseWaveVelocityHistory, RawExtent, Reached, ReadUpTo, Reading,
     RecordedDevices, Rederivation, RefusalReport, RefusalReporter, RefusalStore, RenderingDigest,
-    ReplyStatus, RestingHeartRateHistory, ResumptionPointResetter, ResumptionPointStore,
-    RiddenSession, RiddenSessionLog, RiddenVenues, RideDestination, RidesPlaced, RunLock,
-    RunSummary, Served, SessionOrdinal, SleepHistory, SourceAccount, SourceEvent, StreamStatus,
-    StressHistory, Taken, Terms, TrainingDone, Translation, Translator, UnderivableReason,
-    UnderivableSlot, Unexpressed, WearRecord, WeighInHistory, WorkoutEventSource, WorkoutExtractor,
-    WorkoutNormaliser, WorkoutPrescriber, WorkoutStore,
+    ReplyStatus, RestingHeartRateHistory, ResumptionPointResetter, ResumptionPointStore, Revision,
+    Revisions, RiddenSession, RiddenSessionLog, RiddenVenues, RideDestination, RidesPlaced,
+    RunLock, RunSummary, Served, SessionOrdinal, SleepHistory, SourceAccount, SourceEvent,
+    StreamStatus, StressHistory, Taken, Terms, TrainingDone, Translation, Translator,
+    UnderivableReason, UnderivableSlot, Unexpressed, WearRecord, WeighInHistory,
+    WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber, WorkoutStore,
 };

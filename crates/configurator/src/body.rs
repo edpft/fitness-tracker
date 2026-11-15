@@ -10,12 +10,13 @@ use domain::{
     normalised::OperatorZone,
 };
 
+use crate::clock::Today;
 use crate::{
     body_weight::{self, Aimed},
     composition::{self, ByMethod},
     graph::{page, read},
     next::NextFailure,
-    ranges::{self, Current},
+    ranges::Current,
     rescheduling,
     store::Store,
 };
@@ -28,13 +29,20 @@ page! {
         aims: Aimed,
         composition: ByMethod,
         ranges: Current,
+        today: Today,
     }
 }
 
 /// The parts a run collecting what the page reads takes.
 #[must_use]
 pub fn collects() -> Scope {
-    crate::graph::collects::<Page>()
+    crate::graph::scope(&reads())
+}
+
+/// What the page reads, and so what its kept drawing is drawn from (#805).
+#[must_use]
+pub fn reads() -> application::graph::Reads {
+    <Page as application::graph::Input>::reads()
 }
 
 impl Page {
@@ -50,6 +58,7 @@ impl Page {
             aims: body_weight::aims_over(store, plans.clone()).into(),
             composition: composition::over(store).into(),
             ranges: application::ranges::CurrentRanges::new(plans).into(),
+            today: Today::new(zone.clone()).into(),
         })
     }
 
@@ -67,8 +76,8 @@ impl Page {
     /// # Errors
     ///
     /// [`StoreError`] if the store cannot be read.
-    pub async fn aims(&self, zone: &OperatorZone) -> Result<Vec<Aim>, StoreError> {
-        read!(self.aims.on(crate::equipment::today(zone))).await
+    pub async fn aims(&self) -> Result<Vec<Aim>, StoreError> {
+        read!(self.aims.on(self.today.date())).await
     }
 
     /// Every component anything measured, one series per method.
@@ -85,7 +94,8 @@ impl Page {
     /// # Errors
     ///
     /// [`StoreError`] if the store cannot be read.
-    pub async fn ranges(&self, zone: &OperatorZone) -> Result<Ranges, StoreError> {
-        read!(self.ranges, |of| ranges::today(of, zone)).await
+    pub async fn ranges(&self) -> Result<Ranges, StoreError> {
+        let today = self.today.date();
+        read!(self.ranges, |of| of.on(today)).await
     }
 }

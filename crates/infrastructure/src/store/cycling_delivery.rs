@@ -14,16 +14,18 @@ use domain::{
 use jiff::civil::Date;
 use sqlx::SqlitePool;
 
-use super::store_error;
+use super::{authoring::Authoring, store_error};
 
 #[derive(Debug, Clone)]
 pub struct SqliteCyclingDeliveryStore {
-    pool: SqlitePool,
+    store: Authoring,
 }
 
 impl SqliteCyclingDeliveryStore {
     pub const fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            store: Authoring::new(pool),
+        }
     }
 }
 
@@ -53,7 +55,7 @@ impl CyclingDeliveryStore for SqliteCyclingDeliveryStore {
             prescribed_for,
             name,
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?
         else {
@@ -70,7 +72,7 @@ impl CyclingDeliveryStore for SqliteCyclingDeliveryStore {
             "#,
             row.id,
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
 
@@ -122,9 +124,7 @@ impl CyclingDeliveryStore for SqliteCyclingDeliveryStore {
         let session = i64::from(delivered.session.as_u8());
         let delivered_at = delivered.delivered_at.to_string();
 
-        let mut transaction = super::writing(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
+        let mut transaction = self.store.writing::<Self>().await?;
 
         // **The row moves rather than accumulating**, which is what the
         // destination does: Peloton's stack is one list, so delivering again
@@ -149,12 +149,12 @@ impl CyclingDeliveryStore for SqliteCyclingDeliveryStore {
             session,
             delivered_at,
         )
-        .fetch_one(&mut *transaction)
+        .fetch_one(&mut **transaction)
         .await
         .map_err(|error| store_error(&error))?;
 
         sqlx::query!("DELETE FROM cycling_delivery_class WHERE delivery = ?", id)
-            .execute(&mut *transaction)
+            .execute(&mut **transaction)
             .await
             .map_err(|error| store_error(&error))?;
 
@@ -173,15 +173,12 @@ impl CyclingDeliveryStore for SqliteCyclingDeliveryStore {
                 reference,
                 called,
             )
-            .execute(&mut *transaction)
+            .execute(&mut **transaction)
             .await
             .map_err(|error| store_error(&error))?;
         }
 
-        transaction
-            .commit()
-            .await
-            .map_err(|error| store_error(&error))
+        transaction.commit().await
     }
 }
 
@@ -189,5 +186,11 @@ impl CyclingDeliveryStore for SqliteCyclingDeliveryStore {
 impl application::Input for SqliteCyclingDeliveryStore {
     fn reads() -> application::Reads {
         application::Reads::of([application::Node::PRESCRIPTIONS])
+    }
+}
+
+impl application::Authors for SqliteCyclingDeliveryStore {
+    fn authors() -> std::collections::BTreeSet<application::Node> {
+        [application::Node::PRESCRIPTIONS].into()
     }
 }

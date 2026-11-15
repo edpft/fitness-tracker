@@ -17,16 +17,18 @@ use domain::prescription::PrescriptionState;
 use jiff::{Timestamp, civil::Date};
 use sqlx::SqlitePool;
 
-use super::store_error;
+use super::{authoring::Authoring, store_error};
 
 #[derive(Debug, Clone)]
 pub struct SqlitePrescriptionDeliveryStore {
-    pool: SqlitePool,
+    store: Authoring,
 }
 
 impl SqlitePrescriptionDeliveryStore {
     pub const fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            store: Authoring::new(pool),
+        }
     }
 }
 
@@ -48,7 +50,7 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
             id,
             destination
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
 
@@ -97,7 +99,7 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
             issued_for,
             destination
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
 
@@ -151,16 +153,14 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
         // the hand-over through it is what makes "a performed session is not
         // replaced" hold here without a check in the use case — an `UPDATE ...
         // SET prescription = ?` would slide straight past it.
-        let mut tx = super::writing(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
+        let mut tx = self.store.writing::<Self>().await?;
 
         sqlx::query!(
             "DELETE FROM prescription_delivery WHERE prescription = ? AND destination = ?",
             from,
             destination
         )
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
 
@@ -176,11 +176,11 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
             rendering,
             delivered_at
         )
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
 
-        tx.commit().await.map_err(|error| store_error(&error))?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -204,6 +204,7 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
         // silent overwrite that leaves an orphaned routine behind it. The one
         // legitimate restatement goes through `record_rendering`, which keeps
         // the place and changes what is in it.
+        let mut tx = self.store.writing::<Self>().await?;
         sqlx::query!(
             r#"
             INSERT INTO prescription_delivery
@@ -216,9 +217,10 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
             rendering,
             delivered_at
         )
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
+        tx.commit().await?;
 
         Ok(())
     }
@@ -245,6 +247,7 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
         // performed session being rewritten is the use case declining to send
         // one, which is where § 12 can be stated as a reason rather than as an
         // abort.
+        let mut tx = self.store.writing::<Self>().await?;
         sqlx::query!(
             r#"
             UPDATE prescription_delivery
@@ -257,9 +260,10 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
             id,
             destination
         )
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
+        tx.commit().await?;
 
         Ok(())
     }
@@ -282,6 +286,7 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
         // it could collide with: this table has no key but its own, on purpose.
         // Every attempt leaves a row, and two attempts that said the same thing
         // are two answers rather than one repeated.
+        let mut tx = self.store.writing::<Reply>().await?;
         sqlx::query!(
             r#"
             INSERT INTO delivery_reply
@@ -295,9 +300,10 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
             body,
             answered_at
         )
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
+        tx.commit().await?;
 
         Ok(())
     }
@@ -327,7 +333,7 @@ impl PrescriptionLifecycle for SqlitePrescriptionDeliveryStore {
             "#,
             id
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
 
@@ -355,5 +361,21 @@ impl application::Input for SqlitePrescriptionDeliveryStore {
     fn reads() -> application::Reads {
         application::Reads::of([application::Node::PRESCRIPTIONS])
             .and(super::tables(&[super::table::GYM_SESSION]))
+    }
+}
+
+impl application::Authors for SqlitePrescriptionDeliveryStore {
+    fn authors() -> std::collections::BTreeSet<application::Node> {
+        [application::Node::PRESCRIPTIONS].into()
+    }
+}
+
+/// **What a destination answered authors nothing**: no page reads a reply, so
+/// keeping one redraws none.
+struct Reply;
+
+impl application::Authors for Reply {
+    fn authors() -> std::collections::BTreeSet<application::Node> {
+        std::collections::BTreeSet::new()
     }
 }

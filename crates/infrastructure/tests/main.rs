@@ -42,6 +42,7 @@ mod migration_backup;
 mod myfitnesspal_exports;
 mod next_session;
 mod next_test;
+mod node_revision;
 mod normalisation;
 mod normalised_store;
 mod overnight_hrv;

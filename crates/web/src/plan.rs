@@ -14,20 +14,16 @@ use domain::{
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
-use crate::{
-    page::{self, PAGES, Place},
-    run::View,
-};
+use crate::page::{self, PAGES, Place};
 
 /// The page, with the macrocycle as planned today or the reason it could not
 /// be read, and where a run collecting what it reads has got to (#809).
-pub fn page(macrocycle: &Result<Option<Macrocycle>, String>, run: &View) -> Markup {
+pub fn page(macrocycle: &Result<Option<Macrocycle>, String>) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
             head { (page::head(Place::Plan.name(), &[])) }
             body {
-                (page::following(run))
                 main.plan {
                     h1 { (Place::Plan.name()) }
                     @match macrocycle {
@@ -116,6 +112,44 @@ fn cycling_programme(provenance: &CyclingProvenance) -> String {
     }
 }
 
+/// Plan: the macrocycle in force, then the inputs to planning (#770, #809).
+#[derive(Debug)]
+pub struct Page;
+
+impl crate::drawn::Drawn for Page {
+    const ROUTE: &'static str = Place::Plan.path();
+    type Read = Option<Macrocycle>;
+
+    fn reads() -> application::graph::Reads {
+        configurator::macrocycle::reads()
+    }
+
+    fn asked(
+        _path: &axum::extract::RawPathParams,
+        _query: &std::collections::HashMap<String, String>,
+    ) -> Result<Self, axum::response::Redirect> {
+        Ok(Self)
+    }
+
+    fn here(&self) -> String {
+        Place::Plan.path().to_owned()
+    }
+
+    async fn read(
+        &self,
+        store: &configurator::store::Store,
+        zone: &domain::normalised::OperatorZone,
+    ) -> Result<Self::Read, crate::drawn::Unreadable> {
+        let now = configurator::clock::Now::new(zone.clone());
+        let planned = configurator::macrocycle::planned(store, zone, &now).await?;
+        Ok(planned.as_ref().map(Macrocycle::from))
+    }
+
+    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
+        page(&read.map_err(|error| error.0))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use application::macrocycle::{Macrocycle, Mesocycle};
@@ -189,7 +223,7 @@ mod tests {
     /// as planned**, then the inputs (#770, #789).
     #[test]
     fn plan_opens_with_the_macrocycle() {
-        let shown = page(&Ok(Some(autumn())), &crate::run::View::default()).into_string();
+        let shown = page(&Ok(Some(autumn()))).into_string();
 
         assert!(shown.contains("2026-autumn"), "{shown}");
         assert!(
@@ -226,7 +260,7 @@ mod tests {
     /// **No plan in force, and the inputs are still listed.**
     #[test]
     fn no_plan_in_force_still_lists_the_inputs() {
-        let shown = page(&Ok(None), &crate::run::View::default()).into_string();
+        let shown = page(&Ok(None)).into_string();
 
         assert!(shown.contains("No plan is in force today."), "{shown}");
         assert!(shown.contains(r#"<a href="/schedule">"#), "{shown}");

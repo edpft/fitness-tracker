@@ -16,6 +16,7 @@
 
 use std::collections::BTreeMap;
 
+use super::authoring::Authoring;
 use application::{DiaryAuthor, DiaryStore, StoreError};
 use domain::{
     normalised::OperatorZone,
@@ -27,7 +28,7 @@ use domain::{
     },
 };
 use jiff::{Timestamp, civil::Date};
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 
 use super::{
     corrupt,
@@ -37,12 +38,14 @@ use super::{
 
 /// The diary, in SQLite.
 pub struct SqliteDiaryStore {
-    pool: SqlitePool,
+    store: Authoring,
 }
 
 impl SqliteDiaryStore {
     pub const fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            store: Authoring::new(pool),
+        }
     }
 }
 
@@ -83,7 +86,7 @@ fn length_of(text: &str) -> Result<SlotLength, StoreError> {
 /// [`StoreError`] if the store is unavailable or holds a week the domain
 /// refuses.
 pub(super) async fn training_week(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     date: Date,
     discipline: Discipline,
 ) -> Result<Option<TrainingWeek>, StoreError> {
@@ -97,7 +100,7 @@ pub(super) async fn training_week(
         ",
         on
     )
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?
     else {
@@ -111,14 +114,14 @@ pub(super) async fn training_week(
     let pattern = TrainingPattern::new(
         date_of(&pattern.from_date)?,
         zone_of(&pattern.zone)?,
-        pattern_slots(pool, pattern.id).await?,
+        pattern_slots(&mut *conn, pattern.id).await?,
     );
     Ok(Diary::new(vec![pattern], Vec::new()).training_week(date, discipline))
 }
 
 /// One pattern's free slots and how long each is.
 async fn pattern_slots(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     pattern: i64,
 ) -> Result<BTreeMap<TrainingSlot, SlotLength>, StoreError> {
     let rows = sqlx::query!(
@@ -129,7 +132,7 @@ async fn pattern_slots(
         ",
         pattern
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
 
@@ -147,13 +150,13 @@ impl DiaryStore for SqliteDiaryStore {
             ORDER BY from_date
             "
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
 
         let mut patterns = Vec::with_capacity(weeks.len());
         for week in weeks {
-            let slots = pattern_slots(&self.pool, week.id).await?;
+            let slots = pattern_slots(&mut *self.store.reading().await?, week.id).await?;
 
             patterns.push(TrainingPattern::new(
                 date_of(&week.from_date)?,
@@ -162,14 +165,17 @@ impl DiaryStore for SqliteDiaryStore {
             ));
         }
 
-        Ok(Diary::new(patterns, read_alterations(&self.pool).await?)
-            .with_illnesses(read_illnesses(&self.pool).await?)
-            .with_skips(read_skips(&self.pool).await?))
+        Ok(Diary::new(
+            patterns,
+            read_alterations(&mut *self.store.reading().await?).await?,
+        )
+        .with_illnesses(read_illnesses(&mut *self.store.reading().await?).await?)
+        .with_skips(read_skips(&mut *self.store.reading().await?).await?))
     }
 }
 
 /// Every illness, earliest first.
-async fn read_illnesses(pool: &SqlitePool) -> Result<Vec<Illness>, StoreError> {
+async fn read_illnesses(conn: &mut SqliteConnection) -> Result<Vec<Illness>, StoreError> {
     let rows = sqlx::query!(
         r"
         SELECT from_date, ended_on
@@ -177,7 +183,7 @@ async fn read_illnesses(pool: &SqlitePool) -> Result<Vec<Illness>, StoreError> {
         ORDER BY from_date
         "
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
 
@@ -195,7 +201,7 @@ async fn read_illnesses(pool: &SqlitePool) -> Result<Vec<Illness>, StoreError> {
 }
 
 /// Every skip, oldest first, so the latest of two for one window is last.
-async fn read_skips(pool: &SqlitePool) -> Result<Vec<Skip>, StoreError> {
+async fn read_skips(conn: &mut SqliteConnection) -> Result<Vec<Skip>, StoreError> {
     let rows = sqlx::query!(
         r"
         SELECT from_date, from_part, until_date, until_part, reason
@@ -203,7 +209,7 @@ async fn read_skips(pool: &SqlitePool) -> Result<Vec<Skip>, StoreError> {
         ORDER BY id
         "
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
 
@@ -227,7 +233,7 @@ async fn read_skips(pool: &SqlitePool) -> Result<Vec<Skip>, StoreError> {
 /// they are two questions anyway: the ordinary weeks and what departs from
 /// them are stored apart because a departure is a fact about dates rather than
 /// about which week was in force when it was recorded.
-async fn read_alterations(pool: &SqlitePool) -> Result<Vec<Alteration>, StoreError> {
+async fn read_alterations(conn: &mut SqliteConnection) -> Result<Vec<Alteration>, StoreError> {
     let booked = sqlx::query!(
         r"
         SELECT id, start_date, days, zone, states_slots, reason
@@ -235,7 +241,7 @@ async fn read_alterations(pool: &SqlitePool) -> Result<Vec<Alteration>, StoreErr
         ORDER BY start_date
         "
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
 
@@ -259,7 +265,7 @@ async fn read_alterations(pool: &SqlitePool) -> Result<Vec<Alteration>, StoreErr
                 ",
                 alteration.id
             )
-            .fetch_all(pool)
+            .fetch_all(&mut *conn)
             .await
             .map_err(|error| store_error(&error))?;
 
@@ -283,9 +289,7 @@ async fn read_alterations(pool: &SqlitePool) -> Result<Vec<Alteration>, StoreErr
 
 impl DiaryAuthor for SqliteDiaryStore {
     async fn record_pattern(&self, pattern: &TrainingPattern) -> Result<(), StoreError> {
-        let mut tx = super::writing(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
+        let mut tx = self.store.writing::<Self>().await?;
 
         let authored_at = Timestamp::now().to_string();
         let from = pattern.from().to_string();
@@ -307,13 +311,13 @@ impl DiaryAuthor for SqliteDiaryStore {
             from,
             zone
         )
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?
         .id;
 
         sqlx::query!("DELETE FROM training_slot WHERE pattern = ?", id)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|error| store_error(&error))?;
 
@@ -331,18 +335,16 @@ impl DiaryAuthor for SqliteDiaryStore {
                 part,
                 length
             )
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|error| store_error(&error))?;
         }
 
-        tx.commit().await.map_err(|error| store_error(&error))
+        tx.commit().await
     }
 
     async fn record_alteration(&self, alteration: &Alteration) -> Result<(), StoreError> {
-        let mut tx = super::writing(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
+        let mut tx = self.store.writing::<Self>().await?;
 
         let authored_at = Timestamp::now().to_string();
         let start = alteration.start().to_string();
@@ -372,13 +374,13 @@ impl DiaryAuthor for SqliteDiaryStore {
             states_slots,
             reason
         )
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?
         .id;
 
         sqlx::query!("DELETE FROM alteration_slot WHERE alteration = ?", id)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|error| store_error(&error))?;
 
@@ -396,18 +398,19 @@ impl DiaryAuthor for SqliteDiaryStore {
                 part,
                 length
             )
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|error| store_error(&error))?;
         }
 
-        tx.commit().await.map_err(|error| store_error(&error))
+        tx.commit().await
     }
 
     async fn record_illness(&self, illness: &Illness) -> Result<(), StoreError> {
         let authored_at = Timestamp::now().to_string();
         let from = illness.from().to_string();
         let ended = illness.ended_on().map(|ended| ended.to_string());
+        let mut tx = self.store.writing::<Self>().await?;
         sqlx::query!(
             r"
             INSERT INTO illness (authored_at, from_date, ended_on)
@@ -420,9 +423,10 @@ impl DiaryAuthor for SqliteDiaryStore {
             from,
             ended
         )
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -433,6 +437,7 @@ impl DiaryAuthor for SqliteDiaryStore {
         let until_date = skip.until().date.to_string();
         let until_part = skip.until().part.as_str();
         let reason = skip.reason();
+        let mut tx = self.store.writing::<Self>().await?;
         sqlx::query!(
             r"
             INSERT INTO skip (authored_at, from_date, from_part, until_date, until_part, reason)
@@ -445,9 +450,10 @@ impl DiaryAuthor for SqliteDiaryStore {
             until_part,
             reason
         )
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
+        tx.commit().await?;
         Ok(())
     }
 }
@@ -456,5 +462,11 @@ impl DiaryAuthor for SqliteDiaryStore {
 impl application::Input for SqliteDiaryStore {
     fn reads() -> application::Reads {
         application::Reads::of([application::Node::DIARY])
+    }
+}
+
+impl application::Authors for SqliteDiaryStore {
+    fn authors() -> std::collections::BTreeSet<application::Node> {
+        [application::Node::DIARY].into()
     }
 }

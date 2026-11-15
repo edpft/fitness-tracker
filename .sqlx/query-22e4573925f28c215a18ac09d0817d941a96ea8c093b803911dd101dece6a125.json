@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT revision FROM node_revision WHERE node = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "revision",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "node_revision",
+            "name": "revision"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "22e4573925f28c215a18ac09d0817d941a96ea8c093b803911dd101dece6a125"
+}

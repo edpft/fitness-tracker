@@ -11,18 +11,32 @@ use domain::schedule::Holidays;
 use jiff::Timestamp;
 use sqlx::SqlitePool;
 
-use super::store_error;
+use super::{authoring::Authoring, store_error};
 use crate::calendar::{public::public_holidays, school::school_holidays};
 
 /// Each calendar, kept.
 #[derive(Debug, Clone)]
 pub struct SqliteCalendarStore {
-    pool: SqlitePool,
+    store: Authoring,
 }
 
 impl SqliteCalendarStore {
     pub const fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            store: Authoring::new(pool),
+        }
+    }
+}
+
+/// **Both calendars, whichever was written**: a store kept as its publisher
+/// last served it is written by a run, and a revision too many is one redraw.
+impl application::Authors for SqliteCalendarStore {
+    fn authors() -> std::collections::BTreeSet<application::Node> {
+        Calendar::ALL
+            .map(|calendar| {
+                application::Node::Generation(application::Generation::Calendar(calendar))
+            })
+            .into()
     }
 }
 
@@ -34,13 +48,14 @@ impl CalendarStore for SqliteCalendarStore {
             SELECT served AS "served!: String",
                    etag,
                    last_modified,
-                   asked_at AS "asked_at!: String"
+                   asked.asked_at AS "asked_at!: String"
               FROM calendar
+              JOIN calendar_asked AS asked USING (name)
              WHERE name = ?
             "#,
             name
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
         row.map(|row| {
@@ -69,41 +84,65 @@ impl CalendarStore for SqliteCalendarStore {
     ) -> Result<(), StoreError> {
         let name = calendar.as_str();
         let asked = asked.to_string();
+        let mut tx = self.store.writing::<Self>().await?;
         sqlx::query!(
             r#"
-            INSERT INTO calendar (name, served, etag, last_modified, asked_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO calendar (name, served, etag, last_modified)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT (name) DO UPDATE
                SET served = excluded.served,
                    etag = excluded.etag,
-                   last_modified = excluded.last_modified,
-                   asked_at = excluded.asked_at
+                   last_modified = excluded.last_modified
             "#,
             name,
             served.body,
             served.etag,
-            served.last_modified,
-            asked
+            served.last_modified
         )
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
-        Ok(())
+        asked_at(&mut tx, name, &asked).await?;
+        tx.commit().await
     }
 
     async fn unchanged(&self, calendar: Calendar, asked: Timestamp) -> Result<(), StoreError> {
         let name = calendar.as_str();
         let asked = asked.to_string();
-        sqlx::query!(
-            "UPDATE calendar SET asked_at = ? WHERE name = ?",
-            asked,
-            name
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(|error| store_error(&error))?;
-        Ok(())
+        let mut tx = self.store.writing::<Asked>().await?;
+        asked_at(&mut tx, name, &asked).await?;
+        tx.commit().await
     }
+}
+
+/// **When a publisher was asked authors nothing**: no page reads it, so a
+/// calendar asked again and served the same redraws none.
+struct Asked;
+
+impl application::Authors for Asked {
+    fn authors() -> std::collections::BTreeSet<application::Node> {
+        std::collections::BTreeSet::new()
+    }
+}
+
+/// Keep when `name` was last asked for, inside a write.
+async fn asked_at(
+    tx: &mut sqlx::Transaction<'static, sqlx::Sqlite>,
+    name: &str,
+    asked: &str,
+) -> Result<(), StoreError> {
+    sqlx::query!(
+        r#"
+        INSERT INTO calendar_asked (name, asked_at) VALUES (?, ?)
+        ON CONFLICT (name) DO UPDATE SET asked_at = excluded.asked_at
+        "#,
+        name,
+        asked
+    )
+    .execute(&mut **tx)
+    .await
+    .map(drop)
+    .map_err(|error| store_error(&error))
 }
 
 /// Both calendars, as last served.

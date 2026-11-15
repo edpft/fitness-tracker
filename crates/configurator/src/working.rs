@@ -14,6 +14,7 @@ use infrastructure::{
     SqliteTrainingDone,
 };
 
+use crate::clock::Today;
 use crate::store::Spanned;
 use crate::{
     body_weight::{self, Aimed},
@@ -53,13 +54,20 @@ page! {
         weight: body_weight::Series,
         aims: Aimed,
         composition: ByMethod,
+        today: Today,
     }
 }
 
 /// The parts a run collecting what the page reads takes.
 #[must_use]
 pub fn collects() -> Scope {
-    crate::graph::collects::<Page>()
+    crate::graph::scope(&reads())
+}
+
+/// What the page reads, and so what its kept drawing is drawn from (#805).
+#[must_use]
+pub fn reads() -> application::graph::Reads {
+    <Page as application::graph::Input>::reads()
 }
 
 impl Page {
@@ -92,6 +100,7 @@ impl Page {
             weight: body_weight::series(store).into(),
             aims: body_weight::aims_over(store, plans).into(),
             composition: composition::over(store).into(),
+            today: Today::new(zone.clone()).into(),
         })
     }
 
@@ -101,8 +110,8 @@ impl Page {
     /// # Errors
     ///
     /// [`StoreError`] if the store cannot be read.
-    pub async fn view(&self, zone: &OperatorZone) -> Result<View, StoreError> {
-        let today = crate::equipment::today(zone);
+    pub async fn view(&self) -> Result<View, StoreError> {
+        let today = self.today.date();
         let ftp = read!(self.ftp.tests()).await?;
         let strength = read!(self.strength.tests(today)).await?;
         let estimated = read!(self.estimated.view(today)).await?.lifts;

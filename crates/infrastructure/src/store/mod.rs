@@ -6,6 +6,7 @@
 //! integration tests at the port boundaries run against a temporary file
 //! inside the nix sandbox, with no service to start and no network.
 
+pub mod authoring;
 pub mod btwb_export_landing;
 pub mod btwb_normalised;
 pub mod calendar;
@@ -74,6 +75,7 @@ use domain::{
     normalised::NormalisationRunId,
 };
 
+pub use authoring::{Authoring, Reading, SqliteRevisions, Writing};
 pub use btwb_export_landing::BtwbExportLandingStore;
 pub use btwb_normalised::{BtwbExportAccountReader, SqliteBtwbStore};
 pub use calendar::SqliteCalendarStore;
@@ -88,7 +90,7 @@ pub use cycling_mesocycle::SqliteCyclingMesocycleStore;
 pub use delivery::SqlitePrescriptionDeliveryStore;
 pub use derivation_ledger::SqliteDerivationLedger;
 pub use devices::{GarminRecordedDevices, GarminWear, SqliteGarminActivityStore};
-pub use drawings::SqliteKeptDrawings;
+pub use drawings::{KeptDrawing, SqliteKeptDrawings};
 pub use edit_overlay::{OverlayError, SqliteEditOverlayStore, UnknownCorrectedExercise};
 pub use equipment::SqliteEquipmentStore;
 pub use garmin_activity_file_landing::GarminActivityFileLandingStore;

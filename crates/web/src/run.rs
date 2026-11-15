@@ -38,6 +38,9 @@ pub struct Setting {
     /// stands, so a credential stored while the server runs is the one the
     /// next run uses.
     pub credentials: Option<PathBuf>,
+    /// The build serving, which a kept drawing is keyed on (#805): `None`
+    /// where it is not known, and every page is drawn as it is opened.
+    pub build: Option<&'static str>,
 }
 
 /// The latest run, as the page shows it.
@@ -209,7 +212,7 @@ impl Runs {
     pub async fn open(self: &Arc<Self>, asked: &Asked) {
         if let Asked::Only(scope) = asked
             && !self.covered(asked)
-            && !self.wanted(scope).await
+            && !Box::pin(self.wanted(scope)).await
         {
             configurator::telemetry::not_due();
             return;
@@ -552,6 +555,7 @@ mod tests {
                 .expect("the store"),
             zone: OperatorZone::try_from("Europe/London").expect("a zone"),
             credentials: None,
+            build: None,
         }));
         runs.going
             .lock()
@@ -592,6 +596,7 @@ mod tests {
                 store: store.clone(),
                 zone: OperatorZone::try_from("Europe/London").expect("a zone"),
                 credentials: None,
+                build: None,
             })
         };
         let Asked::Only(hrv) = only(&["garmin.hrv", "garmin.activities"]) else {

@@ -26,8 +26,8 @@ pub fn address(on: Date, number: Number) -> String {
     format!("{}/{on}/{}", Place::History.path(), number.get())
 }
 
-/// The feed, or the reason it could not be read.
-pub fn page(days: &Result<Vec<Day>, String>, today: Date) -> Markup {
+/// The feed as it stands today, or the reason it could not be read.
+pub fn page(days: &Result<(Vec<Day>, Date), String>) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -36,8 +36,8 @@ pub fn page(days: &Result<Vec<Day>, String>, today: Date) -> Markup {
                 main.history {
                     h1 { (Place::History.name()) }
                     @match days {
-                        Ok(days) if days.is_empty() => p.sub { "No session is recorded." },
-                        Ok(days) => @for day in days { (feed_day(day, today)) },
+                        Ok((days, _)) if days.is_empty() => p.sub { "No session is recorded." },
+                        Ok((days, today)) => @for day in days { (feed_day(day, *today)) },
                         Err(error) => p.failed { "History could not be read: " (error) },
                     }
                     (page::bar(Place::History.path()))
@@ -352,6 +352,100 @@ fn cycling(session: &CanonicalCyclingSession) -> Markup {
 fn kilometres(distance: domain::measure::Metres) -> String {
     let tenths = distance.as_millimetres().saturating_add(50_000) / 100_000;
     format!("{}.{} km", tenths / 10, tenths % 10)
+}
+
+/// History, once a run has collected what it reads (#772).
+#[derive(Debug)]
+pub struct Page;
+
+impl crate::drawn::Drawn for Page {
+    const ROUTE: &'static str = Place::History.path();
+    type Read = (Vec<Day>, Date);
+
+    fn reads() -> application::graph::Reads {
+        configurator::history::reads()
+    }
+
+    fn asked(
+        _path: &axum::extract::RawPathParams,
+        _query: &std::collections::HashMap<String, String>,
+    ) -> Result<Self, axum::response::Redirect> {
+        Ok(Self)
+    }
+
+    fn here(&self) -> String {
+        Place::History.path().to_owned()
+    }
+
+    async fn read(
+        &self,
+        store: &configurator::store::Store,
+        zone: &domain::normalised::OperatorZone,
+    ) -> Result<Self::Read, crate::drawn::Unreadable> {
+        let page = configurator::history::Page::open(store, zone);
+        Ok((page.days().await?, page.today()))
+    }
+
+    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
+        page(&read.map_err(|error| error.0))
+    }
+}
+
+/// One session opened from History (#772): the `number`th done `on`.
+///
+/// **No run of its own**: History started one as it was opened, and this
+/// waits on it as any page reading the same layers does.
+#[derive(Debug)]
+pub struct Opened {
+    on: Date,
+    number: Number,
+}
+
+impl crate::drawn::Drawn for Opened {
+    const ROUTE: &'static str = "/history/{on}/{number}";
+    const OPENS: bool = false;
+    type Read = Option<Session>;
+
+    fn reads() -> application::graph::Reads {
+        configurator::history::reads()
+    }
+
+    fn asked(
+        path: &axum::extract::RawPathParams,
+        _query: &std::collections::HashMap<String, String>,
+    ) -> Result<Self, axum::response::Redirect> {
+        let named = |name: &str| {
+            path.iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| value)
+        };
+        let on = named("on").and_then(|on| on.parse::<Date>().ok());
+        let number = named("number")
+            .and_then(|number| number.parse::<usize>().ok())
+            .and_then(|number| Number::try_from(number).ok());
+        match (on, number) {
+            (Some(on), Some(number)) => Ok(Self { on, number }),
+            _ => Err(axum::response::Redirect::to(Place::History.path())),
+        }
+    }
+
+    fn here(&self) -> String {
+        address(self.on, self.number)
+    }
+
+    async fn read(
+        &self,
+        store: &configurator::store::Store,
+        zone: &domain::normalised::OperatorZone,
+    ) -> Result<Self::Read, crate::drawn::Unreadable> {
+        Ok(configurator::history::Page::open(store, zone)
+            .session(self.on, self.number)
+            .await?)
+    }
+
+    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
+        session(&self.here(), self.on, &read.map_err(|error| error.0))
+    }
 }
 
 #[cfg(test)]

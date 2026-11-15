@@ -1,12 +1,13 @@
 //! The macrocycle as planned, over this build's store: what Plan opens with
 //! (#770, #789).
 
+use application::graph::{Input, Reads};
 use application::{
     commit::{CommitError, CommitPorts, Committing},
     macrocycle::{Planned, PlanningPorts},
     next::Scope,
 };
-use domain::{macrocycle::PlannedMacrocycle, normalised::OperatorZone, schedule::DayPart};
+use domain::{macrocycle::PlannedMacrocycle, normalised::OperatorZone};
 use infrastructure::{
     SqliteCanonicalCyclingSessionStore, SqliteDiaryStore, SqliteGenerationParameterStore,
     SqlitePlanStore,
@@ -14,6 +15,7 @@ use infrastructure::{
 };
 use tracing::Instrument as _;
 
+use crate::clock::Now;
 use crate::store::Spanned;
 use crate::{
     holidays::{self, Calendars},
@@ -50,13 +52,20 @@ type Planning<'a> = Planned<
     Calendars,
 >;
 
+/// What Plan reads: what planning does, and the part of the day it is
+/// planned from (#805).
+#[must_use]
+pub fn reads() -> Reads {
+    <Planning<'static> as Input>::reads().and(Now::reads())
+}
+
 /// The parts a run collecting what Plan reads takes (#809).
 #[must_use]
 pub fn collects() -> Scope {
-    crate::graph::collects::<Planning<'static>>()
+    crate::graph::scope(&reads())
 }
 
-/// The macrocycle `now` falls in, as planned: `None` where the calendar does
+/// The macrocycle it is now in, as planned: `None` where the calendar does
 /// not reach it or no plan following a chain is in force.
 ///
 /// **Read from the store alone.** The planned mesocycles are built from the
@@ -70,7 +79,7 @@ pub fn collects() -> Scope {
 pub async fn planned(
     store: &Store,
     zone: &OperatorZone,
-    now: DayPart,
+    now: &Now,
 ) -> Result<Option<PlannedMacrocycle>, PlannedFailure> {
     let classes = store.peloton_classes();
     let catalogue = ClassCatalogue::over(&classes, None);
@@ -90,7 +99,7 @@ pub async fn planned(
         holidays: holidays::calendars(store),
     });
     Ok(use_case
-        .on(now)
+        .on(now.day_part())
         .instrument(crate::telemetry::reading("macrocycle"))
         .await?)
 }

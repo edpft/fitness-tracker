@@ -110,6 +110,7 @@ pub fn request(page: &str, redraw: bool) -> Span {
         page,
         range = Empty,
         served = Empty,
+        same = Empty,
         redraw,
         joined = Empty,
         due = Empty,
@@ -129,6 +130,12 @@ fn drawing(step: &'static str) -> Span {
 /// Opening the store.
 pub(crate) fn opening() -> Span {
     drawing("opening")
+}
+
+/// Asking where everything a page reads stands, so whether its kept drawing
+/// is still the page (#805).
+pub(crate) fn keying() -> Span {
+    drawing("keying")
 }
 
 /// Asking whether anything a page reads could hold anything new (#612).
@@ -158,6 +165,14 @@ pub struct Read<T>(T);
 impl<T> From<T> for Read<T> {
     fn from(of: T) -> Self {
         Self(of)
+    }
+}
+
+/// **The date is no read of the store**, so it is read unspanned: a page
+/// declares it by the field, and a span would time nothing.
+impl Read<crate::clock::Today> {
+    pub(crate) fn date(&self) -> jiff::civil::Date {
+        self.0.date()
     }
 }
 
@@ -196,6 +211,11 @@ pub enum Served {
     /// As it was last drawn, while a run collects what it reads: fast, but
     /// not yet whole.
     Kept,
+    /// As it was last drawn, because nothing it reads has moved since (#805).
+    Unchanged,
+    /// As it was last drawn, asking at once to be drawn again, because
+    /// something it reads has moved since (#805).
+    Moved,
     /// The placeholder, where it has never been drawn on this store.
     Placeholder,
     /// Drawn from the store.
@@ -206,10 +226,18 @@ impl Served {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Kept => "kept",
+            Self::Unchanged => "unchanged",
+            Self::Moved => "moved",
             Self::Placeholder => "placeholder",
             Self::Drawn => "drawn",
         }
     }
+}
+
+/// Whether the page being loaded, drawn again, is the drawing kept before it
+/// (#805): a page drawn again the same was a key that moved for nothing.
+pub fn same(same: bool) {
+    Span::current().record("same", same);
 }
 
 /// The range of the page being loaded, where it has one, on its span.

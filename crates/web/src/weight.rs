@@ -219,14 +219,8 @@ mod tests {
     use maud::Markup;
 
     /// The body page with no composition recorded.
-    fn page(
-        series: &Series,
-        aims: &[Aim],
-        ranges: &Ranges,
-        over: Over,
-        run: &crate::run::View,
-    ) -> Markup {
-        crate::body::page(series, aims, &[], ranges, over, run)
+    fn page(series: &Series, aims: &[Aim], ranges: &Ranges, over: Over) -> Markup {
+        crate::body::page(series, aims, &[], ranges, over)
     }
 
     fn day(d: i8, grams: u64) -> Weighed {
@@ -248,14 +242,7 @@ mod tests {
     }
 
     fn shown(weigh_ins: Vec<Weighed>, ranges: &Ranges, over: Over) -> String {
-        page(
-            &Series::of(weigh_ins),
-            &[],
-            ranges,
-            over,
-            &crate::run::View::default(),
-        )
-        .into_string()
+        page(&Series::of(weigh_ins), &[], ranges, over).into_string()
     }
 
     #[test]
@@ -355,7 +342,6 @@ mod tests {
             &aims,
             &ranges(date(2026, 10, 31)),
             Over::All,
-            &crate::run::View::default(),
         )
         .into_string();
         assert_eq!(

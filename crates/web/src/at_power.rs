@@ -20,17 +20,14 @@ use domain::analytical::{
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
-use crate::{
-    detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced},
-    run::View,
-};
+use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced};
 
 pub const PATH: &str = "/heart-rate";
 pub const TITLE: &str = "Heart rate per power zone";
 
 /// The page: the summary, then the chart over the range chosen.
-pub fn page(trended: &[Trended], ranges: &Ranges, over: Over, run: &View) -> Markup {
-    detail::page(PATH, TITLE, Some(over), run, &body(trended, ranges, over))
+pub fn page(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
+    detail::page(PATH, TITLE, Some(over), &body(trended, ranges, over))
 }
 
 /// The page when the store could not be read.
@@ -249,6 +246,59 @@ fn counted(count: usize, one: &str) -> String {
     }
 }
 
+/// Heart rate at a fixed power over a range (#621). It opens on All, as #621
+/// settled.
+#[derive(Debug)]
+pub struct Page {
+    over: Over,
+}
+
+impl crate::drawn::Drawn for Page {
+    const ROUTE: &'static str = PATH;
+    type Read = (Vec<domain::analytical::heart_rate::RideHeartRate>, Ranges);
+
+    fn reads() -> application::graph::Reads {
+        configurator::heart_rate::reads()
+    }
+
+    fn asked(
+        _path: &axum::extract::RawPathParams,
+        query: &std::collections::HashMap<String, String>,
+    ) -> Result<Self, axum::response::Redirect> {
+        Ok(Self {
+            over: crate::drawn::tests_over(query),
+        })
+    }
+
+    fn here(&self) -> String {
+        PATH.to_owned()
+    }
+
+    fn over(&self) -> Option<Over> {
+        Some(self.over)
+    }
+
+    async fn read(
+        &self,
+        store: &configurator::store::Store,
+        zone: &domain::normalised::OperatorZone,
+    ) -> Result<Self::Read, crate::drawn::Unreadable> {
+        let page = configurator::heart_rate::Page::open(store, zone).await?;
+        Ok((page.rides().await?, page.ranges().await?))
+    }
+
+    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
+        match read {
+            Ok((rides, ranges)) => page(
+                &domain::analytical::heart_rate_at_power::trended(&rides),
+                &ranges,
+                self.over,
+            ),
+            Err(error) => unreadable(error.as_str()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -339,7 +389,7 @@ mod tests {
     }
 
     fn shown(trended: &[Trended]) -> String {
-        super::page(trended, &NO_PLAN, Over::All, &crate::run::View::default()).into_string()
+        super::page(trended, &NO_PLAN, Over::All).into_string()
     }
 
     #[test]

@@ -33,14 +33,13 @@ use maud::{DOCTYPE, Markup, html};
 use crate::{
     detail::{self, Metric},
     page::{self, Group, PAGES, Place},
-    run,
 };
 
 pub const PATH: &str = "/progress";
 
 /// The page: the tiles, or why there is nothing to read.
-pub fn page(view: &View, run: &run::View) -> Markup {
-    shell(run, &body(view))
+pub fn page(view: &View) -> Markup {
+    shell(&body(view))
 }
 
 /// The page when the store could not be read.
@@ -61,13 +60,12 @@ pub fn unreadable(error: &str) -> Markup {
     }
 }
 
-fn shell(run: &run::View, body: &Markup) -> Markup {
+fn shell(body: &Markup) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
             head { (page::head(Place::Progress.name(), &[])) }
             body {
-                (page::following(run))
                 main.progress {
                     h1 { (Place::Progress.name()) }
                     (body)
@@ -529,6 +527,46 @@ fn trace(runs: &[Vec<Traced>], expected: &[Vec<(Date, f64)>], began: Date, today
             @if let Some(last) = last {
                 circle.fell cx=(format!("{:.1}", x(last.on))) cy=(format!("{:.1}", y(last.read))) r="4" {}
             }
+        }
+    }
+}
+
+/// Progress, for the macrocycle in force (#769).
+#[derive(Debug)]
+pub struct Page;
+
+impl crate::drawn::Drawn for Page {
+    const ROUTE: &'static str = PATH;
+    type Read = View;
+
+    fn reads() -> application::graph::Reads {
+        configurator::working::reads()
+    }
+
+    fn asked(
+        _path: &axum::extract::RawPathParams,
+        _query: &std::collections::HashMap<String, String>,
+    ) -> Result<Self, axum::response::Redirect> {
+        Ok(Self)
+    }
+
+    fn here(&self) -> String {
+        PATH.to_owned()
+    }
+
+    async fn read(
+        &self,
+        store: &configurator::store::Store,
+        zone: &domain::normalised::OperatorZone,
+    ) -> Result<Self::Read, crate::drawn::Unreadable> {
+        let page = configurator::working::Page::open(store, zone).await?;
+        Ok(page.view().await?)
+    }
+
+    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
+        match read {
+            Ok(view) => page(&view),
+            Err(error) => unreadable(error.as_str()),
         }
     }
 }

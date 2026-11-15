@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 
+use super::authoring::Authoring;
 use application::{EquipmentStore, StoreError};
 use domain::{
     gym::{
@@ -21,7 +22,7 @@ use domain::{
     sequence::NonEmpty,
 };
 use jiff::{Timestamp, civil::Date};
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 
 use super::{corrupt, store_error};
 
@@ -36,7 +37,7 @@ fn stored(mass: Kg) -> Result<i64, StoreError> {
 }
 
 /// Every stack's and kind's bands, by fact.
-async fn read_bands(pool: &SqlitePool) -> Result<BTreeMap<i64, Vec<Step>>, StoreError> {
+async fn read_bands(conn: &mut SqliteConnection) -> Result<BTreeMap<i64, Vec<Step>>, StoreError> {
     let steps = sqlx::query!(
         r#"
         SELECT fact AS "fact!: i64",
@@ -46,7 +47,7 @@ async fn read_bands(pool: &SqlitePool) -> Result<BTreeMap<i64, Vec<Step>>, Store
         ORDER BY fact, band
         "#
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
     let mut bands: BTreeMap<i64, Vec<Step>> = BTreeMap::new();
@@ -60,7 +61,9 @@ async fn read_bands(pool: &SqlitePool) -> Result<BTreeMap<i64, Vec<Step>>, Store
 }
 
 /// Every range's bands, by fact, in order.
-async fn read_band_ranges(pool: &SqlitePool) -> Result<BTreeMap<i64, Vec<Band>>, StoreError> {
+async fn read_band_ranges(
+    conn: &mut SqliteConnection,
+) -> Result<BTreeMap<i64, Vec<Band>>, StoreError> {
     let rows = sqlx::query!(
         r#"
         SELECT fact AS "fact!: i64", name AS "name!: String", twice_grams AS "twice_grams!: i64"
@@ -68,7 +71,7 @@ async fn read_band_ranges(pool: &SqlitePool) -> Result<BTreeMap<i64, Vec<Band>>,
         ORDER BY fact, position
         "#
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
     let mut ranges: BTreeMap<i64, Vec<Band>> = BTreeMap::new();
@@ -82,7 +85,9 @@ async fn read_band_ranges(pool: &SqlitePool) -> Result<BTreeMap<i64, Vec<Band>>,
 }
 
 /// Every range's declared steps, by fact, in order.
-async fn read_band_steps(pool: &SqlitePool) -> Result<BTreeMap<i64, Vec<Combination>>, StoreError> {
+async fn read_band_steps(
+    conn: &mut SqliteConnection,
+) -> Result<BTreeMap<i64, Vec<Combination>>, StoreError> {
     let rows = sqlx::query!(
         r#"
         SELECT fact AS "fact!: i64", step AS "step!: i64", band AS "band!: String"
@@ -90,7 +95,7 @@ async fn read_band_steps(pool: &SqlitePool) -> Result<BTreeMap<i64, Vec<Combinat
         ORDER BY fact, step, part
         "#
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
     let mut parts: BTreeMap<(i64, i64), Vec<BandName>> = BTreeMap::new();
@@ -109,7 +114,7 @@ async fn read_band_steps(pool: &SqlitePool) -> Result<BTreeMap<i64, Vec<Combinat
 }
 
 /// Everything now known, read in four queries and assembled here.
-pub(crate) async fn read_facts(pool: &SqlitePool) -> Result<EquipmentFacts, StoreError> {
+pub(crate) async fn read_facts(conn: &mut SqliteConnection) -> Result<EquipmentFacts, StoreError> {
     let rows = sqlx::query!(
         r#"
         SELECT id AS "id!: i64",
@@ -125,13 +130,13 @@ pub(crate) async fn read_facts(pool: &SqlitePool) -> Result<EquipmentFacts, Stor
         ORDER BY id
         "#
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
 
-    let mut bands = read_bands(pool).await?;
-    let mut ranges = read_band_ranges(pool).await?;
-    let mut charts = read_band_steps(pool).await?;
+    let mut bands = read_bands(&mut *conn).await?;
+    let mut ranges = read_band_ranges(&mut *conn).await?;
+    let mut charts = read_band_steps(&mut *conn).await?;
 
     let mut kinds: BTreeMap<Implement, Vec<Fact<LoadSteps>>> = BTreeMap::new();
     let mut machines: BTreeMap<Specific, Vec<Fact<Stack>>> = BTreeMap::new();
@@ -367,18 +372,20 @@ pub(crate) async fn insert(
 
 #[derive(Debug, Clone)]
 pub struct SqliteEquipmentStore {
-    pool: SqlitePool,
+    store: Authoring,
 }
 
 impl SqliteEquipmentStore {
     pub const fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            store: Authoring::new(pool),
+        }
     }
 }
 
 impl EquipmentStore for SqliteEquipmentStore {
     async fn facts(&self) -> Result<EquipmentFacts, StoreError> {
-        read_facts(&self.pool).await
+        read_facts(&mut *self.store.reading().await?).await
     }
 
     async fn record(
@@ -388,11 +395,9 @@ impl EquipmentStore for SqliteEquipmentStore {
         recorded_at: Timestamp,
         corrects: Option<FactId>,
     ) -> Result<FactId, StoreError> {
-        let mut tx = super::writing(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
+        let mut tx = self.store.writing::<Self>().await?;
         let fact = insert(&mut tx, statement, from, recorded_at, corrects).await?;
-        tx.commit().await.map_err(|error| store_error(&error))?;
+        tx.commit().await?;
         Ok(fact)
     }
 }
@@ -403,5 +408,14 @@ impl application::Input for SqliteEquipmentStore {
         application::Reads::of([application::Node::Generation(
             application::Generation::Equipment,
         )])
+    }
+}
+
+impl application::Authors for SqliteEquipmentStore {
+    fn authors() -> std::collections::BTreeSet<application::Node> {
+        [application::Node::Generation(
+            application::Generation::Equipment,
+        )]
+        .into()
     }
 }

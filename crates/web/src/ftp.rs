@@ -30,27 +30,17 @@ use domain::analytical::{
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
-use crate::{
-    detail::{self, Axis, Cell, Chart, Layer, Metric, Reading},
-    run::View,
-};
+use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Reading};
 
 pub const PATH: &str = "/ftp";
 const TITLE: &str = "FTP tests";
 
 /// The page: the summary, then the charts over the range chosen.
-pub fn page(
-    tests: &[Test],
-    heart_rates: &[TestHeartRate],
-    ranges: &Ranges,
-    over: Over,
-    run: &View,
-) -> Markup {
+pub fn page(tests: &[Test], heart_rates: &[TestHeartRate], ranges: &Ranges, over: Over) -> Markup {
     detail::page(
         PATH,
         TITLE,
         Some(over),
-        run,
         &body(tests, heart_rates, ranges, over),
     )
 }
@@ -378,6 +368,58 @@ fn counted(count: usize, one: &str) -> String {
     }
 }
 
+/// The FTP tests over a range, in watts and over body weight (#469).
+#[derive(Debug)]
+pub struct Page {
+    over: Over,
+}
+
+impl crate::drawn::Drawn for Page {
+    const ROUTE: &'static str = PATH;
+    type Read = (Vec<Test>, Vec<TestHeartRate>, Ranges);
+
+    fn reads() -> application::graph::Reads {
+        configurator::ftp_tests::reads()
+    }
+
+    fn asked(
+        _path: &axum::extract::RawPathParams,
+        query: &std::collections::HashMap<String, String>,
+    ) -> Result<Self, axum::response::Redirect> {
+        Ok(Self {
+            over: crate::drawn::tests_over(query),
+        })
+    }
+
+    fn here(&self) -> String {
+        PATH.to_owned()
+    }
+
+    fn over(&self) -> Option<Over> {
+        Some(self.over)
+    }
+
+    async fn read(
+        &self,
+        store: &configurator::store::Store,
+        zone: &domain::normalised::OperatorZone,
+    ) -> Result<Self::Read, crate::drawn::Unreadable> {
+        let page = configurator::ftp_tests::Page::open(store, zone).await?;
+        Ok((
+            page.tests().await?,
+            page.heart_rates().await?,
+            page.ranges().await?,
+        ))
+    }
+
+    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
+        match read {
+            Ok((tests, heart_rates, ranges)) => page(&tests, &heart_rates, &ranges, self.over),
+            Err(error) => unreadable(error.as_str()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use domain::{
@@ -446,7 +488,7 @@ mod tests {
     }
 
     fn shown(tests: &[Test], over: Over) -> String {
-        page(tests, &[], &ranges(), over, &crate::run::View::default()).into_string()
+        page(tests, &[], &ranges(), over).into_string()
     }
 
     #[test]
@@ -551,7 +593,6 @@ mod tests {
             &rates,
             &ranges(),
             Over::Macrocycle,
-            &crate::run::View::default(),
         )
         .into_string();
         assert!(page.contains("Heart rate in the test"), "{page}");
@@ -587,7 +628,7 @@ mod tests {
 
     #[test]
     fn no_tests_is_said_rather_than_drawn() {
-        let page = page(&[], &[], &ranges(), Over::All, &crate::run::View::default()).into_string();
+        let page = page(&[], &[], &ranges(), Over::All).into_string();
         assert!(page.contains("No FTP test has been recorded."));
         assert!(!page.contains(r#"class="dot""#));
     }

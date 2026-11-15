@@ -59,13 +59,13 @@ use application::StoreError;
 use jiff::Timestamp;
 use sqlx::SqlitePool;
 
-use super::store_error;
+use super::{authoring::Authoring, store_error};
 use crate::peloton::{ClassSession, ClassSummary, class};
 
 /// Peloton's class library, as this store holds it.
 #[derive(Debug, Clone)]
 pub struct SqlitePelotonClassStore {
-    pool: SqlitePool,
+    store: Authoring,
 }
 
 /// What the catalogue holds, for the one line `fitness next` prints.
@@ -99,7 +99,9 @@ impl Held {
 
 impl SqlitePelotonClassStore {
     pub const fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            store: Authoring::new(pool),
+        }
     }
 
     /// Record what the browse walk listed, and say how many were new.
@@ -114,14 +116,12 @@ impl SqlitePelotonClassStore {
     /// [`StoreError`] if the store is unavailable.
     pub async fn record_listed(&self, classes: &[ClassSummary]) -> Result<u64, StoreError> {
         let listed_at = Timestamp::now().to_string();
-        let mut transaction = super::writing(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
+        let mut transaction = self.store.writing::<Self>().await?;
         // **Counted, not inferred.** An upsert reports one row affected
         // whether it inserted or updated, so how many were new is the
         // difference the whole batch made to the table.
         let before = sqlx::query!(r#"SELECT COUNT(*) AS "held!: i64" FROM peloton_class"#)
-            .fetch_one(&mut *transaction)
+            .fetch_one(&mut **transaction)
             .await
             .map_err(|error| store_error(&error))?
             .held;
@@ -148,19 +148,16 @@ impl SqlitePelotonClassStore {
                 found.aired_at,
                 listed_at,
             )
-            .execute(&mut *transaction)
+            .execute(&mut **transaction)
             .await
             .map_err(|error| store_error(&error))?;
         }
         let after = sqlx::query!(r#"SELECT COUNT(*) AS "held!: i64" FROM peloton_class"#)
-            .fetch_one(&mut *transaction)
+            .fetch_one(&mut **transaction)
             .await
             .map_err(|error| store_error(&error))?
             .held;
-        transaction
-            .commit()
-            .await
-            .map_err(|error| store_error(&error))?;
+        transaction.commit().await?;
         Ok(u64::try_from(after - before).unwrap_or_default())
     }
 
@@ -190,7 +187,7 @@ impl SqlitePelotonClassStore {
              ORDER BY aired_at DESC NULLS LAST, reference ASC
             "#,
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
         Ok(rows.into_iter().map(|row| row.reference).collect())
@@ -214,9 +211,7 @@ impl SqlitePelotonClassStore {
     /// [`StoreError`] if the store is unavailable.
     pub async fn record_not_served(&self, reference: &str) -> Result<(), StoreError> {
         let now = Timestamp::now().to_string();
-        let mut transaction = super::writing(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
+        let mut transaction = self.store.writing::<Self>().await?;
         sqlx::query!(
             r#"
             INSERT INTO peloton_class (reference, title, duration, listed_at)
@@ -227,7 +222,7 @@ impl SqlitePelotonClassStore {
             reference,
             now,
         )
-        .execute(&mut *transaction)
+        .execute(&mut **transaction)
         .await
         .map_err(|error| store_error(&error))?;
         sqlx::query!(
@@ -239,13 +234,10 @@ impl SqlitePelotonClassStore {
             now,
             reference,
         )
-        .execute(&mut *transaction)
+        .execute(&mut **transaction)
         .await
         .map_err(|error| store_error(&error))?;
-        transaction
-            .commit()
-            .await
-            .map_err(|error| store_error(&error))?;
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -278,9 +270,7 @@ impl SqlitePelotonClassStore {
     ) -> Result<(), StoreError> {
         let now = Timestamp::now().to_string();
         let duration = i64::try_from(duration_seconds).unwrap_or(i64::MAX).max(1);
-        let mut transaction = super::writing(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
+        let mut transaction = self.store.writing::<Self>().await?;
         sqlx::query!(
             r#"
             INSERT INTO peloton_class (reference, title, duration, listed_at)
@@ -292,7 +282,7 @@ impl SqlitePelotonClassStore {
             duration,
             now,
         )
-        .execute(&mut *transaction)
+        .execute(&mut **transaction)
         .await
         .map_err(|error| store_error(&error))?;
         sqlx::query!(
@@ -305,13 +295,10 @@ impl SqlitePelotonClassStore {
             now,
             reference,
         )
-        .execute(&mut *transaction)
+        .execute(&mut **transaction)
         .await
         .map_err(|error| store_error(&error))?;
-        transaction
-            .commit()
-            .await
-            .map_err(|error| store_error(&error))?;
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -338,7 +325,7 @@ impl SqlitePelotonClassStore {
             "#,
             reference,
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
         Ok(row.is_some_and(|row| row.accounted != 0))
@@ -360,7 +347,7 @@ impl SqlitePelotonClassStore {
               FROM peloton_class
             "#,
         )
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
         let last_listed = row
@@ -401,7 +388,7 @@ impl SqlitePelotonClassStore {
             "#,
             reference,
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?
         else {
@@ -448,7 +435,7 @@ impl SqlitePelotonClassStore {
             series,
             duration,
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
         Ok(rows
@@ -471,5 +458,14 @@ impl application::Input for SqlitePelotonClassStore {
         application::Reads::of([application::Node::Generation(
             application::Generation::Classes,
         )])
+    }
+}
+
+impl application::Authors for SqlitePelotonClassStore {
+    fn authors() -> std::collections::BTreeSet<application::Node> {
+        [application::Node::Generation(
+            application::Generation::Classes,
+        )]
+        .into()
     }
 }

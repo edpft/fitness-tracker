@@ -23,6 +23,7 @@
 
 use std::collections::BTreeMap;
 
+use super::authoring::Authoring;
 use application::{CyclingMesocycleStore, StoreError};
 use domain::{
     cycling::{
@@ -36,19 +37,21 @@ use domain::{
     sequence::NonEmpty,
 };
 use jiff::civil::Date;
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 
 use super::{corrupt, store_error};
 
 /// The authored cycling side, in SQLite.
 #[derive(Debug, Clone)]
 pub struct SqliteCyclingMesocycleStore {
-    pool: SqlitePool,
+    store: Authoring,
 }
 
 impl SqliteCyclingMesocycleStore {
     pub const fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            store: Authoring::new(pool),
+        }
     }
 }
 
@@ -57,7 +60,7 @@ impl SqliteCyclingMesocycleStore {
 /// **One query for two readers**, for the reason `gym_mesocycle::in_force` gives:
 /// the plan store groups these by plan and the mesocycle store reads them flat.
 pub(super) async fn in_force(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
 ) -> Result<Vec<(i64, PlanName, CyclingMesocycleId, CyclingMesocycle)>, StoreError> {
     let rows = sqlx::query!(
         r#"
@@ -75,7 +78,7 @@ pub(super) async fn in_force(
         ORDER BY m.start_date ASC, m.id ASC
         "#
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
 
@@ -110,7 +113,7 @@ pub(super) async fn in_force(
             .parse::<Date>()
             .map_err(|_| corrupt(&"a start date that is not a date"))?;
 
-        let microcycles = read_microcycles(pool, row.id).await?;
+        let microcycles = read_microcycles(&mut *conn, row.id).await?;
         let microcycles = NonEmpty::new(microcycles)
             .map_err(|_| corrupt(&"a cycling mesocycle with no microcycle in it"))?;
         let mesocycle = CyclingMesocycle::new(provenance, start, microcycles)
@@ -127,7 +130,7 @@ fn role_of(intensity: &str, volume: &str) -> Result<SessionRole, StoreError> {
 }
 
 async fn read_microcycles(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     id: i64,
 ) -> Result<Vec<CyclingMicrocycle>, StoreError> {
     let rows = sqlx::query!(
@@ -139,7 +142,7 @@ async fn read_microcycles(
         "#,
         id
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
 
@@ -147,14 +150,14 @@ async fn read_microcycles(
     for row in rows {
         // The published week is the rides', not the microcycle's: it was a
         // column here until 2026-09-20 and a second place for one fact.
-        let rides = read_rides(pool, id, row.ordinal).await?;
+        let rides = read_rides(&mut *conn, id, row.ordinal).await?;
         microcycles.push(CyclingMicrocycle::new(rides).map_err(|error| corrupt(&error))?);
     }
     Ok(microcycles)
 }
 
 async fn read_rides(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     id: i64,
     microcycle: i64,
 ) -> Result<BTreeMap<SessionPosition, PlannedRide>, StoreError> {
@@ -175,7 +178,7 @@ async fn read_rides(
         id,
         microcycle
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
 
@@ -183,7 +186,7 @@ async fn read_rides(
     for row in rows {
         let warm_up = duration_of(row.warm_up_seconds)?;
         let cool_down = row.cool_down_seconds.map(duration_of).transpose()?;
-        let intervals = read_intervals(pool, id, microcycle, row.session).await?;
+        let intervals = read_intervals(&mut *conn, id, microcycle, row.session).await?;
 
         // A ride is intervals or an effort, and never both. The `CHECK` can see
         // one half of that and this is the other: only a reader can count the
@@ -202,7 +205,7 @@ async fn read_rides(
         };
 
         let session = domain::cycling::CyclingSession::new(warm_up, ride, cool_down);
-        let venues = read_venues(pool, id, microcycle, row.session).await?;
+        let venues = read_venues(&mut *conn, id, microcycle, row.session).await?;
         let role = role_of(&row.intensity, &row.volume)?;
 
         // Both columns or neither, which the `CHECK` also says: "µ5 session 3"
@@ -222,7 +225,7 @@ async fn read_rides(
 }
 
 async fn read_intervals(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     id: i64,
     microcycle: i64,
     session: i64,
@@ -238,7 +241,7 @@ async fn read_intervals(
         microcycle,
         session
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
 
@@ -254,7 +257,7 @@ async fn read_intervals(
 }
 
 async fn read_venues(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     id: i64,
     microcycle: i64,
     session: i64,
@@ -270,7 +273,7 @@ async fn read_venues(
         microcycle,
         session
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| store_error(&error))?;
 
@@ -315,7 +318,7 @@ impl CyclingMesocycleStore for SqliteCyclingMesocycleStore {
         &self,
         date: Date,
     ) -> Result<Option<(CyclingMesocycleId, PlanName, CyclingMesocycle)>, StoreError> {
-        Ok(in_force(&self.pool)
+        Ok(in_force(&mut *self.store.reading().await?)
             .await?
             .into_iter()
             .find(|(_, _, _, mesocycle)| mesocycle.span().covers(date))
@@ -328,7 +331,7 @@ impl CyclingMesocycleStore for SqliteCyclingMesocycleStore {
     ) -> Result<Option<(CyclingMesocycleId, PlanName, CyclingMesocycle)>, StoreError> {
         // Ordered by start, so the first one beginning after the date is the
         // next in the sequence.
-        Ok(in_force(&self.pool)
+        Ok(in_force(&mut *self.store.reading().await?)
             .await?
             .into_iter()
             .find(|(_, _, _, mesocycle)| mesocycle.start() > date)
@@ -500,5 +503,11 @@ async fn write_ride(
 impl application::Input for SqliteCyclingMesocycleStore {
     fn reads() -> application::Reads {
         application::Reads::of([application::Node::PLAN])
+    }
+}
+
+impl application::Authors for SqliteCyclingMesocycleStore {
+    fn authors() -> std::collections::BTreeSet<application::Node> {
+        [application::Node::PLAN].into()
     }
 }

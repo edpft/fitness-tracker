@@ -16,6 +16,7 @@
 //! nothing: the gym programme *is* the `gym_mesocycle` rows under a plan, in
 //! `ordinal` order.
 
+use super::authoring::Authoring;
 use application::{PlanStore, StoreError};
 use domain::{
     cycling::CyclingMesocycle,
@@ -32,7 +33,7 @@ use super::{corrupt, cycling_mesocycle, gym_mesocycle, store_error};
 /// The authored plan, in SQLite.
 #[derive(Debug, Clone)]
 pub struct SqlitePlanStore {
-    pool: SqlitePool,
+    store: Authoring,
     /// The zone the operator declares they train in.
     ///
     /// Configuration rather than plan data, so it is supplied here and not read
@@ -42,7 +43,10 @@ pub struct SqlitePlanStore {
 
 impl SqlitePlanStore {
     pub const fn new(pool: SqlitePool, zone: OperatorZone) -> Self {
-        Self { pool, zone }
+        Self {
+            store: Authoring::new(pool),
+            zone,
+        }
     }
 
     /// Every plan in force, with both its programmes.
@@ -64,12 +68,12 @@ impl SqlitePlanStore {
             ORDER BY id ASC
             "#
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?;
 
-        let gym = gym_mesocycle::in_force(&self.pool, &self.zone).await?;
-        let cycling = cycling_mesocycle::in_force(&self.pool).await?;
+        let gym = gym_mesocycle::in_force(&mut *self.store.reading().await?, &self.zone).await?;
+        let cycling = cycling_mesocycle::in_force(&mut *self.store.reading().await?).await?;
 
         let mut plans = Vec::with_capacity(rows.len());
         for row in rows {
@@ -138,9 +142,7 @@ impl PlanStore for SqlitePlanStore {
     }
 
     async fn author(&self, plan: &Plan) -> Result<PlanId, StoreError> {
-        let mut tx = super::writing(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
+        let mut tx = self.store.writing::<Self>().await?;
 
         let name = plan.name().to_string();
         let authored_at = plan.authored_at().to_string();
@@ -155,7 +157,7 @@ impl PlanStore for SqlitePlanStore {
             authored_at,
             chain
         )
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?
         .id;
@@ -171,7 +173,7 @@ impl PlanStore for SqlitePlanStore {
             }
         }
 
-        tx.commit().await.map_err(|error| store_error(&error))?;
+        tx.commit().await?;
         Ok(PlanId::new(id))
     }
 
@@ -181,9 +183,7 @@ impl PlanStore for SqlitePlanStore {
         gym: &[GymMesocycle],
         cycling: &[CyclingMesocycle],
     ) -> Result<(), StoreError> {
-        let mut tx = super::writing(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
+        let mut tx = self.store.writing::<Self>().await?;
 
         let name = plan.to_string();
         let found = sqlx::query!(
@@ -200,7 +200,7 @@ impl PlanStore for SqlitePlanStore {
             "#,
             name
         )
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?
         .ok_or_else(|| corrupt(&format!("no plan is authored under {plan}")))?;
@@ -216,7 +216,7 @@ impl PlanStore for SqlitePlanStore {
             cycling_mesocycle::write(&mut tx, found.id, ordinal, mesocycle).await?;
         }
 
-        tx.commit().await.map_err(|error| store_error(&error))
+        tx.commit().await
     }
 
     async fn completed(&self, plan: &PlanName) -> Result<Option<Completed>, StoreError> {
@@ -230,7 +230,7 @@ impl PlanStore for SqlitePlanStore {
             "#,
             name
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?
         else {
@@ -246,7 +246,7 @@ impl PlanStore for SqlitePlanStore {
             "#,
             found.plan
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *self.store.reading().await?)
         .await
         .map_err(|error| store_error(&error))?
         .into_iter()
@@ -266,9 +266,7 @@ impl PlanStore for SqlitePlanStore {
     }
 
     async fn complete(&self, plan: &PlanName, completed: &Completed) -> Result<(), StoreError> {
-        let mut tx = super::writing(&self.pool)
-            .await
-            .map_err(|error| store_error(&error))?;
+        let mut tx = self.store.writing::<Self>().await?;
 
         let name = plan.to_string();
         let id = sqlx::query!(
@@ -278,14 +276,14 @@ impl PlanStore for SqlitePlanStore {
             "#,
             name
         )
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?
         .ok_or_else(|| corrupt(&format!("no plan is authored under {plan}")))?
         .id;
 
         sqlx::query!("DELETE FROM plan_completion WHERE plan = ?", id)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|error| store_error(&error))?;
         let through = completed.through().to_string();
@@ -294,7 +292,7 @@ impl PlanStore for SqlitePlanStore {
             id,
             through
         )
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
         for rerun in completed.reruns() {
@@ -306,12 +304,12 @@ impl PlanStore for SqlitePlanStore {
                 monday,
                 holding
             )
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|error| store_error(&error))?;
         }
 
-        tx.commit().await.map_err(|error| store_error(&error))
+        tx.commit().await
     }
 }
 
@@ -331,5 +329,11 @@ fn ordinal(at: usize) -> Result<i64, StoreError> {
 impl application::Input for SqlitePlanStore {
     fn reads() -> application::Reads {
         application::Reads::of([application::Node::PLAN])
+    }
+}
+
+impl application::Authors for SqlitePlanStore {
+    fn authors() -> std::collections::BTreeSet<application::Node> {
+        [application::Node::PLAN].into()
     }
 }
