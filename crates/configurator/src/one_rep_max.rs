@@ -29,6 +29,16 @@ pub(crate) type Estimated = EstimatedOneRepMax<
     Plans,
 >;
 
+/// Each lift's 1RM tests and estimates, read once for both (#817).
+pub(crate) type Strength = application::one_rep_max::Strength<
+    Rts,
+    Spanned<SqlitePerformances>,
+    Spanned<SqliteCanonicalWeighInStore>,
+    Plans,
+    Spanned<SqlitePlanStore>,
+    Spanned<SqlitePrescribedWorkoutStore>,
+>;
+
 /// Each lift's 1RM tests (#517).
 pub(crate) type Tests = OneRepMaxTests<
     Rts,

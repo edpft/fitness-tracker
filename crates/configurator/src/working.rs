@@ -5,6 +5,7 @@ use application::{
     StoreError,
     heart_rate::RideHeartRates,
     next::Scope,
+    one_rep_max::Strength,
     working::{IsItWorking, Readings, View},
 };
 use domain::normalised::OperatorZone;
@@ -43,8 +44,7 @@ page! {
             Plans,
         >,
         ftp: ftp_tests::Tests,
-        strength: one_rep_max::Tests,
-        estimated: one_rep_max::Estimated,
+        strength: one_rep_max::Strength,
         rides: RideHeartRates<
             Spanned<SqliteCanonicalCyclingSessionStore>,
             Spanned<SqliteFtpHistory>,
@@ -89,8 +89,11 @@ impl Page {
             )
             .into(),
             ftp: ftp_tests::over(store).into(),
-            strength: one_rep_max::tests(store, zone).into(),
-            estimated: one_rep_max::estimated(store, plans.clone()).into(),
+            strength: Strength::new(
+                one_rep_max::estimated(store, plans.clone()),
+                one_rep_max::tests(store, zone),
+            )
+            .into(),
             rides: RideHeartRates::new(
                 store.adapter(SqliteCanonicalCyclingSessionStore::new),
                 store.adapter(SqliteFtpHistory::new),
@@ -113,8 +116,8 @@ impl Page {
     pub async fn view(&self) -> Result<View, StoreError> {
         let today = self.today.date();
         let ftp = read!(self.ftp.tests()).await?;
-        let strength = read!(self.strength.tests(today)).await?;
-        let estimated = read!(self.estimated.view(today)).await?.lifts;
+        let (strength, estimated) = read!(self.strength.read(today)).await?;
+        let estimated = estimated.lifts;
         let at_power =
             domain::analytical::heart_rate_at_power::trended(&read!(self.rides.rides()).await?);
         let weight = read!(self.weight.series()).await?;
