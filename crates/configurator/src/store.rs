@@ -52,6 +52,13 @@ pub struct Store {
 }
 
 impl Store {
+    /// Close every connection, waiting for each to finish (#817): what a
+    /// command does last, so that each span its work opened has closed while
+    /// the telemetry is still being recorded.
+    pub async fn close(&self) {
+        self.pool.close().await;
+    }
+
     /// Open the store at a path, creating it if it is not there.
     ///
     /// # Errors
