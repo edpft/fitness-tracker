@@ -1,8 +1,6 @@
 //! Every padel match, read back for History (#772).
 
-use application::{
-    Activities, PlayedPadelMatch, PlayedPadelMatches, StoreError, history::Activity,
-};
+use application::{Activities, Activity, PlayedPadelMatch, PlayedPadelMatches, StoreError};
 use domain::{
     canonical::Occurred,
     measure::{BeatsPerMinute, HeartRateSummary, PositiveDuration},

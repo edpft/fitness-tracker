@@ -380,7 +380,7 @@ impl application::Activities for SqliteCanonicalCyclingSessionStore {
         &self,
         from: Date,
         to: Date,
-    ) -> Result<Vec<(Occurred, application::history::Activity)>, StoreError> {
+    ) -> Result<Vec<(Occurred, application::Activity)>, StoreError> {
         let (lower, upper) = super::canonical_gym::widened(from, to)?;
         // A bare `zone` beside `MIN(started_at_utc)` is the first ride's:
         // SQLite takes a bare column from the row the `MIN` chose.
@@ -413,7 +413,7 @@ impl application::Activities for SqliteCanonicalCyclingSessionStore {
             }
             read.push((
                 Occurred::At(started_at),
-                application::history::Activity::Cycling {
+                application::Activity::Cycling {
                     length: Duration::from_seconds(
                         u64::try_from(row.length).map_err(|e| corrupt(&e))?,
                     ),

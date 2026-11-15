@@ -23,12 +23,7 @@
 //! history but that shouldn't mean that it queries the whole history every time
 //! I open the page."* Opening one reads the whole of it ([`opened`]).
 
-use domain::{
-    canonical::Occurred,
-    cycling::Watts,
-    gym::exercise::RepsExercise,
-    measure::{BeatsPerMinute, Duration, PositiveDuration},
-};
+use domain::{canonical::Occurred, gym::exercise::RepsExercise};
 use jiff::{Span, Timestamp, civil::Date};
 
 use crate::{error::StoreError, ports::Activities};
@@ -41,44 +36,7 @@ const DAYS: usize = 20;
 /// How far back each read reaches while a page has fewer than [`DAYS`].
 const WEEKS: i64 = 8;
 
-/// One activity, as the list shows it: enough of it to recognise it by.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Activity {
-    /// A gym session, and the lifts whose 1RM it tested.
-    ///
-    /// **No length where no source stated one**: a session only his
-    /// spreadsheets recorded is dated to a day, and nothing says when it began
-    /// or ended.
-    Gym {
-        length: Option<PositiveDuration>,
-        exercises: usize,
-        sets: usize,
-        heart_rate: Option<BeatsPerMinute>,
-        tested: Vec<RepsExercise>,
-    },
-    /// A cycling session: every ride of it, and its working ride's power.
-    Cycling {
-        length: Duration,
-        power: Watts,
-        test: bool,
-    },
-    Padel {
-        length: PositiveDuration,
-        heart_rate: Option<BeatsPerMinute>,
-    },
-}
-
-impl Activity {
-    /// Whether it was a test: an FTP test, or a gym session that tested a
-    /// lift's 1RM.
-    pub const fn is_test(&self) -> bool {
-        match self {
-            Self::Gym { tested, .. } => !tested.is_empty(),
-            Self::Cycling { test, .. } => *test,
-            Self::Padel { .. } => false,
-        }
-    }
-}
+pub use crate::ports::Activity;
 
 /// One day's activities, and where each is opened.
 #[derive(Debug, Clone, PartialEq, Eq)]

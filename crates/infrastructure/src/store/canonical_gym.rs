@@ -329,7 +329,7 @@ impl application::Activities for SqliteCanonicalGymSessionStore {
         &self,
         from: Date,
         to: Date,
-    ) -> Result<Vec<(Occurred, application::history::Activity)>, StoreError> {
+    ) -> Result<Vec<(Occurred, application::Activity)>, StoreError> {
         let (lower, upper) = widened(from, to)?;
         let rows = sqlx::query!(
             r#"
@@ -368,7 +368,7 @@ impl application::Activities for SqliteCanonicalGymSessionStore {
                 .transpose()?;
             read.push((
                 occurred,
-                application::history::Activity::Gym {
+                application::Activity::Gym {
                     length,
                     exercises: usize::try_from(row.exercises).map_err(|e| corrupt(&e))?,
                     sets: usize::try_from(row.sets).map_err(|e| corrupt(&e))?,

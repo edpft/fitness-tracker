@@ -25,7 +25,7 @@ use domain::body::{CanonicalWeighIn, WeighInAccount, WeighInCount};
 use domain::canonical::{Occurred, Reach, SessionCount};
 use domain::cycling::{
     CanonicalBikePlusRide, CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId,
-    CyclingSession, DeliveredRide, Ftp, PublishedProgramme, RideVenue,
+    CyclingSession, DeliveredRide, Ftp, PublishedProgramme, RideVenue, Watts,
 };
 use domain::gym::{CanonicalGymSession, NormalisedGymSession, Performance, exercise::RepsExercise};
 use domain::landing::{
@@ -33,7 +33,7 @@ use domain::landing::{
     LandingStream, PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome,
     SourceRecordId, Watermark,
 };
-use domain::measure::PositiveDuration;
+use domain::measure::{BeatsPerMinute, Duration, PositiveDuration};
 use domain::normalised::{
     NormalisationOutcome, NormalisationRun, NormalisationRunId, Refusal, RefusalCount, RefusalKind,
     RefusalReason, StartedAt, StatedZones, WorkoutCount,
@@ -1630,6 +1630,45 @@ pub trait PlayedPadelMatches {
     ) -> impl Future<Output = Result<Vec<PlayedPadelMatch>, StoreError>> + Send;
 }
 
+/// One activity, as the list shows it: enough of it to recognise it by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Activity {
+    /// A gym session, and the lifts whose 1RM it tested.
+    ///
+    /// **No length where no source stated one**: a session only his
+    /// spreadsheets recorded is dated to a day, and nothing says when it began
+    /// or ended.
+    Gym {
+        length: Option<PositiveDuration>,
+        exercises: usize,
+        sets: usize,
+        heart_rate: Option<BeatsPerMinute>,
+        tested: Vec<RepsExercise>,
+    },
+    /// A cycling session: every ride of it, and its working ride's power.
+    Cycling {
+        length: Duration,
+        power: Watts,
+        test: bool,
+    },
+    Padel {
+        length: PositiveDuration,
+        heart_rate: Option<BeatsPerMinute>,
+    },
+}
+
+impl Activity {
+    /// Whether it was a test: an FTP test, or a gym session that tested a
+    /// lift's 1RM.
+    pub const fn is_test(&self) -> bool {
+        match self {
+            Self::Gym { tested, .. } => !tested.is_empty(),
+            Self::Cycling { test, .. } => *test,
+            Self::Padel { .. } => false,
+        }
+    }
+}
+
 /// The activities of one kind, each as History lists it (#817).
 ///
 /// **What the list shows, asked for in one query**: a gym session's counts
@@ -1647,7 +1686,7 @@ pub trait Activities {
         &self,
         from: Date,
         to: Date,
-    ) -> impl Future<Output = Result<Vec<(Occurred, crate::history::Activity)>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Vec<(Occurred, Activity)>, StoreError>> + Send;
 
     /// The day of the first activity the record holds, `None` where it holds
     /// none.

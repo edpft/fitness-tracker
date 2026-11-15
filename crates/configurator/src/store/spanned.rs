@@ -274,7 +274,7 @@ spanned! {
 
 spanned! {
     Activities {
-        fn between(&self, from: Date, to: Date) -> Result<Vec<(Occurred, application::history::Activity)>, StoreError>;
+        fn between(&self, from: Date, to: Date) -> Result<Vec<(Occurred, application::Activity)>, StoreError>;
         fn first(&self) -> Result<Option<Date>, StoreError>;
     }
 }
