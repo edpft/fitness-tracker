@@ -234,9 +234,9 @@ impl NormalisedEntityStore for SqliteGymSessionStore {
 /// makes the whole row stale.
 ///
 /// So re-deriving a gym stream leaves no canonical layer until
-/// `fitness canonicalise gym` builds it again. `fitness next` and
-/// `fitness gym strength` run both steps; the plumbing commands are the
-/// operator's to sequence, as they are for every other derivation.
+/// `fitness canonicalise gym` builds it again. `fitness next` runs both steps;
+/// the plumbing commands are the operator's to sequence, as they are for every
+/// other derivation.
 pub(super) async fn clear_stream(
     tx: &mut Transaction<'_, Sqlite>,
     stream: &str,

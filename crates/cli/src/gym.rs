@@ -27,15 +27,12 @@
 //! and `deliver` sends only into a place it does not already hold (0022).
 
 use crate::{
-    Failure, catalogue, catalogue::KnownDiscipline, config::SourceAccess, output, prescribing,
-    wiring, wiring::Command,
+    Failure, catalogue::KnownDiscipline, config::SourceAccess, output, prescribing, wiring,
+    wiring::Command,
 };
-use application::{Rederivation, strength::RelativeStrength};
+use application::Rederivation;
 use configurator::store::Store;
-use domain::{
-    analytical::Rts,
-    normalised::{OperatorZone, StartedAt},
-};
+use domain::normalised::OperatorZone;
 
 /// Run the discipline's daily loop: collect, derive, prescribe, deliver.
 ///
@@ -106,78 +103,6 @@ pub async fn next(
         credentials,
     )
     .await
-}
-
-/// Where body weight comes from. The one stream this report reads that the
-/// discipline does not collect.
-const WEIGH_INS: &str = "withings.measurements";
-
-/// Relative strength, against a record brought up to date first.
-///
-/// **A source that cannot be reached is reported and stepped past.** The figure
-/// reads what is landed, so an unreachable scale costs the newest weigh-ins
-/// rather than the whole report (§ 36); the note says so. Deriving is not
-/// stepped past: it contacts nothing, so a failure there is a real one.
-///
-/// **Over every gym visit the record holds**, not one source's: the sessions come
-/// from the canonical layer, so the figures run from 2016 rather than from the
-/// first session in the source still in use.
-pub async fn strength(
-    discipline: &KnownDiscipline,
-    store: &Store,
-    zone: &OperatorZone,
-    credentials: &configurator::Credentials,
-) -> Result<(), Failure> {
-    let weigh_ins = catalogue::lookup(WEIGH_INS).ok_or_else(|| {
-        Failure::message(
-            format!("this build does not collect {WEIGH_INS}"),
-            crate::exit::USAGE,
-        )
-    })?;
-
-    for known in [discipline.collects(), weigh_ins] {
-        let stream = known
-            .landing_stream()
-            .map_err(|error| Failure::usage(&error))?;
-
-        output::run_started(&stream);
-        let collected = match crate::source_access(known, None, credentials) {
-            Ok(access) => crate::carry_out(Command::Extract(access), known, store, &stream)
-                .await
-                .map_err(Failure::from),
-            Err(failure) => Err(failure),
-        };
-        match collected {
-            Ok(outcome) => report(&stream, outcome),
-            Err(failure) => output::not_collected(&stream, failure.message_text()),
-        }
-
-        output::derivation_started(&stream);
-        let derived = crate::carry_out(
-            Command::Normalise(zone.clone(), Rederivation::Incremental),
-            known,
-            store,
-            &stream,
-        )
-        .await?;
-        report(&stream, derived);
-    }
-
-    // The report reads the canonical layer, which is a derivation of what the
-    // loop above has just re-derived (#350, #409).
-    crate::canonicalise::gym(store).await?;
-    crate::canonicalise::body_weight(store).await?;
-    println!();
-
-    let figures = RelativeStrength::new(Rts, store.performances(), store.weigh_ins())
-        .report(
-            StartedAt::new(jiff::Timestamp::now(), zone.clone())
-                .wall_clock()
-                .date(),
-        )
-        .await?;
-    output::strength(&figures);
-    Ok(())
 }
 
 /// The two outcomes this loop can produce, printed as the plumbing prints them.

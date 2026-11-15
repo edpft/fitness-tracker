@@ -49,7 +49,6 @@ pub mod reschedule;
 pub mod schedule;
 pub mod sleep;
 pub mod status;
-pub mod strength;
 pub mod working;
 
 /// What a port reads is part of the port (#809).

@@ -1468,8 +1468,7 @@ pub trait Performances {
 /// operate on the session entire — its items, its groupings, its ordering.
 ///
 /// **Canonical, not one source's** (§ 5). A visit is one session here however
-/// many sources recorded it, which is what makes the relative-strength report
-/// reach back past the first source still in use.
+/// many sources recorded it.
 ///
 /// **Named for what it holds rather than for Hevy's word.** This was
 /// `PerformedWorkoutReader` and returned one source's workouts; § 3.1 made the

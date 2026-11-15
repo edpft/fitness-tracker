@@ -293,14 +293,6 @@ fn discipline_command() -> ClapCommand {
                  Defaults to <SOURCE>_API_BASE_URL, then to the built-in root",
             )),
     );
-    command = command.subcommand(
-        ClapCommand::new("strength")
-            .about(
-                "Collect and derive the gym and the scale, then report estimated \
-                 one-rep maximum over body weight for the headline lifts, per session",
-            )
-            .arg(timezone_argument()),
-    );
     command = command.subcommand(corrections_command());
     command = command.subcommand(ClapCommand::new("templates").about(
         "Create on the Hevy account the templates for exercises Hevy does not have, \
@@ -1136,13 +1128,6 @@ async fn discipline_command_run(
             exit::USAGE,
         ));
     };
-    if let Some(("strength", strength)) = sub.subcommand() {
-        let zone = config::timezone(
-            strength.get_one::<String>("timezone").map(String::as_str),
-            stated_timezone,
-        )?;
-        return gym::strength(discipline, store, &zone, credentials).await;
-    }
     if let Some(("corrections", corrections)) = sub.subcommand() {
         return corrections_run(corrections, stated_timezone, store).await;
     }

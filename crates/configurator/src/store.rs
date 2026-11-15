@@ -26,19 +26,18 @@ use application::next::Canonicalising;
 use application::{
     CanonicalGymSessionStore, CyclingDeliveryStore, DiaryAuthor, DiaryStore, EquipmentStore,
     ExerciseHistory, FillChangeStore, FtpHistory, GenerationParameterStore, MesocycleStore,
-    Performances, PerformedGymSessions, PerformedSessionLog, PlanStore, PrescribedWorkoutStore,
+    PerformedGymSessions, PerformedSessionLog, PlanStore, PrescribedWorkoutStore,
     PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore, RiddenSessionLog,
-    RiddenVenues, StoreError, WeighInHistory, WorkoutStore,
+    RiddenVenues, StoreError, WorkoutStore,
 };
 use domain::normalised::OperatorZone;
 use infrastructure::{
     FileRunLock, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
-    SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteDerivationLedger,
-    SqliteDiaryStore, SqliteEquipmentStore, SqliteExerciseHistory, SqliteFtpHistory,
-    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteKeptDrawings,
-    SqliteOperatorSettingsStore, SqlitePelotonClassStore, SqlitePerformances, SqlitePlanStore,
-    SqlitePool, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRevisions,
-    connect,
+    SqliteCyclingDeliveryStore, SqliteDerivationLedger, SqliteDiaryStore, SqliteEquipmentStore,
+    SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
+    SqliteGymMesocycleStore, SqliteKeptDrawings, SqliteOperatorSettingsStore,
+    SqlitePelotonClassStore, SqlitePlanStore, SqlitePool, SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore, SqliteRevisions, connect,
 };
 
 /// The operator's store, opened.
@@ -208,11 +207,6 @@ impl Store {
         self.adapter(SqliteCanonicalGymSessionStore::new)
     }
 
-    /// The performances of some lifts over some days (#817).
-    pub fn performances(&self) -> impl Performances + Send + Sync + use<> {
-        self.adapter(SqlitePerformances::new)
-    }
-
     /// Rebuilding each canonical layer from the normalised ones, logged, each
     /// rebuild a `step` span (#631).
     #[must_use]
@@ -236,12 +230,6 @@ impl Store {
     #[must_use]
     pub fn ftp(&self) -> impl FtpHistory + Send + Sync + use<> {
         self.adapter(SqliteFtpHistory::new)
-    }
-
-    /// Body weight, one weigh-in per weighing.
-    #[must_use]
-    pub fn weigh_ins(&self) -> impl WeighInHistory + Send + Sync + use<> {
-        self.adapter(SqliteCanonicalWeighInStore::new)
     }
 
     /// The zone the operator stated, if they stated one.
