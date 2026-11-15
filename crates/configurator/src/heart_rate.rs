@@ -7,6 +7,7 @@ use domain::{
 };
 use infrastructure::{SqliteCanonicalCyclingSessionStore, SqliteFtpHistory};
 
+use crate::clock::Today;
 use crate::store::Spanned;
 use crate::{
     devices,
@@ -28,13 +29,20 @@ page! {
             Spanned<infrastructure::GarminWear>,
         >,
         ranges: Current,
+        today: Today,
     }
 }
 
 /// The parts a run collecting what the page reads takes.
 #[must_use]
 pub fn collects() -> Scope {
-    crate::graph::collects::<Page>()
+    crate::graph::scope(&reads())
+}
+
+/// What the page reads, and so what its kept drawing is drawn from (#805).
+#[must_use]
+pub fn reads() -> application::graph::Reads {
+    <Page as application::graph::Input>::reads()
 }
 
 impl Page {
@@ -52,6 +60,7 @@ impl Page {
             )
             .into(),
             ranges: ranges::over(store, zone).await?.into(),
+            today: Today::new(zone.clone()).into(),
         })
     }
 
@@ -69,7 +78,8 @@ impl Page {
     /// # Errors
     ///
     /// [`StoreError`] if the store cannot be read.
-    pub async fn ranges(&self, zone: &OperatorZone) -> Result<Ranges, StoreError> {
-        read!(self.ranges, |of| ranges::today(of, zone)).await
+    pub async fn ranges(&self) -> Result<Ranges, StoreError> {
+        let today = self.today.date();
+        read!(self.ranges, |of| of.on(today)).await
     }
 }

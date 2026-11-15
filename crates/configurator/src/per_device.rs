@@ -10,6 +10,7 @@ use infrastructure::{
     GarminRecordedDevices, GarminWear, SqliteOvernightHrvHistory, SqliteRestingHeartRateHistory,
 };
 
+use crate::clock::Today;
 use crate::store::Spanned;
 use crate::{
     devices,
@@ -26,6 +27,7 @@ page! {
     pub struct OvernightHrv {
         nights: PerDevice<Spanned<SqliteOvernightHrvHistory>, (), Spanned<GarminRecordedDevices>, Spanned<GarminWear>>,
         ranges: Current,
+        today: Today,
     }
 }
 
@@ -36,19 +38,32 @@ page! {
     pub struct RestingHeartRate {
         days: PerDevice<(), Spanned<SqliteRestingHeartRateHistory>, Spanned<GarminRecordedDevices>, Spanned<GarminWear>>,
         ranges: Current,
+        today: Today,
     }
 }
 
 /// The parts a run collecting what the overnight HRV page reads takes.
 #[must_use]
 pub fn overnight_hrv_collects() -> Scope {
-    crate::graph::collects::<OvernightHrv>()
+    crate::graph::scope(&overnight_hrv_reads())
+}
+
+/// What the overnight HRV page reads, and so what its kept drawing is drawn from (#805).
+#[must_use]
+pub fn overnight_hrv_reads() -> application::graph::Reads {
+    <OvernightHrv as application::graph::Input>::reads()
 }
 
 /// The parts a run collecting what the resting heart rate page reads takes.
 #[must_use]
 pub fn resting_heart_rate_collects() -> Scope {
-    crate::graph::collects::<RestingHeartRate>()
+    crate::graph::scope(&resting_heart_rate_reads())
+}
+
+/// What the resting heart rate page reads, and so what its kept drawing is drawn from (#805).
+#[must_use]
+pub fn resting_heart_rate_reads() -> application::graph::Reads {
+    <RestingHeartRate as application::graph::Input>::reads()
 }
 
 impl OvernightHrv {
@@ -66,6 +81,7 @@ impl OvernightHrv {
             )
             .into(),
             ranges: ranges::over(store, zone).await?.into(),
+            today: Today::new(zone.clone()).into(),
         })
     }
 
@@ -84,8 +100,9 @@ impl OvernightHrv {
     /// # Errors
     ///
     /// [`StoreError`] if the store cannot be read.
-    pub async fn ranges(&self, zone: &OperatorZone) -> Result<Ranges, StoreError> {
-        read!(self.ranges, |of| ranges::today(of, zone)).await
+    pub async fn ranges(&self) -> Result<Ranges, StoreError> {
+        let today = self.today.date();
+        read!(self.ranges, |of| of.on(today)).await
     }
 }
 
@@ -104,6 +121,7 @@ impl RestingHeartRate {
             )
             .into(),
             ranges: ranges::over(store, zone).await?.into(),
+            today: Today::new(zone.clone()).into(),
         })
     }
 
@@ -122,7 +140,8 @@ impl RestingHeartRate {
     /// # Errors
     ///
     /// [`StoreError`] if the store cannot be read.
-    pub async fn ranges(&self, zone: &OperatorZone) -> Result<Ranges, StoreError> {
-        read!(self.ranges, |of| ranges::today(of, zone)).await
+    pub async fn ranges(&self) -> Result<Ranges, StoreError> {
+        let today = self.today.date();
+        read!(self.ranges, |of| of.on(today)).await
     }
 }

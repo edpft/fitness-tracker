@@ -12,6 +12,7 @@ mod collected;
 mod composition;
 mod curves;
 mod detail;
+mod drawn;
 mod equipment;
 mod ftp;
 mod history;
@@ -37,7 +38,7 @@ use std::{collections::HashMap, convert::Infallible, net::SocketAddr, path::Path
 
 use axum::{
     Form, Router,
-    extract::{Path, Query, RawQuery, Request, State},
+    extract::{Query, RawQuery, Request, State},
     http::{HeaderMap, header},
     middleware::{self, Next},
     response::{
@@ -47,13 +48,12 @@ use axum::{
     routing::get,
 };
 use clap::{Arg, ArgMatches, Command, value_parser};
-use configurator::telemetry::Served;
-use maud::{Markup, PreEscaped};
+use maud::Markup;
 use tokio_stream::{Stream, StreamExt as _, wrappers::WatchStream};
 use tracing::Instrument as _;
 
 use domain::planner::Relative;
-use page::Place;
+use drawn::Pages;
 use run::{Asked, Runs, Setting};
 
 fn main() -> std::process::ExitCode {
@@ -142,6 +142,7 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
         store,
         zone,
         credentials,
+        build: configurator::next::build(),
     }));
     let app = app(runs);
 
@@ -162,33 +163,38 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
 /// **Every route is recorded** (#804), because the layer is on the whole
 /// router: a page added later is recorded without being listed anywhere.
 fn app(runs: Arc<Runs>) -> Router {
-    Router::new()
-        .route("/", get(index))
-        .route(Place::Plan.path(), get(plan_page))
-        .route(at_power::PATH, get(heart_rate))
-        .route(ftp::PATH, get(ftp_tests))
-        .route(body::PATH, get(body_page))
-        .route(pulse_wave_velocity::PATH, get(pulse_wave_velocity_page))
-        .route(hrv::PATH, get(overnight_hrv))
-        .route(resting::PATH, get(resting_heart_rate))
-        .route("/sleep", get(sleep_page))
-        .route(one_rep_max::PATH, get(estimated_one_rep_max))
-        .route(working::PATH, get(is_it_working))
-        .route(progress::PATH, get(progress_page))
-        .route(Place::History.path(), get(history_page))
-        .route("/history/{on}/{number}", get(session_page))
-        .route(body::REPLACED[0], get(to_body))
-        .route(body::REPLACED[1], get(to_body))
-        .route("/equipment", get(equipment_page).post(equipment_post))
-        .route(schedule::HERE, get(schedule_page).post(schedule_post))
-        .route(workout::HERE, get(workout_page).post(workout_post))
-        .route("/run/events", get(events))
-        .route("/run/step", get(step))
-        .route("/htmx.min.js", get(htmx))
-        .route("/sse.min.js", get(sse))
-        .route(page::STYLESHEET, get(stylesheet))
+    pages()
         .with_state(runs)
         .layer(middleware::from_fn(recorded))
+}
+
+/// Every page, each drawn page as its type (#805).
+fn pages() -> Pages {
+    Pages::new()
+        .live("/", get(index))
+        .page::<plan::Page>()
+        .page::<at_power::Page>()
+        .page::<ftp::Page>()
+        .page::<body::Page>()
+        .page::<pulse_wave_velocity::Page>()
+        .page::<hrv::Page>()
+        .page::<resting::Page>()
+        .page::<sleep::Page>()
+        .page::<one_rep_max::Page>()
+        .page::<working::Page>()
+        .page::<progress::Page>()
+        .page::<history::Page>()
+        .page::<history::Opened>()
+        .file(body::REPLACED[0], get(to_body))
+        .file(body::REPLACED[1], get(to_body))
+        .form("/equipment", get(equipment_page).post(equipment_post))
+        .form(schedule::HERE, get(schedule_page).post(schedule_post))
+        .form(workout::HERE, get(workout_page).post(workout_post))
+        .live("/run/events", get(events))
+        .live("/run/step", get(step))
+        .file("/htmx.min.js", get(htmx))
+        .file("/sse.min.js", get(sse))
+        .file(page::STYLESHEET, get(stylesheet))
 }
 
 /// Each page load as a `request` span (#628, #804), whatever it was served.
@@ -219,420 +225,6 @@ async fn opened(runs: &Arc<Runs>, headers: &HeaderMap, asked: Asked) -> run::Vie
     runs.view()
 }
 
-/// What a chart's page asks a run to collect: what it reads.
-fn only(collects: &application::next::Scope) -> Asked {
-    Asked::Only(collects.clone())
-}
-
-/// A chart's page drawn from the store, or while a run is collecting what it
-/// reads, the page as it was last drawn, and the placeholder where it has not
-/// been (#467).
-///
-/// **Asked before the store is read and again after**, so a run that starts
-/// while the page is being drawn is not missed: the read is one snapshot, but
-/// one taken after a layer was emptied and before it was rebuilt.
-///
-/// **The last drawing is kept in the store** (#605), so a page opened just
-/// after `fitness-web` restarts, which is when a run is surest to be going, is
-/// shown at once rather than the placeholder.
-///
-/// **Read, then rendered, as separate arguments** (#804), so the store's
-/// time and the page's are each a span of the load, whichever page it is.
-async fn drawn<T>(
-    runs: &Runs,
-    scope: &application::next::Scope,
-    here: &str,
-    over: Option<domain::analytical::range::Over>,
-    run: &run::View,
-    read: impl AsyncFnOnce(&configurator::store::Store) -> Result<T, Unreadable>,
-    render: impl FnOnce(Result<T, Unreadable>) -> Markup,
-) -> Markup {
-    if let Some(over) = over {
-        configurator::telemetry::ranged(range::name(over));
-    }
-    let address = over.map_or_else(
-        || here.to_owned(),
-        |over| format!("{here}?over={}", range::name(over)),
-    );
-    if runs.collecting(scope) {
-        return Box::pin(meanwhile(runs, here, &address, run)).await;
-    }
-    let read = read(&runs.setting().store).await;
-    let drawn = configurator::telemetry::rendering(|| render(read));
-    if runs.collecting(scope) {
-        Box::pin(meanwhile(runs, here, &address, run)).await
-    } else {
-        configurator::telemetry::served(Served::Drawn);
-        keep(runs, address, &drawn);
-        drawn
-    }
-}
-
-/// The page at `address` as it was last drawn, asking to be drawn again, or
-/// the placeholder where it has not been.
-///
-/// **A drawing that cannot be read is one not kept**: the placeholder costs a
-/// wait, and saying the store is unreadable would be wrong about the page.
-async fn meanwhile(runs: &Runs, here: &str, address: &str, run: &run::View) -> Markup {
-    let kept = runs
-        .setting()
-        .store
-        .kept_drawing(address)
-        .await
-        .ok()
-        .flatten();
-    kept.map_or_else(
-        || {
-            configurator::telemetry::served(Served::Placeholder);
-            page::collecting(here, run)
-        },
-        |kept| {
-            configurator::telemetry::served(Served::Kept);
-            page::kept(&PreEscaped(kept))
-        },
-    )
-}
-
-/// Keep `drawn` as the page at `address`, without the page waiting on it.
-///
-/// **A drawing that cannot be kept is let go**: it is drawn again the next
-/// time the page is opened with nothing collecting, and a run writing to the
-/// store must not hold up the page that is already drawn.
-fn keep(runs: &Runs, address: String, drawn: &Markup) {
-    let store = runs.setting().store.clone();
-    let drawing = drawn.0.clone();
-    tokio::spawn(
-        async move {
-            let _kept = store.keep_drawing(&address, &drawing).await;
-        }
-        .instrument(configurator::telemetry::keeping()),
-    );
-}
-
-/// Why a page could not be read, as it says so.
-struct Unreadable(String);
-
-impl<E: std::fmt::Display> From<E> for Unreadable {
-    fn from(error: E) -> Self {
-        Self(error.to_string())
-    }
-}
-
-impl Unreadable {
-    fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// The range `?over=` names.
-fn over(query: &Query<HashMap<String, String>>) -> domain::analytical::range::Over {
-    range::named(query.get("over").map(String::as_str))
-}
-
-/// The range `?over=` names, or all where it names none: the FTP tests open
-/// on All, since there are few in a macrocycle (operator, 2026-10-28).
-fn tests_over(query: &Query<HashMap<String, String>>) -> domain::analytical::range::Over {
-    query
-        .get("over")
-        .map_or(domain::analytical::range::Over::All, |over| {
-            range::named(Some(over))
-        })
-}
-
-/// Heart rate at a fixed power over a range, read afresh from the store
-/// (#621). It opens on All, as #621 settled.
-async fn heart_rate(
-    State(runs): State<Arc<Runs>>,
-    query: Query<HashMap<String, String>>,
-    headers: HeaderMap,
-) -> Markup {
-    let collects = configurator::heart_rate::collects();
-    let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(
-        &runs,
-        &collects,
-        at_power::PATH,
-        Some(tests_over(&query)),
-        &run,
-        async |store| {
-            let zone = &runs.setting().zone;
-            let page = configurator::heart_rate::Page::open(store, zone).await?;
-            Ok((page.rides().await?, page.ranges(zone).await?))
-        },
-        |read| match read {
-            Ok((rides, ranges)) => at_power::page(
-                &domain::analytical::heart_rate_at_power::trended(&rides),
-                &ranges,
-                tests_over(&query),
-                &run,
-            ),
-            Err(error) => at_power::unreadable(error.as_str()),
-        },
-    )
-    .await
-}
-
-/// The FTP tests over a range, in watts and over body weight, read afresh
-/// from the store (#469).
-async fn ftp_tests(
-    State(runs): State<Arc<Runs>>,
-    query: Query<HashMap<String, String>>,
-    headers: HeaderMap,
-) -> Markup {
-    let collects = configurator::ftp_tests::collects();
-    let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(
-        &runs,
-        &collects,
-        ftp::PATH,
-        Some(tests_over(&query)),
-        &run,
-        async |store| {
-            let zone = &runs.setting().zone;
-            let page = configurator::ftp_tests::Page::open(store, zone).await?;
-            Ok((
-                page.tests().await?,
-                page.heart_rates().await?,
-                page.ranges(zone).await?,
-            ))
-        },
-        |read| match read {
-            Ok((tests, heart_rates, ranges)) => {
-                ftp::page(&tests, &heart_rates, &ranges, tests_over(&query), &run)
-            }
-            Err(error) => ftp::unreadable(error.as_str()),
-        },
-    )
-    .await
-}
-
-/// Body weight and body composition over a range, read afresh from the store
-/// (#786).
-async fn body_page(
-    State(runs): State<Arc<Runs>>,
-    query: Query<HashMap<String, String>>,
-    headers: HeaderMap,
-) -> Markup {
-    let collects = configurator::body::collects();
-    let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(
-        &runs,
-        &collects,
-        body::PATH,
-        Some(over(&query)),
-        &run,
-        async |store| {
-            let zone = &runs.setting().zone;
-            let page = configurator::body::Page::open(store, zone).await?;
-            Ok((
-                page.series().await?,
-                page.aims(zone).await?,
-                page.by_method().await?,
-                page.ranges(zone).await?,
-            ))
-        },
-        |read| match read {
-            Ok((series, aims, components, ranges)) => {
-                body::page(&series, &aims, &components, &ranges, over(&query), &run)
-            }
-            Err(error) => body::unreadable(error.as_str()),
-        },
-    )
-    .await
-}
-
-/// Body weight's and body composition's own pages, which are now one (#786),
-/// over the same range.
-async fn to_body(RawQuery(query): RawQuery) -> Redirect {
-    Redirect::permanent(&query.map_or_else(
-        || body::PATH.to_owned(),
-        |query| format!("{}?{query}", body::PATH),
-    ))
-}
-
-/// Overnight HRV over a range, one series per watch and the trend through
-/// each, read afresh from the store.
-async fn overnight_hrv(
-    State(runs): State<Arc<Runs>>,
-    query: Query<HashMap<String, String>>,
-    headers: HeaderMap,
-) -> Markup {
-    let collects = configurator::per_device::overnight_hrv_collects();
-    let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(
-        &runs,
-        &collects,
-        hrv::PATH,
-        Some(over(&query)),
-        &run,
-        async |store| {
-            let zone = &runs.setting().zone;
-            let page = configurator::per_device::OvernightHrv::open(store, zone).await?;
-            Ok((page.trend().await?, page.ranges(zone).await?))
-        },
-        |read| match read {
-            Ok((trended, ranges)) => hrv::page(&trended, &ranges, over(&query), &run),
-            Err(error) => hrv::unreadable(error.as_str()),
-        },
-    )
-    .await
-}
-
-/// Pulse wave velocity over a range, with its slow line, read afresh from the
-/// store (#471).
-async fn pulse_wave_velocity_page(
-    State(runs): State<Arc<Runs>>,
-    query: Query<HashMap<String, String>>,
-    headers: HeaderMap,
-) -> Markup {
-    let collects = configurator::pulse_wave_velocity::collects();
-    let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(
-        &runs,
-        &collects,
-        pulse_wave_velocity::PATH,
-        Some(over(&query)),
-        &run,
-        async |store| {
-            let zone = &runs.setting().zone;
-            let page = configurator::pulse_wave_velocity::Page::open(store, zone).await?;
-            Ok((page.by_algorithm().await?, page.ranges(zone).await?))
-        },
-        |read| match read {
-            Ok((series, ranges)) => pulse_wave_velocity::page(&series, &ranges, over(&query), &run),
-            Err(error) => pulse_wave_velocity::unreadable(error.as_str()),
-        },
-    )
-    .await
-}
-
-/// Resting heart rate over a range, one series per watch with its slow line
-/// and the nights it flags, read afresh from the store.
-async fn resting_heart_rate(
-    State(runs): State<Arc<Runs>>,
-    query: Query<HashMap<String, String>>,
-    headers: HeaderMap,
-) -> Markup {
-    let collects = configurator::per_device::resting_heart_rate_collects();
-    let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(
-        &runs,
-        &collects,
-        resting::PATH,
-        Some(over(&query)),
-        &run,
-        async |store| {
-            let zone = &runs.setting().zone;
-            let page = configurator::per_device::RestingHeartRate::open(store, zone).await?;
-            Ok((page.trend().await?, page.ranges(zone).await?))
-        },
-        |read| match read {
-            Ok((trended, ranges)) => resting::page(&trended, &ranges, over(&query), &run),
-            Err(error) => resting::unreadable(error.as_str()),
-        },
-    )
-    .await
-}
-
-/// A night's sleep, how long and when, one series per watch, read afresh from
-/// the store (#255).
-async fn sleep_page(
-    State(runs): State<Arc<Runs>>,
-    query: Query<HashMap<String, String>>,
-    headers: HeaderMap,
-) -> Markup {
-    let collects = configurator::sleep::collects();
-    let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(
-        &runs,
-        &collects,
-        sleep::PATH,
-        Some(over(&query)),
-        &run,
-        async |store| {
-            let zone = &runs.setting().zone;
-            let page = configurator::sleep::Page::open(store, zone).await?;
-            Ok((page.nights().await?, page.ranges(zone).await?))
-        },
-        |read| match read {
-            Ok((nights, ranges)) => sleep::page(&nights, &ranges, over(&query), &run),
-            Err(error) => sleep::unreadable(error.as_str()),
-        },
-    )
-    .await
-}
-
-/// Estimated 1RM over the macrocycle, read afresh from the store (#420,
-/// #626).
-async fn estimated_one_rep_max(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
-    let collects = configurator::one_rep_max::collects();
-    let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(
-        &runs,
-        &collects,
-        one_rep_max::PATH,
-        None,
-        &run,
-        async |store| {
-            let zone = &runs.setting().zone;
-            let page = configurator::one_rep_max::Page::open(store, zone).await?;
-            Ok(page.view(zone).await?)
-        },
-        |view| match view {
-            Ok(view) => one_rep_max::page(&view, &run),
-            Err(error) => one_rep_max::unreadable(error.as_str()),
-        },
-    )
-    .await
-}
-
-/// Progress, for the macrocycle in force, read afresh from the store (#769).
-async fn progress_page(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
-    let collects = configurator::working::collects();
-    let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(
-        &runs,
-        &collects,
-        progress::PATH,
-        None,
-        &run,
-        async |store| {
-            let zone = &runs.setting().zone;
-            let page = configurator::working::Page::open(store, zone).await?;
-            Ok(page.view(zone).await?)
-        },
-        |view| match view {
-            Ok(view) => progress::page(&view, &run),
-            Err(error) => progress::unreadable(error.as_str()),
-        },
-    )
-    .await
-}
-
-/// Is what I'm doing working?, for the macrocycle in force, read afresh from
-/// the store (#517).
-async fn is_it_working(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
-    let collects = configurator::working::collects();
-    let run = opened(&runs, &headers, only(&collects)).await;
-    drawn(
-        &runs,
-        &collects,
-        working::PATH,
-        None,
-        &run,
-        async |store| {
-            let zone = &runs.setting().zone;
-            let page = configurator::working::Page::open(store, zone).await?;
-            Ok(page.view(zone).await?)
-        },
-        |view| match view {
-            Ok(view) => working::page(&view, &run),
-            Err(error) => working::unreadable(error.as_str()),
-        },
-    )
-    .await
-}
-
 /// The equipment, read afresh from the store, with the last post if it was
 /// refused.
 async fn equipment_shown(runs: &Runs, refused: Option<&equipment::Refused<'_>>) -> Markup {
@@ -648,94 +240,13 @@ async fn equipment_shown(runs: &Runs, refused: Option<&equipment::Refused<'_>>) 
     }
 }
 
-/// History, read afresh from the store once a run has collected what it
-/// reads (#772).
-async fn history_page(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
-    let collects = configurator::history::collects();
-    let run = opened(&runs, &headers, only(&collects)).await;
-    let zone = &runs.setting().zone;
-    let today = jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date();
-    drawn(
-        &runs,
-        &collects,
-        Place::History.path(),
-        None,
-        &run,
-        async |store| {
-            Ok(configurator::history::Page::open(store, zone)
-                .days(zone)
-                .await?)
-        },
-        |days| history::page(&days.map_err(|error| error.0), today),
-    )
-    .await
-}
-
-/// One session opened from History (#772): the `number`th done `on`.
-///
-/// **No run of its own**: History started one as it was opened, and this
-/// waits on it as any page reading the same layers does.
-async fn session_page(
-    State(runs): State<Arc<Runs>>,
-    Path((on, number)): Path<(String, String)>,
-) -> Response {
-    let (Ok(on), Some(number)) = (
-        on.parse::<jiff::civil::Date>(),
-        number
-            .parse::<usize>()
-            .ok()
-            .and_then(|number| application::history::Number::try_from(number).ok()),
-    ) else {
-        return Redirect::to(Place::History.path()).into_response();
-    };
-    let here = history::address(on, number);
-    let collects = configurator::history::collects();
-    let run = runs.view();
-    let zone = &runs.setting().zone;
-    drawn(
-        &runs,
-        &collects,
-        &here,
-        None,
-        &run,
-        async |store| {
-            Ok(configurator::history::Page::open(store, zone)
-                .session(zone, on, number)
-                .await?)
-        },
-        |session| history::session(&here, on, &session.map_err(|error| error.0)),
-    )
-    .await
-    .into_response()
-}
-
-/// Plan: the macrocycle in force, then the inputs to planning (#770), read
-/// once a run has collected what it reads (#809).
-async fn plan_page(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
-    let collects = configurator::macrocycle::collects();
-    let run = opened(&runs, &headers, only(&collects)).await;
-    let zone = &runs.setting().zone;
-    drawn(
-        &runs,
-        &collects,
-        Place::Plan.path(),
-        None,
-        &run,
-        async |store| {
-            let here = jiff::Timestamp::now().to_zoned(zone.as_time_zone());
-            let planned = configurator::macrocycle::planned(
-                store,
-                zone,
-                domain::schedule::DayPart::containing(here.datetime()),
-            )
-            .await?;
-            Ok(planned
-                .as_ref()
-                .map(application::macrocycle::Macrocycle::from))
-        },
-        |macrocycle| plan::page(&macrocycle.map_err(|error| error.0), &run),
-    )
-    .await
+/// Body weight's and body composition's own pages, which are now one (#786),
+/// over the same range.
+async fn to_body(RawQuery(query): RawQuery) -> Redirect {
+    Redirect::permanent(&query.map_or_else(
+        || body::PATH.to_owned(),
+        |query| format!("{}?{query}", body::PATH),
+    ))
 }
 
 async fn equipment_page(State(runs): State<Arc<Runs>>) -> Markup {
@@ -1041,89 +552,23 @@ fn script(body: &'static str) -> impl IntoResponse {
 
 #[cfg(test)]
 mod tests {
-    use application::{Part, next::Scope};
-    use domain::{analytical::range::Over, landing::LandingStream, normalised::OperatorZone};
-    use maud::html;
+    use domain::normalised::OperatorZone;
 
-    use crate::run::{Asked, Runs, Setting, View};
+    use crate::run::{Runs, Setting};
 
-    /// **A page whose data a run is collecting is drawn as it was before, and
-    /// the store is not read** (#467): on 2026-10-16 the estimated 1RM page
-    /// read the gym's canonical layer while a run had emptied it, and said *"No
-    /// test has been recorded."* A page never drawn on this store is the
-    /// placeholder.
-    ///
-    /// **Kept across a restart** (#605): a server started afresh on the same
-    /// store, a run going, is served the drawing the last one kept.
+    /// **No drawn page reads what has no version** (#805), so each is served
+    /// as it was drawn while nothing it reads has moved, rather than drawn
+    /// every time it is opened.
     #[test]
-    fn a_page_is_kept_as_it_was_while_its_data_is_collected() {
-        let directory = tempfile::TempDir::new().expect("a temporary directory");
-        let database = directory.path().join("fitness.db");
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("a runtime");
-        // A server started afresh opens the store afresh, as `serve` does.
-        let fresh = || {
-            Runs::new(Setting {
-                store: runtime
-                    .block_on(configurator::store::Store::open(&database))
-                    .expect("the store"),
-                zone: OperatorZone::try_from("Europe/London").expect("a zone"),
-                credentials: None,
-            })
-        };
-        let collects = Scope::new([Part::Normalising(
-            LandingStream::try_from("hevy.workouts").expect("a stream"),
-        )]);
-        let drawn = |runs: &Runs, over: Option<Over>, shown: &'static str| {
-            runtime
-                .block_on(super::drawn(
-                    runs,
-                    &collects,
-                    "/estimated-1rm",
-                    over,
-                    &View::default(),
-                    async |_| Ok(()),
-                    |_| html! { main { p { (shown) } } },
-                ))
-                .into_string()
-        };
-
-        let runs = fresh();
-        assert!(drawn(&runs, None, "Front squat 92.5kg").contains("Front squat 92.5kg"));
-        // Kept without the page waiting on it, so wait for it here.
-        let mut kept = None;
-        for _ in 0..100 {
-            kept = runtime
-                .block_on(runs.setting().store.kept_drawing("/estimated-1rm"))
-                .expect("a read");
-            if kept.is_some() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
+    fn every_drawn_page_reads_only_what_has_a_version() {
+        let graph = configurator::graph::graph();
+        for (route, reads) in super::pages().reads() {
+            let unversioned: Vec<_> = reads
+                .nodes()
+                .filter(|node| application::drawing::unversioned(graph, node))
+                .collect();
+            assert!(unversioned.is_empty(), "{route} reads {unversioned:?}");
         }
-        assert!(kept.is_some(), "the drawing was never kept");
-
-        runs.going_over(Asked::Everything);
-        let shown = drawn(&runs, None, "No test has been recorded.");
-        assert!(shown.contains("Front squat 92.5kg"), "{shown}");
-        assert!(!shown.contains("No test"), "{shown}");
-        assert!(shown.contains(r#"hx-trigger="every 2s""#), "{shown}");
-
-        let restarted = fresh();
-        restarted.going_over(Asked::Everything);
-        let shown = drawn(&restarted, None, "No test has been recorded.");
-        assert!(shown.contains("Front squat 92.5kg"), "{shown}");
-        assert!(!shown.contains("No test"), "{shown}");
-
-        let shown = drawn(&restarted, Some(Over::All), "No test has been recorded.");
-        assert!(
-            shown.contains("Collecting what this page shows…"),
-            "{shown}"
-        );
-        assert!(shown.contains("<title>Estimated 1RM</title>"), "{shown}");
-        assert!(!shown.contains("No test"), "{shown}");
     }
 
     /// A span as it was opened: its name, the fields that say what it is,
@@ -1226,6 +671,7 @@ mod tests {
                 .expect("the store"),
             zone: OperatorZone::try_from("Europe/London").expect("a zone"),
             credentials: None,
+            build: None,
         }));
         let opening = Opening::default();
         let _recording =

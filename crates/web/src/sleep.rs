@@ -29,10 +29,7 @@ use domain::analytical::{
 use jiff::civil::{Date, DateTime};
 use maud::{DOCTYPE, Markup, html};
 
-use crate::{
-    detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Segment, Traced, name},
-    run::View,
-};
+use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Segment, Traced, name};
 
 pub const PATH: &str = "/sleep";
 pub const TITLE: &str = "Sleep";
@@ -41,8 +38,8 @@ pub const TITLE: &str = "Sleep";
 const HOUR: f64 = 3600.0;
 
 /// The page: the summary, then each chart over the range chosen.
-pub fn page(nights: &[Trended], ranges: &Ranges, over: Over, run: &View) -> Markup {
-    detail::page(PATH, TITLE, Some(over), run, &body(nights, ranges, over))
+pub fn page(nights: &[Trended], ranges: &Ranges, over: Over) -> Markup {
+    detail::page(PATH, TITLE, Some(over), &body(nights, ranges, over))
 }
 
 /// The page when the store could not be read.
@@ -418,6 +415,54 @@ fn counted(count: usize, one: &str) -> String {
     }
 }
 
+/// A night's sleep, how long and when, one series per watch (#255).
+#[derive(Debug)]
+pub struct Page {
+    over: Over,
+}
+
+impl crate::drawn::Drawn for Page {
+    const ROUTE: &'static str = PATH;
+    type Read = (Vec<Trended>, Ranges);
+
+    fn reads() -> application::graph::Reads {
+        configurator::sleep::reads()
+    }
+
+    fn asked(
+        _path: &axum::extract::RawPathParams,
+        query: &std::collections::HashMap<String, String>,
+    ) -> Result<Self, axum::response::Redirect> {
+        Ok(Self {
+            over: crate::drawn::over(query),
+        })
+    }
+
+    fn here(&self) -> String {
+        PATH.to_owned()
+    }
+
+    fn over(&self) -> Option<Over> {
+        Some(self.over)
+    }
+
+    async fn read(
+        &self,
+        store: &configurator::store::Store,
+        zone: &domain::normalised::OperatorZone,
+    ) -> Result<Self::Read, crate::drawn::Unreadable> {
+        let page = configurator::sleep::Page::open(store, zone).await?;
+        Ok((page.nights().await?, page.ranges().await?))
+    }
+
+    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
+        match read {
+            Ok((nights, ranges)) => page(&nights, &ranges, self.over),
+            Err(error) => unreadable(error.as_str()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use domain::{
@@ -478,7 +523,7 @@ mod tests {
     }
 
     fn shown(nights: &[Trended], ranges: &Ranges, over: Over) -> String {
-        super::page(nights, ranges, over, &crate::run::View::default()).into_string()
+        super::page(nights, ranges, over).into_string()
     }
 
     #[test]

@@ -28,10 +28,7 @@ use domain::analytical::{
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
-use crate::{
-    detail::{self, Cell, Metric},
-    run::View as RunView,
-};
+use crate::detail::{self, Cell, Metric};
 
 pub const PATH: &str = "/estimated-1rm";
 const TITLE: &str = "Estimated 1RM";
@@ -47,8 +44,8 @@ const BOTTOM: f64 = 26.0;
 const RADIUS: f64 = 4.0;
 
 /// The whole page.
-pub fn page(view: &View, run: &RunView) -> Markup {
-    detail::page(PATH, TITLE, None, run, &body(view, view.today))
+pub fn page(view: &View) -> Markup {
+    detail::page(PATH, TITLE, None, &body(view, view.today))
 }
 
 /// The page when the store could not be read.
@@ -472,6 +469,46 @@ fn latest(trend: &Trend<Point>, today: Date) -> Markup {
     detail::latest("Sessions", "estimated 1RM", &rows)
 }
 
+/// Estimated 1RM over the macrocycle (#420, #626).
+#[derive(Debug)]
+pub struct Page;
+
+impl crate::drawn::Drawn for Page {
+    const ROUTE: &'static str = PATH;
+    type Read = View;
+
+    fn reads() -> application::graph::Reads {
+        configurator::one_rep_max::reads()
+    }
+
+    fn asked(
+        _path: &axum::extract::RawPathParams,
+        _query: &std::collections::HashMap<String, String>,
+    ) -> Result<Self, axum::response::Redirect> {
+        Ok(Self)
+    }
+
+    fn here(&self) -> String {
+        PATH.to_owned()
+    }
+
+    async fn read(
+        &self,
+        store: &configurator::store::Store,
+        zone: &domain::normalised::OperatorZone,
+    ) -> Result<Self::Read, crate::drawn::Unreadable> {
+        let page = configurator::one_rep_max::Page::open(store, zone).await?;
+        Ok(page.view().await?)
+    }
+
+    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
+        match read {
+            Ok(view) => page(&view),
+            Err(error) => unreadable(error.as_str()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use application::one_rep_max::{Lift, View};
@@ -565,7 +602,7 @@ mod tests {
     }
 
     fn drawn(points: &[Point]) -> String {
-        page(&view(points), &crate::run::View::default()).into_string()
+        page(&view(points)).into_string()
     }
 
     #[test]
@@ -621,7 +658,7 @@ mod tests {
         let mut view = view(&autumn().expect("points"));
         view.macrocycle = None;
         view.lifts.clear();
-        let page = page(&view, &crate::run::View::default()).into_string();
+        let page = page(&view).into_string();
         assert!(
             page.contains("No macrocycle is planned for today."),
             "{page}"

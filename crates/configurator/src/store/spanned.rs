@@ -26,10 +26,10 @@ use application::{
     PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore, PublishedCycling,
     PublishedProgrammes, PublishedRead, PulseWaveVelocityHistory, RawExtent, Reached, Reading,
     Reads, RecordedDevices, RefusalStore, RenderingDigest, RestingHeartRateHistory,
-    ResumptionPointStore, RiddenSession, RiddenSessionLog, RiddenVenues, Served, SessionOrdinal,
-    SleepHistory, SourceError, StoreError, StressHistory, TrainingDone, WearRecord, WeighInHistory,
-    WorkoutStore,
-    graph::{Calendar, Table},
+    ResumptionPointStore, Revision, Revisions, RiddenSession, RiddenSessionLog, RiddenVenues,
+    Served, SessionOrdinal, SleepHistory, SourceError, StoreError, StressHistory, TrainingDone,
+    WearRecord, WeighInHistory, WorkoutStore,
+    graph::{Calendar, Node, Table},
 };
 use domain::analytical::Weighed;
 use domain::body::{CanonicalWeighIn, WeighInAccount, WeighInCount};
@@ -535,6 +535,12 @@ spanned! {
 spanned! {
     WearRecord {
         fn wear(&self) -> Result<domain::device::Wear, StoreError>;
+    }
+}
+
+spanned! {
+    Revisions {
+        fn revision(&self, node: &Node) -> Result<Revision, StoreError>;
     }
 }
 

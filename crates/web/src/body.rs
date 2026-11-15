@@ -19,7 +19,7 @@ use domain::analytical::{
 };
 use maud::{DOCTYPE, Markup, html};
 
-use crate::{composition, detail, page::Group, run::View, weight};
+use crate::{composition, detail, page::Group, weight};
 
 pub const PATH: &str = "/body";
 
@@ -36,13 +36,11 @@ pub fn page(
     components: &[ComponentSeries],
     ranges: &Ranges,
     over: Over,
-    run: &View,
 ) -> Markup {
     detail::page(
         PATH,
         TITLE,
         Some(over),
-        run,
         &body(series, aims, components, ranges, over),
     )
 }
@@ -128,6 +126,61 @@ fn foot(series: &Series, components: &[ComponentSeries], range: Range) -> String
     format!("{}.", said.join(". "))
 }
 
+/// Body weight and body composition over a range (#786).
+#[derive(Debug)]
+pub struct Page {
+    over: Over,
+}
+
+impl crate::drawn::Drawn for Page {
+    const ROUTE: &'static str = PATH;
+    type Read = (Series, Vec<Aim>, Vec<ComponentSeries>, Ranges);
+
+    fn reads() -> application::graph::Reads {
+        configurator::body::reads()
+    }
+
+    fn asked(
+        _path: &axum::extract::RawPathParams,
+        query: &std::collections::HashMap<String, String>,
+    ) -> Result<Self, axum::response::Redirect> {
+        Ok(Self {
+            over: crate::drawn::over(query),
+        })
+    }
+
+    fn here(&self) -> String {
+        PATH.to_owned()
+    }
+
+    fn over(&self) -> Option<Over> {
+        Some(self.over)
+    }
+
+    async fn read(
+        &self,
+        store: &configurator::store::Store,
+        zone: &domain::normalised::OperatorZone,
+    ) -> Result<Self::Read, crate::drawn::Unreadable> {
+        let page = configurator::body::Page::open(store, zone).await?;
+        Ok((
+            page.series().await?,
+            page.aims().await?,
+            page.by_method().await?,
+            page.ranges().await?,
+        ))
+    }
+
+    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
+        match read {
+            Ok((series, aims, components, ranges)) => {
+                page(&series, &aims, &components, &ranges, self.over)
+            }
+            Err(error) => unreadable(error.as_str()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use domain::{
@@ -187,7 +240,6 @@ mod tests {
             ],
             &ranges,
             Over::Mesocycle,
-            &crate::run::View::default(),
         )
         .into_string();
 

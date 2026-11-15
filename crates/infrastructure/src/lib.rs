@@ -51,7 +51,7 @@ pub use store::{
     GarminDailyHeartRateLandingStore, GarminExerciseSetLandingStore, GarminGymAccountReader,
     GarminGymRawExtent, GarminHrvAccountReader, GarminHrvLandingStore, GarminRecordedDevices,
     GarminSleepAccountReader, GarminWear, HevySessionAccountReader, HevyWorkoutLandingStore,
-    MyFitnessPalExportAccountReader, MyFitnessPalExportLandingStore, OverlayError,
+    KeptDrawing, MyFitnessPalExportAccountReader, MyFitnessPalExportLandingStore, OverlayError,
     PelotonAccountLandingStore, PelotonRawExtent, PelotonRideDetailLandingStore,
     PelotonRideLandingStore, PelotonRideSampleLandingStore, PelotonSessionAccountReader,
     SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SqliteBtwbStore,

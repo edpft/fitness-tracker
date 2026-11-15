@@ -32,15 +32,14 @@ use maud::{DOCTYPE, Markup, html};
 use crate::{
     detail::{self, Axis, Chart, Layer, Traced, name},
     progress::{Written, answering, change, row, tested},
-    run,
 };
 
 pub const PATH: &str = "/working";
 pub const TITLE: &str = "Is what I'm doing working?";
 
 /// The page: the three cards, or why there is nothing to read.
-pub fn page(view: &View, run: &run::View) -> Markup {
-    detail::page(PATH, TITLE, None, run, &body(view))
+pub fn page(view: &View) -> Markup {
+    detail::page(PATH, TITLE, None, &body(view))
 }
 
 /// The page when the store could not be read.
@@ -306,6 +305,46 @@ fn on_the_last(macrocycle: &Macrocycle, today: Date) -> Markup {
                     ". Comparing the two is not built yet."
                 },
             }
+        }
+    }
+}
+
+/// Is what I'm doing working?, for the macrocycle in force (#517).
+#[derive(Debug)]
+pub struct Page;
+
+impl crate::drawn::Drawn for Page {
+    const ROUTE: &'static str = PATH;
+    type Read = View;
+
+    fn reads() -> application::graph::Reads {
+        configurator::working::reads()
+    }
+
+    fn asked(
+        _path: &axum::extract::RawPathParams,
+        _query: &std::collections::HashMap<String, String>,
+    ) -> Result<Self, axum::response::Redirect> {
+        Ok(Self)
+    }
+
+    fn here(&self) -> String {
+        PATH.to_owned()
+    }
+
+    async fn read(
+        &self,
+        store: &configurator::store::Store,
+        zone: &domain::normalised::OperatorZone,
+    ) -> Result<Self::Read, crate::drawn::Unreadable> {
+        let page = configurator::working::Page::open(store, zone).await?;
+        Ok(page.view().await?)
+    }
+
+    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
+        match read {
+            Ok(view) => page(&view),
+            Err(error) => unreadable(error.as_str()),
         }
     }
 }

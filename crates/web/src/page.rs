@@ -246,7 +246,7 @@ pub fn collecting(here: &str, run: &View) -> Markup {
                 main {
                     (header(here, title))
                     p.collecting { "Collecting what this page shows…" }
-                    (redrawing())
+                    div hx-get="" hx-trigger="every 2s" hx-target="main" hx-select="main" hx-swap="outerHTML" {}
                     (bar(here))
                 }
             }
@@ -260,21 +260,32 @@ pub fn collecting(here: &str, run: &View) -> Markup {
 ///
 /// **The drawing as it was, asking to be drawn again**: inside its `main`,
 /// which is what a redraw replaces, so the asking ends with the first drawing
-/// made with nothing collecting.
-pub fn kept(drawn: &Markup) -> Markup {
-    PreEscaped(
-        drawn
-            .0
-            .replacen("</main>", &format!("{}</main>", redrawing().0), 1),
-    )
+/// made with nothing collecting. Every two seconds as well as when this
+/// server's run ends, because a run the terminal started sends this server
+/// nothing.
+pub fn kept(drawn: &str) -> Markup {
+    asking(drawn, "every 2s")
 }
 
-/// The page asked for again every two seconds, as well as when this server's
-/// run ends, because a run the terminal started sends this server nothing.
-fn redrawing() -> Markup {
-    html! {
-        div hx-get="" hx-trigger="every 2s" hx-target="main" hx-select="main" hx-swap="outerHTML" {}
-    }
+/// A page as it was last drawn, asking at once to be drawn again, because
+/// something it reads has moved since (#805).
+pub fn moved(drawn: &str) -> Markup {
+    asking(drawn, "load")
+}
+
+fn asking(drawn: &str, trigger: &str) -> Markup {
+    let asking = html! {
+        div hx-get="" hx-trigger=(trigger) hx-target="main" hx-select="main" hx-swap="outerHTML" {}
+    };
+    PreEscaped(drawn.replacen("</main>", &format!("{}</main>", asking.0), 1))
+}
+
+/// `drawn`, below the step the run is on (#805).
+///
+/// **Not kept with the drawing**: where a run has got to is the moment's, and
+/// a drawing served again would follow a run long ended.
+pub fn followed(drawn: &str, run: &View) -> Markup {
+    PreEscaped(drawn.replacen("<body>", &format!("<body>{}", following(run).0), 1))
 }
 
 /// What every page's head holds: its title, and the one stylesheet (#614)
@@ -347,7 +358,7 @@ mod tests {
     /// tile (`progress::tests`).
     #[test]
     fn every_plan_page_is_listed_by_plan() {
-        let listed = crate::plan::page(&Ok(None), &crate::run::View::default()).into_string();
+        let listed = crate::plan::page(&Ok(None)).into_string();
 
         for page in &PAGES {
             if page.place == Place::Today {

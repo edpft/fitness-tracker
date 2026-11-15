@@ -12,6 +12,7 @@ use infrastructure::{
 };
 use jiff::civil::Date;
 
+use crate::clock::Today;
 use crate::store::Spanned;
 use crate::{
     graph::{page, read},
@@ -29,13 +30,20 @@ page! {
             Spanned<SqlitePadelGames>,
         >,
         tests: one_rep_max::Tests,
+        today: Today,
     }
 }
 
 /// The parts a run collecting what the page reads takes.
 #[must_use]
 pub fn collects() -> Scope {
-    crate::graph::collects::<Page>()
+    crate::graph::scope(&reads())
+}
+
+/// What the page reads, and so what its kept drawing is drawn from (#805).
+#[must_use]
+pub fn reads() -> application::graph::Reads {
+    <Page as application::graph::Input>::reads()
 }
 
 impl Page {
@@ -50,7 +58,14 @@ impl Page {
             )
             .into(),
             tests: one_rep_max::tests(store, zone).into(),
+            today: Today::new(zone.clone()).into(),
         }
+    }
+
+    /// The date it is now.
+    #[must_use]
+    pub fn today(&self) -> Date {
+        self.today.date()
     }
 
     /// Every day through today that holds a session, newest first.
@@ -58,8 +73,8 @@ impl Page {
     /// # Errors
     ///
     /// [`StoreError`] if the store cannot be read.
-    pub async fn days(&self, zone: &OperatorZone) -> Result<Vec<Day>, StoreError> {
-        let today = crate::equipment::today(zone);
+    pub async fn days(&self) -> Result<Vec<Day>, StoreError> {
+        let today = self.today.date();
         let tests = read!(self.tests.tests(today)).await?;
         read!(self.history.days(today, &tests)).await
     }
@@ -69,13 +84,8 @@ impl Page {
     /// # Errors
     ///
     /// [`StoreError`] if the store cannot be read.
-    pub async fn session(
-        &self,
-        zone: &OperatorZone,
-        on: Date,
-        number: Number,
-    ) -> Result<Option<Session>, StoreError> {
-        let tests = read!(self.tests.tests(crate::equipment::today(zone))).await?;
+    pub async fn session(&self, on: Date, number: Number) -> Result<Option<Session>, StoreError> {
+        let tests = read!(self.tests.tests(self.today.date())).await?;
         read!(self.history.session(on, number, &tests)).await
     }
 }

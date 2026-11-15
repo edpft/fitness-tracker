@@ -90,7 +90,7 @@ pub use cycling_mesocycle::SqliteCyclingMesocycleStore;
 pub use delivery::SqlitePrescriptionDeliveryStore;
 pub use derivation_ledger::SqliteDerivationLedger;
 pub use devices::{GarminRecordedDevices, GarminWear, SqliteGarminActivityStore};
-pub use drawings::SqliteKeptDrawings;
+pub use drawings::{KeptDrawing, SqliteKeptDrawings};
 pub use edit_overlay::{OverlayError, SqliteEditOverlayStore, UnknownCorrectedExercise};
 pub use equipment::SqliteEquipmentStore;
 pub use garmin_activity_file_landing::GarminActivityFileLandingStore;

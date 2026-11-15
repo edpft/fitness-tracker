@@ -23,17 +23,14 @@ use domain::analytical::{
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
-use crate::{
-    detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced},
-    run::View,
-};
+use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced};
 
 pub const PATH: &str = "/pulse-wave-velocity";
 const TITLE: &str = "Pulse wave velocity";
 
 /// The page: the summary, then the chart over the range chosen.
-pub fn page(series: &[Series], ranges: &Ranges, over: Over, run: &View) -> Markup {
-    detail::page(PATH, TITLE, Some(over), run, &body(series, ranges, over))
+pub fn page(series: &[Series], ranges: &Ranges, over: Over) -> Markup {
+    detail::page(PATH, TITLE, Some(over), &body(series, ranges, over))
 }
 
 /// The page when the store could not be read.
@@ -227,6 +224,54 @@ fn counted(count: usize) -> String {
     }
 }
 
+/// Pulse wave velocity over a range, with its slow line (#471).
+#[derive(Debug)]
+pub struct Page {
+    over: Over,
+}
+
+impl crate::drawn::Drawn for Page {
+    const ROUTE: &'static str = PATH;
+    type Read = (Vec<Series>, Ranges);
+
+    fn reads() -> application::graph::Reads {
+        configurator::pulse_wave_velocity::reads()
+    }
+
+    fn asked(
+        _path: &axum::extract::RawPathParams,
+        query: &std::collections::HashMap<String, String>,
+    ) -> Result<Self, axum::response::Redirect> {
+        Ok(Self {
+            over: crate::drawn::over(query),
+        })
+    }
+
+    fn here(&self) -> String {
+        PATH.to_owned()
+    }
+
+    fn over(&self) -> Option<Over> {
+        Some(self.over)
+    }
+
+    async fn read(
+        &self,
+        store: &configurator::store::Store,
+        zone: &domain::normalised::OperatorZone,
+    ) -> Result<Self::Read, crate::drawn::Unreadable> {
+        let page = configurator::pulse_wave_velocity::Page::open(store, zone).await?;
+        Ok((page.by_algorithm().await?, page.ranges().await?))
+    }
+
+    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
+        match read {
+            Ok((series, ranges)) => page(&series, &ranges, self.over),
+            Err(error) => unreadable(error.as_str()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use domain::{
@@ -270,7 +315,7 @@ mod tests {
     }
 
     fn shown(series: &[Series], ranges: &Ranges, over: Over) -> String {
-        super::page(series, ranges, over, &crate::run::View::default()).into_string()
+        super::page(series, ranges, over).into_string()
     }
 
     #[test]

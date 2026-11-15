@@ -20,17 +20,14 @@ use domain::analytical::{
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
-use crate::{
-    detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced, name},
-    run::View,
-};
+use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced, name};
 
 pub const PATH: &str = "/resting-heart-rate";
 pub const TITLE: &str = "Resting heart rate";
 
 /// The page: the summary, then the chart over the range chosen.
-pub fn page(trended: &[Trended], ranges: &Ranges, over: Over, run: &View) -> Markup {
-    detail::page(PATH, TITLE, Some(over), run, &body(trended, ranges, over))
+pub fn page(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
+    detail::page(PATH, TITLE, Some(over), &body(trended, ranges, over))
 }
 
 /// The page when the store could not be read.
@@ -243,6 +240,55 @@ fn counted(count: usize, one: &str) -> String {
     }
 }
 
+/// Resting heart rate over a range, one series per watch with its slow line
+/// and the nights it flags.
+#[derive(Debug)]
+pub struct Page {
+    over: Over,
+}
+
+impl crate::drawn::Drawn for Page {
+    const ROUTE: &'static str = PATH;
+    type Read = (Vec<Trended>, Ranges);
+
+    fn reads() -> application::graph::Reads {
+        configurator::per_device::resting_heart_rate_reads()
+    }
+
+    fn asked(
+        _path: &axum::extract::RawPathParams,
+        query: &std::collections::HashMap<String, String>,
+    ) -> Result<Self, axum::response::Redirect> {
+        Ok(Self {
+            over: crate::drawn::over(query),
+        })
+    }
+
+    fn here(&self) -> String {
+        PATH.to_owned()
+    }
+
+    fn over(&self) -> Option<Over> {
+        Some(self.over)
+    }
+
+    async fn read(
+        &self,
+        store: &configurator::store::Store,
+        zone: &domain::normalised::OperatorZone,
+    ) -> Result<Self::Read, crate::drawn::Unreadable> {
+        let page = configurator::per_device::RestingHeartRate::open(store, zone).await?;
+        Ok((page.trend().await?, page.ranges().await?))
+    }
+
+    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
+        match read {
+            Ok((trended, ranges)) => page(&trended, &ranges, self.over),
+            Err(error) => unreadable(error.as_str()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use domain::{
@@ -286,7 +332,7 @@ mod tests {
     }
 
     fn shown(trended: &[Trended], ranges: &Ranges, over: Over) -> String {
-        super::page(trended, ranges, over, &crate::run::View::default()).into_string()
+        super::page(trended, ranges, over).into_string()
     }
 
     #[test]

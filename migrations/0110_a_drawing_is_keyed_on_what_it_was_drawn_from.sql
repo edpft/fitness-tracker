@@ -13,3 +13,5 @@ CREATE TABLE calendar_asked (
 INSERT INTO calendar_asked (name, asked_at) SELECT name, asked_at FROM calendar;
 
 ALTER TABLE calendar DROP COLUMN asked_at;
+
+DELETE FROM kept_drawing;

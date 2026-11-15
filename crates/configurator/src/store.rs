@@ -12,11 +12,16 @@
 
 mod spanned;
 
+pub use infrastructure::KeptDrawing;
 pub use spanned::Spanned;
 
 use std::path::Path;
 use std::sync::Arc;
 
+use tracing::Instrument as _;
+
+use application::drawing::{Drawing, DrawnFrom};
+use application::graph::Reads;
 use application::next::Canonicalising;
 use application::{
     CanonicalGymSessionStore, CyclingDeliveryStore, DiaryAuthor, DiaryStore, EquipmentStore,
@@ -28,11 +33,11 @@ use application::{
 use domain::normalised::OperatorZone;
 use infrastructure::{
     FileRunLock, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
-    SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteDiaryStore,
-    SqliteEquipmentStore, SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
-    SqliteGymMesocycleStore, SqliteKeptDrawings, SqliteOperatorSettingsStore,
-    SqlitePelotonClassStore, SqlitePlanStore, SqlitePool, SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore, connect,
+    SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteDerivationLedger,
+    SqliteDiaryStore, SqliteEquipmentStore, SqliteExerciseHistory, SqliteFtpHistory,
+    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteKeptDrawings,
+    SqliteOperatorSettingsStore, SqlitePelotonClassStore, SqlitePlanStore, SqlitePool,
+    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRevisions, connect,
 };
 
 /// The operator's store, opened.
@@ -260,17 +265,50 @@ impl Store {
             .await
     }
 
-    /// Keep `drawing` as the page at `address`, so it can be shown at once
-    /// the next time that page is opened, by this server or after a restart
-    /// (#605).
+    /// What a page reading `reads` would be drawn from `now`, by `build`:
+    /// `None` where something it reads has no version, or the build is not
+    /// known, which is a page drawn every time it is opened (#805).
+    ///
+    /// **Read before the page is**, so a write landing while it is drawn is
+    /// one its key does not include, and the next load draws it again.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub async fn drawn_from(
+        &self,
+        reads: &Reads,
+        build: Option<&str>,
+        now: &crate::clock::Now,
+    ) -> Result<Option<DrawnFrom>, StoreError> {
+        let Some(build) = build else {
+            return Ok(None);
+        };
+        Drawing::new(
+            self.adapter(SqliteDerivationLedger::new),
+            self.adapter(SqliteRevisions::new),
+        )
+        .drawn_from(crate::graph::graph(), reads, build, now.day_part())
+        .instrument(crate::telemetry::keying())
+        .await
+    }
+
+    /// Keep `drawing` as the page at `address`, drawn from `drawn_from`, so
+    /// it can be shown at once the next time that page is opened, by this
+    /// server or after a restart (#605).
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store cannot be written.
-    pub async fn keep_drawing(&self, address: &str, drawing: &str) -> Result<(), StoreError> {
+    pub async fn keep_drawing(
+        &self,
+        address: &str,
+        drawn_from: Option<DrawnFrom>,
+        drawing: &str,
+    ) -> Result<(), StoreError> {
         self.adapter(SqliteKeptDrawings::new)
             .call("SqliteKeptDrawings::keep", |adapter| {
-                adapter.keep(address, drawing)
+                adapter.keep(address, drawn_from, drawing)
             })
             .await
     }
@@ -280,7 +318,7 @@ impl Store {
     /// # Errors
     ///
     /// [`StoreError`] if the store cannot be read.
-    pub async fn kept_drawing(&self, address: &str) -> Result<Option<String>, StoreError> {
+    pub async fn kept_drawing(&self, address: &str) -> Result<Option<KeptDrawing>, StoreError> {
         self.adapter(SqliteKeptDrawings::new)
             .call("SqliteKeptDrawings::kept", |adapter| adapter.kept(address))
             .await

@@ -103,6 +103,9 @@ where
         node: &Node,
         now: DayPart,
     ) -> Result<Option<String>, StoreError> {
+        if unversioned(graph, node) {
+            return Ok(None);
+        }
         Ok(match node {
             Node::Normalised(stream) => self
                 .ledger
@@ -118,7 +121,7 @@ where
                 let mut stated = String::new();
                 for writer in graph.reads(node).into_iter().flat_map(Reads::nodes) {
                     let Node::Normalised(stream) = writer else {
-                        return Ok(None);
+                        continue;
                     };
                     let Some(from) = self.ledger.normalised(stream).await? else {
                         return Ok(None);
@@ -132,10 +135,31 @@ where
             }
             Node::Date => Some(now.date.to_string()),
             Node::DayPart => Some(format!("{now:?}")),
-            // **Read by a derivation, never by a page**: a page reading one
-            // is drawn every time it is opened rather than ever served stale.
             Node::Landing(_) | Node::Edits(_) | Node::Interpretive(_) => None,
         })
+    }
+}
+
+/// Whether `node` has no version whatever the ledger says.
+///
+/// **A node read by a derivation and never by a page, or a table not written
+/// by normalising alone**: a page reading one is drawn every time it is
+/// opened rather than ever served stale.
+#[must_use]
+pub fn unversioned(graph: &Graph, node: &Node) -> bool {
+    match node {
+        Node::Landing(_) | Node::Edits(_) | Node::Interpretive(_) => true,
+        Node::Table(_) => graph.reads(node).is_none_or(|writers| {
+            writers
+                .nodes()
+                .any(|writer| !matches!(writer, Node::Normalised(_)))
+        }),
+        Node::Normalised(_)
+        | Node::Canonical(_)
+        | Node::Authored(_)
+        | Node::Generation(_)
+        | Node::Date
+        | Node::DayPart => false,
     }
 }
 
@@ -347,6 +371,11 @@ mod tests {
                 .insert(stream(name), from.to_owned());
         };
 
+        assert_eq!(
+            run(drawing.drawn_from(&Graph::default(), &reads, "build", now)).expect("read"),
+            None,
+            "a table nothing writes has no version"
+        );
         ledger("hevy.workouts", "1");
         assert_eq!(from(), None, "BTWB's layer has no version");
         ledger("btwb.exports", "1");

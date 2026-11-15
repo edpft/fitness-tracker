@@ -12,6 +12,7 @@ use infrastructure::{
     SqlitePrescribedWorkoutStore,
 };
 
+use crate::clock::Today;
 use crate::store::Spanned;
 use crate::{
     graph::{page, read},
@@ -42,13 +43,20 @@ page! {
     /// the canonical weigh-ins, and the plans as they now stand.
     pub struct Page {
         estimated: Estimated,
+        today: Today,
     }
 }
 
 /// The parts a run collecting what the page reads takes.
 #[must_use]
 pub fn collects() -> Scope {
-    crate::graph::collects::<Page>()
+    crate::graph::scope(&reads())
+}
+
+/// What the page reads, and so what its kept drawing is drawn from (#805).
+#[must_use]
+pub fn reads() -> application::graph::Reads {
+    <Page as application::graph::Input>::reads()
 }
 
 /// Each lift over the macrocycle in force in `plans`.
@@ -80,6 +88,7 @@ impl Page {
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
         Ok(Self {
             estimated: estimated(store, rescheduling::plans(store, zone).await?).into(),
+            today: Today::new(zone.clone()).into(),
         })
     }
 
@@ -88,7 +97,7 @@ impl Page {
     /// # Errors
     ///
     /// [`StoreError`] if the store cannot be read.
-    pub async fn view(&self, zone: &OperatorZone) -> Result<View, StoreError> {
-        read!(self.estimated.view(crate::equipment::today(zone))).await
+    pub async fn view(&self) -> Result<View, StoreError> {
+        read!(self.estimated.view(self.today.date())).await
     }
 }

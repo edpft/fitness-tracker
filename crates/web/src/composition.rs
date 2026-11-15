@@ -399,7 +399,6 @@ mod tests {
             components,
             ranges,
             over,
-            &crate::run::View::default(),
         )
         .into_string()
     }

@@ -22,8 +22,6 @@ use domain::analytical::{
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
-use crate::run::View;
-
 /// What a chart or a summary draws, each in the one colour every page uses
 /// for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,13 +64,12 @@ impl Metric {
 
 /// The whole page: a back link and its name, the range where the page offers
 /// a choice of one, then `body`.
-pub fn page(here: &str, title: &str, over: Option<Over>, run: &View, body: &Markup) -> Markup {
+pub fn page(here: &str, title: &str, over: Option<Over>, body: &Markup) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
             head { (crate::page::head(title, &[])) }
             body {
-                (crate::page::following(run))
                 main {
                     (crate::page::bar(here))
                     (crate::page::header(here, title))
