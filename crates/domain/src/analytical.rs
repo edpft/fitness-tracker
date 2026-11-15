@@ -47,10 +47,9 @@ use jiff::civil::Date;
 
 use crate::{
     body::BodyScanWeighIn,
-    canonical::{Attributed, Occurred},
-    gym::{CanonicalExercise, CanonicalGymSession, Identified, Load, Rir, exercise::RepsExercise},
+    canonical::Occurred,
+    gym::{Load, Performance, PerformedSet, Rir, exercise::RepsExercise},
     measure::{Kg, RepCount},
-    sequence::NonEmpty,
 };
 
 /// The lifts relative strength is reported for, in the order they print.
@@ -162,37 +161,27 @@ impl fmt::Display for Estimate {
     }
 }
 
-/// The highest estimate any set of `lift` gives in `session`.
+/// The highest estimate any completed working set of a performance gives.
 ///
-/// **Whatever the set's load, and whether it was tagged warm-up or working**
-/// (the operator: *"Highest e1RM is highest e1RM."*). A set with no RIR, a
-/// failed set, a set the record states no count or no load for, and a set with
-/// a relative load give no estimate; a session with no set that does gives none.
-///
-/// **Only the exercises a record named.** A watch's guess is not a claim that
-/// this was the lift, so no figure is read off one.
+/// **Only a working set states its effort**, so only one gives an estimate
+/// (#817). A failed set and a set with a relative load give none; a
+/// performance with no set that does gives none.
 pub fn session_estimate<E: OneRepMaxEstimator>(
     estimator: &E,
-    session: &CanonicalGymSession,
-    lift: RepsExercise,
+    performance: &Performance,
 ) -> Option<Estimate> {
-    session
-        .exercises()
-        .filter_map(|performed| match performed {
-            CanonicalExercise::ForReps { identified, sets }
-                if identified.copied() == Identified::Recorded(lift) =>
-            {
-                Some(sets)
-            }
-            _ => None,
-        })
-        .flat_map(NonEmpty::iter)
+    performance
+        .sets
+        .iter()
         .filter_map(|set| {
-            let Some(Load::Absolute(load)) = set.load.as_ref().map(Attributed::copied) else {
+            let PerformedSet::Working {
+                load: Load::Absolute(load),
+                reps,
+                rir,
+            } = *set
+            else {
                 return None;
             };
-            let reps = (*set.outcome.value().completed()?)?;
-            let rir = set.intensity.as_ref().map(Attributed::copied)?;
             let one_rep_max = estimator.estimate(load, reps, rir)?;
             Some(Estimate {
                 one_rep_max,
@@ -282,11 +271,8 @@ pub struct SessionStrength {
 ///
 /// **A weigh-in dated to a day comes after every one with a clock**, because
 /// it cannot be nearer than one that was. No day in the record has both.
-fn weigh_in_for<'a>(
-    session: &CanonicalGymSession,
-    weigh_ins: &'a [Weighed],
-) -> Option<&'a Weighed> {
-    nearest(session.occurred(), weigh_ins)
+fn weigh_in_for<'a>(performance: &Performance, weigh_ins: &'a [Weighed]) -> Option<&'a Weighed> {
+    nearest(&performance.occurred, weigh_ins)
 }
 
 /// [`weigh_in_for`]'s rule, over when the session happened.
@@ -303,53 +289,34 @@ fn nearest<'a>(occurred: &Occurred, weigh_ins: &'a [Weighed]) -> Option<&'a Weig
     }
 }
 
-/// Whether any account of the session names `lift`, a watch's guess included.
+/// Relative strength for every performance of a headline lift.
 ///
-/// **A guess earns a row and never a figure.** The row says the record holds an
-/// account of that lift that day, which is true of a watch's classification;
-/// [`session_estimate`] is where the distinction bites, and it reads recorded
-/// exercises only.
-fn named(session: &CanonicalGymSession, lift: RepsExercise) -> bool {
-    session.exercises().any(|performed| {
-        matches!(
-            performed,
-            CanonicalExercise::ForReps { identified, .. }
-                if identified.copied().exercise() == Some(lift)
-        )
-    })
-}
-
-/// Relative strength for every session in which a headline lift was performed.
-///
-/// One row per session per lift, in session order and then in
-/// [`HEADLINE_LIFTS`] order. A session with no usable set, or no weigh-in that
-/// day, is a row with no figure rather than no row: the gap is the finding.
+/// One row per performance, in the order given. A performance with no usable
+/// set, or no weigh-in that day, is a row with no figure rather than no row:
+/// the gap is the finding.
 pub fn relative_strength<E: OneRepMaxEstimator>(
     estimator: &E,
-    sessions: &[CanonicalGymSession],
+    performances: &[Performance],
     weigh_ins: &[Weighed],
 ) -> Vec<SessionStrength> {
-    let mut rows = Vec::new();
-    for session in sessions {
-        let body_mass = weigh_in_for(session, weigh_ins).map(|weigh_in| weigh_in.mass);
-        for lift in HEADLINE_LIFTS {
-            if !named(session, lift) {
-                continue;
-            }
-            let estimate = session_estimate(estimator, session, lift);
+    performances
+        .iter()
+        .filter(|performance| HEADLINE_LIFTS.contains(&performance.exercise))
+        .map(|performance| {
+            let body_mass = weigh_in_for(performance, weigh_ins).map(|weigh_in| weigh_in.mass);
+            let estimate = session_estimate(estimator, performance);
             let relative = estimate
                 .zip(body_mass)
                 .and_then(|(estimate, body)| RelativeStrength::of(estimate.one_rep_max, body));
-            rows.push(SessionStrength {
-                on: session.occurred().day(),
-                lift,
+            SessionStrength {
+                on: performance.on(),
+                lift: performance.exercise,
                 estimate,
                 body_mass,
                 relative,
-            });
-        }
-    }
-    rows
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

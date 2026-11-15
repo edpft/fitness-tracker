@@ -14,18 +14,15 @@ use domain::{
             relative, sessions_of, trend,
         },
     },
-    gym::exercise::RepsExercise,
+    gym::exercise::{Exercise, RepsExercise},
     plan::{Mesocycles, Occupies},
 };
-use jiff::civil::{Date, date};
+use jiff::civil::Date;
 
 use crate::{
     error::StoreError,
-    ports::{PerformedGymSessions, PlanStore, PrescribedWorkoutStore, WeighInHistory},
+    ports::{Performances, PlanStore, PrescribedWorkoutStore, WeighInHistory},
 };
-
-/// Before anything the record holds.
-const EARLIEST: Date = date(2000, 1, 1);
 
 /// Each lift over the macrocycle in force.
 #[derive(Debug, Clone, PartialEq)]
@@ -65,7 +62,7 @@ crate::graph::through!(EstimatedOneRepMax<E, S, W, P>);
 impl<E, S, W, P> EstimatedOneRepMax<E, S, W, P>
 where
     E: OneRepMaxEstimator + Sync,
-    S: PerformedGymSessions + Sync,
+    S: Performances + Sync,
     W: WeighInHistory + Sync,
     P: PlanStore + Sync,
 {
@@ -117,7 +114,10 @@ where
             .map(|mesocycle| Occupies::span(mesocycle).start())
             .collect();
         mesocycles.sort_unstable();
-        let sessions = self.sessions.between(EARLIEST, today).await?;
+        // From the macrocycle's first day: no point before it is drawn, and
+        // the next test is counted from the last session only where that is
+        // today.
+        let sessions = self.sessions.of(&LIFTS, from, today).await?;
         let weigh_ins = self.weigh_ins.weigh_ins().await?;
         let yesterday = today.yesterday().unwrap_or(today);
         Ok(View {
@@ -188,7 +188,7 @@ crate::graph::through!(OneRepMaxTests<E, S, P, R>);
 impl<E, S, P, R> OneRepMaxTests<E, S, P, R>
 where
     E: OneRepMaxEstimator + Sync,
-    S: PerformedGymSessions + Sync,
+    S: Performances + Sync,
     P: PlanStore + Sync,
     R: PrescribedWorkoutStore + Sync,
 {
@@ -207,7 +207,6 @@ where
     ///
     /// [`StoreError`] if the store is unavailable.
     pub async fn tests(&self, today: Date) -> Result<Vec<Tests>, StoreError> {
-        let sessions = self.sessions.between(EARLIEST, today).await?;
         let mut plans = Vec::new();
         for window in self.plans.windows().await? {
             if let Some(plan) = self.plans.named(window.name()).await?
@@ -216,6 +215,29 @@ where
                 plans.push(plan);
             }
         }
+        // A test is a prescription's, and no lift has one before its first
+        // mesocycle, so no day before that is read or looked up.
+        let Some(from) = plans
+            .iter()
+            .filter_map(domain::plan::Plan::gym)
+            .flat_map(Mesocycles::mesocycles)
+            .filter(|mesocycle| {
+                LIFTS
+                    .iter()
+                    .any(|lift| mesocycle.primary_exercise() == Exercise::Reps(*lift))
+            })
+            .map(|mesocycle| Occupies::span(mesocycle).start())
+            .min()
+        else {
+            return Ok(LIFTS
+                .into_iter()
+                .map(|lift| Tests {
+                    lift,
+                    tests: Vec::new(),
+                })
+                .collect());
+        };
+        let sessions = self.sessions.of(&LIFTS, from, today).await?;
         let mut read = Vec::new();
         for lift in LIFTS {
             // The prescription in force on each day the lift was performed,

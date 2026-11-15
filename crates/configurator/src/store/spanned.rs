@@ -17,11 +17,11 @@ use application::{
     CompositionHistory, CyclingDeliveryStore, CyclingMesocycleStore, DeliveryReference,
     DerivationLedger, DerivedFrom, DestinationName, DestinationReply, DiaryAuthor, DiaryStore,
     EquipmentStore, ExerciseHistory, ExtractionRunLog, FetchLog, Fetched, FillChangeStore,
-    FtpHistory, GenerationParameterStore, HoldingRides, HolidayCalendar, Input, Kept, LandingStore,
-    LastPerformance, Mark, MesocycleInForce, MesocycleStore, NewestObservation,
+    FtpHistory, FulfilledSession, GenerationParameterStore, HoldingRides, HolidayCalendar, Input,
+    Kept, LandingStore, LastPerformance, Mark, MesocycleInForce, MesocycleStore, NewestObservation,
     NormalisationRunLog, NormalisedCyclingSessionReader, NormalisedEntityStore,
     NormalisedGymSessionReader, NormalisedWeighInReader, Occupant, Output, OvernightHrvHistory,
-    Performance, PerformedCyclingSessions, PerformedGymSessions, PerformedSessionLog, PlanStore,
+    Performances, PerformedCyclingSessions, PerformedGymSessions, PerformedSessionLog, PlanStore,
     PlayedPadelGame, PlayedPadelGames, PrescribedWorkoutId, PrescribedWorkoutStore,
     PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore, PublishedCycling,
     PublishedProgrammes, PublishedRead, PulseWaveVelocityHistory, RawExtent, Reached, Reading,
@@ -38,7 +38,7 @@ use domain::cycling::{
     CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide,
     Ftp, RideVenue,
 };
-use domain::gym::{CanonicalGymSession, NormalisedGymSession, exercise::RepsExercise};
+use domain::gym::{CanonicalGymSession, NormalisedGymSession, Performance, exercise::RepsExercise};
 use domain::landing::{
     ExtractionRun, FetchedAt, LandingRecord, LandingRecordId, LandingStream, PayloadDigest,
     RecordCount, RunId, RunOutcome, SourceRecordId, Watermark,
@@ -292,8 +292,14 @@ spanned! {
 spanned! {
     ExerciseHistory {
         fn last_performances(&self, exercises: &[RepsExercise]) -> Result<BTreeMap<RepsExercise, LastPerformance>, StoreError>;
-        fn performances(&self, exercise: RepsExercise) -> Result<Vec<Performance>, StoreError>;
+        fn performances(&self, exercise: RepsExercise) -> Result<Vec<(Performance, Option<FulfilledSession>)>, StoreError>;
         fn newest_performance(&self) -> Result<Option<Date>, StoreError>;
+    }
+}
+
+spanned! {
+    Performances {
+        fn of(&self, exercises: &[RepsExercise], from: Date, to: Date) -> Result<Vec<Performance>, StoreError>;
     }
 }
 

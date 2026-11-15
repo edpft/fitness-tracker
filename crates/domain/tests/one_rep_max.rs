@@ -9,11 +9,8 @@ use domain::{
             Against, Line, Point, Reading, points as read, read_tests, relative, tested, trend,
         },
     },
-    canonical::{Attributed, NormalisedSessionId, Occurred},
-    gym::{
-        CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Identified, Load,
-        Performed, Rir, exercise::RepsExercise,
-    },
+    canonical::Occurred,
+    gym::{Load, Performance, PerformedSet, Rir, exercise::RepsExercise},
     measure::{Kg, RepCount},
     sequence::NonEmpty,
 };
@@ -128,57 +125,65 @@ fn sessions_on_one_day_give_no_line() {
     );
 }
 
-const ACCOUNT: NormalisedSessionId = NormalisedSessionId::FIRST;
+const fn load(tenths: u64) -> Load {
+    Load::Absolute(Kg::from_grams(tenths * 100))
+}
 
-/// A front squat set: kilograms, repetitions (`None` for a failure) and the
-/// reserve where one was recorded.
-fn set(kg: u64, reps: Option<u32>, rir: Option<Rir>) -> Option<CanonicalSet<RepCount>> {
-    let outcome = match reps {
-        Some(reps) => Performed::Completed(Some(RepCount::new(reps).ok()?)),
-        None => Performed::Failed,
-    };
-    Some(CanonicalSet {
-        outcome: Attributed::new(outcome, ACCOUNT),
-        load: Some(Attributed::new(
-            Load::Absolute(Kg::from_grams(kg * 1_000 / 10)),
-            ACCOUNT,
-        )),
-        began: None,
-        intensity: rir.map(|rir| Attributed::new(rir, ACCOUNT)),
-        kind: None,
-        rest_after: None,
+/// A front squat warm-up: tenths of a kilogram and repetitions.
+fn warmup(tenths: u64, reps: u32) -> Option<PerformedSet> {
+    Some(PerformedSet::Warmup {
+        load: load(tenths),
+        reps: RepCount::new(reps).ok()?,
     })
 }
 
-/// A session of front squat on `on`, its sets as [`set`] states them.
-fn front_squat(on: Date, sets: Vec<Option<CanonicalSet<RepCount>>>) -> Option<CanonicalGymSession> {
-    let sets: Vec<CanonicalSet<RepCount>> = sets.into_iter().collect::<Option<_>>()?;
-    let exercise = CanonicalExercise::ForReps {
-        identified: Attributed::new(
-            Identified::Recorded(RepsExercise::FrontSquatBarbell),
-            ACCOUNT,
-        ),
+/// A completed front squat working set, with its reserve.
+fn working(tenths: u64, reps: u32, rir: Rir) -> Option<PerformedSet> {
+    Some(PerformedSet::Working {
+        load: load(tenths),
+        reps: RepCount::new(reps).ok()?,
+        rir,
+    })
+}
+
+/// A completed front squat working set with no effort stated.
+fn unrated(tenths: u64, reps: u32) -> Option<PerformedSet> {
+    Some(PerformedSet::Unrated {
+        load: load(tenths),
+        reps: RepCount::new(reps).ok()?,
+    })
+}
+
+/// A failed front squat attempt.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "beside its siblings in a vec of Options"
+)]
+const fn failed(tenths: u64) -> Option<PerformedSet> {
+    Some(PerformedSet::Failed { load: load(tenths) })
+}
+
+/// Front squat on `on`, its sets in order.
+fn front_squat(on: Date, sets: Vec<Option<PerformedSet>>) -> Option<Performance> {
+    let sets: Vec<PerformedSet> = sets.into_iter().collect::<Option<_>>()?;
+    Some(Performance {
+        occurred: Occurred::On(on),
+        exercise: RepsExercise::FrontSquatBarbell,
         sets: NonEmpty::new(sets).ok()?,
-    };
-    Some(CanonicalGymSession::new(
-        Occurred::On(on),
-        NonEmpty::of(CanonicalItem::Exercise(exercise), Vec::new()),
-        None,
-        None,
-    ))
+    })
 }
 
 /// The entry test as the record holds it, 2026-09-25, in tenths of a kilogram.
-fn entry_test() -> Option<CanonicalGymSession> {
+fn entry_test() -> Option<Performance> {
     front_squat(
         date(2026, 9, 25),
         vec![
-            set(350, Some(4), None),
-            set(800, Some(1), None),
-            set(900, Some(1), None),
-            set(925, Some(1), None),
-            set(950, None, None),
-            set(950, None, None),
+            warmup(350, 4),
+            warmup(800, 1),
+            unrated(900, 1),
+            unrated(925, 1),
+            failed(950),
+            failed(950),
         ],
     )
 }
@@ -192,8 +197,7 @@ fn declared() -> Option<Vec<(Date, RepCount)>> {
 fn a_test_is_its_heaviest_completed_set_at_none_in_reserve() {
     let session = entry_test().expect("a session");
     let one = RepCount::new(1).expect("one rep");
-    let (estimate, failed) =
-        tested(&Rts, &session, RepsExercise::FrontSquatBarbell, one).expect("a test");
+    let (estimate, failed) = tested(&Rts, &session, one).expect("a test");
     assert_eq!(estimate.one_rep_max, Kg::from_grams(92_500));
     assert_eq!(failed, Some(Kg::from_grams(95_000)));
     let points = read(
@@ -215,7 +219,7 @@ fn a_test_needs_no_failure() {
     // The operator, 2026-11-03: a test may end at 0 or 0–1 in reserve.
     let session = front_squat(
         date(2026, 9, 25),
-        vec![set(900, Some(1), None), set(925, Some(1), Some(Rir::Zero))],
+        vec![unrated(900, 1), working(925, 1, Rir::Zero)],
     )
     .expect("a session");
     let points = read(
@@ -238,11 +242,7 @@ fn a_failed_attempt_on_a_day_not_prescribed_as_a_test_is_no_test() {
     // 94.1 kg, and the failure at 85 is not a test.
     let session = front_squat(
         date(2026, 10, 9),
-        vec![
-            set(800, Some(5), Some(Rir::One)),
-            set(825, Some(1), None),
-            set(850, None, None),
-        ],
+        vec![working(800, 5, Rir::One), unrated(825, 1), failed(850)],
     )
     .expect("a session");
     let points = read(
@@ -265,17 +265,12 @@ fn a_reserve_recorded_on_the_heaviest_set_still_tests() {
     // 2026-07-03, or 2026-10-23: 95 kg × 1 @ 0–1, then 100 kg failed (#617).
     let session = front_squat(
         date(2026, 9, 25),
-        vec![
-            set(800, Some(1), None),
-            set(950, Some(1), Some(Rir::One)),
-            set(1000, None, None),
-        ],
+        vec![warmup(800, 1), working(950, 1, Rir::One), failed(1000)],
     )
     .expect("a session");
     let one = RepCount::new(1).expect("one rep");
     assert_eq!(
-        tested(&Rts, &session, RepsExercise::FrontSquatBarbell, one)
-            .map(|(estimate, failed)| (estimate.one_rep_max, failed)),
+        tested(&Rts, &session, one).map(|(estimate, failed)| (estimate.one_rep_max, failed)),
         Some((Kg::from_grams(95_000), Some(Kg::from_grams(100_000))))
     );
 }
@@ -287,15 +282,15 @@ fn a_rep_max_test_takes_the_heaviest_set_of_its_reps() {
     let session = front_squat(
         date(2026, 9, 25),
         vec![
-            set(900, Some(3), Some(Rir::One)),
-            set(925, Some(3), Some(Rir::Zero)),
-            set(950, Some(2), Some(Rir::Zero)),
+            working(900, 3, Rir::One),
+            working(925, 3, Rir::Zero),
+            working(950, 2, Rir::Zero),
         ],
     )
     .expect("a session");
     let three = RepCount::new(3).expect("three reps");
     assert_eq!(
-        tested(&Rts, &session, RepsExercise::FrontSquatBarbell, three).map(|(estimate, failed)| (
+        tested(&Rts, &session, three).map(|(estimate, failed)| (
             estimate.load,
             estimate.reps,
             failed
@@ -312,11 +307,11 @@ fn weighed(on: Date, grams: u64, fat_free: Option<u64>) -> Weighed {
     }
 }
 
-fn after_the_test() -> Option<Vec<CanonicalGymSession>> {
+fn after_the_test() -> Option<Vec<Performance>> {
     Some(vec![
         entry_test()?,
-        front_squat(date(2026, 9, 29), vec![set(725, Some(5), Some(Rir::Two))])?,
-        front_squat(date(2026, 10, 2), vec![set(750, Some(8), Some(Rir::One))])?,
+        front_squat(date(2026, 9, 29), vec![working(725, 5, Rir::Two)])?,
+        front_squat(date(2026, 10, 2), vec![working(750, 8, Rir::One)])?,
     ])
 }
 

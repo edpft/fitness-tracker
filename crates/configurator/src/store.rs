@@ -26,7 +26,7 @@ use application::next::Canonicalising;
 use application::{
     CanonicalGymSessionStore, CyclingDeliveryStore, DiaryAuthor, DiaryStore, EquipmentStore,
     ExerciseHistory, FillChangeStore, FtpHistory, GenerationParameterStore, MesocycleStore,
-    PerformedGymSessions, PerformedSessionLog, PlanStore, PrescribedWorkoutStore,
+    Performances, PerformedGymSessions, PerformedSessionLog, PlanStore, PrescribedWorkoutStore,
     PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore, RiddenSessionLog,
     RiddenVenues, StoreError, WeighInHistory, WorkoutStore,
 };
@@ -36,8 +36,9 @@ use infrastructure::{
     SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteDerivationLedger,
     SqliteDiaryStore, SqliteEquipmentStore, SqliteExerciseHistory, SqliteFtpHistory,
     SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteKeptDrawings,
-    SqliteOperatorSettingsStore, SqlitePelotonClassStore, SqlitePlanStore, SqlitePool,
-    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRevisions, connect,
+    SqliteOperatorSettingsStore, SqlitePelotonClassStore, SqlitePerformances, SqlitePlanStore,
+    SqlitePool, SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRevisions,
+    connect,
 };
 
 /// The operator's store, opened.
@@ -205,6 +206,11 @@ impl Store {
     ) -> impl CanonicalGymSessionStore + PerformedGymSessions + PerformedSessionLog + Send + Sync + use<>
     {
         self.adapter(SqliteCanonicalGymSessionStore::new)
+    }
+
+    /// The performances of some lifts over some days (#817).
+    pub fn performances(&self) -> impl Performances + Send + Sync + use<> {
+        self.adapter(SqlitePerformances::new)
     }
 
     /// Rebuilding each canonical layer from the normalised ones, logged, each

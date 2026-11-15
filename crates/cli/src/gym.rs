@@ -169,7 +169,7 @@ pub async fn strength(
     crate::canonicalise::body_weight(store).await?;
     println!();
 
-    let figures = RelativeStrength::new(Rts, store.canonical_gym(), store.weigh_ins())
+    let figures = RelativeStrength::new(Rts, store.performances(), store.weigh_ins())
         .report(
             StartedAt::new(jiff::Timestamp::now(), zone.clone())
                 .wall_clock()

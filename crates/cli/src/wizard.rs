@@ -632,15 +632,15 @@ async fn best_of(
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
     let mut best: Option<Best> = None;
-    for performance in performances {
-        for set in performance.sets {
-            let Load::Absolute(load) = set.load else {
+    for (performance, _) in performances {
+        for set in &performance.sets {
+            let Load::Absolute(load) = set.load() else {
                 continue;
             };
-            let Some(reps) = set.outcome.completed() else {
+            let Some(reps) = set.reps() else {
                 continue;
             };
-            let Some(maximum) = as_one_rep_max(load, *reps) else {
+            let Some(maximum) = as_one_rep_max(load, reps) else {
                 continue;
             };
             let maximum = scale.map_or(maximum, |steps| steps.quantise(maximum));
@@ -651,7 +651,7 @@ async fn best_of(
                 best = Some(Best {
                     load,
                     reps: reps.as_u32(),
-                    on: performance.on,
+                    on: performance.on(),
                     maximum,
                 });
             }

@@ -27,15 +27,13 @@ use domain::cycling::{
     CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide,
     Ftp, PublishedProgramme, RideVenue,
 };
-use domain::gym::{
-    CanonicalGymSession, Load, NormalisedGymSession, Performed, SetKind, exercise::RepsExercise,
-};
+use domain::gym::{CanonicalGymSession, NormalisedGymSession, Performance, exercise::RepsExercise};
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
     LandingStream, PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome,
     SourceRecordId, Watermark,
 };
-use domain::measure::{PositiveDuration, RepCount};
+use domain::measure::PositiveDuration;
 use domain::normalised::{
     NormalisationOutcome, NormalisationRun, NormalisationRunId, Refusal, RefusalCount, RefusalKind,
     RefusalReason, StatedZones, WorkoutCount,
@@ -1256,33 +1254,6 @@ pub trait RefusalReporter {
 // port below returns both kinds of value.
 // ---------------------------------------------------------------------------
 
-/// One performance of one exercise, on one date, as the canonical layer holds
-/// it.
-///
-/// **No landing record.** A canonical session is merged from however many
-/// normalised sessions recorded it, each of them derived from however many
-/// landing records, so there is no one record for this to name — and nothing
-/// ever read the one it used to carry. Provenance lives on the canonical
-/// session's own fields (§ II.4), which is where a reader asking "whose figure
-/// is this?" should go.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Performance {
-    pub on: Date,
-    /// The prescribed session this performance was against, where the record
-    /// names one.
-    ///
-    /// **The published id is the only thing that links the two.** A performance
-    /// carries the reference the destination assigned when the session was
-    /// delivered, and that reference resolves to the prescription it came from.
-    /// Nothing else does: not the date, not the exercise, not the order they
-    /// appear in.
-    ///
-    /// `None` is a session performed against no prescription of ours -- logged
-    /// freehand, or against a routine that was never delivered from here.
-    pub fulfilled: Option<FulfilledSession>,
-    pub sets: Vec<PerformedSetSummary>,
-}
-
 /// The prescription a performance was performed against.
 ///
 /// Two facts, because two is what reading a performance's role needs: whose
@@ -1297,28 +1268,6 @@ pub struct FulfilledSession {
     /// picks the latest authoring by name for the same reason.
     pub plan: PlanName,
     pub role: SessionRole,
-}
-
-/// Enough of a set for double progression and for the gate.
-///
-/// Deliberately not the whole `Set<M>`: rest is never recorded by the one source
-/// in use, and an effort report is not an input to any derivation, so `intensity`
-/// is absent too.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PerformedSetSummary {
-    pub load: Load,
-    /// A completed count, or a failed attempt. The gate reads this and nothing
-    /// else.
-    pub outcome: Performed<RepCount>,
-    /// Warm-up or working, as the record has it.
-    ///
-    /// **Carried rather than filtered on, because only one caller's question is
-    /// about working sets.** What the heaviest weight lifted was does not depend
-    /// on which sets the source called warm-ups; whether every set of a slot
-    /// reached the top of its rep range does, since a warm-up is not one of the
-    /// sets the range was prescribed for. Excluding warm-ups in the store made
-    /// the first question unanswerable to serve the second.
-    pub kind: SetKind,
 }
 
 /// What the projection knows about an exercise.
@@ -1474,7 +1423,7 @@ pub trait ExerciseHistory {
     fn performances(
         &self,
         exercise: RepsExercise,
-    ) -> impl Future<Output = Result<Vec<Performance>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Vec<(Performance, Option<FulfilledSession>)>, StoreError>> + Send;
 
     /// The newest performance in the record, whatever exercise it was of.
     ///
@@ -1485,6 +1434,30 @@ pub trait ExerciseHistory {
     ///
     /// [`StoreError`] if the store is unavailable.
     fn newest_performance(&self) -> impl Future<Output = Result<Option<Date>, StoreError>> + Send;
+}
+
+/// The performances of some lifts over some days, as a chart reads them (#817).
+///
+/// **What a chart draws, asked for in one query.** A page reading a lift's
+/// estimate draws that lift's sets, so it asks for them rather than for whole
+/// sessions to search; the store answers with the sets [`Performance`] admits.
+/// No method here reads more than the lifts and the days asked for.
+///
+/// **Over the canonical layer** (§ 5), and only exercises a record named, for
+/// [`ExerciseHistory`]'s reasons.
+pub trait Performances {
+    /// Each performance of any of `exercises` between the two days, both
+    /// included, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn of(
+        &self,
+        exercises: &[RepsExercise],
+        from: Date,
+        to: Date,
+    ) -> impl Future<Output = Result<Vec<Performance>, StoreError>> + Send;
 }
 
 /// Whole gym sessions the record holds, as the canonical layer holds them.

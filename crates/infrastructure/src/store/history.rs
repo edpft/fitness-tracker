@@ -41,20 +41,22 @@
 
 use std::collections::BTreeMap;
 
-use application::{
-    ExerciseHistory, FulfilledSession, LastPerformance, Performance, PerformedSetSummary,
-    StoreError,
-};
+use application::{ExerciseHistory, FulfilledSession, LastPerformance, StoreError};
 use domain::{
-    gym::{Load, Performed, SetKind, SignedKg, exercise::RepsExercise},
+    canonical::Occurred,
+    gym::{Load, Performance, PerformedSet, Rir, SignedKg, exercise::RepsExercise},
     measure::RepCount,
     plan::PlanName,
     planner::{Relative, SessionRole},
+    sequence::NonEmpty,
 };
 use jiff::civil::Date;
 use sqlx::SqlitePool;
 
-use super::{canonical_gym::occurred, store_error};
+use super::{
+    canonical_gym::{occurred, widened},
+    store_error,
+};
 
 /// The performed record, read for prescription.
 #[derive(Debug, Clone)]
@@ -68,70 +70,44 @@ impl SqliteExerciseHistory {
     }
 }
 
-/// One row of a set, as SQLite hands it back.
-struct SetRow {
-    load_kind: String,
-    load_grams: i64,
-    outcome: String,
-    reps: Option<i64>,
-    set_kind: String,
-}
-
-/// Rebuild a set summary from its flat row.
+/// One set's columns, rebuilt into the one of three things it is (#817).
 ///
-/// The measure columns are the sum type projected; which one matters follows
-/// from the exercise, and a failed attempt populates none of them.
-fn summary_of(row: &SetRow) -> Result<PerformedSetSummary, StoreError> {
+/// The query admits only the three, so anything else is a store something else
+/// has written to.
+fn set_of(row: &PerformanceRow) -> Result<PerformedSet, StoreError> {
+    let corrupt = |detail: String| StoreError::Corrupt { detail };
     let load = match row.load_kind.as_str() {
-        "absolute" => {
-            let grams = u64::try_from(row.load_grams).map_err(|_| StoreError::Corrupt {
-                detail: "an absolute load stored as a negative mass".to_owned(),
-            })?;
-            Load::Absolute(domain::measure::Kg::from_grams(grams))
-        }
+        "absolute" => Load::Absolute(domain::measure::Kg::from_grams(
+            u64::try_from(row.load_grams)
+                .map_err(|_| corrupt("an absolute load stored as a negative mass".to_owned()))?,
+        )),
         "relative" => Load::Relative(SignedKg::from_grams(row.load_grams)),
-        other => {
-            return Err(StoreError::Corrupt {
-                detail: format!("{other:?} is not a load kind"),
-            });
-        }
+        other => return Err(corrupt(format!("{other:?} is not a load kind"))),
     };
-
-    let outcome = match row.outcome.as_str() {
-        "failed" => Performed::Failed,
-        "completed" => {
-            let reps = row.reps.ok_or_else(|| StoreError::Corrupt {
-                detail: "a completed set of repetitions with no count".to_owned(),
-            })?;
-            let count = u32::try_from(reps).map_err(|_| StoreError::Corrupt {
-                detail: "a repetition count the domain cannot hold".to_owned(),
-            })?;
-            Performed::Completed(RepCount::new(count).map_err(|error| StoreError::Corrupt {
-                detail: error.to_string(),
-            })?)
+    let reps = row
+        .reps
+        .map(|reps| {
+            u32::try_from(reps)
+                .map_err(|_| corrupt("a repetition count the domain cannot hold".to_owned()))
+                .and_then(|count| RepCount::new(count).map_err(|error| corrupt(error.to_string())))
+        })
+        .transpose()?;
+    let rir = row
+        .rir
+        .clone()
+        .map(|rir| Rir::try_from(rir).map_err(|error| corrupt(error.to_string())))
+        .transpose()?;
+    match (row.set_kind.as_str(), row.outcome.as_str(), reps, rir) {
+        ("warmup", "completed", Some(reps), _) => Ok(PerformedSet::Warmup { load, reps }),
+        ("working", "completed", Some(reps), Some(rir)) => {
+            Ok(PerformedSet::Working { load, reps, rir })
         }
-        other => {
-            return Err(StoreError::Corrupt {
-                detail: format!("{other:?} is not a set outcome"),
-            });
-        }
-    };
-
-    let kind = match row.set_kind.as_str() {
-        "working" => SetKind::Working,
-        "warmup" => SetKind::Warmup,
-        other => {
-            return Err(StoreError::Corrupt {
-                detail: format!("{other:?} is not a set kind"),
-            });
-        }
-    };
-
-    Ok(PerformedSetSummary {
-        load,
-        outcome,
-        kind,
-    })
+        ("working", "completed", Some(reps), None) => Ok(PerformedSet::Unrated { load, reps }),
+        ("working", "failed", _, _) => Ok(PerformedSet::Failed { load }),
+        (kind, outcome, _, _) => Err(corrupt(format!(
+            "a {kind} set {outcome} is not a performed set"
+        ))),
+    }
 }
 
 /// The prescribed session a performance names, rebuilt from its two columns.
@@ -176,7 +152,7 @@ impl ExerciseHistory for SqliteExerciseHistory {
             // `LastPerformance` exists to prevent.
             let performances = self.performances(*exercise).await?;
             let answer = match performances.into_iter().next_back() {
-                Some(last) => LastPerformance::Performed(last),
+                Some((last, _)) => LastPerformance::Performed(last),
                 // Nothing a record named, so the question is whether a watch
                 // placed it. Asked only here: a series of performances has
                 // nowhere to say "and a guess sat between these two".
@@ -188,7 +164,10 @@ impl ExerciseHistory for SqliteExerciseHistory {
         Ok(answers)
     }
 
-    async fn performances(&self, exercise: RepsExercise) -> Result<Vec<Performance>, StoreError> {
+    async fn performances(
+        &self,
+        exercise: RepsExercise,
+    ) -> Result<Vec<(Performance, Option<FulfilledSession>)>, StoreError> {
         grouped(self.sets_of(exercise).await?)
     }
 
@@ -257,10 +236,12 @@ struct PerformanceRow {
     plan: Option<String>,
     session_intensity: Option<String>,
     session_volume: Option<String>,
+    exercise: String,
     load_kind: String,
     load_grams: i64,
     outcome: String,
     reps: Option<i64>,
+    rir: Option<String>,
     set_kind: String,
 }
 
@@ -277,10 +258,12 @@ impl SqliteExerciseHistory {
                    prescriber.name AS "plan: String",
                    issued.session_intensity AS "session_intensity: String",
                    issued.session_volume AS "session_volume: String",
+                   e.exercise AS "exercise!: String",
                    st.load_kind AS "load_kind!: String",
                    st.load_grams AS "load_grams!: i64",
                    st.outcome AS "outcome!: String",
                    st.reps AS "reps: i64",
+                   st.rir AS "rir: String",
                    st.set_kind AS "set_kind!: String"
             FROM canonical_gym_session AS c
             JOIN canonical_gym_exercise AS e ON e.session = c.id
@@ -329,8 +312,11 @@ impl SqliteExerciseHistory {
               AND e.identified = 'recorded'
               AND e.exercise = ?
               AND st.load_kind IS NOT NULL
+              -- What a performed set is (#817): a completed set of either
+              -- kind, and a failed working set.
               AND st.set_kind IS NOT NULL
-              AND (st.outcome = 'failed' OR st.reps IS NOT NULL)
+              AND ((st.outcome = 'completed' AND st.reps IS NOT NULL)
+                OR (st.set_kind = 'working' AND st.outcome = 'failed'))
             ORDER BY COALESCE(c.started_at_utc, c.on_day) ASC, c.id ASC,
                      e.item_position ASC, e.position ASC, st.position ASC
             "#,
@@ -342,41 +328,57 @@ impl SqliteExerciseHistory {
     }
 }
 
-/// The rows folded into one performance per visit, set order kept.
+/// The rows folded into one performance per visit and exercise, set order
+/// kept, each with the prescription its visit answered.
 ///
 /// The rows arrive in visit order and in performed order within a visit, so this
 /// is a fold over a sequence the database already sorted.
-fn grouped(rows: Vec<PerformanceRow>) -> Result<Vec<Performance>, StoreError> {
-    let mut performances: Vec<Performance> = Vec::new();
-    let mut current: Option<i64> = None;
+fn grouped(
+    rows: Vec<PerformanceRow>,
+) -> Result<Vec<(Performance, Option<FulfilledSession>)>, StoreError> {
+    // The visit, the exercise, when, what it answered, and its sets so far.
+    type Open = (
+        i64,
+        RepsExercise,
+        Occurred,
+        Option<FulfilledSession>,
+        Vec<PerformedSet>,
+    );
+    let corrupt = |detail: String| StoreError::Corrupt { detail };
+    let mut open: Vec<Open> = Vec::new();
     for row in rows {
-        let day = occurred(
-            row.started_at_utc.as_deref(),
-            row.zone.as_deref(),
-            row.on_day.as_deref(),
-        )?
-        .day();
-        let summary = summary_of(&SetRow {
-            load_kind: row.load_kind,
-            load_grams: row.load_grams,
-            outcome: row.outcome,
-            reps: row.reps,
-            set_kind: row.set_kind,
-        })?;
-
-        match performances.last_mut() {
-            Some(last) if current == Some(row.session) => last.sets.push(summary),
-            _ => {
-                current = Some(row.session);
-                performances.push(Performance {
-                    on: day,
-                    fulfilled: fulfilled_of(row.plan, row.session_intensity, row.session_volume)?,
-                    sets: vec![summary],
-                });
+        let set = set_of(&row)?;
+        let exercise =
+            RepsExercise::try_from(row.exercise).map_err(|error| corrupt(error.to_string()))?;
+        match open.last_mut() {
+            Some((session, held, _, _, sets)) if *session == row.session && *held == exercise => {
+                sets.push(set);
             }
+            _ => open.push((
+                row.session,
+                exercise,
+                occurred(
+                    row.started_at_utc.as_deref(),
+                    row.zone.as_deref(),
+                    row.on_day.as_deref(),
+                )?,
+                fulfilled_of(row.plan, row.session_intensity, row.session_volume)?,
+                vec![set],
+            )),
         }
     }
-    Ok(performances)
+    open.into_iter()
+        .map(|(_, exercise, occurred, fulfilled, sets)| {
+            Ok((
+                Performance {
+                    occurred,
+                    exercise,
+                    sets: NonEmpty::new(sets).map_err(|error| corrupt(error.to_string()))?,
+                },
+                fulfilled,
+            ))
+        })
+        .collect()
 }
 
 /// What was lifted, against what was prescribed for it (#809).
@@ -389,6 +391,95 @@ impl application::Input for SqliteExerciseHistory {
             application::Node::PLAN,
             application::Node::PRESCRIPTIONS,
         ]))
+        .and(super::tables(&[super::table::GYM_SESSION]))
+    }
+}
+
+/// The performances of some lifts over some days, read for a chart (#817).
+#[derive(Debug, Clone)]
+pub struct SqlitePerformances {
+    pool: SqlitePool,
+}
+
+impl SqlitePerformances {
+    pub const fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+impl application::Performances for SqlitePerformances {
+    async fn of(
+        &self,
+        exercises: &[RepsExercise],
+        from: Date,
+        to: Date,
+    ) -> Result<Vec<Performance>, StoreError> {
+        let keys = serde_json::to_string(
+            &exercises
+                .iter()
+                .map(|exercise| exercise.as_str())
+                .collect::<Vec<_>>(),
+        )
+        .map_err(|error| StoreError::Corrupt {
+            detail: error.to_string(),
+        })?;
+        // A day either side, narrowed below by the day each was performed on,
+        // as `PerformedGymSessions::between` does.
+        let (lower, upper) = widened(from, to)?;
+        let rows = sqlx::query_as!(
+            PerformanceRow,
+            r#"
+            SELECT c.id AS "session!: i64",
+                   c.started_at_utc, c.zone, c.on_day,
+                   NULL AS "plan: String",
+                   NULL AS "session_intensity: String",
+                   NULL AS "session_volume: String",
+                   e.exercise AS "exercise!: String",
+                   st.load_kind AS "load_kind!: String",
+                   st.load_grams AS "load_grams!: i64",
+                   st.outcome AS "outcome!: String",
+                   st.reps AS "reps: i64",
+                   st.rir AS "rir: String",
+                   st.set_kind AS "set_kind!: String"
+            FROM canonical_gym_session AS c
+            JOIN canonical_gym_exercise AS e ON e.session = c.id
+            JOIN canonical_gym_set AS st
+              ON st.session = e.session
+             AND st.item_position = e.item_position
+             AND st.exercise_position = e.position
+            WHERE e.measure = 'reps'
+              AND e.identified = 'recorded'
+              AND e.exercise IN (SELECT value FROM json_each(?))
+              AND COALESCE(c.started_at_utc, c.on_day) >= ?
+              AND COALESCE(c.started_at_utc, c.on_day) < ?
+              AND st.load_kind IS NOT NULL
+              AND st.set_kind IS NOT NULL
+              AND ((st.outcome = 'completed' AND st.reps IS NOT NULL)
+                OR (st.set_kind = 'working' AND st.outcome = 'failed'))
+            ORDER BY COALESCE(c.started_at_utc, c.on_day) ASC, c.id ASC, e.exercise ASC,
+                     e.item_position ASC, e.position ASC, st.position ASC
+            "#,
+            keys,
+            lower,
+            upper
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+        Ok(grouped(rows)?
+            .into_iter()
+            .map(|(performance, _)| performance)
+            .filter(|performance| (from..=to).contains(&performance.on()))
+            .collect())
+    }
+}
+
+/// What was lifted, and nothing about what it answered.
+impl application::Input for SqlitePerformances {
+    fn reads() -> application::Reads {
+        application::Reads::of([application::Node::Canonical(
+            application::CanonicalLayer::Gym,
+        )])
         .and(super::tables(&[super::table::GYM_SESSION]))
     }
 }

@@ -413,7 +413,7 @@ fn a_session_performed_on_an_unavailable_day_still_counts() {
     assert!(
         performances
             .iter()
-            .any(|performance| performance.on == performed_on),
+            .any(|(performance, _)| performance.on() == performed_on),
         "and the front squat performed on it is in the history all the same"
     );
 }

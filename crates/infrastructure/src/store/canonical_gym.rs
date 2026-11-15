@@ -306,7 +306,7 @@ async fn spine_between(
 /// A day column is `YYYY-MM-DD` and an instant column `YYYY-MM-DDTHH:MM:SSZ`, so
 /// one lexicographic comparison covers both: every instant on a day sorts after
 /// that day's own string and before the next day's.
-fn widened(from: Date, to: Date) -> Result<(String, String), StoreError> {
+pub(super) fn widened(from: Date, to: Date) -> Result<(String, String), StoreError> {
     let lower = from
         .checked_sub(jiff::Span::new().days(1))
         .map_err(|_| StoreError::Corrupt {

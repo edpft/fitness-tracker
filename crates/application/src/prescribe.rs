@@ -14,7 +14,7 @@ use std::{borrow::Cow, cmp::Ordering, collections::BTreeMap};
 
 use domain::{
     gym::{
-        Load, SetKind, SignedKg,
+        Load, Performance, PerformedSet, SignedKg,
         equipment::{BandLadder, BandSetting},
         exercise::{DurationExercise, Exercise, Implement, RepsExercise},
     },
@@ -43,10 +43,9 @@ use crate::{
     error::{PrescriptionError, StoreError},
     ports::{
         Authored, ExerciseHistory, GenerationParameterStore, Issuance, LadderStanding,
-        LastPerformance, MesocycleInForce, MesocycleStore, Performance, PerformedSetSummary,
-        PlanAuthor, PlanStore, PlannedWith, PrescribedWorkoutStore, Prescription,
-        PrescriptionLifecycle, ProgressionStore, UnderivableReason, UnderivableSlot,
-        WorkoutPrescriber, WorkoutStore,
+        LastPerformance, MesocycleInForce, MesocycleStore, PlanAuthor, PlanStore, PlannedWith,
+        PrescribedWorkoutStore, Prescription, PrescriptionLifecycle, ProgressionStore,
+        UnderivableReason, UnderivableSlot, WorkoutPrescriber, WorkoutStore,
     },
 };
 
@@ -751,15 +750,16 @@ where
         let performances = self.ports.history.performances(primary).await?;
         let entering: Vec<_> = performances
             .into_iter()
-            .filter(|performance| performance.on < before)
+            .map(|(performance, _)| performance)
+            .filter(|performance| performance.on() < before)
             .filter(|performance| {
                 matches!(
-                    calendar.place_week(performance.on),
+                    calendar.place_week(performance.on()),
                     Ok(WeekKind::Climbing(week)) if week == domain::prescription::WeekIndex::FIRST
                 )
             })
             .collect();
-        let Some(latest) = entering.iter().map(|performance| performance.on).max() else {
+        let Some(latest) = entering.iter().map(Performance::on).max() else {
             return Ok(None);
         };
         let Some(completed) = heaviest_completed_in(&entering) else {
@@ -768,8 +768,10 @@ where
         let failed = entering
             .iter()
             .flat_map(|performance| performance.sets.iter())
-            .filter_map(|set| match (set.load, set.outcome.completed()) {
-                (Load::Absolute(mass), None) if mass > completed => Some(mass),
+            .filter_map(|set| match set {
+                PerformedSet::Failed {
+                    load: Load::Absolute(mass),
+                } if *mass > completed => Some(*mass),
                 _ => None,
             })
             .max();
@@ -849,7 +851,14 @@ where
         primary: RepsExercise,
         span: Span,
     ) -> Result<Option<(Kg, Option<Kg>)>, PrescriptionError> {
-        let performances = self.ports.history.performances(primary).await?;
+        let performances: Vec<Performance> = self
+            .ports
+            .history
+            .performances(primary)
+            .await?
+            .into_iter()
+            .map(|(performance, _)| performance)
+            .collect();
         let Some(completed) = heaviest_completed(&performances, span) else {
             return Ok(None);
         };
@@ -893,7 +902,7 @@ where
         let mut performances = self.ports.history.performances(primary).await?;
         // In date order, because each advance is applied to the result of the
         // one before it. The store's order is not part of its contract.
-        performances.sort_by_key(|performance| performance.on);
+        performances.sort_by_key(|(performance, _)| performance.on());
 
         // Gathered first and applied by the chart, because *what* the record
         // says is this layer's business and what it *means* is the chart's.
@@ -904,20 +913,20 @@ where
         // question — and answering it wrongly: an 8RM day that recorded
         // `8 @ 75kg` and then `5 @ 77.5kg` was read as a 77.5kg 8RM.
         let mut performed: Vec<(u32, Vec<CompletedSet>)> = Vec::new();
-        for performance in &performances {
-            if performance.on >= before {
+        for (performance, fulfilled) in &performances {
+            if performance.on() >= before {
                 continue;
             }
             // Same two answers the ladder uses, and in the same order: the
             // prescription where the record links one, the calendar otherwise.
-            let (week, role) = match &performance.fulfilled {
+            let (week, role) = match fulfilled {
                 Some(fulfilled) if fulfilled.plan == *plan => {
-                    match sbs.calendar().place_week(performance.on) {
+                    match sbs.calendar().place_week(performance.on()) {
                         Ok(week) => (week, fulfilled.role),
                         Err(_) => continue,
                     }
                 }
-                _ => match sbs.calendar().place(performance.on) {
+                _ => match sbs.calendar().place(performance.on()) {
                     Ok(placed) => placed,
                     Err(_) => continue,
                 },
@@ -1079,8 +1088,8 @@ where
 
         let performances = self.ports.history.performances(primary).await?;
         let mut gating: Vec<GatingTopSet> = Vec::new();
-        for performance in &performances {
-            if performance.on >= before {
+        for (performance, fulfilled) in &performances {
+            if performance.on() >= before {
                 continue;
             }
             // **The prescription answers where it can; the calendar answers
@@ -1103,9 +1112,9 @@ where
             //
             // 0018 removes the fallback by removing the calendar. Until then a
             // programme that predates the link keeps its ladder position.
-            let role = match &performance.fulfilled {
+            let role = match fulfilled {
                 Some(fulfilled) if fulfilled.plan == *plan => fulfilled.role,
-                _ => match mesocycle.calendar().place(performance.on) {
+                _ => match mesocycle.calendar().place(performance.on()) {
                     Ok((_, role)) => role,
                     Err(_) => continue,
                 },
@@ -1167,10 +1176,12 @@ fn asserted_by(mesocycle: &GymMesocycle) -> Option<Anchor> {
 fn heaviest_failed_above(performances: &[Performance], span: Span, completed: Kg) -> Option<Kg> {
     performances
         .iter()
-        .filter(|performance| span.covers(performance.on))
+        .filter(|performance| span.covers(performance.on()))
         .flat_map(|performance| performance.sets.iter())
-        .filter_map(|set| match (set.load, set.outcome.completed()) {
-            (Load::Absolute(mass), None) if mass > completed => Some(mass),
+        .filter_map(|set| match set {
+            PerformedSet::Failed {
+                load: Load::Absolute(mass),
+            } if *mass > completed => Some(*mass),
             _ => None,
         })
         .max()
@@ -1180,25 +1191,19 @@ fn heaviest_completed_in(performances: &[Performance]) -> Option<Kg> {
     performances
         .iter()
         .flat_map(|performance| performance.sets.iter())
-        .filter_map(|set| match (set.load, set.outcome.completed()) {
-            (Load::Absolute(mass), Some(_)) => Some(mass),
-            _ => None,
-        })
+        .filter_map(|set| set.reps().and_then(|_| set.absolute()))
         .max()
 }
 
 fn heaviest_completed(performances: &[Performance], span: Span) -> Option<Kg> {
     performances
         .iter()
-        .filter(|performance| span.covers(performance.on))
+        .filter(|performance| span.covers(performance.on()))
         .flat_map(|performance| performance.sets.iter())
-        .filter_map(|set| match (set.load, set.outcome.completed()) {
-            // Only an absolute load is comparable on this axis, as in the gate
-            // below: an assisted or weighted bodyweight lift is not measured
-            // from a mass a maximum could be taken of.
-            (Load::Absolute(mass), Some(_)) => Some(mass),
-            _ => None,
-        })
+        // Only an absolute load is comparable on this axis, as in the gate
+        // below: an assisted or weighted bodyweight lift is not measured from a
+        // mass a maximum could be taken of.
+        .filter_map(|set| set.reps().and_then(|_| set.absolute()))
         .max()
 }
 
@@ -1221,12 +1226,12 @@ fn heaviest_completed(performances: &[Performance], span: Span) -> Option<Kg> {
 /// `None` where the session recorded no set on this axis at all, which is a
 /// session that says nothing about the ladder rather than a miss.
 fn top_set_of(performance: &Performance) -> Option<GatingTopSet> {
-    let mut heaviest: Option<(u64, &PerformedSetSummary)> = None;
+    let mut heaviest: Option<(u64, &PerformedSet)> = None;
     for set in &performance.sets {
         // Only an absolute load is comparable on this axis, and the primary is a
         // barbell lift. A relative one — assisted or weighted bodyweight — is left
         // out rather than compared against a mass it is not measured from.
-        let Load::Absolute(mass) = set.load else {
+        let Some(mass) = set.absolute() else {
             continue;
         };
         let grams = mass.as_grams();
@@ -1235,11 +1240,8 @@ fn top_set_of(performance: &Performance) -> Option<GatingTopSet> {
         }
     }
     heaviest.map(|(_, set)| GatingTopSet {
-        load: match set.load {
-            Load::Absolute(mass) => mass,
-            Load::Relative(_) => Kg::NONE,
-        },
-        completed: set.outcome.completed().is_some(),
+        load: set.absolute().unwrap_or(Kg::NONE),
+        completed: set.reps().is_some(),
     })
 }
 
@@ -1263,14 +1265,7 @@ fn completed_sets_of(performance: &Performance) -> Vec<CompletedSet> {
     performance
         .sets
         .iter()
-        .filter_map(|set| {
-            let Load::Absolute(load) = set.load else {
-                return None;
-            };
-            set.outcome
-                .completed()
-                .map(|reps| CompletedSet::new(load, *reps))
-        })
+        .filter_map(|set| Some(CompletedSet::new(set.absolute()?, set.reps()?)))
         .collect()
 }
 
@@ -1289,18 +1284,19 @@ fn completed_sets_of(performance: &Performance) -> Vec<CompletedSet> {
 /// record holds them, and of any kind or outcome: a failed back-off set was
 /// still attempted.
 fn abandoned_at_the_top_set(performance: &Performance) -> bool {
-    let absolute = |set: &PerformedSetSummary| match set.load {
-        Load::Absolute(load) => Some(load),
-        Load::Relative(_) => None,
-    };
-    let Some(heaviest) = performance.sets.iter().filter_map(absolute).max() else {
+    let Some(heaviest) = performance
+        .sets
+        .iter()
+        .filter_map(PerformedSet::absolute)
+        .max()
+    else {
         return false;
     };
     performance
         .sets
         .iter()
-        .position(|set| absolute(set) == Some(heaviest))
-        .is_some_and(|top| top + 1 == performance.sets.len())
+        .position(|set| set.absolute() == Some(heaviest))
+        .is_some_and(|top| top + 1 == performance.sets.count())
 }
 
 /// What a derivation consults, and it is two kinds of thing.
@@ -2282,11 +2278,13 @@ fn banded_load(
 /// record has ever carried both. Keeping the first axis seen is a decision about
 /// a state the record does not reach, made explicitly rather than by whichever
 /// way a comparison happened to fall.
-fn heaviest_of<'a>(sets: &[&'a PerformedSetSummary]) -> Option<&'a PerformedSetSummary> {
+fn heaviest_of<'a>(sets: &[&'a PerformedSet]) -> Option<&'a PerformedSet> {
     sets.iter()
         .copied()
         .fold(None, |heaviest, set| match heaviest {
-            Some(held) if held.load.partial_cmp(&set.load) != Some(Ordering::Less) => Some(held),
+            Some(held) if held.load().partial_cmp(&set.load()) != Some(Ordering::Less) => {
+                Some(held)
+            }
             Some(_) | None => Some(set),
         })
 }
@@ -2360,24 +2358,18 @@ fn standing_at_heaviest(
     scheme: &domain::prescription::AccessoryScheme,
     last: &Performance,
 ) -> Result<(Load, bool), UnderivableReason> {
-    let working: Vec<_> = last
-        .sets
-        .iter()
-        .filter(|set| set.kind == SetKind::Working)
-        .collect();
+    let working: Vec<_> = last.sets.iter().filter(|set| set.is_working()).collect();
     let heaviest = heaviest_of(&working).ok_or(UnderivableReason::NoWorkingSet)?;
     let at_heaviest: Vec<_> = working
         .iter()
-        .filter(|set| set.load == heaviest.load)
+        .filter(|set| set.load() == heaviest.load())
         .collect();
     let enough = u32::try_from(at_heaviest.len()).unwrap_or(u32::MAX) >= scheme.sets.as_u32();
     let reached_top = enough
-        && at_heaviest.iter().all(|set| {
-            set.outcome
-                .completed()
-                .is_some_and(|reps| *reps >= scheme.reps.maximum())
-        });
-    Ok((heaviest.load, reached_top))
+        && at_heaviest
+            .iter()
+            .all(|set| set.reps().is_some_and(|reps| reps >= scheme.reps.maximum()));
+    Ok((heaviest.load(), reached_top))
 }
 
 /// Storing an authored plan.
@@ -2658,14 +2650,18 @@ mod progression_tests {
     //! private and needs no port: it is a rule about one performance.
 
     use domain::{
-        gym::{Load, Performed, SetKind, SignedKg, exercise::Exercise},
+        gym::{
+            Load, Performance, PerformedSet, Rir, SignedKg,
+            exercise::{Exercise, RepsExercise},
+        },
         measure::{Kg, RepCount},
         prescription::seed,
+        sequence::NonEmpty,
     };
     use jiff::civil::Date;
 
     use super::Consulted;
-    use super::{Performance, PerformedSetSummary, banded_load, progressed_load};
+    use super::{banded_load, progressed_load};
 
     /// The operator's Supaflex chart of 2026-10-15, at each band's force at
     /// twice its length.
@@ -2725,7 +2721,8 @@ mod progression_tests {
             set(assisted(15), 6).expect("a set"),
             set(assisted(7), 6).expect("a set"),
             set(assisted(7), 6).expect("a set"),
-        ]);
+        ])
+        .expect("a performance");
         let (load, setting) = banded_load(
             &ladder,
             workout
@@ -2750,7 +2747,8 @@ mod progression_tests {
             set(assisted(21), 6).expect("a set"),
             set(assisted(21), 6).expect("a set"),
             set(assisted(21), 6).expect("a set"),
-        ]);
+        ])
+        .expect("a performance");
         let (load, setting) = banded_load(
             &ladder,
             workout
@@ -2775,7 +2773,8 @@ mod progression_tests {
             set(assisted(9), 6).expect("a set"),
             set(assisted(9), 6).expect("a set"),
             set(assisted(9), 6).expect("a set"),
-        ]);
+        ])
+        .expect("a performance");
         let (load, setting) = banded_load(
             &ladder,
             workout
@@ -2790,22 +2789,22 @@ mod progression_tests {
 
     /// One completed set. Returns `Result`: the test exemptions do not reach a
     /// helper defined beside a `#[test]`.
-    fn set(load: Load, reps: u32) -> Result<PerformedSetSummary, Box<dyn std::error::Error>> {
-        Ok(PerformedSetSummary {
+    fn set(load: Load, reps: u32) -> Result<PerformedSet, Box<dyn std::error::Error>> {
+        Ok(PerformedSet::Working {
             load,
-            outcome: Performed::Completed(RepCount::new(reps)?),
-            kind: SetKind::Working,
+            reps: RepCount::new(reps)?,
+            rir: Rir::Two,
         })
     }
 
-    /// One performance on a fixed date. Infallible since the landing record id
-    /// went: nothing left in it can fail.
-    fn performance(sets: Vec<PerformedSetSummary>) -> Performance {
-        Performance {
-            on: Date::constant(2026, 8, 3),
-            fulfilled: None,
-            sets,
-        }
+    /// One performance on a fixed date. Which exercise does not matter to a
+    /// rule about its sets.
+    fn performance(sets: Vec<PerformedSet>) -> Result<Performance, Box<dyn std::error::Error>> {
+        Ok(Performance {
+            occurred: domain::canonical::Occurred::On(Date::constant(2026, 8, 3)),
+            exercise: RepsExercise::DeadBug,
+            sets: NonEmpty::new(sets)?,
+        })
     }
 
     /// The shape the primary template issues: a top set, then lighter back-offs.
@@ -2829,7 +2828,8 @@ mod progression_tests {
             set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
             set(Load::absolute(Kg::from_grams(30_000)), 6).expect("a set"),
             set(Load::absolute(Kg::from_grams(30_000)), 6).expect("a set"),
-        ]);
+        ])
+        .expect("a performance");
 
         let progressed = progressed_load(
             &consulted,
@@ -2869,7 +2869,8 @@ mod progression_tests {
             set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
             set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
             set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
-        ]);
+        ])
+        .expect("a performance");
 
         let progressed = progressed_load(
             &consulted,
@@ -2909,7 +2910,8 @@ mod progression_tests {
             set(Load::relative(SignedKg::from_grams(-15_000)), 6).expect("a set"),
             set(Load::relative(SignedKg::from_grams(-7_000)), 6).expect("a set"),
             set(Load::relative(SignedKg::from_grams(-7_000)), 6).expect("a set"),
-        ]);
+        ])
+        .expect("a performance");
 
         let progressed = progressed_load(
             &consulted,
@@ -2952,7 +2954,8 @@ mod progression_tests {
             set(Load::relative(SignedKg::from_grams(-7_000)), 4).expect("a set"),
             set(Load::relative(SignedKg::from_grams(-14_000)), 5).expect("a set"),
             set(Load::relative(SignedKg::from_grams(-21_000)), 6).expect("a set"),
-        ]);
+        ])
+        .expect("a performance");
 
         let progressed = progressed_load(
             &consulted,
@@ -2990,7 +2993,8 @@ mod progression_tests {
         let last = performance(vec![
             set(Load::absolute(Kg::from_grams(40_000)), 6).expect("a set"),
             set(Load::absolute(Kg::from_grams(30_000)), 4).expect("a set"),
-        ]);
+        ])
+        .expect("a performance");
 
         let progressed = progressed_load(
             &consulted,
@@ -3024,11 +3028,14 @@ mod progression_tests {
         let scales = seed::scales().expect("the seed builds");
         let history = std::collections::BTreeMap::from([(
             RepsExercise::DeadBug,
-            LastPerformance::Performed(performance(vec![
-                set(Load::absolute(Kg::from_grams(0)), 8).expect("a set"),
-                set(Load::absolute(Kg::from_grams(0)), 6).expect("a set"),
-                set(Load::absolute(Kg::from_grams(0)), 6).expect("a set"),
-            ])),
+            LastPerformance::Performed(
+                performance(vec![
+                    set(Load::absolute(Kg::from_grams(0)), 8).expect("a set"),
+                    set(Load::absolute(Kg::from_grams(0)), 6).expect("a set"),
+                    set(Load::absolute(Kg::from_grams(0)), 6).expect("a set"),
+                ])
+                .expect("a performance"),
+            ),
         )]);
         let dead_bug = Exercise::Reps(RepsExercise::DeadBug);
 
@@ -3089,13 +3096,14 @@ mod measurement_tests {
     //! warm-up; and the light session that used to answer for both.
 
     use domain::{
-        gym::{Load, Performed, SetKind},
+        gym::{Load, Performance, PerformedSet, SetKind, exercise::RepsExercise},
         measure::{Kg, RepCount},
         plan::Span,
+        sequence::NonEmpty,
     };
     use jiff::civil::Date;
 
-    use super::{Performance, PerformedSetSummary, heaviest_completed};
+    use super::heaviest_completed;
 
     /// One set, as the record holds it. Returns `Result`: the test exemptions do
     /// not reach a helper defined beside a `#[test]`.
@@ -3103,24 +3111,31 @@ mod measurement_tests {
         kg: u64,
         reps: Option<u32>,
         kind: SetKind,
-    ) -> Result<PerformedSetSummary, Box<dyn std::error::Error>> {
-        Ok(PerformedSetSummary {
-            load: Load::Absolute(Kg::from_grams(kg)),
-            outcome: match reps {
-                Some(count) => Performed::Completed(RepCount::new(count)?),
-                None => Performed::Failed,
+    ) -> Result<PerformedSet, Box<dyn std::error::Error>> {
+        let load = Load::Absolute(Kg::from_grams(kg));
+        Ok(match (reps, kind) {
+            (Some(count), SetKind::Warmup) => PerformedSet::Warmup {
+                load,
+                reps: RepCount::new(count)?,
             },
-            kind,
+            (Some(count), SetKind::Working) => PerformedSet::Unrated {
+                load,
+                reps: RepCount::new(count)?,
+            },
+            (None, _) => PerformedSet::Failed { load },
         })
     }
 
-    /// One performance on a given date. Infallible, as above.
-    fn performance(on: Date, sets: Vec<PerformedSetSummary>) -> Performance {
-        Performance {
-            on,
-            fulfilled: None,
-            sets,
-        }
+    /// One performance of the front squat on a given date.
+    fn performance(
+        on: Date,
+        sets: Vec<PerformedSet>,
+    ) -> Result<Performance, Box<dyn std::error::Error>> {
+        Ok(Performance {
+            occurred: domain::canonical::Occurred::On(on),
+            exercise: RepsExercise::FrontSquatBarbell,
+            sets: NonEmpty::new(sets)?,
+        })
     }
 
     /// The week the test is in: Monday 29 June 2026 to Sunday 5 July.
@@ -3138,7 +3153,8 @@ mod measurement_tests {
                 set(90_000, Some(1), SetKind::Working).expect("a single"),
                 set(95_000, None, SetKind::Working).expect("a failed attempt"),
             ],
-        );
+        )
+        .expect("a performance");
 
         assert_eq!(
             heaviest_completed(&[day], week()),
@@ -3156,14 +3172,16 @@ mod measurement_tests {
                 set(70_000, Some(3), SetKind::Working).expect("a triple"),
                 set(70_000, Some(3), SetKind::Working).expect("a triple"),
             ],
-        );
+        )
+        .expect("a performance");
         let test = performance(
             Date::constant(2026, 7, 3),
             vec![
                 set(90_000, Some(1), SetKind::Working).expect("a single"),
                 set(95_000, None, SetKind::Working).expect("a failed attempt"),
             ],
-        );
+        )
+        .expect("a performance");
 
         assert_eq!(
             heaviest_completed(&[taper, test], week()),
@@ -3183,7 +3201,8 @@ mod measurement_tests {
                 set(92_500, Some(1), SetKind::Warmup).expect("a bridging single"),
                 set(70_000, Some(10), SetKind::Working).expect("a set of ten"),
             ],
-        );
+        )
+        .expect("a performance");
 
         assert_eq!(
             heaviest_completed(&[day], week()),
@@ -3205,7 +3224,8 @@ mod measurement_tests {
                 set(67_500, Some(5), SetKind::Warmup).expect("a ramp step"),
                 set(75_000, Some(6), SetKind::Working).expect("the top set"),
             ],
-        );
+        )
+        .expect("a performance");
 
         assert!(super::abandoned_at_the_top_set(&day));
     }
@@ -3223,7 +3243,8 @@ mod measurement_tests {
                 set(75_000, Some(6), SetKind::Working).expect("a back-off set"),
                 set(75_000, Some(5), SetKind::Working).expect("a back-off set"),
             ],
-        );
+        )
+        .expect("a performance");
 
         assert!(!super::abandoned_at_the_top_set(&day));
     }
@@ -3240,7 +3261,8 @@ mod measurement_tests {
                 set(90_000, Some(1), SetKind::Working).expect("a back-off set"),
                 set(90_000, None, SetKind::Working).expect("a failed back-off set"),
             ],
-        );
+        )
+        .expect("a performance");
 
         assert!(!super::abandoned_at_the_top_set(&day));
     }
@@ -3250,7 +3272,8 @@ mod measurement_tests {
         let after = performance(
             Date::constant(2026, 7, 6),
             vec![set(100_000, Some(1), SetKind::Working).expect("a single")],
-        );
+        )
+        .expect("a performance");
 
         assert_eq!(heaviest_completed(&[after], week()), None);
     }

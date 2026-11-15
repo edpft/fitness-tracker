@@ -109,7 +109,7 @@ pub use garmin_metric_landing::{
 };
 pub use garmin_normalised::{GarminHrvAccountReader, SqliteOvernightHrvStore};
 pub use gym_mesocycle::SqliteGymMesocycleStore;
-pub use history::SqliteExerciseHistory;
+pub use history::{SqliteExerciseHistory, SqlitePerformances};
 pub use landing::HevyWorkoutLandingStore;
 pub use myfitnesspal_export_landing::MyFitnessPalExportLandingStore;
 pub use myfitnesspal_normalised::{MyFitnessPalExportAccountReader, SqliteMyFitnessPalStore};

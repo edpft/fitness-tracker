@@ -62,17 +62,12 @@ use super::{
     session_estimate, weigh_in_for,
 };
 use crate::{
-    canonical::Attributed,
     gym::exercise::Exercise,
-    gym::{
-        CanonicalExercise, CanonicalGymSession, CanonicalSet, Identified, Load, Rir,
-        exercise::RepsExercise,
-    },
+    gym::{Performance, PerformedSet, Rir, exercise::RepsExercise},
     measure::{Kg, RepCount},
     plan::{Occupies, Plan},
     planner::ESSENTIAL,
     prescription::{GymMesocycle, PrescribedWorkout},
-    sequence::NonEmpty,
 };
 
 /// The lifts shown, in order. Each joins once it has been the focus of a
@@ -307,13 +302,12 @@ fn t_95(freedom: u32) -> f64 {
 /// has no point.
 pub fn points<E: OneRepMaxEstimator>(
     estimator: &E,
-    sessions: &[CanonicalGymSession],
+    performances: &[Performance],
     lift: RepsExercise,
     tests: &[(Date, RepCount)],
 ) -> Vec<Point> {
-    let mut points: Vec<Point> = sessions
-        .iter()
-        .filter_map(|session| point(estimator, session, lift, tests))
+    let mut points: Vec<Point> = of(performances, lift)
+        .filter_map(|performance| point(estimator, performance, tests))
         .collect();
     points.sort_by_key(|point| point.on);
     points
@@ -324,17 +318,16 @@ pub fn points<E: OneRepMaxEstimator>(
 /// one that states no such mass, has none.
 pub fn relative<E: OneRepMaxEstimator>(
     estimator: &E,
-    sessions: &[CanonicalGymSession],
+    performances: &[Performance],
     lift: RepsExercise,
     tests: &[(Date, RepCount)],
     weigh_ins: &[Weighed],
     against: Against,
 ) -> Vec<Relative> {
-    let mut relative: Vec<Relative> = sessions
-        .iter()
-        .filter_map(|session| {
-            let point = point(estimator, session, lift, tests)?;
-            let body = against.of(weigh_in_for(session, weigh_ins)?)?;
+    let mut relative: Vec<Relative> = of(performances, lift)
+        .filter_map(|performance| {
+            let point = point(estimator, performance, tests)?;
+            let body = against.of(weigh_in_for(performance, weigh_ins)?)?;
             let ratio = RelativeStrength::of(point.estimate.one_rep_max, body)?;
             Some(Relative { point, body, ratio })
         })
@@ -349,20 +342,17 @@ pub fn relative<E: OneRepMaxEstimator>(
 /// measurement, and a test day's estimate is not one more.
 fn point<E: OneRepMaxEstimator>(
     estimator: &E,
-    session: &CanonicalGymSession,
-    lift: RepsExercise,
+    performance: &Performance,
     tests: &[(Date, RepCount)],
 ) -> Option<Point> {
-    let on = session.occurred().day();
+    let on = performance.on();
     match tests.iter().find(|(day, _)| *day == on) {
-        Some((_, reps)) => {
-            tested(estimator, session, lift, *reps).map(|(estimate, failed)| Point {
-                on,
-                estimate,
-                reading: Reading::Tested { failed },
-            })
-        }
-        None => session_estimate(estimator, session, lift).map(|estimate| Point {
+        Some((_, reps)) => tested(estimator, performance, *reps).map(|(estimate, failed)| Point {
+            on,
+            estimate,
+            reading: Reading::Tested { failed },
+        }),
+        None => session_estimate(estimator, performance).map(|estimate| Point {
             on,
             estimate,
             reading: Reading::Estimated,
@@ -588,23 +578,21 @@ pub fn tests<P: Figure>(points: &[P]) -> Vec<Date> {
 /// in [`session_estimate`].
 pub fn tested<E: OneRepMaxEstimator>(
     estimator: &E,
-    session: &CanonicalGymSession,
-    lift: RepsExercise,
+    performance: &Performance,
     reps: RepCount,
 ) -> Option<(Estimate, Option<Kg>)> {
-    let sets = sets_of(session, lift);
+    let sets = &performance.sets;
     let load = sets
         .iter()
         .filter_map(|set| {
-            let load = absolute(set)?;
-            let done = (*set.outcome.value().completed()?)?;
-            (done >= reps).then_some(load)
+            let load = set.absolute()?;
+            (set.reps()? >= reps).then_some(load)
         })
         .max_by_key(|load| load.as_grams())?;
     let failed = sets
         .iter()
-        .filter(|set| set.outcome.value().is_failed())
-        .filter_map(|set| absolute(set))
+        .filter(|set| matches!(set, PerformedSet::Failed { .. }))
+        .filter_map(PerformedSet::absolute)
         .filter(|failed| failed.as_grams() > load.as_grams())
         .max_by_key(|failed| failed.as_grams());
     let one_rep_max = estimator.estimate(load, reps, Rir::Zero)?;
@@ -619,36 +607,16 @@ pub fn tested<E: OneRepMaxEstimator>(
     ))
 }
 
-/// Every set of `lift` a record named in `session`.
-fn sets_of(session: &CanonicalGymSession, lift: RepsExercise) -> Vec<&CanonicalSet<RepCount>> {
-    session
-        .exercises()
-        .filter_map(|performed| match performed {
-            CanonicalExercise::ForReps { identified, sets }
-                if identified.copied() == Identified::Recorded(lift) =>
-            {
-                Some(sets)
-            }
-            _ => None,
-        })
-        .flat_map(NonEmpty::iter)
-        .collect()
-}
-
-fn absolute(set: &CanonicalSet<RepCount>) -> Option<Kg> {
-    match set.load.as_ref().map(Attributed::copied) {
-        Some(Load::Absolute(load)) => Some(load),
-        _ => None,
-    }
+/// The performances of `lift`.
+fn of(performances: &[Performance], lift: RepsExercise) -> impl Iterator<Item = &Performance> {
+    performances
+        .iter()
+        .filter(move |performance| performance.exercise == lift)
 }
 
 /// The days a session recorded `lift`, oldest first, once each.
-pub fn sessions_of(sessions: &[CanonicalGymSession], lift: RepsExercise) -> Vec<Date> {
-    let mut days: Vec<Date> = sessions
-        .iter()
-        .filter(|session| !sets_of(session, lift).is_empty())
-        .map(|session| session.occurred().day())
-        .collect();
+pub fn sessions_of(performances: &[Performance], lift: RepsExercise) -> Vec<Date> {
+    let mut days: Vec<Date> = of(performances, lift).map(Performance::on).collect();
     days.sort_unstable();
     days.dedup();
     days

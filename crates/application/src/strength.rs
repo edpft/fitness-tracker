@@ -12,11 +12,11 @@ use jiff::civil::{Date, date};
 
 use crate::{
     error::StoreError,
-    ports::{PerformedGymSessions, WeighInHistory},
+    ports::{Performances, WeighInHistory},
 };
 
-/// Before anything the record holds. The session reader takes a window, and
-/// this report wants all of it.
+/// Before anything the record holds. The reader takes a window, and this
+/// report wants all of it.
 const EARLIEST: Date = date(2000, 1, 1);
 
 /// What the report says, and which series it is.
@@ -37,7 +37,7 @@ pub struct RelativeStrength<E, S, W> {
 impl<E, S, W> RelativeStrength<E, S, W>
 where
     E: OneRepMaxEstimator + Sync,
-    S: PerformedGymSessions + Sync,
+    S: Performances + Sync,
     W: WeighInHistory + Sync,
 {
     pub const fn new(estimator: E, sessions: S, weigh_ins: W) -> Self {
@@ -54,7 +54,10 @@ where
     ///
     /// [`StoreError`] if either store is unavailable.
     pub async fn report(&self, through: Date) -> Result<StrengthReport, StoreError> {
-        let sessions = self.sessions.between(EARLIEST, through).await?;
+        let sessions = self
+            .sessions
+            .of(&domain::analytical::HEADLINE_LIFTS, EARLIEST, through)
+            .await?;
         let weigh_ins = self.weigh_ins.weigh_ins().await?;
         Ok(StrengthReport {
             estimator: E::NAME,

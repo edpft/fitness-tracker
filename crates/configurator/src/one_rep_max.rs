@@ -8,8 +8,7 @@ use application::{
 };
 use domain::{analytical::Rts, normalised::OperatorZone};
 use infrastructure::{
-    SqliteCanonicalGymSessionStore, SqliteCanonicalWeighInStore, SqlitePlanStore,
-    SqlitePrescribedWorkoutStore,
+    SqliteCanonicalWeighInStore, SqlitePerformances, SqlitePlanStore, SqlitePrescribedWorkoutStore,
 };
 
 use crate::clock::Today;
@@ -25,7 +24,7 @@ use crate::{
 /// stand (#800).
 pub(crate) type Estimated = EstimatedOneRepMax<
     Rts,
-    Spanned<SqliteCanonicalGymSessionStore>,
+    Spanned<SqlitePerformances>,
     Spanned<SqliteCanonicalWeighInStore>,
     Plans,
 >;
@@ -33,13 +32,13 @@ pub(crate) type Estimated = EstimatedOneRepMax<
 /// Each lift's 1RM tests (#517).
 pub(crate) type Tests = OneRepMaxTests<
     Rts,
-    Spanned<SqliteCanonicalGymSessionStore>,
+    Spanned<SqlitePerformances>,
     Spanned<SqlitePlanStore>,
     Spanned<SqlitePrescribedWorkoutStore>,
 >;
 
 page! {
-    /// What the estimated 1RM page reads: the canonical gym sessions (#559),
+    /// What the estimated 1RM page reads: the lifts' performances (#559, #817),
     /// the canonical weigh-ins, and the plans as they now stand.
     pub struct Page {
         estimated: Estimated,
@@ -63,7 +62,7 @@ pub fn reads() -> application::graph::Reads {
 pub(crate) fn estimated(store: &Store, plans: Plans) -> Estimated {
     EstimatedOneRepMax::new(
         Rts,
-        store.adapter(SqliteCanonicalGymSessionStore::new),
+        store.adapter(SqlitePerformances::new),
         store.adapter(SqliteCanonicalWeighInStore::new),
         plans,
     )
@@ -73,7 +72,7 @@ pub(crate) fn estimated(store: &Store, plans: Plans) -> Estimated {
 pub(crate) fn tests(store: &Store, zone: &OperatorZone) -> Tests {
     OneRepMaxTests::new(
         Rts,
-        store.adapter(SqliteCanonicalGymSessionStore::new),
+        store.adapter(SqlitePerformances::new),
         store.adapter_with(SqlitePlanStore::new, zone.clone()),
         store.adapter_with(SqlitePrescribedWorkoutStore::new, zone.id().to_owned()),
     )
