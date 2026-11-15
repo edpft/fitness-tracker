@@ -21,7 +21,7 @@ use super::{authoring::Authoring, store_error};
 
 #[derive(Debug, Clone)]
 pub struct SqlitePrescriptionDeliveryStore {
-    store: Authoring<Self>,
+    store: Authoring,
 }
 
 impl SqlitePrescriptionDeliveryStore {
@@ -153,7 +153,7 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
         // the hand-over through it is what makes "a performed session is not
         // replaced" hold here without a check in the use case — an `UPDATE ...
         // SET prescription = ?` would slide straight past it.
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
 
         sqlx::query!(
             "DELETE FROM prescription_delivery WHERE prescription = ? AND destination = ?",
@@ -204,7 +204,7 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
         // silent overwrite that leaves an orphaned routine behind it. The one
         // legitimate restatement goes through `record_rendering`, which keeps
         // the place and changes what is in it.
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
         sqlx::query!(
             r#"
             INSERT INTO prescription_delivery
@@ -247,7 +247,7 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
         // performed session being rewritten is the use case declining to send
         // one, which is where § 12 can be stated as a reason rather than as an
         // abort.
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
         sqlx::query!(
             r#"
             UPDATE prescription_delivery
@@ -286,7 +286,7 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
         // it could collide with: this table has no key but its own, on purpose.
         // Every attempt leaves a row, and two attempts that said the same thing
         // are two answers rather than one repeated.
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Reply>().await?;
         sqlx::query!(
             r#"
             INSERT INTO delivery_reply
@@ -367,5 +367,15 @@ impl application::Input for SqlitePrescriptionDeliveryStore {
 impl application::Authors for SqlitePrescriptionDeliveryStore {
     fn authors() -> std::collections::BTreeSet<application::Node> {
         [application::Node::PRESCRIPTIONS].into()
+    }
+}
+
+/// **What a destination answered authors nothing**: no page reads a reply, so
+/// keeping one redraws none.
+struct Reply;
+
+impl application::Authors for Reply {
+    fn authors() -> std::collections::BTreeSet<application::Node> {
+        std::collections::BTreeSet::new()
     }
 }

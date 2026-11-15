@@ -17,7 +17,7 @@ use crate::calendar::{public::public_holidays, school::school_holidays};
 /// Each calendar, kept.
 #[derive(Debug, Clone)]
 pub struct SqliteCalendarStore {
-    store: Authoring<Self>,
+    store: Authoring,
 }
 
 impl SqliteCalendarStore {
@@ -48,8 +48,9 @@ impl CalendarStore for SqliteCalendarStore {
             SELECT served AS "served!: String",
                    etag,
                    last_modified,
-                   asked_at AS "asked_at!: String"
+                   asked.asked_at AS "asked_at!: String"
               FROM calendar
+              JOIN calendar_asked AS asked USING (name)
              WHERE name = ?
             "#,
             name
@@ -83,43 +84,65 @@ impl CalendarStore for SqliteCalendarStore {
     ) -> Result<(), StoreError> {
         let name = calendar.as_str();
         let asked = asked.to_string();
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
         sqlx::query!(
             r#"
-            INSERT INTO calendar (name, served, etag, last_modified, asked_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO calendar (name, served, etag, last_modified)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT (name) DO UPDATE
                SET served = excluded.served,
                    etag = excluded.etag,
-                   last_modified = excluded.last_modified,
-                   asked_at = excluded.asked_at
+                   last_modified = excluded.last_modified
             "#,
             name,
             served.body,
             served.etag,
-            served.last_modified,
-            asked
+            served.last_modified
         )
         .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
+        asked_at(&mut tx, name, &asked).await?;
         tx.commit().await
     }
 
     async fn unchanged(&self, calendar: Calendar, asked: Timestamp) -> Result<(), StoreError> {
         let name = calendar.as_str();
         let asked = asked.to_string();
-        let mut tx = self.store.writing().await?;
-        sqlx::query!(
-            "UPDATE calendar SET asked_at = ? WHERE name = ?",
-            asked,
-            name
-        )
-        .execute(&mut **tx)
-        .await
-        .map_err(|error| store_error(&error))?;
+        let mut tx = self.store.writing::<Asked>().await?;
+        asked_at(&mut tx, name, &asked).await?;
         tx.commit().await
     }
+}
+
+/// **When a publisher was asked authors nothing**: no page reads it, so a
+/// calendar asked again and served the same redraws none.
+struct Asked;
+
+impl application::Authors for Asked {
+    fn authors() -> std::collections::BTreeSet<application::Node> {
+        std::collections::BTreeSet::new()
+    }
+}
+
+/// Keep when `name` was last asked for, inside a write.
+async fn asked_at(
+    tx: &mut sqlx::Transaction<'static, sqlx::Sqlite>,
+    name: &str,
+    asked: &str,
+) -> Result<(), StoreError> {
+    sqlx::query!(
+        r#"
+        INSERT INTO calendar_asked (name, asked_at) VALUES (?, ?)
+        ON CONFLICT (name) DO UPDATE SET asked_at = excluded.asked_at
+        "#,
+        name,
+        asked
+    )
+    .execute(&mut **tx)
+    .await
+    .map(drop)
+    .map_err(|error| store_error(&error))
 }
 
 /// Both calendars, as last served.

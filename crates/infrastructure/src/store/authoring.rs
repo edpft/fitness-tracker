@@ -2,10 +2,15 @@
 //! such node stands (#805).
 //!
 //! **A writer of one gets no pool**, only an [`Authoring`]: a write is a
-//! [`Writing`], whose commit moves the revision of every node the writer
-//! authors in the same transaction, and a read is a [`Reading`], which is
-//! never committed. So such an adapter has no way to write that moves no
-//! revision, and a page drawn from what it writes is never served stale.
+//! [`Writing`] that names what it authors, whose commit moves the revision of
+//! each of those nodes in the same transaction, and a read is a [`Reading`],
+//! which is never committed. So such an adapter has no way to write that does
+//! not say what it moves, and a page drawn from what it writes is never served
+//! stale.
+//!
+//! **A write of what no page reads authors nothing**, and touches only tables
+//! no page reads: a table holds what a page reads or bookkeeping about the
+//! source it came from, never both.
 
 use std::{
     marker::PhantomData,
@@ -19,33 +24,15 @@ use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction};
 
 use super::store_error;
 
-/// The store, for an adapter writing what `W` authors.
-pub struct Authoring<W> {
+/// The store, for an adapter writing what a page reads.
+#[derive(Debug, Clone)]
+pub struct Authoring {
     pool: SqlitePool,
-    author: PhantomData<fn() -> W>,
 }
 
-impl<W> Clone for Authoring<W> {
-    fn clone(&self) -> Self {
-        Self {
-            pool: self.pool.clone(),
-            author: PhantomData,
-        }
-    }
-}
-
-impl<W> std::fmt::Debug for Authoring<W> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Authoring").finish_non_exhaustive()
-    }
-}
-
-impl<W: Authors> Authoring<W> {
+impl Authoring {
     pub const fn new(pool: SqlitePool) -> Self {
-        Self {
-            pool,
-            author: PhantomData,
-        }
+        Self { pool }
     }
 
     /// A snapshot to read from.
@@ -60,12 +47,13 @@ impl<W: Authors> Authoring<W> {
             .map_err(|error| store_error(&error))
     }
 
-    /// A write, holding the store's write lock from its first statement.
+    /// A write of what `W` authors, holding the store's write lock from its
+    /// first statement.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if no connection is free or the lock is not given up.
-    pub async fn writing(&self) -> Result<Writing<W>, StoreError> {
+    pub async fn writing<W: Authors>(&self) -> Result<Writing<W>, StoreError> {
         super::writing(&self.pool)
             .await
             .map(|transaction| Writing {

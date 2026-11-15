@@ -372,7 +372,7 @@ pub(crate) async fn insert(
 
 #[derive(Debug, Clone)]
 pub struct SqliteEquipmentStore {
-    store: Authoring<Self>,
+    store: Authoring,
 }
 
 impl SqliteEquipmentStore {
@@ -395,7 +395,7 @@ impl EquipmentStore for SqliteEquipmentStore {
         recorded_at: Timestamp,
         corrects: Option<FactId>,
     ) -> Result<FactId, StoreError> {
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
         let fact = insert(&mut tx, statement, from, recorded_at, corrects).await?;
         tx.commit().await?;
         Ok(fact)

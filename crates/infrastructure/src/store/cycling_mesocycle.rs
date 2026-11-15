@@ -44,7 +44,7 @@ use super::{corrupt, store_error};
 /// The authored cycling side, in SQLite.
 #[derive(Debug, Clone)]
 pub struct SqliteCyclingMesocycleStore {
-    store: Authoring<Self>,
+    store: Authoring,
 }
 
 impl SqliteCyclingMesocycleStore {

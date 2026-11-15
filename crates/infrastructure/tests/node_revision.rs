@@ -13,8 +13,15 @@ impl Authors for Planner {
     }
 }
 
-/// **A committed write moves the revision of what its writer authors; a read,
-/// and a write not committed, keep nothing**, so a page drawn from the plan
+struct Nobody;
+impl Authors for Nobody {
+    fn authors() -> BTreeSet<Node> {
+        BTreeSet::new()
+    }
+}
+
+/// **A committed write moves the revision of what its writer authors; a read, a
+/// write authoring nothing and a write not committed keep nothing**, so a page drawn from the plan
 /// sees every edit to it and no other.
 #[test]
 fn a_write_moves_the_revision_and_a_read_keeps_nothing() {
@@ -27,7 +34,7 @@ fn a_write_moves_the_revision_and_a_read_keeps_nothing() {
             let pool = connect(&directory.path().join("test.db"))
                 .await
                 .expect("a store");
-            let authoring = Authoring::<Planner>::new(pool.clone());
+            let authoring = Authoring::new(pool.clone());
             let revisions = SqliteRevisions::new(pool);
             let at = async |node: &Node| revisions.revision(node).await.expect("read").value();
             assert_eq!(at(&Node::PLAN).await, 0, "never written");
@@ -42,7 +49,7 @@ fn a_write_moves_the_revision_and_a_read_keeps_nothing() {
 
             for _ in 0..2 {
                 authoring
-                    .writing()
+                    .writing::<Planner>()
                     .await
                     .expect("a write")
                     .commit()
@@ -52,7 +59,20 @@ fn a_write_moves_the_revision_and_a_read_keeps_nothing() {
             assert_eq!(at(&Node::PLAN).await, 2);
             assert_eq!(at(&Node::DIARY).await, 0, "the diary was not written");
 
-            drop(authoring.writing().await.expect("a write"));
+            authoring
+                .writing::<Nobody>()
+                .await
+                .expect("a write")
+                .commit()
+                .await
+                .expect("committed");
+            assert_eq!(
+                at(&Node::PLAN).await,
+                2,
+                "a write authoring nothing moves nothing"
+            );
+
+            drop(authoring.writing::<Planner>().await.expect("a write"));
             assert_eq!(
                 at(&Node::PLAN).await,
                 2,

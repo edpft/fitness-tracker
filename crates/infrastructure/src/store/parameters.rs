@@ -203,7 +203,7 @@ fn ramp(steps: Vec<(i64, i64)>) -> Result<NonEmpty<WarmupStep>, StoreError> {
 /// primary progression (#192), as one store.
 #[derive(Debug, Clone)]
 pub struct SqliteGenerationParameterStore {
-    store: Authoring<Self>,
+    store: Authoring,
 }
 
 impl SqliteGenerationParameterStore {
@@ -567,7 +567,7 @@ impl WorkoutStore for SqliteGenerationParameterStore {
         at: Timestamp,
         workout: &Workout,
     ) -> Result<(), StoreError> {
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
 
         let of = intensity.as_str();
         let stamp = at.to_string();
@@ -705,7 +705,7 @@ impl ProgressionStore for SqliteGenerationParameterStore {
         at: Timestamp,
         linear: &LinearProgression,
     ) -> Result<(), StoreError> {
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
 
         let stamp = at.to_string();
         let light_of_heavy = bp_for_storage(linear.light_of_heavy);
@@ -846,7 +846,7 @@ impl ProgressionStore for SqliteGenerationParameterStore {
     }
 
     async fn author_sbs(&self, at: Timestamp, sbs: &SbsProgression) -> Result<(), StoreError> {
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
 
         let stamp = at.to_string();
         sqlx::query!(

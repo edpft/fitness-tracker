@@ -43,7 +43,7 @@ use super::{corrupt, store_error};
 
 #[derive(Debug, Clone)]
 pub struct SqlitePrescribedWorkoutStore {
-    store: Authoring<Self>,
+    store: Authoring,
     /// The zone every issued date is recorded against. Configuration rather than
     /// programme data (§ II.3), so it arrives with the adapter.
     zone: String,
@@ -428,7 +428,7 @@ fn ordinal_of(position: usize) -> Result<i64, StoreError> {
 
 impl PrescribedWorkoutStore for SqlitePrescribedWorkoutStore {
     async fn issue(&self, workout: &PrescribedWorkout) -> Result<PrescribedWorkoutId, StoreError> {
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
 
         let mesocycle = workout.mesocycle().as_i64();
         let issued_for = workout.issued_for().to_string();

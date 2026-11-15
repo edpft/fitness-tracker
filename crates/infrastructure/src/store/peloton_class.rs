@@ -65,7 +65,7 @@ use crate::peloton::{ClassSession, ClassSummary, class};
 /// Peloton's class library, as this store holds it.
 #[derive(Debug, Clone)]
 pub struct SqlitePelotonClassStore {
-    store: Authoring<Self>,
+    store: Authoring,
 }
 
 /// What the catalogue holds, for the one line `fitness next` prints.
@@ -116,7 +116,7 @@ impl SqlitePelotonClassStore {
     /// [`StoreError`] if the store is unavailable.
     pub async fn record_listed(&self, classes: &[ClassSummary]) -> Result<u64, StoreError> {
         let listed_at = Timestamp::now().to_string();
-        let mut transaction = self.store.writing().await?;
+        let mut transaction = self.store.writing::<Self>().await?;
         // **Counted, not inferred.** An upsert reports one row affected
         // whether it inserted or updated, so how many were new is the
         // difference the whole batch made to the table.
@@ -211,7 +211,7 @@ impl SqlitePelotonClassStore {
     /// [`StoreError`] if the store is unavailable.
     pub async fn record_not_served(&self, reference: &str) -> Result<(), StoreError> {
         let now = Timestamp::now().to_string();
-        let mut transaction = self.store.writing().await?;
+        let mut transaction = self.store.writing::<Self>().await?;
         sqlx::query!(
             r#"
             INSERT INTO peloton_class (reference, title, duration, listed_at)
@@ -270,7 +270,7 @@ impl SqlitePelotonClassStore {
     ) -> Result<(), StoreError> {
         let now = Timestamp::now().to_string();
         let duration = i64::try_from(duration_seconds).unwrap_or(i64::MAX).max(1);
-        let mut transaction = self.store.writing().await?;
+        let mut transaction = self.store.writing::<Self>().await?;
         sqlx::query!(
             r#"
             INSERT INTO peloton_class (reference, title, duration, listed_at)

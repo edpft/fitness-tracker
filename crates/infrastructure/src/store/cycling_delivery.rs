@@ -18,7 +18,7 @@ use super::{authoring::Authoring, store_error};
 
 #[derive(Debug, Clone)]
 pub struct SqliteCyclingDeliveryStore {
-    store: Authoring<Self>,
+    store: Authoring,
 }
 
 impl SqliteCyclingDeliveryStore {
@@ -124,7 +124,7 @@ impl CyclingDeliveryStore for SqliteCyclingDeliveryStore {
         let session = i64::from(delivered.session.as_u8());
         let delivered_at = delivered.delivered_at.to_string();
 
-        let mut transaction = self.store.writing().await?;
+        let mut transaction = self.store.writing::<Self>().await?;
 
         // **The row moves rather than accumulating**, which is what the
         // destination does: Peloton's stack is one list, so delivering again

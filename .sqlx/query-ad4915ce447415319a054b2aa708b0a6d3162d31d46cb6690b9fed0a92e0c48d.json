@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT served AS \"served!: String\",\n                   etag,\n                   last_modified,\n                   asked_at AS \"asked_at!: String\"\n              FROM calendar\n             WHERE name = ?\n            ",
+  "query": "\n            SELECT served AS \"served!: String\",\n                   etag,\n                   last_modified,\n                   asked.asked_at AS \"asked_at!: String\"\n              FROM calendar\n              JOIN calendar_asked AS asked USING (name)\n             WHERE name = ?\n            ",
   "describe": {
     "columns": [
       {
@@ -42,7 +42,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "calendar",
+            "table": "calendar_asked",
             "name": "asked_at"
           }
         }
@@ -58,5 +58,5 @@
       false
     ]
   },
-  "hash": "e063f9e69abe2e96494ae22954648e83a4526b78590f4913a062fa93f62ba995"
+  "hash": "ad4915ce447415319a054b2aa708b0a6d3162d31d46cb6690b9fed0a92e0c48d"
 }

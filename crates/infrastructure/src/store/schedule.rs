@@ -38,7 +38,7 @@ use super::{
 
 /// The diary, in SQLite.
 pub struct SqliteDiaryStore {
-    store: Authoring<Self>,
+    store: Authoring,
 }
 
 impl SqliteDiaryStore {
@@ -289,7 +289,7 @@ async fn read_alterations(conn: &mut SqliteConnection) -> Result<Vec<Alteration>
 
 impl DiaryAuthor for SqliteDiaryStore {
     async fn record_pattern(&self, pattern: &TrainingPattern) -> Result<(), StoreError> {
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
 
         let authored_at = Timestamp::now().to_string();
         let from = pattern.from().to_string();
@@ -344,7 +344,7 @@ impl DiaryAuthor for SqliteDiaryStore {
     }
 
     async fn record_alteration(&self, alteration: &Alteration) -> Result<(), StoreError> {
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
 
         let authored_at = Timestamp::now().to_string();
         let start = alteration.start().to_string();
@@ -410,7 +410,7 @@ impl DiaryAuthor for SqliteDiaryStore {
         let authored_at = Timestamp::now().to_string();
         let from = illness.from().to_string();
         let ended = illness.ended_on().map(|ended| ended.to_string());
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
         sqlx::query!(
             r"
             INSERT INTO illness (authored_at, from_date, ended_on)
@@ -437,7 +437,7 @@ impl DiaryAuthor for SqliteDiaryStore {
         let until_date = skip.until().date.to_string();
         let until_part = skip.until().part.as_str();
         let reason = skip.reason();
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
         sqlx::query!(
             r"
             INSERT INTO skip (authored_at, from_date, from_part, until_date, until_part, reason)

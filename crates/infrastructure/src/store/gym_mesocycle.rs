@@ -159,7 +159,7 @@ impl SlotRows {
 
 #[derive(Debug, Clone)]
 pub struct SqliteGymMesocycleStore {
-    store: Authoring<Self>,
+    store: Authoring,
     /// The zone the operator declares they train in.
     ///
     /// Configuration rather than programme data, so it is supplied here and not
@@ -1153,7 +1153,7 @@ impl FillChangeStore for SqliteGymMesocycleStore {
         mesocycle: MesocycleId,
         change: &FillChange,
     ) -> Result<(), StoreError> {
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
         write_change(&mut tx, mesocycle, change).await?;
         tx.commit().await
     }

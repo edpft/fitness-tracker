@@ -33,7 +33,7 @@ use super::{corrupt, cycling_mesocycle, gym_mesocycle, store_error};
 /// The authored plan, in SQLite.
 #[derive(Debug, Clone)]
 pub struct SqlitePlanStore {
-    store: Authoring<Self>,
+    store: Authoring,
     /// The zone the operator declares they train in.
     ///
     /// Configuration rather than plan data, so it is supplied here and not read
@@ -142,7 +142,7 @@ impl PlanStore for SqlitePlanStore {
     }
 
     async fn author(&self, plan: &Plan) -> Result<PlanId, StoreError> {
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
 
         let name = plan.name().to_string();
         let authored_at = plan.authored_at().to_string();
@@ -183,7 +183,7 @@ impl PlanStore for SqlitePlanStore {
         gym: &[GymMesocycle],
         cycling: &[CyclingMesocycle],
     ) -> Result<(), StoreError> {
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
 
         let name = plan.to_string();
         let found = sqlx::query!(
@@ -266,7 +266,7 @@ impl PlanStore for SqlitePlanStore {
     }
 
     async fn complete(&self, plan: &PlanName, completed: &Completed) -> Result<(), StoreError> {
-        let mut tx = self.store.writing().await?;
+        let mut tx = self.store.writing::<Self>().await?;
 
         let name = plan.to_string();
         let id = sqlx::query!(
