@@ -9,7 +9,7 @@
 //! a drawing is what a frontend made of what the use cases answered, and
 //! nothing in the core reads it back.
 
-use application::{StoreError, drawing::DrawnFrom};
+use application::{DrawnFrom, StoreError};
 use sqlx::SqlitePool;
 
 use super::store_error;

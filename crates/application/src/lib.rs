@@ -52,12 +52,13 @@ pub mod status;
 pub mod strength;
 pub mod working;
 
+/// What a port reads is part of the port (#809).
+pub use drawing::DrawnFrom;
 pub use error::{
     ComparisonError, DeliveryError, DesignError, EquipmentError, ExtractionError, FillChangeError,
     NormalisationError, PrescriptionError, RunLockError, ScheduleError, SourceError, StatusError,
     StoreError,
 };
-/// What a port reads is part of the port (#809).
 pub use graph::{Authors, Calendar, Generation, Input, Node, Output, Reads, Table};
 pub use ports::{
     AccountReader, Authored, ByReason, CalendarPublisher, CalendarStore,

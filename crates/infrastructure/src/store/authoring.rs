@@ -17,9 +17,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use application::{
-    Authors, Calendar, Generation, Node, Revision, Revisions, StoreError, graph::Authored,
-};
+use application::{Authors, Calendar, Generation, Node, Revision, Revisions, StoreError};
 use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction};
 
 use super::store_error;
@@ -133,25 +131,25 @@ impl<W: Authors> Writing<W> {
 }
 
 /// The name a node's revision is kept under, for a node that has one.
-const fn stored(node: &Node) -> Option<&'static str> {
-    Some(match node {
-        Node::Authored(Authored::Plan) => "plan",
-        Node::Authored(Authored::Prescriptions) => "prescriptions",
-        Node::Authored(Authored::Workouts) => "workouts",
-        Node::Authored(Authored::Diary) => "diary",
-        Node::Generation(Generation::Equipment) => "equipment",
-        Node::Generation(Generation::Classes) => "classes",
-        Node::Generation(Generation::Calendar(Calendar::School)) => "calendar school",
-        Node::Generation(Generation::Calendar(Calendar::Public)) => "calendar public",
-        Node::Landing(_)
-        | Node::Normalised(_)
-        | Node::Canonical(_)
-        | Node::Table(_)
-        | Node::Edits(_)
-        | Node::Interpretive(_)
-        | Node::Date
-        | Node::DayPart => return None,
-    })
+fn stored(node: &Node) -> Option<&'static str> {
+    [
+        (Node::PLAN, "plan"),
+        (Node::PRESCRIPTIONS, "prescriptions"),
+        (Node::WORKOUTS, "workouts"),
+        (Node::DIARY, "diary"),
+        (Node::Generation(Generation::Equipment), "equipment"),
+        (Node::Generation(Generation::Classes), "classes"),
+        (
+            Node::Generation(Generation::Calendar(Calendar::School)),
+            "calendar school",
+        ),
+        (
+            Node::Generation(Generation::Calendar(Calendar::Public)),
+            "calendar public",
+        ),
+    ]
+    .into_iter()
+    .find_map(|(named, stored)| (&named == node).then_some(stored))
 }
 
 /// Where each node nothing derives stands, in the store.
