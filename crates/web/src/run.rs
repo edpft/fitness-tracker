@@ -212,7 +212,7 @@ impl Runs {
     pub async fn open(self: &Arc<Self>, asked: &Asked) {
         if let Asked::Only(scope) = asked
             && !self.covered(asked)
-            && !self.wanted(scope).await
+            && !Box::pin(self.wanted(scope)).await
         {
             configurator::telemetry::not_due();
             return;
