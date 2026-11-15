@@ -412,8 +412,16 @@ mod tests {
     struct Rides(Vec<CanonicalCyclingSession>);
 
     impl PerformedCyclingSessions for Rides {
-        async fn all(&self) -> Result<Vec<CanonicalCyclingSession>, StoreError> {
-            Ok(self.0.clone())
+        async fn main_rides(&self) -> Result<Vec<CanonicalBikePlusRide>, StoreError> {
+            Ok(Vec::new())
+        }
+
+        async fn efforts(&self) -> Result<Vec<CanonicalBikePlusRide>, StoreError> {
+            Ok(Vec::new())
+        }
+
+        async fn tested(&self) -> Result<Vec<StartedAt>, StoreError> {
+            Ok(Vec::new())
         }
 
         async fn between(

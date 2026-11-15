@@ -35,8 +35,8 @@ use domain::analytical::Weighed;
 use domain::body::{CanonicalWeighIn, WeighInAccount, WeighInCount};
 use domain::canonical::{Occurred, Reach, SessionCount};
 use domain::cycling::{
-    CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide,
-    Ftp, RideVenue,
+    CanonicalBikePlusRide, CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId,
+    CyclingSession, DeliveredRide, Ftp, RideVenue,
 };
 use domain::gym::{CanonicalGymSession, NormalisedGymSession, Performance, exercise::RepsExercise};
 use domain::landing::{
@@ -44,7 +44,8 @@ use domain::landing::{
     RecordCount, RunId, RunOutcome, SourceRecordId, Watermark,
 };
 use domain::normalised::{
-    NormalisationOutcome, NormalisationRun, NormalisationRunId, Refusal, RefusalCount, WorkoutCount,
+    NormalisationOutcome, NormalisationRun, NormalisationRunId, Refusal, RefusalCount, StartedAt,
+    WorkoutCount,
 };
 use domain::plan::{Plan, PlanId, PlanName, PlanWindow};
 use domain::planner::{Completed, Relative, RerunOrdinal, SessionRole};
@@ -264,7 +265,9 @@ spanned! {
 
 spanned! {
     PerformedCyclingSessions {
-        fn all(&self) -> Result<Vec<CanonicalCyclingSession>, StoreError>;
+        fn main_rides(&self) -> Result<Vec<CanonicalBikePlusRide>, StoreError>;
+        fn efforts(&self) -> Result<Vec<CanonicalBikePlusRide>, StoreError>;
+        fn tested(&self) -> Result<Vec<StartedAt>, StoreError>;
         fn between(&self, from: Date, to: Date) -> Result<Vec<CanonicalCyclingSession>, StoreError>;
     }
 }

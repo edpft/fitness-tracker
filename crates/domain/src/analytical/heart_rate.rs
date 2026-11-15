@@ -10,7 +10,7 @@
 
 use super::heart_rate_at_power::{AtPower, seconds};
 use crate::{
-    cycling::{CanonicalBikePlusRide, CanonicalCyclingSession, Ftp},
+    cycling::{CanonicalBikePlusRide, Ftp},
     device::{Device, InUse, Measurand, Register},
     normalised::StartedAt,
 };
@@ -40,26 +40,24 @@ impl RideHeartRate {
     }
 }
 
-/// A session's main ride's heart rate, or [`None`] for a test.
+/// A main ride's heart rate.
 ///
 /// **Main rides only.** A test's effort is one zone held as hard as can be,
-/// and a cool-down is not a ride anything is compared across.
+/// and a cool-down is not a ride anything is compared across, so neither is
+/// read for this (#817).
 ///
 /// `ftp` is the value in force on the ride's date (§ 13).
 #[must_use]
 pub fn ride_heart_rate(
-    session: &CanonicalCyclingSession,
+    main: &CanonicalBikePlusRide,
     ftp: Option<Ftp>,
     register: &Register,
-) -> Option<RideHeartRate> {
-    let CanonicalCyclingSession::Ride { main, .. } = session else {
-        return None;
-    };
-    Some(RideHeartRate {
+) -> RideHeartRate {
+    RideHeartRate {
         started_at: main.started_at().value().clone(),
         sent_by: sent_by(main, register),
         at_power: seconds(main, ftp),
-    })
+    }
 }
 
 /// The device that sent `ride`'s heart rate: the ride's own monitor where

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT session AS \"session!: i64\", ride_position AS \"position!: i64\",\n                   json_group_array(json_array(\n                       at_seconds, power_watts, cadence_rpm,\n                       resistance_percentage, speed_millimetres_per_hour\n                   )) AS \"rows!: String\"\n              FROM canonical_bike_plus_ride_sample\n             WHERE ?1 IS NULL OR session IN (SELECT value FROM json_each(?1))\n             GROUP BY session, ride_position\n            ",
+  "query": "\n            SELECT session AS \"session!: i64\", ride_position AS \"position!: i64\",\n                   json_group_array(json_array(\n                       at_seconds, power_watts, cadence_rpm,\n                       resistance_percentage, speed_millimetres_per_hour\n                   )) AS \"rows!: String\"\n              FROM canonical_bike_plus_ride_sample\n             WHERE (?1 IS NULL OR session IN (SELECT value FROM json_each(?1)))\n               AND (?2 IS NULL OR (session, ride_position) IN\n                        (SELECT session, position FROM canonical_bike_plus_ride WHERE role = ?2))\n             GROUP BY session, ride_position\n            ",
   "describe": {
     "columns": [
       {
@@ -33,7 +33,7 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 2
     },
     "nullable": [
       false,
@@ -41,5 +41,5 @@
       true
     ]
   },
-  "hash": "2b08867af14f5e7353c791311ec9b505726b1966b97f6309732184f63c3e0766"
+  "hash": "4c2ec6589ca850c298dca0ee4459dc3affd370c2754aa8dc62cc3531f9f8e16b"
 }

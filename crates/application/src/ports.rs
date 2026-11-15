@@ -24,8 +24,8 @@ use domain::analytical::Weighed;
 use domain::body::{CanonicalWeighIn, WeighInAccount, WeighInCount};
 use domain::canonical::{Occurred, Reach, SessionCount};
 use domain::cycling::{
-    CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide,
-    Ftp, PublishedProgramme, RideVenue,
+    CanonicalBikePlusRide, CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId,
+    CyclingSession, DeliveredRide, Ftp, PublishedProgramme, RideVenue,
 };
 use domain::gym::{CanonicalGymSession, NormalisedGymSession, Performance, exercise::RepsExercise};
 use domain::landing::{
@@ -36,7 +36,7 @@ use domain::landing::{
 use domain::measure::PositiveDuration;
 use domain::normalised::{
     NormalisationOutcome, NormalisationRun, NormalisationRunId, Refusal, RefusalCount, RefusalKind,
-    RefusalReason, StatedZones, WorkoutCount,
+    RefusalReason, StartedAt, StatedZones, WorkoutCount,
 };
 use domain::plan::{MesocycleOrdinal, Plan, PlanId, PlanName, PlanWindow};
 use domain::planner::{Completed, RerunOrdinal};
@@ -974,15 +974,39 @@ pub trait CanonicalCyclingSessionStore {
     fn count(&self) -> impl Future<Output = Result<SessionCount, StoreError>> + Send;
 }
 
-/// Every cycling session the canonical layer holds, as the analytical layer
-/// reads it (§ II.4).
+/// The cycling sessions the canonical layer holds, as the analytical layer
+/// reads them (§ II.4).
+///
+/// **No read of every session whole** (#817). Each read is of what a page
+/// draws: a day's sessions, the rides a chart compares, or when each test
+/// was. The operator, 2026-11-14, on a compile check over a list or a test:
+/// *"less likely for future agents to ignore them"*.
 pub trait PerformedCyclingSessions {
-    /// Every canonical cycling session, oldest first.
+    /// Every session's main ride, its series with it, oldest first: no
+    /// warm-up, effort or cool-down.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
-    fn all(&self) -> impl Future<Output = Result<Vec<CanonicalCyclingSession>, StoreError>> + Send;
+    fn main_rides(
+        &self,
+    ) -> impl Future<Output = Result<Vec<CanonicalBikePlusRide>, StoreError>> + Send;
+
+    /// Every FTP test's effort, its series with it, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn efforts(
+        &self,
+    ) -> impl Future<Output = Result<Vec<CanonicalBikePlusRide>, StoreError>> + Send;
+
+    /// When each FTP test session started, oldest first, and nothing else.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn tested(&self) -> impl Future<Output = Result<Vec<StartedAt>, StoreError>> + Send;
 
     /// Each canonical cycling session that started between the two days,
     /// both included, in the zone it was ridden in, oldest first.

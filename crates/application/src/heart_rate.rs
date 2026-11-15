@@ -45,10 +45,10 @@ where
     pub async fn rides(&self) -> Result<Vec<RideHeartRate>, StoreError> {
         let register = self.devices.register().await?;
         let mut rides = Vec::new();
-        for session in self.sessions.all().await? {
-            let date = session.started_at().wall_clock().date();
+        for main in self.sessions.main_rides().await? {
+            let date = main.started_at().value().wall_clock().date();
             let ftp = self.ftp.in_force_on(date).await?;
-            rides.extend(ride_heart_rate(&session, ftp, &register));
+            rides.push(ride_heart_rate(&main, ftp, &register));
         }
         Ok(rides)
     }
