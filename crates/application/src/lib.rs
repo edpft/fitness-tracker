@@ -60,7 +60,7 @@ pub use error::{
 };
 pub use graph::{Authors, Calendar, Generation, Input, Node, Output, Reads, Table};
 pub use ports::{
-    AccountReader, Authored, ByReason, CalendarPublisher, CalendarStore,
+    AccountReader, Activities, Authored, ByReason, CalendarPublisher, CalendarStore,
     CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalLayer, CanonicalWeighInStore,
     ClassSource, ClassesHeld, ClassesListed, ClassesRead, Clock, CompositionHistory,
     CyclingDeliveryStore, CyclingMesocycleStore, Deliverable, Delivered, Delivery, DeliveryAttempt,

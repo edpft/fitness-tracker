@@ -724,7 +724,7 @@ mod tests {
                 .collect()
         };
         let session = parts("/history/2026-11-02/1");
-        for part in ["reading tests", "rendering", "keeping"] {
+        for part in ["reading opened", "rendering", "keeping"] {
             assert!(
                 session.iter().any(|seen| seen == part),
                 "{part}: {session:?}"

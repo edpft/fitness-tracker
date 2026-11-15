@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT started_at_utc AS \"started_at!: String\",\n                   zone AS \"zone!: String\",\n                   duration_seconds AS \"duration!: i64\",\n                   average_bpm, highest_bpm\n            FROM padel_match\n            ORDER BY started_at_utc, landing_record_id\n            ",
+  "query": "\n            SELECT started_at_utc AS \"started_at!: String\",\n                   zone AS \"zone!: String\",\n                   duration_seconds AS \"duration!: i64\",\n                   average_bpm, highest_bpm\n            FROM padel_match\n            WHERE started_at_utc >= ? AND started_at_utc < ?\n            ORDER BY started_at_utc, landing_record_id\n            ",
   "describe": {
     "columns": [
       {
@@ -60,7 +60,7 @@
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 2
     },
     "nullable": [
       false,
@@ -70,5 +70,5 @@
       true
     ]
   },
-  "hash": "2117fbee49c5121838ab4cfb372e4d06f05af0977d8ad9d2636878b6808a68eb"
+  "hash": "1e87c8dea464fe7464bd32a70e42364af91dbd83dd3486a02ff594b0b4163e88"
 }

@@ -14,7 +14,11 @@ use domain::{
             relative, sessions_of, trend,
         },
     },
-    gym::exercise::{Exercise, RepsExercise},
+    canonical::Occurred,
+    gym::{
+        Performance,
+        exercise::{Exercise, RepsExercise},
+    },
     plan::{Mesocycles, Occupies},
 };
 use jiff::civil::Date;
@@ -207,6 +211,20 @@ where
     ///
     /// [`StoreError`] if the store is unavailable.
     pub async fn tests(&self, today: Date) -> Result<Vec<Tests>, StoreError> {
+        Ok(self.read(Date::MIN, today).await?.0)
+    }
+
+    /// Every lift's 1RM tests between the two days, both included, and the
+    /// performances they were read from.
+    ///
+    /// **No earlier than a lift's first mesocycle**: a test is a
+    /// prescription's, and no lift has one before that, so no day before it is
+    /// read or looked up.
+    async fn read(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> Result<(Vec<Tests>, Vec<Performance>), StoreError> {
         let mut plans = Vec::new();
         for window in self.plans.windows().await? {
             if let Some(plan) = self.plans.named(window.name()).await?
@@ -215,9 +233,7 @@ where
                 plans.push(plan);
             }
         }
-        // A test is a prescription's, and no lift has one before its first
-        // mesocycle, so no day before that is read or looked up.
-        let Some(from) = plans
+        let Some(first) = plans
             .iter()
             .filter_map(domain::plan::Plan::gym)
             .flat_map(Mesocycles::mesocycles)
@@ -228,16 +244,20 @@ where
             })
             .map(|mesocycle| Occupies::span(mesocycle).start())
             .min()
+            .filter(|first| *first <= to)
         else {
-            return Ok(LIFTS
-                .into_iter()
-                .map(|lift| Tests {
-                    lift,
-                    tests: Vec::new(),
-                })
-                .collect());
+            return Ok((
+                LIFTS
+                    .into_iter()
+                    .map(|lift| Tests {
+                        lift,
+                        tests: Vec::new(),
+                    })
+                    .collect(),
+                Vec::new(),
+            ));
         };
-        let sessions = self.sessions.of(&LIFTS, from, today).await?;
+        let sessions = self.sessions.of(&LIFTS, from.max(first), to).await?;
         let mut read = Vec::new();
         for lift in LIFTS {
             // The prescription in force on each day the lift was performed,
@@ -264,6 +284,37 @@ where
                 .collect();
             read.push(Tests { lift, tests });
         }
-        Ok(read)
+        Ok((read, sessions))
+    }
+}
+
+/// The gym sessions that tested a lift: each performance of a lift on a day
+/// its test was read from.
+impl<E, S, P, R> crate::history::Tested for OneRepMaxTests<E, S, P, R>
+where
+    E: OneRepMaxEstimator + Sync,
+    S: Performances + Sync,
+    P: PlanStore + Sync,
+    R: PrescribedWorkoutStore + Sync,
+{
+    async fn between(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> Result<Vec<(Occurred, RepsExercise)>, StoreError> {
+        let (tests, performances) = self.read(from, to).await?;
+        Ok(tests
+            .iter()
+            .flat_map(|lift| {
+                lift.tests.iter().flat_map(|(on, _)| {
+                    performances
+                        .iter()
+                        .filter(|performance| {
+                            performance.exercise == lift.lift && performance.on() == *on
+                        })
+                        .map(|performance| (performance.occurred.clone(), lift.lift))
+                })
+            })
+            .collect())
     }
 }

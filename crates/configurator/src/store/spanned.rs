@@ -12,23 +12,23 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use application::{
-    AccountReader, CalendarStore, CanonicalCyclingSessionStore, CanonicalGymSessionStore,
-    CanonicalLayer, CanonicalWeighInStore, ClassSource, ClassesHeld, ClassesListed, ClassesRead,
-    CompositionHistory, CyclingDeliveryStore, CyclingMesocycleStore, DeliveryReference,
-    DerivationLedger, DerivedFrom, DestinationName, DestinationReply, DiaryAuthor, DiaryStore,
-    EquipmentStore, ExerciseHistory, ExtractionRunLog, FetchLog, Fetched, FillChangeStore,
-    FtpHistory, FulfilledSession, GenerationParameterStore, HoldingRides, HolidayCalendar, Input,
-    Kept, LandingStore, LastPerformance, Mark, MesocycleInForce, MesocycleStore, NewestObservation,
-    NormalisationRunLog, NormalisedCyclingSessionReader, NormalisedEntityStore,
-    NormalisedGymSessionReader, NormalisedWeighInReader, Occupant, Output, OvernightHrvHistory,
-    Performances, PerformedCyclingSessions, PerformedGymSessions, PerformedSessionLog, PlanStore,
-    PlayedPadelMatch, PlayedPadelMatches, PrescribedWorkoutId, PrescribedWorkoutStore,
-    PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore, PublishedCycling,
-    PublishedProgrammes, PublishedRead, PulseWaveVelocityHistory, RawExtent, Reached, Reading,
-    Reads, RecordedDevices, RefusalStore, RenderingDigest, RestingHeartRateHistory,
-    ResumptionPointStore, Revision, Revisions, RiddenSession, RiddenSessionLog, RiddenVenues,
-    Served, SessionOrdinal, SleepHistory, SourceError, StoreError, StressHistory, TrainingDone,
-    WearRecord, WeighInHistory, WorkoutStore,
+    AccountReader, Activities, CalendarStore, CanonicalCyclingSessionStore,
+    CanonicalGymSessionStore, CanonicalLayer, CanonicalWeighInStore, ClassSource, ClassesHeld,
+    ClassesListed, ClassesRead, CompositionHistory, CyclingDeliveryStore, CyclingMesocycleStore,
+    DeliveryReference, DerivationLedger, DerivedFrom, DestinationName, DestinationReply,
+    DiaryAuthor, DiaryStore, EquipmentStore, ExerciseHistory, ExtractionRunLog, FetchLog, Fetched,
+    FillChangeStore, FtpHistory, FulfilledSession, GenerationParameterStore, HoldingRides,
+    HolidayCalendar, Input, Kept, LandingStore, LastPerformance, Mark, MesocycleInForce,
+    MesocycleStore, NewestObservation, NormalisationRunLog, NormalisedCyclingSessionReader,
+    NormalisedEntityStore, NormalisedGymSessionReader, NormalisedWeighInReader, Occupant, Output,
+    OvernightHrvHistory, Performances, PerformedCyclingSessions, PerformedGymSessions,
+    PerformedSessionLog, PlanStore, PlayedPadelMatch, PlayedPadelMatches, PrescribedWorkoutId,
+    PrescribedWorkoutStore, PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore,
+    PublishedCycling, PublishedProgrammes, PublishedRead, PulseWaveVelocityHistory, RawExtent,
+    Reached, Reading, Reads, RecordedDevices, RefusalStore, RenderingDigest,
+    RestingHeartRateHistory, ResumptionPointStore, Revision, Revisions, RiddenSession,
+    RiddenSessionLog, RiddenVenues, Served, SessionOrdinal, SleepHistory, SourceError, StoreError,
+    StressHistory, TrainingDone, WearRecord, WeighInHistory, WorkoutStore,
     graph::{Calendar, Node, Table},
 };
 use domain::analytical::Weighed;
@@ -265,6 +265,14 @@ spanned! {
 spanned! {
     PerformedCyclingSessions {
         fn all(&self) -> Result<Vec<CanonicalCyclingSession>, StoreError>;
+        fn between(&self, from: Date, to: Date) -> Result<Vec<CanonicalCyclingSession>, StoreError>;
+    }
+}
+
+spanned! {
+    Activities {
+        fn between(&self, from: Date, to: Date) -> Result<Vec<(Occurred, application::history::Activity)>, StoreError>;
+        fn first(&self) -> Result<Option<Date>, StoreError>;
     }
 }
 
@@ -318,7 +326,7 @@ spanned! {
 
 spanned! {
     PlayedPadelMatches {
-        fn all(&self) -> Result<Vec<PlayedPadelMatch>, StoreError>;
+        fn between(&self, from: Date, to: Date) -> Result<Vec<PlayedPadelMatch>, StoreError>;
     }
 }
 

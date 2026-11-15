@@ -322,6 +322,88 @@ pub(super) fn widened(from: Date, to: Date) -> Result<(String, String), StoreErr
     Ok((lower, upper))
 }
 
+/// Each session as History lists it (#817): its counts and stated averages in
+/// one query, and none of its sets or its heart-rate series.
+impl application::Activities for SqliteCanonicalGymSessionStore {
+    async fn between(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> Result<Vec<(Occurred, application::history::Activity)>, StoreError> {
+        let (lower, upper) = widened(from, to)?;
+        let rows = sqlx::query!(
+            r#"
+            SELECT s.started_at_utc, s.zone, s.on_day, s.duration_seconds, s.average_bpm,
+                   (SELECT COUNT(*) FROM canonical_gym_exercise AS e
+                     WHERE e.session = s.id) AS "exercises!: i64",
+                   (SELECT COUNT(*) FROM canonical_gym_set AS t
+                     WHERE t.session = s.id) AS "sets!: i64"
+              FROM canonical_gym_session AS s
+             WHERE COALESCE(s.started_at_utc, s.on_day) >= ?
+               AND COALESCE(s.started_at_utc, s.on_day) < ?
+             ORDER BY COALESCE(s.started_at_utc, s.on_day), s.id
+            "#,
+            lower,
+            upper
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| store_error(&e))?;
+        let mut read = Vec::new();
+        for row in rows {
+            let occurred = occurred(
+                row.started_at_utc.as_deref(),
+                row.zone.as_deref(),
+                row.on_day.as_deref(),
+            )?;
+            if !(from..=to).contains(&occurred.day()) {
+                continue;
+            }
+            let length = row
+                .duration_seconds
+                .map(|seconds| {
+                    PositiveDuration::from_seconds(u64::try_from(seconds).map_err(|e| corrupt(&e))?)
+                        .map_err(|e| corrupt(&e))
+                })
+                .transpose()?;
+            read.push((
+                occurred,
+                application::history::Activity::Gym {
+                    length,
+                    exercises: usize::try_from(row.exercises).map_err(|e| corrupt(&e))?,
+                    sets: usize::try_from(row.sets).map_err(|e| corrupt(&e))?,
+                    heart_rate: row.average_bpm.map(beats).transpose()?,
+                    tested: Vec::new(),
+                },
+            ));
+        }
+        Ok(read)
+    }
+
+    async fn first(&self) -> Result<Option<Date>, StoreError> {
+        let row = sqlx::query!(
+            r#"
+            SELECT started_at_utc, zone, on_day
+              FROM canonical_gym_session
+             ORDER BY COALESCE(started_at_utc, on_day), id
+             LIMIT 1
+            "#
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| store_error(&e))?;
+        row.map(|row| {
+            occurred(
+                row.started_at_utc.as_deref(),
+                row.zone.as_deref(),
+                row.on_day.as_deref(),
+            )
+            .map(|occurred| occurred.day())
+        })
+        .transpose()
+    }
+}
+
 /// Whole canonical sessions, and the one that answered a prescription, each
 /// read as one snapshot of the layer (#467).
 impl PerformedGymSessions for SqliteCanonicalGymSessionStore {

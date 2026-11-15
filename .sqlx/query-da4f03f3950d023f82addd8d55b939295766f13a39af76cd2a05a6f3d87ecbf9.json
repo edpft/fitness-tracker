@@ -1,0 +1,59 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT s.kind AS \"kind!: String\",\n                   MIN(r.started_at_utc) AS \"started_at_utc!: String\",\n                   r.zone AS \"zone!: String\",\n                   SUM(r.duration_seconds) AS \"length!: i64\",\n                   MAX(CASE WHEN r.role IN ('main', 'effort')\n                            THEN r.average_power_watts END) AS \"power!: i64\"\n              FROM canonical_cycling_session AS s\n              JOIN canonical_bike_plus_ride AS r ON r.session = s.id\n             WHERE s.id IN (SELECT session FROM canonical_bike_plus_ride\n                             WHERE started_at_utc >= ? AND started_at_utc < ?)\n             GROUP BY s.id\n             ORDER BY MIN(r.started_at_utc)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "kind!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_cycling_session",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "name": "started_at_utc!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_bike_plus_ride",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "length!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "power!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "da4f03f3950d023f82addd8d55b939295766f13a39af76cd2a05a6f3d87ecbf9"
+}

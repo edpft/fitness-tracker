@@ -1,9 +1,12 @@
-//! The sessions he has done, and one of them opened, over this build's store
-//! (#772).
+//! The activities he has done, a page at a time, and one of them opened, over
+//! this build's store (#772, #817).
 
 use application::{
     StoreError,
-    history::{Day, History, Number, Session},
+    history::{
+        History, Number, Page,
+        opened::{self, Activity},
+    },
     next::Scope,
 };
 use domain::normalised::OperatorZone;
@@ -21,33 +24,51 @@ use crate::{
 };
 
 page! {
-    /// What History reads: the canonical gym and cycling sessions, the padel
-    /// matches Garmin's activities give, and which sessions were 1RM tests.
-    pub struct Page {
+    /// What the list reads: each activity as it lists it, and which gym
+    /// sessions were 1RM tests.
+    pub struct List {
         history: History<
             Spanned<SqliteCanonicalGymSessionStore>,
             Spanned<SqliteCanonicalCyclingSessionStore>,
             Spanned<SqlitePadelMatches>,
+            one_rep_max::Tests,
         >,
-        tests: one_rep_max::Tests,
         today: Today,
     }
 }
 
-/// The parts a run collecting what the page reads takes.
+page! {
+    /// What an opened activity reads: the whole of it.
+    pub struct Opened {
+        opened: opened::Opened<
+            Spanned<SqliteCanonicalGymSessionStore>,
+            Spanned<SqliteCanonicalCyclingSessionStore>,
+            Spanned<SqlitePadelMatches>,
+            one_rep_max::Tests,
+        >,
+    }
+}
+
+/// The parts a run collecting what the list reads takes.
 #[must_use]
 pub fn collects() -> Scope {
     crate::graph::scope(&reads())
 }
 
-/// What the page reads, and so what its kept drawing is drawn from (#805).
+/// What the list reads, and so what its kept drawing is drawn from (#805).
 #[must_use]
 pub fn reads() -> application::graph::Reads {
-    <Page as application::graph::Input>::reads()
+    <List as application::graph::Input>::reads()
 }
 
-impl Page {
-    /// The page over `store`.
+/// What an opened activity reads.
+#[must_use]
+pub fn opened_reads() -> application::graph::Reads {
+    <Opened as application::graph::Input>::reads()
+}
+
+impl List {
+    /// The list over `store`.
     #[must_use]
     pub fn open(store: &Store, zone: &OperatorZone) -> Self {
         Self {
@@ -55,9 +76,9 @@ impl Page {
                 store.adapter(SqliteCanonicalGymSessionStore::new),
                 store.adapter(SqliteCanonicalCyclingSessionStore::new),
                 store.adapter(SqlitePadelMatches::new),
+                one_rep_max::tests(store, zone),
             )
             .into(),
-            tests: one_rep_max::tests(store, zone).into(),
             today: Today::new(zone.clone()).into(),
         }
     }
@@ -68,24 +89,47 @@ impl Page {
         self.today.date()
     }
 
-    /// Every day through today that holds a session, newest first.
+    /// The page of days before `before`, or through today where it is `None`.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store cannot be read.
-    pub async fn days(&self) -> Result<Vec<Day>, StoreError> {
-        let today = self.today.date();
-        let tests = read!(self.tests.tests(today)).await?;
-        read!(self.history.days(today, &tests)).await
+    pub async fn page(&self, before: Option<Date>) -> Result<Page, StoreError> {
+        let before = match before {
+            Some(before) => before,
+            None => self
+                .today
+                .date()
+                .tomorrow()
+                .map_err(|_| StoreError::Corrupt {
+                    detail: "a day beyond the calendar".to_owned(),
+                })?,
+        };
+        read!(self.history.page(before)).await
+    }
+}
+
+impl Opened {
+    /// The opened activity over `store`.
+    #[must_use]
+    pub fn open(store: &Store, zone: &OperatorZone) -> Self {
+        Self {
+            opened: opened::Opened::new(
+                store.adapter(SqliteCanonicalGymSessionStore::new),
+                store.adapter(SqliteCanonicalCyclingSessionStore::new),
+                store.adapter(SqlitePadelMatches::new),
+                one_rep_max::tests(store, zone),
+            )
+            .into(),
+        }
     }
 
-    /// The session `number` of those done `on`, where there is one.
+    /// The activity `number` of those done `on`, where there is one.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store cannot be read.
-    pub async fn session(&self, on: Date, number: Number) -> Result<Option<Session>, StoreError> {
-        let tests = read!(self.tests.tests(self.today.date())).await?;
-        read!(self.history.session(on, number, &tests)).await
+    pub async fn activity(&self, on: Date, number: Number) -> Result<Option<Activity>, StoreError> {
+        read!(self.opened.activity(on, number)).await
     }
 }

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT started_at_utc AS \"started_at!: String\", zone AS \"zone!: String\"\n              FROM padel_match\n             ORDER BY started_at_utc\n             LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "started_at!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "padel_match",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "padel_match",
+            "name": "zone"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "936b5317ae92b314c17e3c96fa6b7769e8a74ecc8040a2b9ebf2218adbd6ba4f"
+}

@@ -1761,3 +1761,81 @@ fn rebuilding_what_a_new_ride_reached_is_rebuilding_the_whole() {
         assert_eq!(reached.read.as_usize(), 1, "only the new ride was read");
     });
 }
+
+/// **The list's read of a session says what its whole read does** (#817): its
+/// length is every ride's, its power the working ride's, and a test is one;
+/// and a day's whole read is the session that started on it.
+#[test]
+fn a_session_as_history_lists_it_is_the_whole_one_summed() {
+    use application::{Activities, PerformedCyclingSessions, history::Activity};
+    use domain::canonical::Occurred;
+
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = landed(
+            vec![
+                ("warm-up", workout("warm-up", Kind::WarmUp, 100, 400)),
+                ("effort", workout("effort", Kind::Test, 400, 1600)),
+            ],
+            vec![
+                ("warm-up", graph(&[1, 2], &[93, 132], None, "2.0", "km")),
+                (
+                    "effort",
+                    graph(
+                        &[1, 2, 3],
+                        &[180, 200, 210],
+                        Some((&[120, 140, 150], "0")),
+                        "8.0",
+                        "km",
+                    ),
+                ),
+            ],
+        )
+        .await
+        .expect("a landed corpus");
+        derive(&pool).await.expect("a derivation");
+        canonicalise(&pool).await.expect("a canonical layer");
+        let store = SqliteCanonicalCyclingSessionStore::new(pool.clone());
+
+        let whole = PerformedCyclingSessions::all(&store).await.expect("whole");
+        let [session] = whole.as_slice() else {
+            panic!("one session: {whole:?}");
+        };
+        let day = session.started_at().wall_clock().date();
+        assert_eq!(
+            PerformedCyclingSessions::between(&store, day, day)
+                .await
+                .expect("the day's"),
+            whole
+        );
+        let other = day.tomorrow().expect("a day");
+        assert_eq!(
+            PerformedCyclingSessions::between(&store, other, other)
+                .await
+                .expect("the next day's"),
+            vec![]
+        );
+
+        let listed = Activities::between(&store, day, day)
+            .await
+            .expect("the list's");
+        assert_eq!(
+            listed,
+            vec![(
+                Occurred::At(session.started_at().clone()),
+                Activity::Cycling {
+                    length: domain::measure::Duration::from_seconds(
+                        session
+                            .rides()
+                            .iter()
+                            .map(|ride| ride.duration().value().as_seconds())
+                            .sum(),
+                    ),
+                    power: *session.working_ride().average_power().value(),
+                    test: true,
+                },
+            )]
+        );
+        assert_eq!(Activities::first(&store).await.expect("first"), Some(day));
+    });
+}

@@ -983,6 +983,18 @@ pub trait PerformedCyclingSessions {
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
     fn all(&self) -> impl Future<Output = Result<Vec<CanonicalCyclingSession>, StoreError>> + Send;
+
+    /// Each canonical cycling session that started between the two days,
+    /// both included, in the zone it was ridden in, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn between(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> impl Future<Output = Result<Vec<CanonicalCyclingSession>, StoreError>> + Send;
 }
 
 /// What the domain would not accept, for one stream.
@@ -1579,14 +1591,47 @@ pub struct PlayedPadelMatch {
     pub heart_rate: Option<domain::measure::HeartRateSummary>,
 }
 
-/// Every padel match the normalised layer holds, which only the watch records.
+/// The padel matches the normalised layer holds, which only the watch records.
 pub trait PlayedPadelMatches {
-    /// Oldest first.
+    /// Each match played between the two days, both included, by the day it
+    /// started on in the zone it was played in, oldest first.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
-    fn all(&self) -> impl Future<Output = Result<Vec<PlayedPadelMatch>, StoreError>> + Send;
+    fn between(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> impl Future<Output = Result<Vec<PlayedPadelMatch>, StoreError>> + Send;
+}
+
+/// The activities of one kind, each as History lists it (#817).
+///
+/// **What the list shows, asked for in one query**: a gym session's counts
+/// and averages rather than its sets, and a ride's length and power rather than
+/// its samples. Opening an activity reads the whole of it, through its own
+/// port, for one day.
+pub trait Activities {
+    /// Each activity between the two days, both included, by the day it
+    /// happened on in the zone it happened in, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn between(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> impl Future<Output = Result<Vec<(Occurred, crate::history::Activity)>, StoreError>> + Send;
+
+    /// The day of the first activity the record holds, `None` where it holds
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn first(&self) -> impl Future<Output = Result<Option<Date>, StoreError>> + Send;
 }
 
 /// One cycling session the record holds, and the classes it was ridden to.

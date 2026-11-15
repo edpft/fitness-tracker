@@ -1773,7 +1773,7 @@ fn a_game_the_watch_gave_no_length_is_nothing_happening() {
 /// rate the watch stated.
 #[test]
 fn a_padel_match_is_training_done_on_the_day_it_was_played() {
-    use application::{PlayedPadelMatches as _, TrainingDone as _};
+    use application::{PlayedPadelMatches, TrainingDone as _};
     use domain::analytical::training_done::{Kind, Session};
 
     let runtime = runtime().expect("a runtime");
@@ -1826,8 +1826,17 @@ fn a_padel_match_is_training_done_on_the_day_it_was_played() {
                 length: domain::measure::PositiveDuration::from_seconds(7_080).expect("a duration"),
             }]
         );
-        let matches = SqlitePadelMatches::new(pool.clone())
-            .all()
+        let store = SqlitePadelMatches::new(pool.clone());
+        let saturday = jiff::civil::date(2026, 7, 4);
+        let sunday = jiff::civil::date(2026, 7, 5);
+        assert_eq!(
+            PlayedPadelMatches::between(&store, saturday, saturday)
+                .await
+                .expect("Saturday's"),
+            vec![],
+            "half past midnight is Sunday's"
+        );
+        let matches = PlayedPadelMatches::between(&store, sunday, sunday)
             .await
             .expect("matches");
         let read: Vec<_> = matches

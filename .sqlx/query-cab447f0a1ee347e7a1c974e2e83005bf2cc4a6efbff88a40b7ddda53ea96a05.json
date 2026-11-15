@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT s.id AS \"session!: i64\", s.kind AS \"kind!: String\",\n                   r.position AS \"position!: i64\",\n                   r.started_at_utc AS \"started_at_utc!: String\", r.zone AS \"zone!: String\",\n                   r.started_at_normalised_session AS \"started_at_from!: i64\",\n                   r.venue_reference AS \"venue_reference!: String\",\n                   r.venue_called AS \"venue_called!: String\",\n                   r.venue_normalised_session AS \"venue_from!: i64\",\n                   r.duration_seconds AS \"duration_seconds!: i64\",\n                   r.duration_normalised_session AS \"duration_from!: i64\",\n                   r.distance_millimetres AS \"distance_millimetres!: i64\",\n                   r.distance_normalised_session AS \"distance_from!: i64\",\n                   r.average_power_watts AS \"average_power_watts!: i64\",\n                   r.average_power_normalised_session AS \"average_power_from!: i64\",\n                   r.samples_normalised_session AS \"samples_from!: i64\",\n                   r.heart_rate_normalised_session AS \"heart_rate_from: i64\",\n                   r.heart_rate_declared_missing_seconds AS \"heart_rate_declared_missing_seconds: i64\",\n                   r.heart_rate_declared_missing_normalised_session AS \"heart_rate_declared_missing_from: i64\",\n                   r.heart_rate_device, r.heart_rate_device_name,\n                   r.heart_rate_device_normalised_session AS \"heart_rate_device_from: i64\"\n              FROM canonical_cycling_session AS s\n              JOIN canonical_bike_plus_ride AS r ON r.session = s.id\n             ORDER BY s.id, r.position\n            ",
+  "query": "\n            SELECT s.id AS \"session!: i64\", s.kind AS \"kind!: String\",\n                   r.position AS \"position!: i64\",\n                   r.started_at_utc AS \"started_at_utc!: String\", r.zone AS \"zone!: String\",\n                   r.started_at_normalised_session AS \"started_at_from!: i64\",\n                   r.venue_reference AS \"venue_reference!: String\",\n                   r.venue_called AS \"venue_called!: String\",\n                   r.venue_normalised_session AS \"venue_from!: i64\",\n                   r.duration_seconds AS \"duration_seconds!: i64\",\n                   r.duration_normalised_session AS \"duration_from!: i64\",\n                   r.distance_millimetres AS \"distance_millimetres!: i64\",\n                   r.distance_normalised_session AS \"distance_from!: i64\",\n                   r.average_power_watts AS \"average_power_watts!: i64\",\n                   r.average_power_normalised_session AS \"average_power_from!: i64\",\n                   r.samples_normalised_session AS \"samples_from!: i64\",\n                   r.heart_rate_normalised_session AS \"heart_rate_from: i64\",\n                   r.heart_rate_declared_missing_seconds AS \"heart_rate_declared_missing_seconds: i64\",\n                   r.heart_rate_declared_missing_normalised_session AS \"heart_rate_declared_missing_from: i64\",\n                   r.heart_rate_device, r.heart_rate_device_name,\n                   r.heart_rate_device_normalised_session AS \"heart_rate_device_from: i64\"\n              FROM canonical_cycling_session AS s\n              JOIN canonical_bike_plus_ride AS r ON r.session = s.id\n             WHERE ?1 IS NULL OR s.id IN (SELECT value FROM json_each(?1))\n             ORDER BY s.id, r.position\n            ",
   "describe": {
     "columns": [
       {
@@ -247,7 +247,7 @@
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 1
     },
     "nullable": [
       false,
@@ -274,5 +274,5 @@
       true
     ]
   },
-  "hash": "1748ce9d0aff8986c5af5a9380494e6a5a5bf8499e53929af32ad9ed2b66687f"
+  "hash": "cab447f0a1ee347e7a1c974e2e83005bf2cc4a6efbff88a40b7ddda53ea96a05"
 }
