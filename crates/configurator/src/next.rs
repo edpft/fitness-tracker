@@ -88,20 +88,23 @@ pub async fn run(
     let if_going = run.if_going();
     let refetch = run.refetch();
     let spanned = telemetry::Spanned::new(progress, run.span);
-    let answered = over(
-        store,
-        zone,
-        credentials,
-        refetch,
-        Asked::Next {
-            now,
-            skip,
-            if_going,
-        },
-        held,
-        &spanned,
+    // **Boxed, because it holds every source's fetch at once** (#468).
+    let answered = Box::pin(
+        over(
+            store,
+            zone,
+            credentials,
+            refetch,
+            Asked::Next {
+                now,
+                skip,
+                if_going,
+            },
+            held,
+            &spanned,
+        )
+        .instrument(spanned.run.clone()),
     )
-    .instrument(spanned.run.clone())
     .await;
     if let Ok(Answered::Report(report)) = &answered {
         telemetry::delivered(&spanned.run, &report.next);
@@ -164,16 +167,18 @@ pub async fn collect(
 ) -> Result<Vec<Done>, NextFailure> {
     let refetch = run.refetch();
     let spanned = telemetry::Spanned::new(progress, run.span);
-    let answered = over(
-        store,
-        zone,
-        credentials,
-        refetch,
-        Asked::Collect { scope, now },
-        &Unheld,
-        &spanned,
+    let answered = Box::pin(
+        over(
+            store,
+            zone,
+            credentials,
+            refetch,
+            Asked::Collect { scope, now },
+            &Unheld,
+            &spanned,
+        )
+        .instrument(spanned.run.clone()),
     )
-    .instrument(spanned.run.clone())
     .await;
     telemetry::run_ended(&spanned.run, &answered);
     match answered? {
@@ -198,16 +203,18 @@ pub async fn wanted(
     frontend: telemetry::Frontend,
 ) -> Result<bool, NextFailure> {
     use tracing::Instrument as _;
-    match over(
-        store,
-        zone,
-        credentials,
-        frontend.refetch(),
-        Asked::Wanted { scope, now },
-        &Unheld,
-        &Unheard,
+    match Box::pin(
+        over(
+            store,
+            zone,
+            credentials,
+            frontend.refetch(),
+            Asked::Wanted { scope, now },
+            &Unheld,
+            &Unheard,
+        )
+        .instrument(telemetry::checking()),
     )
-    .instrument(telemetry::checking())
     .await?
     {
         Answered::Wanted(wanted) => Ok(wanted),
