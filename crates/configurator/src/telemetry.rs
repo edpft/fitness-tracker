@@ -11,9 +11,9 @@ use application::{
     cycling::RidingError,
     microcycle::Standing,
     next::{
-        Canonicalising, CyclingPrescribed, CyclingSessions, Done, Found, GymPrescribed,
-        GymSessions, IfGoing, MesocycleCommitter, NotDue, Progress, Refetch, StandingReader, Step,
-        StepFailure,
+        Canonicalising, CyclingDerived, CyclingDeriving, CyclingPrescribed, CyclingSessions, Done,
+        Found, GymDerived, GymDeriving, GymPrescribed, GymSessions, IfGoing, MesocycleCommitter,
+        NotDue, Progress, Refetch, StandingReader, Step, StepFailure,
     },
     reschedule::Reschedule,
 };
@@ -175,33 +175,55 @@ impl<C: MesocycleCommitter + Sync> MesocycleCommitter for Staged<C> {
     }
 }
 
-impl<G: GymSessions + Sync> GymSessions for Staged<G> {
-    async fn prescribed(
+impl<G: GymDeriving + Sync> GymDeriving for Staged<G> {
+    async fn derived(
         &self,
         from: Date,
         reschedule: &Reschedule,
-    ) -> Result<GymPrescribed, PrescriptionError> {
+    ) -> Result<GymDerived, PrescriptionError> {
         self.0
-            .prescribed(from, reschedule)
+            .derived(from, reschedule)
             .instrument(stage("prescribing", "discipline", Discipline::Gym.as_str()))
             .await
     }
 }
 
-impl<Y: CyclingSessions + Sync> CyclingSessions for Staged<Y> {
+impl<G: GymSessions + Sync> GymSessions for Staged<G> {
     async fn prescribed(
+        &self,
+        derived: GymDerived,
+        reschedule: &Reschedule,
+    ) -> Result<GymPrescribed, PrescriptionError> {
+        self.0
+            .prescribed(derived, reschedule)
+            .instrument(stage("issuing", "discipline", Discipline::Gym.as_str()))
+            .await
+    }
+}
+
+impl<Y: CyclingDeriving + Sync> CyclingDeriving for Staged<Y> {
+    async fn derived(
         &self,
         from: Date,
         reschedule: &Reschedule,
         diary: &Diary,
-    ) -> Result<CyclingPrescribed, RidingError> {
+    ) -> Result<CyclingDerived, RidingError> {
         self.0
-            .prescribed(from, reschedule, diary)
+            .derived(from, reschedule, diary)
             .instrument(stage(
                 "prescribing",
                 "discipline",
                 Discipline::Cycling.as_str(),
             ))
+            .await
+    }
+}
+
+impl<Y: CyclingSessions + Sync> CyclingSessions for Staged<Y> {
+    async fn prescribed(&self, derived: CyclingDerived) -> CyclingPrescribed {
+        self.0
+            .prescribed(derived)
+            .instrument(stage("issuing", "discipline", Discipline::Cycling.as_str()))
             .await
     }
 }

@@ -12,6 +12,7 @@ use application::{
     ftp_tests::TestHeartRates as HeartRatesOfTests,
     graph::Analysis,
     heart_rate::RideHeartRates as HeartRatesOfRides,
+    next::Upcoming,
     one_rep_max::{Tests, View},
     per_device::PerDevice,
     pulse_wave_velocity::PulseWaveVelocities,
@@ -32,6 +33,7 @@ use domain::{
     cycling::Ftp,
     device::{self, Measurand},
     normalised::OperatorZone,
+    schedule::DayPart,
 };
 use infrastructure::{
     GarminRecordedDevices, GarminWear, SqliteCanonicalCyclingSessionStore, SqliteFtpHistory,
@@ -42,9 +44,10 @@ use jiff::civil::Date;
 
 use crate::{
     body_weight as weigh_ins,
-    clock::Today,
+    clock::{Now, Today},
     composition as components, devices, ftp_tests,
     held::{Analysed, Of},
+    macrocycle::Stood,
     next::NextFailure,
     one_rep_max, rescheduling,
     store::{Spanned, Store},
@@ -453,6 +456,87 @@ impl Analysed for PulseWaveVelocity {
     }
 }
 
+/// The store, read through what `I` declares: what an analysis that builds
+/// its ports as it derives reads (#830).
+pub struct Over<I> {
+    store: Store,
+    zone: OperatorZone,
+    reads: std::marker::PhantomData<fn() -> I>,
+}
+
+impl<I> Over<I> {
+    fn new(store: &Store, zone: &OperatorZone) -> Self {
+        Self {
+            store: store.clone(),
+            zone: zone.clone(),
+            reads: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<I: application::graph::Input> application::graph::Input for Over<I> {
+    fn reads() -> application::graph::Reads {
+        I::reads()
+    }
+}
+
+/// What Plan reads, as a type.
+pub struct PlanReads;
+
+impl application::graph::Input for PlanReads {
+    fn reads() -> application::graph::Reads {
+        crate::macrocycle::reads()
+    }
+}
+
+/// Where the plan stands now: the macrocycle's week and its curves, the
+/// microcycle's sessions, and what the walk read to say so.
+pub struct Standing;
+
+impl Analysed for Standing {
+    const ANALYSIS: Analysis = Analysis::Standing;
+    type Ports = Over<PlanReads>;
+    type Reads = Now;
+    type Value = Stood;
+
+    async fn open(store: &Store, zone: &OperatorZone) -> Result<Self::Ports, NextFailure> {
+        Ok(Over::new(store, zone))
+    }
+
+    async fn derive(ports: Self::Ports, now: DayPart) -> Result<Self::Value, NextFailure> {
+        crate::macrocycle::stood(&ports.store, &ports.zone, now).await
+    }
+}
+
+/// What prescribing either discipline reads.
+pub struct Prescribers;
+
+impl application::graph::Input for Prescribers {
+    fn reads() -> application::graph::Reads {
+        <crate::prescribing::Prescriber as application::graph::Input>::reads()
+            .and(<crate::cycling::Prescriber<'static> as application::graph::Input>::reads())
+    }
+}
+
+/// What is next, and the session derived for it, written nowhere: what the
+/// home page shows, and what a run issues and delivers.
+pub struct Prescription;
+
+impl Analysed for Prescription {
+    const ANALYSIS: Analysis = Analysis::Prescription;
+    type Ports = Over<Prescribers>;
+    type Reads = Of<Standing>;
+    type Value = Upcoming;
+
+    async fn open(store: &Store, zone: &OperatorZone) -> Result<Self::Ports, NextFailure> {
+        Ok(Over::new(store, zone))
+    }
+
+    async fn derive(ports: Self::Ports, stood: Arc<Stood>) -> Result<Self::Value, NextFailure> {
+        crate::next::upcoming(&ports.store, &ports.zone, &stood).await
+    }
+}
+
 /// Every analysis's derivation, for the graph.
 pub(crate) fn derivations() -> [application::graph::Derivation; Analysis::ALL.len()] {
     use crate::held::derivation;
@@ -476,5 +560,7 @@ pub(crate) fn derivations() -> [application::graph::Derivation; Analysis::ALL.le
         derivation::<RestingHeartRate>(),
         derivation::<Sleep>(),
         derivation::<PulseWaveVelocity>(),
+        derivation::<Standing>(),
+        derivation::<Prescription>(),
     ]
 }

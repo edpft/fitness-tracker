@@ -415,6 +415,38 @@ where
         })
     }
 
+    /// Whether the record says `ride` already went where it is ridden
+    /// (#830): what a page shows of it, read and never sent.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    pub async fn in_place(&self, ride: &PrescribedRide) -> Result<bool, StoreError> {
+        let Ok(microcycle) = u32::try_from(ride.next.microcycle) else {
+            return Ok(false);
+        };
+        Ok(self.went(ride, microcycle).await?.is_some())
+    }
+
+    /// What the record says went for `ride`, where it is these rides.
+    async fn went(
+        &self,
+        ride: &PrescribedRide,
+        microcycle: u32,
+    ) -> Result<Option<DeliveredRide>, StoreError> {
+        Ok(self
+            .ports
+            .deliveries
+            .delivered_for(ride.next.date, &self.destination)
+            .await?
+            .filter(|delivered| {
+                delivered.programme == ride.published
+                    && delivered.microcycle == microcycle
+                    && delivered.session == ride.next.session
+                    && delivered.went(ride.next.ride.at())
+            }))
+    }
+
     /// Put a ride where it is ridden, and record what went.
     ///
     /// **The record is written after the destination, and only if the
@@ -450,16 +482,7 @@ where
                 ride.next.microcycle
             ))
         })?;
-        if let Some(delivered) = self
-            .ports
-            .deliveries
-            .delivered_for(ride.next.date, &self.destination)
-            .await?
-            && delivered.programme == ride.published
-            && delivered.microcycle == microcycle
-            && delivered.session == ride.next.session
-            && delivered.went(ride.next.ride.at())
-        {
+        if let Some(delivered) = self.went(ride, microcycle).await? {
             return Ok(RideDelivery::Unchanged(delivered));
         }
 

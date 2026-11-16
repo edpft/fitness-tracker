@@ -8,17 +8,23 @@
 use std::fmt::Write as _;
 
 use application::{
-    Delivery, Prescription, Unexpressed,
+    UnderivableSlot,
     cycling::PrescribedRide,
     microcycle::Session,
-    next::{CyclingPrescribed, Done, Found, GymPrescribed, Prescribed, Report, Step, WhatIsNext},
+    next::{
+        CyclingDerived, Derived, Done, Found, GymDerived, InPlace, PlanStanding, Step, Upcoming,
+        WhatIsNext,
+    },
 };
 use domain::{
     cycling::{CyclingMicrocycle, CyclingSession, PowerZone, Ride, clock},
     gym::Load,
     measure::{Duration, PositiveDuration, Spans},
     planner::{Discipline, ScheduledSlot},
-    prescription::{Prescribed as Set, PrescribedExercise, PrescribedSet, Target, shape::SlotId},
+    prescription::{
+        Prescribed as Set, PrescribedExercise, PrescribedSet, PrescribedWorkout, Target,
+        shape::SlotId,
+    },
     schedule::DayPart,
 };
 use maud::{Markup, html};
@@ -138,18 +144,24 @@ fn ended(done: &Done) -> String {
     format!("done, {what}")
 }
 
-/// What is next, then this microcycle's sessions (#666), then the curves.
+/// What is next (#666), as the store says it now (#830).
+pub fn next(upcoming: &Upcoming) -> Markup {
+    html! {
+        section.card.next {
+            p.label { "Next" }
+            (what_is_next(upcoming))
+        }
+    }
+}
+
+/// This microcycle's sessions, and where each stands (#666).
 ///
 /// **Not where each discipline stands in its mesocycle**: the operator,
 /// 2026-11-09, *"isn't very meaningful"*. The volume and intensity curves
 /// replace it (#742).
-pub fn report(report: &Report) -> Markup {
+pub fn microcycle(plan: &PlanStanding) -> Markup {
     html! {
-        section.card.next {
-            p.label { "Next" }
-            (what_is_next(&report.next))
-        }
-        @if let Some((_, sessions)) = &report.plan.microcycle {
+        @if let Some((_, sessions)) = &plan.microcycle {
             section.card.microcycle {
                 h2 { "This microcycle" }
                 @for session in sessions {
@@ -161,11 +173,10 @@ pub fn report(report: &Report) -> Markup {
                 }
             }
         }
-        (crate::curves::card(&report.plan.macrocycle, &report.plan.curves))
     }
 }
 
-fn what_is_next(next: &WhatIsNext) -> Markup {
+fn what_is_next(next: &Upcoming) -> Markup {
     let (session, prescribed) = match next {
         WhatIsNext::Session {
             session,
@@ -198,8 +209,8 @@ fn what_is_next(next: &WhatIsNext) -> Markup {
     html! {
         p.session { (named(session)) ", " (when(session.at())) (until) }
         @match prescribed {
-            Prescribed::Gym(Err(error)) => p.failed { "not prescribed: " (error) },
-            Prescribed::Gym(Ok(GymPrescribed::NothingPlanned { from, last })) => {
+            Derived::Gym(Err(error)) => p.failed { "not prescribed: " (error) },
+            Derived::Gym(Ok(GymDerived::NothingPlanned { from, last })) => {
                 p {
                     @match last {
                         Some((plan, day)) => {
@@ -213,15 +224,15 @@ fn what_is_next(next: &WhatIsNext) -> Markup {
                     }
                 }
             }
-            Prescribed::Gym(Ok(GymPrescribed::Issued { issued, primary, delivery })) => {
-                (gym_summary(issued, *primary))
-                @match delivery {
-                    Ok(delivered) => (gym_delivery(delivered)),
-                    Err(_) => (not_delivered(Discipline::Gym)),
+            Derived::Gym(Ok(GymDerived::Session { proposal, primary, in_place, .. })) => {
+                (gym_summary(proposal.workout(), proposal.underivable(), *primary))
+                @match in_place {
+                    Some(in_place) => (gym_in_place(in_place)),
+                    None => (not_delivered(Discipline::Gym)),
                 }
             }
-            Prescribed::Cycling(Err(error)) => p.failed { "not prescribed: " (error) },
-            Prescribed::Cycling(Ok(prescribed)) => (cycling_session(prescribed)),
+            Derived::Cycling(Err(error)) => p.failed { "not prescribed: " (error) },
+            Derived::Cycling(Ok(derived)) => (cycling_session(derived)),
         }
     }
 }
@@ -261,27 +272,31 @@ fn destination(discipline: Discipline) -> String {
 /// The primary and its sets, and one tap opens the whole session (#773). The
 /// operator, 2026-11-10: *"just showing the primary lift for the next strength
 /// session."* A slot that could not be derived stays in sight, folded or not.
-fn gym_summary(issued: &Prescription, primary: Option<SlotId>) -> Markup {
-    let shape = issued.workout.shape();
+fn gym_summary(
+    workout: &PrescribedWorkout,
+    slots: &[UnderivableSlot],
+    primary: Option<SlotId>,
+) -> Markup {
+    let shape = workout.shape();
     let Some(item) = primary.and_then(|slot| shape.item_for(slot)) else {
-        return html! { (gym_session(issued)) (underivable(issued)) };
+        return html! { (gym_session(workout)) (underivable(slots)) };
     };
     html! {
         @for member in item.exercises() { (exercise(member)) }
         details.folded {
             summary { "All " (shape.exercises().count()) " exercises" }
-            (gym_session(issued))
+            (gym_session(workout))
         }
-        (underivable(issued))
+        (underivable(slots))
     }
 }
 
 /// The session itself, drawn as Hevy draws a routine (#666): its blocks, then
 /// each exercise with a row per set, and the members of a superset boxed
 /// together.
-fn gym_session(issued: &Prescription) -> Markup {
+fn gym_session(workout: &PrescribedWorkout) -> Markup {
     let mut blocks: Vec<(String, Vec<Vec<&PrescribedExercise>>)> = Vec::new();
-    for item in issued.workout.shape().items().iter() {
+    for item in workout.shape().items().iter() {
         let Some(slot) = item.slots().next() else {
             continue;
         };
@@ -311,11 +326,11 @@ fn gym_session(issued: &Prescription) -> Markup {
 }
 
 /// Any slot that could not be derived.
-fn underivable(issued: &Prescription) -> Markup {
+fn underivable(slots: &[UnderivableSlot]) -> Markup {
     html! {
-        @if !issued.underivable.is_empty() {
+        @if !slots.is_empty() {
             ul.failed {
-                @for slot in &issued.underivable {
+                @for slot in slots {
                     li { (slot.slot) " (" (slot.exercise.name()) ") — not derivable: " (slot.reason) }
                 }
             }
@@ -437,38 +452,26 @@ const fn unloaded(load: Load) -> bool {
     matches!(load, Load::Absolute(mass) if mass.is_none())
 }
 
-/// Where the session went, in one line, and what it could not say there.
-fn gym_delivery(delivered: &Delivery) -> Markup {
+/// Where the record says the session is, in one line.
+fn gym_in_place(in_place: &InPlace) -> Markup {
     html! {
         p.status {
-            i.dot.done {} "In " (capitalised(delivered.destination.as_str()))
-            ", session " (delivered.ordinal)
-        }
-        (unexpressed(&delivered.unexpressed))
-    }
-}
-
-/// What the destination had no way to state.
-fn unexpressed(unexpressed: &[Unexpressed]) -> Markup {
-    html! {
-        @if !unexpressed.is_empty() {
-            p { "what would not go:" }
-            ul.failed {
-                @for item in unexpressed { li { (item.exercise.name()) " — " (item.reason) } }
-            }
+            i.dot.done {} "In " (capitalised(in_place.destination.as_str()))
+            ", session " (in_place.ordinal)
         }
     }
 }
 
 /// The ride, where it is done, and where it went.
-fn cycling_session(prescribed: &CyclingPrescribed) -> Markup {
-    let ride = &prescribed.ride;
+fn cycling_session(derived: &CyclingDerived) -> Markup {
+    let ride = &derived.ride;
     html! {
         p { (heading(ride)) }
         (cycling_ride(ride))
-        @match &prescribed.delivery {
-            Ok(_) => p.status { i.dot.done {} "In " (destination(Discipline::Cycling)) },
-            Err(_) => (not_delivered(Discipline::Cycling)),
+        @if derived.in_place {
+            p.status { i.dot.done {} "In " (destination(Discipline::Cycling)) }
+        } @else {
+            (not_delivered(Discipline::Cycling))
         }
     }
 }

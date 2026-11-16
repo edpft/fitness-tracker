@@ -27,10 +27,11 @@ use application::{
     graph::{Derivation, Node, Reads},
     microcycle::{Session, Standing},
     next::{
-        Awaits, Canonicalising, CyclingPrescribed, CyclingSessions, Daily, Done, Expects, Found,
-        GymPrescribed, GymSessions, IfGoing, MesocycleCommitter, Next, NextError, NextPorts,
-        NoAccess, NotDue, Prescribed, Progress, Records, Refetch, Report, Scope, SkipRefused,
-        StandingReader, Step, StepFailure, Walks, WhatIsNext,
+        Awaits, Canonicalising, CyclingDerived, CyclingDeriving, CyclingPrescribed,
+        CyclingSessions, Daily, Done, Expects, Found, GymDerived, GymDeriving, GymPrescribed,
+        GymSessions, IfGoing, MesocycleCommitter, Next, NextError, NextPorts, NoAccess, NotDue,
+        Prescribed, Progress, Records, Refetch, Report, Scope, SkipRefused, StandingReader, Step,
+        StepFailure, Unheld, Walks, WhatIsNext,
     },
     reschedule::Reschedule,
 };
@@ -699,27 +700,53 @@ impl MesocycleCommitter for Committer {
 /// A gym with nothing planned at or after the slot.
 struct Unplanned;
 
-impl GymSessions for Unplanned {
-    async fn prescribed(
+impl GymDeriving for Unplanned {
+    async fn derived(
         &self,
         from: Date,
         _reschedule: &Reschedule,
+    ) -> Result<GymDerived, PrescriptionError> {
+        Ok(GymDerived::NothingPlanned { from, last: None })
+    }
+}
+
+impl GymSessions for Unplanned {
+    async fn prescribed(
+        &self,
+        derived: GymDerived,
+        _reschedule: &Reschedule,
     ) -> Result<GymPrescribed, PrescriptionError> {
-        Ok(GymPrescribed::NothingPlanned { from, last: None })
+        match derived {
+            GymDerived::NothingPlanned { from, last } => {
+                Ok(GymPrescribed::NothingPlanned { from, last })
+            }
+            GymDerived::Session { date, .. } => Err(PrescriptionError::NoPlan { date }),
+        }
     }
 }
 
 /// Cycling with no day to ride on.
 struct Dayless;
 
-impl CyclingSessions for Dayless {
-    async fn prescribed(
+impl CyclingDeriving for Dayless {
+    async fn derived(
         &self,
         from: Date,
         _reschedule: &Reschedule,
         _diary: &Diary,
-    ) -> Result<CyclingPrescribed, RidingError> {
+    ) -> Result<CyclingDerived, RidingError> {
         Err(RidingError::NoDay { from })
+    }
+}
+
+impl CyclingSessions for Dayless {
+    async fn prescribed(&self, derived: CyclingDerived) -> CyclingPrescribed {
+        CyclingPrescribed {
+            ride: derived.ride,
+            delivery: Err(application::next::Undelivered::NoAccess(NoAccess {
+                detail: "no peloton credential".to_owned(),
+            })),
+        }
     }
 }
 
@@ -785,6 +812,7 @@ type Ports<H = Unreachable> = NextPorts<
     Dayless,
     Lock,
     Fetches,
+    Unheld,
 >;
 
 /// The parts other runs of `next` hold, each let go once waited on.
@@ -900,6 +928,7 @@ fn over<H>(
         committing: committer,
         gym: Unplanned,
         cycling: Dayless,
+        upcoming: Unheld,
         lock: Lock::default(),
         fetches: Fetches::default(),
         zone: OperatorZone::try_from("Europe/London")?,

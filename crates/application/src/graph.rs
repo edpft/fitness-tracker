@@ -86,10 +86,15 @@ pub enum Analysis {
     Sleep,
     /// Pulse wave velocity, one series per algorithm.
     PulseWaveVelocity,
+    /// Where the plan stands now: the macrocycle's week and its curves, and
+    /// the microcycle's sessions.
+    Standing,
+    /// What is next, and the session derived for it, issued or not.
+    Prescription,
 }
 
 impl Analysis {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 21] = [
         Self::BodyWeight,
         Self::Composition,
         Self::Plans,
@@ -109,6 +114,8 @@ impl Analysis {
         Self::RestingHeartRate,
         Self::Sleep,
         Self::PulseWaveVelocity,
+        Self::Standing,
+        Self::Prescription,
     ];
 
     /// Its name, as telemetry records it.
@@ -133,6 +140,8 @@ impl Analysis {
             Self::RestingHeartRate => "resting heart rate",
             Self::Sleep => "sleep",
             Self::PulseWaveVelocity => "pulse wave velocity",
+            Self::Standing => "standing",
+            Self::Prescription => "prescription",
         }
     }
 }

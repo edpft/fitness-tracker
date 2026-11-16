@@ -23,11 +23,11 @@ use domain::{
     planner::{Relative, SessionRole},
     prescription::{
         Anchor, AnchorProvenance, Attempts, BlockPeriodisation, BlockWeek, ByIntensity,
-        DerivedFrom, GatingTopSet, GymMesocycle, Ladder, Linear, LoadSteps, Opening, Position,
-        PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset, PrescribedWorkout,
-        PrescriptionState, Progress, Progression, Sbs, SbsChart, SbsDay, SbsSession, Scales,
-        Section, SlotId, Superset, SupersetMember, Target, Test, WarmupStep, WeekKind, WeekPlan,
-        Workout, WorkoutShape, anchor,
+        DeliveryReference, DerivedFrom, GatingTopSet, GymMesocycle, Ladder, Linear, LoadSteps,
+        Opening, Position, PrescribedExercise, PrescribedItem, PrescribedSet, PrescribedSuperset,
+        PrescribedWorkout, PrescriptionState, Progress, Progression, Sbs, SbsChart, SbsDay,
+        SbsSession, Scales, Section, SlotId, Superset, SupersetMember, Target, Test, WarmupStep,
+        WeekKind, WeekPlan, Workout, WorkoutShape, anchor,
         linear::SlotContent,
         progress_after, rep_max, rested,
         sbs::chart::{
@@ -44,8 +44,8 @@ use crate::{
     ports::{
         Authored, ExerciseHistory, GenerationParameterStore, Issuance, LadderStanding,
         LastPerformance, MesocycleInForce, MesocycleStore, PlanAuthor, PlanStore, PlannedWith,
-        PrescribedWorkoutStore, Prescription, PrescriptionLifecycle, ProgressionStore,
-        UnderivableReason, UnderivableSlot, WorkoutPrescriber, WorkoutStore,
+        PrescribedWorkoutId, PrescribedWorkoutStore, Prescription, PrescriptionLifecycle,
+        ProgressionStore, UnderivableReason, UnderivableSlot, WorkoutPrescriber, WorkoutStore,
     },
 };
 
@@ -208,7 +208,8 @@ impl<H, P, G, S, L> Prescribing<H, P, G, S, L> {
 /// repetition-maximum day the record holds. A prescription that printed the
 /// anchor and programmed from this left the operator reading 92.5kg over a
 /// session of 82.5kg top sets and asking where the number came from.
-struct Derivation {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Derivation {
     workout: PrescribedWorkout,
     underivable: Vec<UnderivableSlot>,
     /// `None` for every template whose loads are shares of a number that does
@@ -288,12 +289,91 @@ where
     }
 
     async fn prescribe(&self, date: Date) -> Result<Prescription, PrescriptionError> {
+        let proposal = self.propose(date).await?;
+        self.issue(proposal).await
+    }
+}
+
+/// The session a date is prescribed, as the store now says, before anything
+/// is written (#830).
+///
+/// **What a page shows of the next session**, so opening one never issues
+/// it: only a run issues what this holds, through [`Prescribing::issue`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Proposal {
+    /// A performed session stands, and is not derived at all.
+    Performed {
+        id: PrescribedWorkoutId,
+        workout: PrescribedWorkout,
+        reference: DeliveryReference,
+    },
+    /// Derived, beside what is in force for the date and what has become of
+    /// it.
+    Derived {
+        in_force: Option<(PrescribedWorkoutId, PrescribedWorkout, PrescriptionState)>,
+        derived: Box<Derivation>,
+    },
+}
+
+impl Proposal {
+    /// The session: the one that stands, or the one derived.
+    #[must_use]
+    pub fn workout(&self) -> &PrescribedWorkout {
+        match self {
+            Self::Performed { workout, .. } => workout,
+            Self::Derived { derived, .. } => &derived.workout,
+        }
+    }
+
+    /// The slots that could not be derived.
+    #[must_use]
+    pub fn underivable(&self) -> &[UnderivableSlot] {
+        match self {
+            Self::Performed { .. } => &[],
+            Self::Derived { derived, .. } => &derived.underivable,
+        }
+    }
+
+    /// The issued prescription this already is, where issuing it would write
+    /// nothing: a performed session standing, or one derived to the shape of
+    /// what is in force.
+    #[must_use]
+    pub fn issued(&self) -> Option<PrescribedWorkoutId> {
+        match self {
+            Self::Performed { id, .. } => Some(*id),
+            Self::Derived {
+                in_force: Some((id, workout, _)),
+                derived,
+            } => (derived.workout.shape() == workout.shape()).then_some(*id),
+            Self::Derived { in_force: None, .. } => None,
+        }
+    }
+}
+
+impl<H, P, G, S, L> Prescribing<H, P, G, S, L>
+where
+    H: ExerciseHistory + Sync,
+    P: MesocycleStore + Sync,
+    G: GenerationParameterStore + WorkoutStore + ProgressionStore + Sync,
+    S: PrescribedWorkoutStore + Sync,
+    L: PrescriptionLifecycle + Sync,
+{
+    /// The session `date` is prescribed, derived from the store and written
+    /// nowhere (#830).
+    ///
+    /// # Errors
+    ///
+    /// [`PrescriptionError`] if no mesocycle is in force, the date is not one
+    /// the block runs, or the store cannot be read.
+    pub async fn propose(&self, date: Date) -> Result<Proposal, PrescriptionError> {
         // What is in force, and what has become of it. Read before any work,
         // because both answers decide what the derivation below is allowed to
         // do with its result.
-        let in_force = self.ports.prescriptions.issued_for(date).await?;
-        let state = match &in_force {
-            Some((id, _)) => Some(self.ports.lifecycle.state_of(*id).await?),
+        let in_force = match self.ports.prescriptions.issued_for(date).await? {
+            Some((id, workout)) => {
+                let state = self.ports.lifecycle.state_of(id).await?;
+                Some((id, workout, state))
+            }
             None => None,
         };
 
@@ -307,30 +387,56 @@ where
         // Returning *before* the derivation rather than discarding one after it
         // is the point: a session that cannot be replaced is not a candidate
         // for replacement, and deriving one to throw away would imply it was.
-        if let (Some((id, workout)), Some(PrescriptionState::Performed { reference })) =
-            (&in_force, &state)
-        {
-            return Ok(Prescription {
-                id: *id,
-                workout: workout.clone(),
-                issuance: Issuance::Performed {
-                    reference: reference.clone(),
-                },
-                history_through: self.ports.history.newest_performance().await?,
-                // **Nothing was derived**, so there is no maximum this call
-                // worked from. Reporting the one a fresh derivation would reach
-                // would be reporting a number the standing session was not a
-                // share of.
-                training_maximum: None,
-                underivable: Vec::new(),
+        if let Some((id, workout, PrescriptionState::Performed { reference })) = in_force {
+            return Ok(Proposal::Performed {
+                id,
+                workout,
+                reference,
             });
         }
+        Ok(Proposal::Derived {
+            derived: Box::new(self.derive(date).await?),
+            in_force,
+        })
+    }
 
+    /// Issue what `proposal` holds: nothing where it is what is in force
+    /// already, and a new prescription where it is not.
+    ///
+    /// # Errors
+    ///
+    /// [`PrescriptionError`] if the store cannot be read or written.
+    pub async fn issue(&self, proposal: Proposal) -> Result<Prescription, PrescriptionError> {
+        let (in_force, derived) = match proposal {
+            Proposal::Derived { in_force, derived } => (in_force, derived),
+            Proposal::Performed {
+                id,
+                workout,
+                reference,
+            } => {
+                return Ok(Prescription {
+                    id,
+                    workout,
+                    issuance: Issuance::Performed { reference },
+                    history_through: self.ports.history.newest_performance().await?,
+                    // **Nothing was derived**, so there is no maximum this call
+                    // worked from. Reporting the one a fresh derivation would reach
+                    // would be reporting a number the standing session was not a
+                    // share of.
+                    training_maximum: None,
+                    underivable: Vec::new(),
+                });
+            }
+        };
         let Derivation {
             workout,
             underivable,
             maximum,
-        } = self.derive(date).await?;
+        } = *derived;
+        let (in_force, state) = match in_force {
+            Some((id, workout, state)) => (Some((id, workout)), Some(state)),
+            None => (None, None),
+        };
 
         // **The shape decides whether this is the same workout.** Not the whole
         // of `PrescribedWorkout`, which also carries when it was issued, which
