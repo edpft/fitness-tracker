@@ -8,7 +8,7 @@
 //! depends on the other.
 
 pub mod access;
-pub mod body;
+pub mod analyses;
 pub mod body_weight;
 pub mod catalogue;
 pub mod clock;
@@ -22,27 +22,22 @@ pub mod equipment;
 pub mod fills;
 pub mod ftp_tests;
 pub mod graph;
-pub mod heart_rate;
+pub mod held;
 pub mod history;
 pub mod holidays;
 pub mod macrocycle;
 pub mod next;
 pub mod one_rep_max;
 pub mod paths;
-pub mod per_device;
 pub mod prescribing;
-pub mod pulse_wave_velocity;
-pub mod ranges;
 pub mod rescheduling;
 pub mod rides;
 pub mod scheduling;
 pub mod setup;
-pub mod sleep;
 pub mod store;
 pub mod telemetry;
 pub mod templates;
 pub mod wiring;
-pub mod working;
 
 /// What the operator stored, as a frontend passes it to a run.
 pub use infrastructure::Credentials;

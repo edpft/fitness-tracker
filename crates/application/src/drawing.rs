@@ -6,7 +6,11 @@
 //! derives as it was at its revision, so a drawing whose entries all read the
 //! same is the drawing the page would make again.
 
-use std::fmt::Write as _;
+use std::{
+    collections::BTreeMap,
+    fmt::Write as _,
+    sync::{Mutex, PoisonError},
+};
 
 use domain::schedule::DayPart;
 use sha2::{Digest as _, Sha256};
@@ -53,9 +57,14 @@ impl AsRef<[u8]> for DrawnFrom {
 }
 
 /// Where what a page reads stands, over the ledger and the revisions.
+///
+/// **Each node is asked once for as long as this lives** (#830): one is made
+/// for a page load, and the cards on it and the analyses they read share what
+/// it was told.
 pub struct Drawing<L, R> {
     ledger: L,
     revisions: R,
+    asked: Mutex<BTreeMap<Node, Option<String>>>,
 }
 
 impl<L, R> Drawing<L, R>
@@ -64,7 +73,11 @@ where
     R: Revisions + Sync,
 {
     pub const fn new(ledger: L, revisions: R) -> Self {
-        Self { ledger, revisions }
+        Self {
+            ledger,
+            revisions,
+            asked: Mutex::new(BTreeMap::new()),
+        }
     }
 
     /// What a page reading `reads`, drawn by `build` at `now`, is drawn from:
@@ -96,8 +109,34 @@ where
     }
 
     /// Where `node` stands, as text compared and nothing else, or `None` where
-    /// it has no version.
+    /// it has no version: asked once, and remembered after.
     async fn stands(
+        &self,
+        graph: &Graph,
+        node: &Node,
+        now: DayPart,
+    ) -> Result<Option<String>, StoreError> {
+        if let Some(stands) = self
+            .asked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(node)
+        {
+            return Ok(stands.clone());
+        }
+        let stands = Box::pin(self.asked_now(graph, node, now)).await?;
+        self.asked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(node.clone(), stands.clone());
+        Ok(stands)
+    }
+
+    /// Where `node` stands, asked of the store.
+    ///
+    /// **An analysis stands where everything it reads does**, as the graph
+    /// says what that is (#830).
+    async fn asked_now(
         &self,
         graph: &Graph,
         node: &Node,
@@ -107,6 +146,16 @@ where
             return Ok(None);
         }
         Ok(match node {
+            Node::Analysis(_) => {
+                let mut stated = String::new();
+                for read in graph.reads(node).into_iter().flat_map(Reads::nodes) {
+                    let Some(stands) = self.stands(graph, read, now).await? else {
+                        return Ok(None);
+                    };
+                    let _infallible = write!(stated, "{read:?}: {stands}; ");
+                }
+                Some(stated)
+            }
             Node::Normalised(stream) => self
                 .ledger
                 .normalised(stream)
@@ -148,6 +197,11 @@ where
 #[must_use]
 pub fn unversioned(graph: &Graph, node: &Node) -> bool {
     match node {
+        // **An analysis nothing declares has no version**, and one reading
+        // anything unversioned has none either.
+        Node::Analysis(_) => graph
+            .reads(node)
+            .is_none_or(|reads| reads.nodes().any(|read| unversioned(graph, read))),
         Node::Landing(_) | Node::Edits(_) | Node::Interpretive(_) => true,
         Node::Table(_) => graph.reads(node).is_none_or(|writers| {
             writers
@@ -165,7 +219,10 @@ pub fn unversioned(graph: &Graph, node: &Node) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, sync::Mutex};
+    use std::{
+        collections::BTreeMap,
+        sync::{Arc, Mutex},
+    };
 
     use domain::{
         landing::LandingStream,
@@ -180,10 +237,10 @@ mod tests {
         ports::{CanonicalLayer, DerivationLedger, DerivedFrom, Revision, Revisions},
     };
 
-    #[derive(Default)]
+    #[derive(Default, Clone)]
     struct Ledger {
-        normalised: Mutex<BTreeMap<LandingStream, String>>,
-        canonical: Mutex<BTreeMap<CanonicalLayer, String>>,
+        normalised: Arc<Mutex<BTreeMap<LandingStream, String>>>,
+        canonical: Arc<Mutex<BTreeMap<CanonicalLayer, String>>>,
     }
 
     impl DerivationLedger for Ledger {
@@ -234,8 +291,22 @@ mod tests {
         }
     }
 
+    #[derive(Default, Clone)]
+    struct Written(Arc<Mutex<BTreeMap<Node, u64>>>);
+
+    /// The ledger and the revisions, and a drawing over them for each load,
+    /// as a page load makes one.
     #[derive(Default)]
-    struct Written(Mutex<BTreeMap<Node, u64>>);
+    struct Stored {
+        ledger: Ledger,
+        revisions: Written,
+    }
+
+    impl Stored {
+        fn drawing(&self) -> Drawing<Ledger, Written> {
+            Drawing::new(self.ledger.clone(), self.revisions.clone())
+        }
+    }
 
     impl Written {
         fn write(&self, node: &Node) {
@@ -281,19 +352,19 @@ mod tests {
     /// **A drawing moves with what its page reads, and with nothing else.**
     #[test]
     fn a_drawing_moves_only_with_what_its_page_reads() {
-        let drawing = Drawing::new(Ledger::default(), Written::default());
+        let stored = Stored::default();
         let graph = Graph::default();
         let reads = Reads::of([Node::Canonical(CanonicalLayer::Gym), Node::PLAN, Node::Date]);
         let now = on("2026-11-14", MORNING);
-        let from = || run(drawing.drawn_from(&graph, &reads, "build", now));
-        run(drawing
+        let from = || run(stored.drawing().drawn_from(&graph, &reads, "build", now));
+        run(stored
             .ledger
             .record_canonical(CanonicalLayer::Gym, &DerivedFrom::from("1".to_owned())))
         .expect("recorded");
         let before = from().expect("read").expect("versioned");
 
-        drawing.revisions.write(&Node::DIARY);
-        run(drawing
+        stored.revisions.write(&Node::DIARY);
+        run(stored
             .ledger
             .record_canonical(CanonicalLayer::Cycling, &DerivedFrom::from("1".to_owned())))
         .expect("recorded");
@@ -303,22 +374,28 @@ mod tests {
             "nothing it reads moved"
         );
 
-        drawing.revisions.write(&Node::PLAN);
+        stored.revisions.write(&Node::PLAN);
         let planned = from().expect("read").expect("versioned");
         assert_ne!(planned, before, "the plan was written");
 
-        run(drawing
+        run(stored
             .ledger
             .record_canonical(CanonicalLayer::Gym, &DerivedFrom::from("2".to_owned())))
         .expect("recorded");
         let derived = from().expect("read").expect("versioned");
         assert_ne!(derived, planned, "the gym layer was derived again");
 
-        let tomorrow = run(drawing.drawn_from(&graph, &reads, "build", on("2026-11-15", MORNING)))
+        let tomorrow =
+            run(stored
+                .drawing()
+                .drawn_from(&graph, &reads, "build", on("2026-11-15", MORNING)))
             .expect("read");
         assert_ne!(tomorrow, Some(derived), "a day passed");
 
-        let rebuilt = run(drawing.drawn_from(&graph, &reads, "another build", now)).expect("read");
+        let rebuilt = run(stored
+            .drawing()
+            .drawn_from(&graph, &reads, "another build", now))
+        .expect("read");
         assert_ne!(rebuilt, Some(derived), "another build draws it differently");
     }
 
@@ -326,10 +403,13 @@ mod tests {
     /// and one reading the part of the day is.
     #[test]
     fn the_part_of_the_day_moves_only_a_page_reading_it() {
-        let drawing = Drawing::new(Ledger::default(), Written::default());
+        let stored = Stored::default();
         let graph = Graph::default();
         let at = |reads: &Reads, part| {
-            run(drawing.drawn_from(&graph, reads, "build", on("2026-11-14", part))).expect("read")
+            run(stored
+                .drawing()
+                .drawn_from(&graph, reads, "build", on("2026-11-14", part)))
+            .expect("read")
         };
         let dated = Reads::of([Node::Date]);
         assert_eq!(at(&dated, MORNING), at(&dated, PartOfDay::Evening));
@@ -353,7 +433,7 @@ mod tests {
     /// version while one of them has none.
     #[test]
     fn a_table_stands_where_its_writers_do() {
-        let drawing = Drawing::new(Ledger::default(), Written::default());
+        let stored = Stored::default();
         let graph = Graph::of(
             ["hevy.workouts", "btwb.exports"]
                 .into_iter()
@@ -361,9 +441,9 @@ mod tests {
         );
         let reads = Reads::of([Node::Table(Table::named("gym_session"))]);
         let now = on("2026-11-14", MORNING);
-        let from = || run(drawing.drawn_from(&graph, &reads, "build", now)).expect("read");
+        let from = || run(stored.drawing().drawn_from(&graph, &reads, "build", now)).expect("read");
         let ledger = |name: &str, from: &str| {
-            drawing
+            stored
                 .ledger
                 .normalised
                 .lock()
@@ -372,7 +452,10 @@ mod tests {
         };
 
         assert_eq!(
-            run(drawing.drawn_from(&Graph::default(), &reads, "build", now)).expect("read"),
+            run(stored
+                .drawing()
+                .drawn_from(&Graph::default(), &reads, "build", now))
+            .expect("read"),
             None,
             "a table nothing writes has no version"
         );
@@ -388,10 +471,10 @@ mod tests {
     /// rather than served as it was.
     #[test]
     fn a_page_reading_an_unversioned_node_is_always_drawn() {
-        let drawing = Drawing::new(Ledger::default(), Written::default());
+        let stored = Stored::default();
         let reads = Reads::of([Node::Landing(stream("hevy.workouts"))]);
         assert_eq!(
-            run(drawing.drawn_from(
+            run(stored.drawing().drawn_from(
                 &Graph::default(),
                 &reads,
                 "build",
@@ -399,6 +482,55 @@ mod tests {
             ))
             .expect("read"),
             None
+        );
+    }
+
+    struct Weighed;
+    impl crate::graph::Input for Weighed {
+        fn reads() -> Reads {
+            Reads::of([Node::Canonical(CanonicalLayer::WeighIns), Node::Date])
+        }
+    }
+
+    /// **An analysis stands where everything it reads does** (#830): a card
+    /// reading it moves when a layer under it is derived again, and a node
+    /// asked once in a load is not asked again in it.
+    #[test]
+    fn an_analysis_stands_where_what_it_reads_does() {
+        use crate::graph::Analysis;
+        let stored = Stored::default();
+        let graph = Graph::of([Derivation::of::<Weighed>(Node::Analysis(
+            Analysis::BodyWeight,
+        ))]);
+        let reads = Reads::of([Node::Analysis(Analysis::BodyWeight)]);
+        let now = on("2026-11-14", MORNING);
+        let record = |from: &str| {
+            run(stored.ledger.record_canonical(
+                CanonicalLayer::WeighIns,
+                &DerivedFrom::from(from.to_owned()),
+            ))
+            .expect("recorded");
+        };
+        assert_eq!(
+            run(stored.drawing().drawn_from(&graph, &reads, "build", now)).expect("read"),
+            None,
+            "the weigh-ins were never derived"
+        );
+        record("1");
+        let load = stored.drawing();
+        let before = run(load.drawn_from(&graph, &reads, "build", now))
+            .expect("read")
+            .expect("versioned");
+        record("2");
+        assert_eq!(
+            run(load.drawn_from(&graph, &reads, "build", now)).expect("read"),
+            Some(before),
+            "asked once in a load"
+        );
+        assert_ne!(
+            run(stored.drawing().drawn_from(&graph, &reads, "build", now)).expect("read"),
+            Some(before),
+            "the weigh-ins were derived again"
         );
     }
 }

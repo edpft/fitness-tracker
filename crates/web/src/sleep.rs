@@ -27,7 +27,7 @@ use domain::analytical::{
     sleep::{self, METHOD, Night, Trend, Trended, WINDRED},
 };
 use jiff::civil::{Date, DateTime};
-use maud::{DOCTYPE, Markup, html};
+use maud::{Markup, html};
 
 use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Segment, Traced, name};
 
@@ -37,52 +37,130 @@ pub const TITLE: &str = "Sleep";
 /// Seconds in an hour, for the axes.
 const HOUR: f64 = 3600.0;
 
-/// The page: the summary, then each chart over the range chosen.
-pub fn page(nights: &[Trended], ranges: &Ranges, over: Over) -> Markup {
-    detail::page(PATH, TITLE, Some(over), &body(nights, ranges, over))
-}
-
-/// The page when the store could not be read.
-pub fn unreadable(error: &str) -> Markup {
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head { (crate::page::head(TITLE, &[])) }
-            body {
-                main {
-                    (crate::page::bar(PATH))
-                    p.failed { "the store could not be read: " (error) }
-                }
-            }
-        }
-    }
-}
-
-/// The summary, the three charts over the range chosen and the latest
-/// nights, or why there is no range.
-fn body(nights: &[Trended], ranges: &Ranges, over: Over) -> Markup {
+/// The days the cards are drawn over, or what to say instead.
+fn range(nights: &[Trended], ranges: &Ranges, over: Over) -> Result<Range, Markup> {
     let recorded = Range::spanning(
         nights
             .iter()
             .flat_map(|one| one.series.readings.iter().map(|reading| reading.on)),
     );
-    let range = match crate::range::chosen(ranges, over, recorded, "Nothing has been recorded.") {
-        Ok(range) => range,
-        Err(said) => return said,
+    crate::range::chosen(ranges, over, recorded, "Nothing has been recorded.")
+}
+
+/// The summary, which is the latest whatever the range; or why there is no
+/// range, which leaves every other card empty.
+fn summary_card(nights: &[Trended], ranges: &Ranges, over: Over) -> Markup {
+    match range(nights, ranges, over) {
+        Ok(range) => summary(nights, range.to),
+        Err(said) => said,
+    }
+}
+
+/// Asleep, over the range chosen.
+fn asleep_card(nights: &[Trended], ranges: &Ranges, over: Over) -> Markup {
+    let Ok(range) = range(nights, ranges, over) else {
+        return html! {};
     };
     let today = range.to;
     let within: Vec<Trended> = nights.iter().map(|one| one.within(range)).collect();
+    detail::chart(&asleep(&within, range, today))
+}
+
+/// Window, over the range chosen.
+fn window_card(nights: &[Trended], ranges: &Ranges, over: Over) -> Markup {
+    let Ok(range) = range(nights, ranges, over) else {
+        return html! {};
+    };
+    let today = range.to;
+    let within: Vec<Trended> = nights.iter().map(|one| one.within(range)).collect();
+    detail::chart(&window(&within, range, today))
+}
+
+/// Regularity, over the range chosen.
+fn regularity_card(nights: &[Trended], ranges: &Ranges, over: Over) -> Markup {
+    let Ok(range) = range(nights, ranges, over) else {
+        return html! {};
+    };
+    let today = range.to;
+    let within: Vec<Trended> = nights.iter().map(|one| one.within(range)).collect();
+    detail::chart(&regularity(&within, range, today))
+}
+
+/// The latest nights, and what the dots, lines and bands are.
+fn latest_card(nights: &[Trended], ranges: &Ranges, over: Over) -> Markup {
+    let Ok(range) = range(nights, ranges, over) else {
+        return html! {};
+    };
+    let today = range.to;
     html! {
-        (summary(nights, today))
-        (detail::chart(&asleep(&within, range, today)))
-        (detail::chart(&window(&within, range, today)))
-        (detail::chart(&regularity(&within, range, today)))
         (latest(nights, today))
         (detail::foot(&format!(
             "Dots: each night. Bars: fell asleep to woke. Line: each watch's trend, the {METHOD}. Grey: the NHS's 7 to 9 hours for adults, against which a wrist watch probably reads tens of minutes high, since it takes lying still for sleep; the fifths of Windred et al. (Sleep, 2024), 7 days of wrist actigraphy in 61,000 UK adults, among whom the risk of dying fell from the lowest fifth to the highest, most of it between the lowest and the rest, darker higher."
         )))
     }
 }
+
+/// The page: its cards, under the range chosen.
+fn laid_out(over: Over, cards: &[Markup]) -> Markup {
+    detail::page(
+        PATH,
+        TITLE,
+        Some(over),
+        &html! { @for card in cards { (card) } },
+    )
+}
+
+/// The whole page over `over`, each card drawn from the same reads, as a
+/// load draws it.
+#[cfg(test)]
+pub fn page(nights: &[Trended], ranges: &Ranges, over: Over) -> Markup {
+    laid_out(
+        over,
+        &[
+            summary_card(nights, ranges, over),
+            asleep_card(nights, ranges, over),
+            window_card(nights, ranges, over),
+            regularity_card(nights, ranges, over),
+            latest_card(nights, ranges, over),
+        ],
+    )
+}
+
+crate::card::ranged_card!(
+    /// The summary.
+    Summary,
+    "sleep-summary",
+    configurator::analyses::Sleep,
+    summary_card
+);
+crate::card::ranged_card!(
+    /// Time asleep.
+    AsleepChart,
+    "sleep-asleep",
+    configurator::analyses::Sleep,
+    asleep_card
+);
+crate::card::ranged_card!(
+    /// Fell asleep to woke.
+    WindowChart,
+    "sleep-window",
+    configurator::analyses::Sleep,
+    window_card
+);
+crate::card::ranged_card!(
+    /// The Sleep Regularity Index.
+    RegularityChart,
+    "sleep-regularity",
+    configurator::analyses::Sleep,
+    regularity_card
+);
+crate::card::ranged_card!(
+    /// The latest nights.
+    Latest,
+    "sleep-latest",
+    configurator::analyses::Sleep,
+    latest_card
+);
 
 /// The watch whose trend is the latest, and that trend.
 fn latest_trend(
@@ -421,13 +499,9 @@ pub struct Page {
     over: Over,
 }
 
-impl crate::drawn::Drawn for Page {
+impl crate::card::Page for Page {
     const ROUTE: &'static str = PATH;
-    type Read = (Vec<Trended>, Ranges);
-
-    fn reads() -> application::graph::Reads {
-        configurator::sleep::reads()
-    }
+    type Cards = (Summary, AsleepChart, WindowChart, RegularityChart, Latest);
 
     fn asked(
         _path: &axum::extract::RawPathParams,
@@ -438,28 +512,12 @@ impl crate::drawn::Drawn for Page {
         })
     }
 
-    fn here(&self) -> String {
-        PATH.to_owned()
-    }
-
     fn over(&self) -> Option<Over> {
         Some(self.over)
     }
 
-    async fn read(
-        &self,
-        store: &configurator::store::Store,
-        zone: &domain::normalised::OperatorZone,
-    ) -> Result<Self::Read, crate::drawn::Unreadable> {
-        let page = configurator::sleep::Page::open(store, zone).await?;
-        Ok((page.nights().await?, page.ranges().await?))
-    }
-
-    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
-        match read {
-            Ok((nights, ranges)) => page(&nights, &ranges, self.over),
-            Err(error) => unreadable(error.as_str()),
-        }
+    fn layout(&self, cards: [Markup; 5]) -> Markup {
+        laid_out(self.over, &cards)
     }
 }
 

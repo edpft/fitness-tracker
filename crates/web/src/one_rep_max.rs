@@ -26,7 +26,7 @@ use domain::analytical::{
     range::Range,
 };
 use jiff::civil::Date;
-use maud::{DOCTYPE, Markup, html};
+use maud::{Markup, html};
 
 use crate::detail::{self, Cell, Metric};
 
@@ -44,23 +44,31 @@ const BOTTOM: f64 = 26.0;
 const RADIUS: f64 = 4.0;
 
 /// The whole page.
-pub fn page(view: &View) -> Markup {
-    detail::page(PATH, TITLE, None, &body(view, view.today))
+fn page(lifts: &Markup) -> Markup {
+    detail::page(PATH, TITLE, None, lifts)
 }
 
-/// The page when the store could not be read.
-pub fn unreadable(error: &str) -> Markup {
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head { (crate::page::head(TITLE, &[])) }
-            body {
-                main {
-                    (crate::page::bar(PATH))
-                    p.failed { "the store could not be read: " (error) }
-                }
-            }
-        }
+/// Every lift, each its summary, its chart and its latest sessions, and what
+/// the dots and lines are.
+///
+/// **One card, not one for each lift**: each lift is read from the same
+/// node, so none is ever drawn again without the others.
+pub struct Lifts;
+
+impl crate::card::Card for Lifts {
+    const NAME: &'static str = "one-rep-max-lifts";
+    type Reads = configurator::held::Of<configurator::analyses::Strength>;
+
+    fn asked(_: &std::collections::HashMap<String, String>) -> Self {
+        Self
+    }
+
+    fn render(
+        &self,
+        strength: std::sync::Arc<(Vec<application::one_rep_max::Tests>, View)>,
+    ) -> Markup {
+        let view = &strength.1;
+        body(view, view.today)
     }
 }
 
@@ -473,13 +481,9 @@ fn latest(trend: &Trend<Point>, today: Date) -> Markup {
 #[derive(Debug)]
 pub struct Page;
 
-impl crate::drawn::Drawn for Page {
+impl crate::card::Page for Page {
     const ROUTE: &'static str = PATH;
-    type Read = View;
-
-    fn reads() -> application::graph::Reads {
-        configurator::one_rep_max::reads()
-    }
+    type Cards = (Lifts,);
 
     fn asked(
         _path: &axum::extract::RawPathParams,
@@ -488,29 +492,18 @@ impl crate::drawn::Drawn for Page {
         Ok(Self)
     }
 
-    fn here(&self) -> String {
-        PATH.to_owned()
-    }
-
-    async fn read(
-        &self,
-        store: &configurator::store::Store,
-        zone: &domain::normalised::OperatorZone,
-    ) -> Result<Self::Read, crate::drawn::Unreadable> {
-        let page = configurator::one_rep_max::Page::open(store, zone).await?;
-        Ok(page.view().await?)
-    }
-
-    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
-        match read {
-            Ok(view) => page(&view),
-            Err(error) => unreadable(error.as_str()),
-        }
+    fn layout(&self, [lifts]: [Markup; 1]) -> Markup {
+        page(&lifts)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    /// The page, its one card drawn from `view`.
+    fn drawn_page(view: &View) -> maud::Markup {
+        super::page(&super::body(view, view.today))
+    }
+
     use application::one_rep_max::{Lift, View};
     use domain::{
         analytical::{
@@ -521,8 +514,6 @@ mod tests {
         measure::{Kg, RepCount},
     };
     use jiff::civil::{Date, date};
-
-    use super::page;
 
     const TODAY: Date = date(2026, 11, 4);
     const MACROCYCLE: Date = date(2026, 9, 14);
@@ -602,7 +593,7 @@ mod tests {
     }
 
     fn drawn(points: &[Point]) -> String {
-        page(&view(points)).into_string()
+        drawn_page(&view(points)).into_string()
     }
 
     #[test]
@@ -658,7 +649,7 @@ mod tests {
         let mut view = view(&autumn().expect("points"));
         view.macrocycle = None;
         view.lifts.clear();
-        let page = page(&view).into_string();
+        let page = drawn_page(&view).into_string();
         assert!(
             page.contains("No macrocycle is planned for today."),
             "{page}"

@@ -24,48 +24,124 @@
 //! **Has this macrocycle improved on the last?** With one macrocycle on
 //! record it says this is the first.
 
-use application::working::{Answering, Macrocycle, Performance, Responding, Tested, View};
-use domain::analytical::{range::Range, response::Week};
+use std::{collections::HashMap, sync::Arc};
+
+use application::working::{self, Answering, Frame, Performance, Responding, Tested};
+use configurator::{
+    analyses::{FtpTests, HeartRateAtPower, Plans, Responses, Strength},
+    clock::Today,
+    held::Of,
+    rescheduling,
+};
+use domain::analytical::{ftp_test, heart_rate_at_power, range::Range, response::Week};
 use jiff::civil::Date;
-use maud::{DOCTYPE, Markup, html};
+use maud::{Markup, html};
 
 use crate::{
+    card::Card,
     detail::{self, Axis, Chart, Layer, Traced, name},
-    progress::{Written, answering, change, row, tested},
+    progress::{NoMacrocycle, Written, answering, change, row, tested},
 };
 
 pub const PATH: &str = "/working";
 pub const TITLE: &str = "Is what I'm doing working?";
 
 /// The page: the three cards, or why there is nothing to read.
-pub fn page(view: &View) -> Markup {
-    detail::page(PATH, TITLE, None, &body(view))
+fn laid_out(cards: [Markup; 4]) -> Markup {
+    let [none, so_far, each_week, on_the_last] = cards;
+    detail::page(
+        PATH,
+        TITLE,
+        None,
+        &html! { (none) (so_far) (each_week) (on_the_last) },
+    )
 }
 
-/// The page when the store could not be read.
-pub fn unreadable(error: &str) -> Markup {
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head { (crate::page::head(TITLE, &[])) }
-            body {
-                main {
-                    (crate::page::bar(PATH))
-                    p.failed { "the store could not be read: " (error) }
-                }
-            }
-        }
+/// Has this macrocycle improved my fitness so far?
+pub struct SoFar;
+
+impl Card for SoFar {
+    const NAME: &'static str = "working-so-far";
+    type Reads = (
+        Of<Plans>,
+        Of<FtpTests>,
+        Of<HeartRateAtPower>,
+        Of<Strength>,
+        Of<Responses>,
+        Today,
+    );
+
+    fn asked(_: &HashMap<String, String>) -> Self {
+        Self
+    }
+
+    fn render(
+        &self,
+        (plans, tests, rides, strength, responses, today): (
+            Arc<rescheduling::Plans>,
+            Arc<Vec<ftp_test::Test>>,
+            Arc<Vec<heart_rate_at_power::Trended>>,
+            Arc<(
+                Vec<application::one_rep_max::Tests>,
+                application::one_rep_max::View,
+            )>,
+            Arc<Option<Vec<Responding>>>,
+            Date,
+        ),
+    ) -> Markup {
+        let Some(frame) = Frame::on(today, plans.now()) else {
+            return html! {};
+        };
+        let performance: Vec<Performance> =
+            std::iter::once(crate::progress::cycling(&tests, &rides, &frame, today))
+                .chain(working::gym(
+                    &strength.0,
+                    &strength.1.lifts,
+                    frame.began,
+                    today,
+                ))
+                .collect();
+        let responses = responses.as_deref().unwrap_or_default();
+        so_far(&performance, responses, frame.began, today)
     }
 }
 
-fn body(view: &View) -> Markup {
-    let Some(macrocycle) = &view.macrocycle else {
-        return html! { p.sub { "No plan is in force today, so there is no macrocycle to read." } };
-    };
-    html! {
-        (so_far(macrocycle, view.today))
-        (each_week(macrocycle, view.today))
-        (on_the_last(macrocycle, view.today))
+/// Each response reading week by week against the expected result.
+pub struct EachWeek;
+
+impl Card for EachWeek {
+    const NAME: &'static str = "working-each-week";
+    type Reads = (Of<Plans>, Of<Responses>, Today);
+
+    fn asked(_: &HashMap<String, String>) -> Self {
+        Self
+    }
+
+    fn render(
+        &self,
+        (plans, responses, today): (Arc<rescheduling::Plans>, Arc<Option<Vec<Responding>>>, Date),
+    ) -> Markup {
+        let Some(frame) = Frame::on(today, plans.now()) else {
+            return html! {};
+        };
+        each_week(responses.as_deref().unwrap_or_default(), &frame, today)
+    }
+}
+
+/// Has this macrocycle improved on the last?
+pub struct OnTheLast;
+
+impl Card for OnTheLast {
+    const NAME: &'static str = "working-on-the-last";
+    type Reads = (Of<Plans>, Today);
+
+    fn asked(_: &HashMap<String, String>) -> Self {
+        Self
+    }
+
+    fn render(&self, (plans, today): (Arc<rescheduling::Plans>, Date)) -> Markup {
+        Frame::on(today, plans.now())
+            .map_or_else(|| html! {}, |frame| on_the_last(frame.last_began, today))
     }
 }
 
@@ -139,22 +215,31 @@ fn responding(one: &Responding) -> Markup {
 
 /// The first card: a bar per reading, and beneath them what each was read
 /// over.
-fn so_far(macrocycle: &Macrocycle, today: Date) -> Markup {
+fn so_far(
+    performance: &[Performance],
+    responses: &[Responding],
+    began: Date,
+    today: Date,
+) -> Markup {
     html! {
         section.card.working {
             h2 { "Has this macrocycle improved my fitness so far?" }
-            @for one in &macrocycle.performance { (performance(one)) }
-            @for one in &macrocycle.responses { (responding(one)) }
-            div.asof { (read_over(macrocycle, today)) }
+            @for one in performance { (self::performance(one)) }
+            @for one in responses { (responding(one)) }
+            div.asof { (read_over(performance, responses, began, today)) }
         }
     }
 }
 
 /// When each test was, the days the response readings are over, and the watch
 /// that recorded them.
-fn read_over(macrocycle: &Macrocycle, today: Date) -> String {
-    let mut said: Vec<String> = macrocycle
-        .performance
+fn read_over(
+    performance: &[Performance],
+    responses: &[Responding],
+    began: Date,
+    today: Date,
+) -> String {
+    let mut said: Vec<String> = performance
         .iter()
         .filter_map(|one| {
             let since = one.since?;
@@ -170,8 +255,7 @@ fn read_over(macrocycle: &Macrocycle, today: Date) -> String {
             ))
         })
         .collect();
-    let over = macrocycle
-        .responses
+    let over = responses
         .iter()
         .find_map(|one| one.response.as_ref()?.change.map(|change| change.over));
     if let Some(over) = over {
@@ -179,12 +263,11 @@ fn read_over(macrocycle: &Macrocycle, today: Date) -> String {
             "readings over {} to {}, against the two weeks before {}",
             detail::day(over.from, today),
             detail::day(over.to, today),
-            detail::day(macrocycle.began, today)
+            detail::day(began, today)
         ));
         said.push("expected from the training done".to_owned());
     }
-    let mut watches: Vec<String> = macrocycle
-        .responses
+    let mut watches: Vec<String> = responses
         .iter()
         .filter_map(|one| one.sent_by.as_ref().map(name))
         .collect();
@@ -195,16 +278,16 @@ fn read_over(macrocycle: &Macrocycle, today: Date) -> String {
 
 /// The second card: each response reading week by week against the expected
 /// result.
-fn each_week(macrocycle: &Macrocycle, today: Date) -> Markup {
+fn each_week(responses: &[Responding], frame: &Frame, today: Date) -> Markup {
     let range = Range {
-        from: macrocycle.began,
+        from: frame.began,
         to: today,
     };
-    let mesocycles = detail::mesocycles(&macrocycle.mesocycles, range);
+    let mesocycles = detail::mesocycles(&frame.mesocycles, range);
     html! {
         section.card.weeks {
             h2 { "Each week against the expected result" }
-            @for one in &macrocycle.responses {
+            @for one in responses {
                 @if let Some(response) = &one.response {
                     @let (label, written) = answering(one.reading);
                     div class=(written.metric.class()) {
@@ -294,11 +377,11 @@ fn weeks(
 }
 
 /// The third card: this macrocycle against the one before.
-fn on_the_last(macrocycle: &Macrocycle, today: Date) -> Markup {
+fn on_the_last(last_began: Option<Date>, today: Date) -> Markup {
     html! {
         section.card.working {
             h2 { "Has this macrocycle improved on the last?" }
-            @match macrocycle.last_began {
+            @match last_began {
                 None => p.sub { "This is the first macrocycle. The one after it is compared with it." },
                 Some(began) => p.sub {
                     "The macrocycle before this one began on " (detail::day(began, today))
@@ -313,47 +396,25 @@ fn on_the_last(macrocycle: &Macrocycle, today: Date) -> Markup {
 #[derive(Debug)]
 pub struct Page;
 
-impl crate::drawn::Drawn for Page {
+impl crate::card::Page for Page {
     const ROUTE: &'static str = PATH;
-    type Read = View;
-
-    fn reads() -> application::graph::Reads {
-        configurator::working::reads()
-    }
+    type Cards = (NoMacrocycle, SoFar, EachWeek, OnTheLast);
 
     fn asked(
         _path: &axum::extract::RawPathParams,
-        _query: &std::collections::HashMap<String, String>,
+        _query: &HashMap<String, String>,
     ) -> Result<Self, axum::response::Redirect> {
         Ok(Self)
     }
 
-    fn here(&self) -> String {
-        PATH.to_owned()
-    }
-
-    async fn read(
-        &self,
-        store: &configurator::store::Store,
-        zone: &domain::normalised::OperatorZone,
-    ) -> Result<Self::Read, crate::drawn::Unreadable> {
-        let page = configurator::working::Page::open(store, zone).await?;
-        Ok(page.view().await?)
-    }
-
-    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
-        match read {
-            Ok(view) => page(&view),
-            Err(error) => unreadable(error.as_str()),
-        }
+    fn layout(&self, cards: [Markup; 4]) -> Markup {
+        laid_out(cards)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use application::working::{
-        Answering, Body, Macrocycle, Performance, Responding, Tested, View,
-    };
+    use application::working::{Answering, Frame, Performance, Responding, Tested};
     use domain::{
         analytical::{
             range::Range,
@@ -365,7 +426,32 @@ mod tests {
     };
     use jiff::civil::{Date, date};
 
-    use super::body;
+    use super::{each_week, laid_out, on_the_last, so_far};
+    use crate::progress::no_macrocycle;
+
+    /// What the page's cards read, on a day.
+    struct Shown {
+        frame: Option<Frame>,
+        performance: Vec<Performance>,
+        responses: Vec<Responding>,
+    }
+
+    /// The page as its cards draw it from `shown`.
+    fn body(shown: &Shown) -> maud::Markup {
+        let frame = shown.frame.as_ref();
+        laid_out([
+            no_macrocycle(frame),
+            frame
+                .map(|frame| so_far(&shown.performance, &shown.responses, frame.began, TODAY))
+                .unwrap_or_default(),
+            frame
+                .map(|frame| each_week(&shown.responses, frame, TODAY))
+                .unwrap_or_default(),
+            frame
+                .map(|frame| on_the_last(frame.last_began, TODAY))
+                .unwrap_or_default(),
+        ])
+    }
 
     const BEGAN: Date = date(2026, 9, 14);
     const TODAY: Date = date(2026, 11, 11);
@@ -399,10 +485,9 @@ mod tests {
         }
     }
 
-    fn autumn() -> View {
-        View {
-            today: TODAY,
-            macrocycle: Some(Macrocycle {
+    fn autumn() -> Shown {
+        Shown {
+            frame: Some(Frame {
                 began: BEGAN,
                 mesocycles: vec![
                     Span::new(BEGAN, 2),
@@ -410,49 +495,44 @@ mod tests {
                     Span::new(date(2026, 10, 26), 4),
                 ],
                 last_began: None,
-                performance: vec![
-                    Performance {
-                        tested: Tested::Ftp,
-                        since: Some(SinceEntry {
-                            entry: (date(2026, 9, 23), 177),
-                            latest: Some((date(2026, 10, 25), 182)),
-                            noise: 14.2,
-                        }),
-                        estimated: None,
-                    },
-                    Performance {
-                        tested: Tested::OneRepMax(RepsExercise::FrontSquatBarbell),
-                        since: Some(SinceEntry {
-                            entry: (date(2026, 9, 25), 92_500),
-                            latest: Some((date(2026, 10, 23), 95_000)),
-                            noise: 8_974.0,
-                        }),
-                        estimated: None,
-                    },
-                ],
-                body: Body {
-                    weight: None,
-                    fat: None,
-                    fat_free: None,
-                },
-                responses: vec![
-                    Responding {
-                        reading: Answering::RestingHeartRate,
-                        sent_by: None,
-                        response: Some(response(51.0, 1.2, -1.5)),
-                    },
-                    Responding {
-                        reading: Answering::OvernightHrv,
-                        sent_by: None,
-                        response: Some(response(57.7, -3.8, 5.2)),
-                    },
-                    Responding {
-                        reading: Answering::Stress,
-                        sent_by: None,
-                        response: Some(response(33.4, 0.1, -2.6)),
-                    },
-                ],
             }),
+            performance: vec![
+                Performance {
+                    tested: Tested::Ftp,
+                    since: Some(SinceEntry {
+                        entry: (date(2026, 9, 23), 177),
+                        latest: Some((date(2026, 10, 25), 182)),
+                        noise: 14.2,
+                    }),
+                    estimated: None,
+                },
+                Performance {
+                    tested: Tested::OneRepMax(RepsExercise::FrontSquatBarbell),
+                    since: Some(SinceEntry {
+                        entry: (date(2026, 9, 25), 92_500),
+                        latest: Some((date(2026, 10, 23), 95_000)),
+                        noise: 8_974.0,
+                    }),
+                    estimated: None,
+                },
+            ],
+            responses: vec![
+                Responding {
+                    reading: Answering::RestingHeartRate,
+                    sent_by: None,
+                    response: Some(response(51.0, 1.2, -1.5)),
+                },
+                Responding {
+                    reading: Answering::OvernightHrv,
+                    sent_by: None,
+                    response: Some(response(57.7, -3.8, 5.2)),
+                },
+                Responding {
+                    reading: Answering::Stress,
+                    sent_by: None,
+                    response: Some(response(33.4, 0.1, -2.6)),
+                },
+            ],
         }
     }
 
@@ -514,8 +594,8 @@ mod tests {
         );
 
         let mut second = autumn();
-        if let Some(macrocycle) = &mut second.macrocycle {
-            macrocycle.last_began = Some(date(2026, 4, 13));
+        if let Some(frame) = &mut second.frame {
+            frame.last_began = Some(date(2026, 4, 13));
         }
         let page = body(&second).into_string();
         assert!(page.contains("began on 13 Apr"), "{page}");
@@ -524,9 +604,8 @@ mod tests {
 
     #[test]
     fn a_reading_with_nothing_to_read_says_why() {
-        let mut view = autumn();
-        if let Some(macrocycle) = &mut view.macrocycle {
-            macrocycle.performance = vec![
+        let view = Shown {
+            performance: vec![
                 Performance {
                     tested: Tested::Ftp,
                     since: None,
@@ -541,13 +620,14 @@ mod tests {
                     }),
                     estimated: None,
                 },
-            ];
-            macrocycle.responses = vec![Responding {
+            ],
+            responses: vec![Responding {
                 reading: Answering::Stress,
                 sent_by: None,
                 response: None,
-            }];
-        }
+            }],
+            ..autumn()
+        };
         let page = body(&view).into_string();
         for said in [
             "No test in this macrocycle yet.",
@@ -562,9 +642,9 @@ mod tests {
 
     #[test]
     fn no_plan_in_force_reads_nothing() {
-        let page = body(&View {
-            today: TODAY,
-            macrocycle: None,
+        let page = body(&Shown {
+            frame: None,
+            ..autumn()
         })
         .into_string();
         assert!(page.contains("No plan is in force today"), "{page}");

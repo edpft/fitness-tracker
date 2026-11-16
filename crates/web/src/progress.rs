@@ -22,36 +22,61 @@
 //!
 //! **A reading with nothing to show yet is left out**, not drawn empty.
 
-use application::working::{Answering, Body, Macrocycle, Performance, Responding, Tested, View};
+use std::{collections::HashMap, sync::Arc};
+
+use application::working::{self, Answering, Body, Frame, Performance, Responding, Tested};
+use configurator::{
+    analyses::{BodyWeight, Composition, FtpTests, HeartRateAtPower, Plans, Responses, Strength},
+    clock::Today,
+    held::Of,
+    rescheduling,
+};
 use domain::{
-    analytical::{range::Range, since_start::SinceStart},
+    analytical::{
+        body_weight, composition::ComponentSeries, ftp_test, heart_rate_at_power, range::Range,
+        since_start::SinceStart,
+    },
     planner::Discipline,
 };
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
 use crate::{
+    card::Card,
     detail::{self, Metric},
     page::{self, Group, PAGES, Place},
 };
 
 pub const PATH: &str = "/progress";
 
-/// The page: the tiles, or why there is nothing to read.
-pub fn page(view: &View) -> Markup {
-    shell(&body(view))
-}
-
-/// The page when the store could not be read.
-pub fn unreadable(error: &str) -> Markup {
+/// The page: its cards under their groups' headings, then Health.
+///
+/// **A heading over nothing is not shown**: a group none of whose cards drew
+/// anything is hidden by the stylesheet, as a reading with nothing to show is
+/// left out.
+fn laid_out(cards: [Markup; 5]) -> Markup {
+    let [none, cycling, gym, body, responses] = cards;
     html! {
         (DOCTYPE)
         html lang="en" {
             head { (page::head(Place::Progress.name(), &[])) }
             body {
-                main {
+                main.progress {
                     h1 { (Place::Progress.name()) }
-                    p.failed { "the store could not be read: " (error) }
+                    (none)
+                    div.cards {
+                        h2.group { (Group::Performance.heading()) }
+                        (cycling)
+                        (gym)
+                    }
+                    div.cards {
+                        h2.group { (Group::Body.heading()) }
+                        (body)
+                    }
+                    div.cards {
+                        h2.group { (Group::Response.heading()) }
+                        (responses)
+                    }
                     (health())
                     (page::bar(PATH))
                 }
@@ -60,53 +85,171 @@ pub fn unreadable(error: &str) -> Markup {
     }
 }
 
-fn shell(body: &Markup) -> Markup {
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head { (page::head(Place::Progress.name(), &[])) }
-            body {
-                main.progress {
-                    h1 { (Place::Progress.name()) }
-                    (body)
-                    (page::bar(PATH))
-                }
-            }
-        }
+/// That no plan is in force today, so there is no macrocycle to read; nothing
+/// on a day one is.
+pub struct NoMacrocycle;
+
+impl Card for NoMacrocycle {
+    const NAME: &'static str = "no-macrocycle";
+    type Reads = (Of<Plans>, Today);
+
+    fn asked(_: &HashMap<String, String>) -> Self {
+        Self
+    }
+
+    fn render(&self, (plans, today): (Arc<rescheduling::Plans>, Date)) -> Markup {
+        no_macrocycle(Frame::on(today, plans.now()).as_ref())
     }
 }
 
-fn body(view: &View) -> Markup {
-    let Some(macrocycle) = &view.macrocycle else {
-        return html! {
-            p.sub { "No plan is in force today, so there is no macrocycle to read." }
-            (health())
+pub fn no_macrocycle(frame: Option<&Frame>) -> Markup {
+    if frame.is_some() {
+        return html! {};
+    }
+    html! { p.sub { "No plan is in force today, so there is no macrocycle to read." } }
+}
+
+/// The FTP test since the entry test, and heart rate at 140 W since the start.
+pub struct Cycling;
+
+impl Card for Cycling {
+    const NAME: &'static str = "progress-cycling";
+    type Reads = (Of<Plans>, Of<FtpTests>, Of<HeartRateAtPower>, Today);
+
+    fn asked(_: &HashMap<String, String>) -> Self {
+        Self
+    }
+
+    fn render(
+        &self,
+        (plans, tests, rides, today): (
+            Arc<rescheduling::Plans>,
+            Arc<Vec<ftp_test::Test>>,
+            Arc<Vec<heart_rate_at_power::Trended>>,
+            Date,
+        ),
+    ) -> Markup {
+        Frame::on(today, plans.now()).map_or_else(
+            || html! {},
+            |frame| {
+                tile(
+                    Discipline::Cycling,
+                    &[cycling(&tests, &rides, &frame, today)],
+                )
+            },
+        )
+    }
+}
+
+/// The FTP test and heart rate at 140 W over the macrocycle `frame`.
+pub fn cycling(
+    tests: &[ftp_test::Test],
+    at_power: &[heart_rate_at_power::Trended],
+    frame: &Frame,
+    today: Date,
+) -> Performance {
+    working::cycling(tests, at_power, frame.began, today)
+}
+
+/// Each lift's 1RM test since the entry test, and its estimate since the
+/// start.
+pub struct Gym;
+
+impl Card for Gym {
+    const NAME: &'static str = "progress-gym";
+    type Reads = (Of<Plans>, Of<Strength>, Today);
+
+    fn asked(_: &HashMap<String, String>) -> Self {
+        Self
+    }
+
+    fn render(
+        &self,
+        (plans, strength, today): (
+            Arc<rescheduling::Plans>,
+            Arc<(
+                Vec<application::one_rep_max::Tests>,
+                application::one_rep_max::View,
+            )>,
+            Date,
+        ),
+    ) -> Markup {
+        Frame::on(today, plans.now()).map_or_else(
+            || html! {},
+            |frame| {
+                tile(
+                    Discipline::Gym,
+                    &working::gym(&strength.0, &strength.1.lifts, frame.began, today),
+                )
+            },
+        )
+    }
+}
+
+/// Body weight against the plan's aims, then fat and fat-free mass.
+pub struct BodyTile;
+
+impl Card for BodyTile {
+    const NAME: &'static str = "progress-body";
+    type Reads = (Of<Plans>, Of<BodyWeight>, Of<Composition>, Today);
+
+    fn asked(_: &HashMap<String, String>) -> Self {
+        Self
+    }
+
+    fn render(
+        &self,
+        (plans, weight, composition, today): (
+            Arc<rescheduling::Plans>,
+            Arc<body_weight::Series>,
+            Arc<Vec<ComponentSeries>>,
+            Date,
+        ),
+    ) -> Markup {
+        let Some(frame) = Frame::on(today, plans.now()) else {
+            return html! {};
         };
-    };
-    let disciplines: Vec<Markup> = [Discipline::Cycling, Discipline::Gym]
-        .into_iter()
-        .filter_map(|discipline| performance(macrocycle, discipline))
-        .collect();
-    let body = body_tile(macrocycle, view.today);
-    let responses: Vec<Markup> = macrocycle
-        .responses
+        let aims = application::body_weight::aims_on(today, plans.now(), plans.holidays());
+        let body = working::body(&weight, &aims, &composition, frame.began, today);
+        body_tile(&body, frame.began, today).unwrap_or_default()
+    }
+}
+
+/// Resting heart rate, HRV and stress, each week since the start against the
+/// expected result of the training done.
+pub struct ResponseTile;
+
+impl Card for ResponseTile {
+    const NAME: &'static str = "progress-responses";
+    type Reads = (Of<Plans>, Of<Responses>, Today);
+
+    fn asked(_: &HashMap<String, String>) -> Self {
+        Self
+    }
+
+    fn render(
+        &self,
+        (plans, responses, today): (Arc<rescheduling::Plans>, Arc<Option<Vec<Responding>>>, Date),
+    ) -> Markup {
+        let (Some(frame), Some(responses)) = (Frame::on(today, plans.now()), responses.as_ref())
+        else {
+            return html! {};
+        };
+        responding_tile(responses, frame.began, today)
+    }
+}
+
+/// Every response reading with a change to show, on one tile; nothing where
+/// none has.
+fn responding_tile(responses: &[Responding], began: Date, today: Date) -> Markup {
+    let rows: Vec<Markup> = responses
         .iter()
-        .filter_map(|one| responding(one, macrocycle.began, view.today))
+        .filter_map(|one| responding(one, began, today))
         .collect();
     html! {
-        @if !disciplines.is_empty() {
-            h2.group { (Group::Performance.heading()) }
-            @for tile in &disciplines { (tile) }
+        @if !rows.is_empty() {
+            section.card.tile { @for row in &rows { (row) } }
         }
-        @if let Some(body) = body {
-            h2.group { (Group::Body.heading()) }
-            (body)
-        }
-        @if !responses.is_empty() {
-            h2.group { (Group::Response.heading()) }
-            section.card.tile { @for row in &responses { (row) } }
-        }
-        (health())
     }
 }
 
@@ -254,13 +397,11 @@ fn linked(path: &str, reading: &Markup) -> Markup {
     html! { a.row href=(path) { (reading) } }
 }
 
-/// A discipline's tile: each test, then the estimate read beside it. `None`
+/// A discipline's tile: each test, then the estimate read beside it. Nothing
 /// where nothing in it has a change to show.
-fn performance(macrocycle: &Macrocycle, discipline: Discipline) -> Option<Markup> {
-    let rows: Vec<Markup> = macrocycle
-        .performance
+fn tile(discipline: Discipline, performance: &[Performance]) -> Markup {
+    let rows: Vec<Markup> = performance
         .iter()
-        .filter(|one| one.tested.discipline() == discipline)
         .flat_map(|one| [test(one), estimate(one)])
         .flatten()
         .collect();
@@ -268,14 +409,14 @@ fn performance(macrocycle: &Macrocycle, discipline: Discipline) -> Option<Markup
         Discipline::Cycling => "Cycling",
         Discipline::Gym => "Gym",
     };
-    (!rows.is_empty()).then(|| {
-        html! {
+    html! {
+        @if !rows.is_empty() {
             section.card.tile {
                 h3 { (heading) }
                 @for row in &rows { (row) }
             }
         }
-    })
+    }
 }
 
 fn test(one: &Performance) -> Option<Markup> {
@@ -340,12 +481,12 @@ fn since_start(written: Written, label: &str, since: SinceStart) -> Markup {
 
 /// Body weight against the plan's aims, then fat and fat-free mass. `None`
 /// where none of them has a change to show.
-fn body_tile(macrocycle: &Macrocycle, today: Date) -> Option<Markup> {
+fn body_tile(body: &Body, began: Date, today: Date) -> Option<Markup> {
     let Body {
         weight,
         fat,
         fat_free,
-    } = &macrocycle.body;
+    } = body;
     let weight = weight.as_ref().map(|weight| {
         let runs: Vec<Vec<Traced>> = weight
             .days
@@ -370,7 +511,7 @@ fn body_tile(macrocycle: &Macrocycle, today: Date) -> Option<Markup> {
                 Some(KG.figure(weight.change.now)),
                 &html! {
                     (moved(KG, weight.change.by(), weight.expected))
-                    (trace(&runs, &detail::expected(&weight.aimed, Range { from: macrocycle.began, to: today }), macrocycle.began, today))
+                    (trace(&runs, &detail::expected(&weight.aimed, Range { from: began, to: today }), began, today))
                 },
             ),
         )
@@ -535,47 +676,26 @@ fn trace(runs: &[Vec<Traced>], expected: &[Vec<(Date, f64)>], began: Date, today
 #[derive(Debug)]
 pub struct Page;
 
-impl crate::drawn::Drawn for Page {
+impl crate::card::Page for Page {
     const ROUTE: &'static str = PATH;
-    type Read = View;
-
-    fn reads() -> application::graph::Reads {
-        configurator::working::reads()
-    }
+    type Cards = (NoMacrocycle, Cycling, Gym, BodyTile, ResponseTile);
 
     fn asked(
         _path: &axum::extract::RawPathParams,
-        _query: &std::collections::HashMap<String, String>,
+        _query: &HashMap<String, String>,
     ) -> Result<Self, axum::response::Redirect> {
         Ok(Self)
     }
 
-    fn here(&self) -> String {
-        PATH.to_owned()
-    }
-
-    async fn read(
-        &self,
-        store: &configurator::store::Store,
-        zone: &domain::normalised::OperatorZone,
-    ) -> Result<Self::Read, crate::drawn::Unreadable> {
-        let page = configurator::working::Page::open(store, zone).await?;
-        Ok(page.view().await?)
-    }
-
-    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
-        match read {
-            Ok(view) => page(&view),
-            Err(error) => unreadable(error.as_str()),
-        }
+    fn layout(&self, cards: [Markup; 5]) -> Markup {
+        laid_out(cards)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use application::working::{
-        Answering, Body, Macrocycle, Performance, Responding, Tested, View,
-    };
+    use application::working::{Answering, Body, Frame, Performance, Responding, Tested};
+    use domain::planner::Discipline;
     use domain::{
         analytical::{
             body_weight::{Aimed, Trend, Weight},
@@ -590,8 +710,44 @@ mod tests {
     };
     use jiff::civil::{Date, date};
 
-    use super::body;
+    use super::{body_tile, laid_out, no_macrocycle, responding_tile, tile};
     use crate::page::{PAGES, Place};
+
+    /// What Progress's cards read, on a day.
+    struct Shown {
+        frame: Option<Frame>,
+        performance: Vec<Performance>,
+        body: Body,
+        responses: Vec<Responding>,
+    }
+
+    /// The page as its cards draw it from `shown`.
+    fn body(shown: &Shown) -> String {
+        let frame = shown.frame.as_ref();
+        let discipline = |discipline: Discipline| {
+            let performance: Vec<Performance> = shown
+                .performance
+                .iter()
+                .filter(|one| one.tested.discipline() == discipline)
+                .copied()
+                .collect();
+            frame
+                .map(|_| tile(discipline, &performance))
+                .unwrap_or_default()
+        };
+        laid_out([
+            no_macrocycle(frame),
+            discipline(Discipline::Cycling),
+            discipline(Discipline::Gym),
+            frame
+                .and_then(|frame| body_tile(&shown.body, frame.began, TODAY))
+                .unwrap_or_default(),
+            frame
+                .map(|frame| responding_tile(&shown.responses, frame.began, TODAY))
+                .unwrap_or_default(),
+        ])
+        .into_string()
+    }
 
     const BEGAN: Date = date(2026, 9, 14);
     const TODAY: Date = date(2026, 11, 12);
@@ -630,10 +786,9 @@ mod tests {
     }
 
     /// **Autumn 2026 on 12 November**, as mock 3 drew it.
-    fn autumn() -> View {
-        View {
-            today: TODAY,
-            macrocycle: Some(Macrocycle {
+    fn autumn() -> Shown {
+        Shown {
+            frame: Some(Frame {
                 began: BEGAN,
                 mesocycles: vec![
                     Span::new(BEGAN, 2),
@@ -641,93 +796,93 @@ mod tests {
                     Span::new(date(2026, 10, 26), 4),
                 ],
                 last_began: None,
-                performance: vec![
-                    Performance {
-                        tested: Tested::Ftp,
-                        since: Some(SinceEntry {
-                            entry: (date(2026, 9, 23), 177),
-                            latest: Some((date(2026, 10, 25), 182)),
-                            noise: 14.2,
-                        }),
-                        estimated: Some(SinceStart {
-                            from: 139.0,
-                            now: 137.6,
-                            margin: Some(5.7),
-                        }),
-                    },
-                    Performance {
-                        tested: Tested::OneRepMax(RepsExercise::FrontSquatBarbell),
-                        since: Some(SinceEntry {
-                            entry: (date(2026, 9, 25), 92_500),
-                            latest: Some((date(2026, 10, 23), 95_000)),
-                            noise: 8_974.0,
-                        }),
-                        estimated: Some(SinceStart {
-                            from: 94_000.0,
-                            now: 94_800.0,
-                            margin: Some(8_300.0),
-                        }),
-                    },
-                ],
-                body: Body {
-                    weight: Some(Weight {
-                        days: vec![
-                            days()
-                                .map(|on| Aimed {
-                                    trend: Trend {
-                                        on,
-                                        mass: Kg::from_grams(84_600),
-                                        margin: Some(0.4),
-                                    },
-                                    expected: Some(84.6),
-                                })
-                                .collect(),
-                        ],
-                        aimed: vec![
-                            days()
-                                .map(|on| domain::analytical::expected::Expected {
-                                    on,
-                                    value: 84.6,
-                                    since: BEGAN,
-                                })
-                                .collect(),
-                        ],
-                        change: SinceStart {
-                            from: 84.6,
-                            now: 84.6,
-                            margin: Some(0.57),
-                        },
-                        expected: Some(-1.8),
+            }),
+            performance: vec![
+                Performance {
+                    tested: Tested::Ftp,
+                    since: Some(SinceEntry {
+                        entry: (date(2026, 9, 23), 177),
+                        latest: Some((date(2026, 10, 25), 182)),
+                        noise: 14.2,
                     }),
-                    fat: Some(SinceStart {
-                        from: 19.0,
-                        now: 18.2,
-                        margin: Some(0.5),
-                    }),
-                    fat_free: Some(SinceStart {
-                        from: 65.7,
-                        now: 66.2,
-                        margin: Some(0.5),
+                    estimated: Some(SinceStart {
+                        from: 139.0,
+                        now: 137.6,
+                        margin: Some(5.7),
                     }),
                 },
-                responses: vec![
-                    Responding {
-                        reading: Answering::RestingHeartRate,
-                        sent_by: None,
-                        response: Some(response(51.0, 1.4, -1.4)),
+                Performance {
+                    tested: Tested::OneRepMax(RepsExercise::FrontSquatBarbell),
+                    since: Some(SinceEntry {
+                        entry: (date(2026, 9, 25), 92_500),
+                        latest: Some((date(2026, 10, 23), 95_000)),
+                        noise: 8_974.0,
+                    }),
+                    estimated: Some(SinceStart {
+                        from: 94_000.0,
+                        now: 94_800.0,
+                        margin: Some(8_300.0),
+                    }),
+                },
+            ],
+            body: Body {
+                weight: Some(Weight {
+                    days: vec![
+                        days()
+                            .map(|on| Aimed {
+                                trend: Trend {
+                                    on,
+                                    mass: Kg::from_grams(84_600),
+                                    margin: Some(0.4),
+                                },
+                                expected: Some(84.6),
+                            })
+                            .collect(),
+                    ],
+                    aimed: vec![
+                        days()
+                            .map(|on| domain::analytical::expected::Expected {
+                                on,
+                                value: 84.6,
+                                since: BEGAN,
+                            })
+                            .collect(),
+                    ],
+                    change: SinceStart {
+                        from: 84.6,
+                        now: 84.6,
+                        margin: Some(0.57),
                     },
-                    Responding {
-                        reading: Answering::OvernightHrv,
-                        sent_by: None,
-                        response: Some(response(57.7, -4.2, 4.5)),
-                    },
-                    Responding {
-                        reading: Answering::Stress,
-                        sent_by: None,
-                        response: Some(response(33.4, 0.4, -2.2)),
-                    },
-                ],
-            }),
+                    expected: Some(-1.8),
+                }),
+                fat: Some(SinceStart {
+                    from: 19.0,
+                    now: 18.2,
+                    margin: Some(0.5),
+                }),
+                fat_free: Some(SinceStart {
+                    from: 65.7,
+                    now: 66.2,
+                    margin: Some(0.5),
+                }),
+            },
+            responses: vec![
+                Responding {
+                    reading: Answering::RestingHeartRate,
+                    sent_by: None,
+                    response: Some(response(51.0, 1.4, -1.4)),
+                },
+                Responding {
+                    reading: Answering::OvernightHrv,
+                    sent_by: None,
+                    response: Some(response(57.7, -4.2, 4.5)),
+                },
+                Responding {
+                    reading: Answering::Stress,
+                    sent_by: None,
+                    response: Some(response(33.4, 0.4, -2.2)),
+                },
+            ],
         }
     }
 
@@ -735,7 +890,7 @@ mod tests {
     /// test first and the estimate second, and Health last.
     #[test]
     fn the_tiles_are_in_progress_order() {
-        let page = body(&autumn()).into_string();
+        let page = body(&autumn());
         let order = [
             "Performance",
             "<h3>Cycling</h3>",
@@ -765,7 +920,7 @@ mod tests {
 
     #[test]
     fn each_row_says_its_change_and_opens_its_page() {
-        let page = body(&autumn()).into_string();
+        let page = body(&autumn());
         for said in [
             r#"<a class="row" href="/ftp">"#,
             "<em>182 W</em>",
@@ -797,34 +952,36 @@ mod tests {
     /// reading left with it.
     #[test]
     fn a_reading_with_nothing_to_show_is_left_out() {
-        let mut view = autumn();
-        if let Some(macrocycle) = &mut view.macrocycle {
-            macrocycle.performance = vec![Performance {
-                tested: Tested::Ftp,
-                since: Some(SinceEntry {
-                    entry: (date(2026, 9, 23), 177),
-                    latest: None,
-                    noise: 14.2,
-                }),
-                estimated: None,
-            }];
-            macrocycle.body = Body {
-                weight: None,
-                fat: None,
-                fat_free: None,
-            };
-            macrocycle.responses.truncate(1);
-            macrocycle.responses[0].response = None;
-        }
-        let page = body(&view).into_string();
+        let mut shown = autumn();
+        shown.performance = vec![Performance {
+            tested: Tested::Ftp,
+            since: Some(SinceEntry {
+                entry: (date(2026, 9, 23), 177),
+                latest: None,
+                noise: 14.2,
+            }),
+            estimated: None,
+        }];
+        shown.body = Body {
+            weight: None,
+            fat: None,
+            fat_free: None,
+        };
+        shown.responses.truncate(1);
+        shown.responses[0].response = None;
+        let page = body(&shown);
         for gone in [
-            "Performance",
-            "Cycling",
-            "Body weight",
-            "HRV and stress",
+            "<h3>Cycling",
+            ">Body weight<",
+            ">Resting heart rate<",
             "gauge",
         ] {
             assert!(!page.contains(gone), "{gone}: {page}");
+        }
+        // **Each group's heading is over no card**, so the stylesheet hides it.
+        for group in page.split(r#"<div class="cards">"#).skip(1) {
+            let group = group.split("</div>").next().unwrap_or_default();
+            assert!(!group.contains(r#"class="card"#), "{group}");
         }
         assert!(page.contains("Health"), "{page}");
     }
@@ -833,7 +990,7 @@ mod tests {
     /// is gone (#768).
     #[test]
     fn every_page_under_progress_is_opened_from_it() {
-        let page = body(&autumn()).into_string();
+        let page = body(&autumn());
         for one in PAGES.iter().filter(|one| one.place == Place::Progress) {
             assert!(
                 page.contains(&format!(r#"href="{}""#, one.path)),
@@ -845,11 +1002,10 @@ mod tests {
 
     #[test]
     fn no_plan_in_force_reads_nothing_but_health() {
-        let page = body(&View {
-            today: TODAY,
-            macrocycle: None,
-        })
-        .into_string();
+        let page = body(&Shown {
+            frame: None,
+            ..autumn()
+        });
         assert!(page.contains("No plan is in force today"), "{page}");
         assert!(page.contains(r#"<a href="/sleep">Sleep</a>"#), "{page}");
     }

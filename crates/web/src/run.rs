@@ -146,6 +146,11 @@ impl Asked {
 /// The runs this server holds.
 pub struct Runs {
     setting: Setting,
+    /// What is derived from the store, held while nothing it reads moves
+    /// (#830).
+    held: configurator::held::Held,
+    /// Each card's last drawing (#830).
+    drawings: crate::card::Drawings,
     view: watch::Sender<View>,
     going: Mutex<Vec<Asked>>,
 }
@@ -154,6 +159,8 @@ impl Runs {
     pub fn new(setting: Setting) -> Self {
         Self {
             setting,
+            held: configurator::held::Held::default(),
+            drawings: crate::card::Drawings::default(),
             view: watch::Sender::new(View::default()),
             going: Mutex::new(Vec::new()),
         }
@@ -167,6 +174,16 @@ impl Runs {
     /// What the operator configured.
     pub const fn setting(&self) -> &Setting {
         &self.setting
+    }
+
+    /// What is held in memory.
+    pub const fn held(&self) -> &configurator::held::Held {
+        &self.held
+    }
+
+    /// Each card's last drawing.
+    pub const fn drawings(&self) -> &crate::card::Drawings {
+        &self.drawings
     }
 
     pub fn view(&self) -> View {

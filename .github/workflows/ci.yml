@@ -42,7 +42,7 @@ jobs:
       - name: Restore cache
         uses: nix-community/cache-nix-action@v7
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/Cargo.lock', 'rust-toolchain.toml') }}-prebuilt
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml') }}-prebuilt
           restore-prefixes-first-match: nix-${{ runner.os }}-
           save: false
 
@@ -110,10 +110,16 @@ jobs:
             sandbox = true
             sandbox-fallback = false
 
+      # **The key is everything the dependencies are built from**, every
+      # `Cargo.toml` among them (#830). A crate taking a dependency already in
+      # the lock file changes the dependencies' build and not the lock: with
+      # the key unchanged, this job built the new one and did not save it,
+      # and every check, restoring the old one, failed to import the
+      # workspace build that refers to it.
       - name: Setup cache
         uses: nix-community/cache-nix-action@v7
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/Cargo.lock', 'rust-toolchain.toml') }}-prebuilt
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml') }}-prebuilt
           restore-prefixes-first-match: nix-${{ runner.os }}-
           gc-max-store-size-linux: 5G
           purge: true
@@ -188,7 +194,7 @@ jobs:
         if: ${{ env.UNCHANGED != 'true' }}
         uses: nix-community/cache-nix-action@v7
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/Cargo.lock', 'rust-toolchain.toml') }}-prebuilt
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml') }}-prebuilt
           restore-prefixes-first-match: nix-${{ runner.os }}-
           save: false
 
@@ -324,7 +330,7 @@ jobs:
       - name: Restore cache
         uses: nix-community/cache-nix-action@v7
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/Cargo.lock', 'rust-toolchain.toml') }}-prebuilt
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml') }}-prebuilt
           restore-prefixes-first-match: nix-${{ runner.os }}-
           save: false
 

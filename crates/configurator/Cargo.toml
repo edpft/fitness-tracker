@@ -18,6 +18,8 @@ telemetry.workspace = true
 
 jiff.workspace = true
 thiserror.workspace = true
+# What is held in memory is derived once however many ask at once (#830).
+tokio = { workspace = true, features = ["sync"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
@@ -26,7 +28,6 @@ tracing-subscriber.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 tempfile.workspace = true
-tokio.workspace = true
 
 [lints]
 workspace = true

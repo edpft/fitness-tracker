@@ -37,6 +37,89 @@ pub enum Node {
     Date,
     /// The part of the day now, which where the plan stands is judged at.
     DayPart,
+    // What is derived from the store and held in memory, never written (#830).
+    Analysis(Analysis),
+}
+
+/// What is read from the store and worked out from it, held in memory while
+/// nothing it reads has moved, and shared by every card reading it (#830).
+///
+/// **Not in the store**: what one stands at is where everything upstream of it
+/// does, so a card reading one is drawn again when any of that moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Analysis {
+    /// Every canonical weigh-in, and the trend through them.
+    BodyWeight,
+    /// Every component anything measured, one series per method.
+    Composition,
+    /// The plans, as written and as they now stand.
+    Plans,
+    /// Which device sent each reading.
+    Register,
+    /// The functional threshold power, as it has been tested.
+    FtpHistory,
+    /// Every FTP test, in watts and over body weight.
+    FtpTests,
+    /// The heart rate each FTP test was ridden at.
+    TestHeartRates,
+    /// Each main ride's heart rate.
+    RideHeartRates,
+    /// Heart rate at a fixed power, one line per device.
+    HeartRateAtPower,
+    /// Each lift's 1RM tests and its estimates over the macrocycle.
+    Strength,
+    /// Resting heart rate, overnight HRV and stress, each against the
+    /// training done, over the macrocycle.
+    Responses,
+    /// Each night's HRV, one series per watch.
+    OvernightHrv,
+    /// Each day's resting heart rate, one series per watch.
+    RestingHeartRate,
+    /// Each night's sleep, one series per watch.
+    Sleep,
+    /// Pulse wave velocity, one series per algorithm.
+    PulseWaveVelocity,
+}
+
+impl Analysis {
+    pub const ALL: [Self; 15] = [
+        Self::BodyWeight,
+        Self::Composition,
+        Self::Plans,
+        Self::Register,
+        Self::FtpHistory,
+        Self::FtpTests,
+        Self::TestHeartRates,
+        Self::RideHeartRates,
+        Self::HeartRateAtPower,
+        Self::Strength,
+        Self::Responses,
+        Self::OvernightHrv,
+        Self::RestingHeartRate,
+        Self::Sleep,
+        Self::PulseWaveVelocity,
+    ];
+
+    /// Its name, as telemetry records it.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::BodyWeight => "body weight",
+            Self::Composition => "composition",
+            Self::Plans => "plans",
+            Self::Register => "register",
+            Self::FtpHistory => "ftp history",
+            Self::FtpTests => "ftp tests",
+            Self::TestHeartRates => "test heart rates",
+            Self::RideHeartRates => "ride heart rates",
+            Self::HeartRateAtPower => "heart rate at power",
+            Self::Strength => "strength",
+            Self::Responses => "responses",
+            Self::OvernightHrv => "overnight hrv",
+            Self::RestingHeartRate => "resting heart rate",
+            Self::Sleep => "sleep",
+            Self::PulseWaveVelocity => "pulse wave velocity",
+        }
+    }
 }
 
 /// What is authored, by name, so a driven adapter declaring that it reads one
@@ -353,7 +436,8 @@ impl Graph {
                 | Node::Authored(_)
                 | Node::Interpretive(_)
                 | Node::Date
-                | Node::DayPart => None,
+                | Node::DayPart
+                | Node::Analysis(_) => None,
             })
             .collect()
     }

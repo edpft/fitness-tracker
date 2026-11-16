@@ -586,7 +586,14 @@ mod tests {
     use application::{CanonicalLayer, Part, next::Scope};
     use domain::{landing::LandingStream, planner::Discipline};
 
-    use crate::{body, heart_rate, history, macrocycle, one_rep_max, per_device, working};
+    use crate::{
+        analyses::{
+            BodyWeight, Composition, OvernightHrv, Plans, Responses, RestingHeartRate,
+            RideHeartRates, Strength,
+        },
+        held::Of,
+        history, macrocycle,
+    };
 
     fn named(scope: &Scope) -> Vec<String> {
         scope
@@ -641,6 +648,19 @@ mod tests {
         }
     }
 
+    /// What the HRV chart reads: the nights, and the plans its ranges are.
+    fn hrv_chart() -> Scope {
+        crate::graph::collects::<(Of<OvernightHrv>, Of<Plans>)>()
+    }
+
+    fn resting_chart() -> Scope {
+        crate::graph::collects::<(Of<RestingHeartRate>, Of<Plans>)>()
+    }
+
+    fn heart_rate_chart() -> Scope {
+        crate::graph::collects::<(Of<RideHeartRates>, Of<Plans>)>()
+    }
+
     /// **Each chart's page collects what its chart reads and nothing else**
     /// (#559): the HRV chart its nights, the sleep records naming each night's
     /// watch and Garmin's recordings naming the watch (#569), and the walk its
@@ -659,22 +679,18 @@ mod tests {
             .map(|part| (*part).to_owned())
             .collect();
         expected.sort();
-        let mut hrv = named(&per_device::overnight_hrv_collects());
+        let mut hrv = named(&hrv_chart());
         hrv.sort();
         assert_eq!(hrv, expected);
 
-        for scope in [
-            per_device::resting_heart_rate_collects(),
-            heart_rate::collects(),
-            per_device::overnight_hrv_collects(),
-        ] {
+        for scope in [resting_chart(), heart_rate_chart(), hrv_chart()] {
             assert!(!scope.has(&Part::Delivering));
             assert!(!scope.has(&Part::Fetching(stream("withings.measurements"))));
         }
         // #569: a ride's monitor is Peloton's account's, and a day's watch
         // Garmin's own records'; the register is Garmin's, for history.
-        assert!(heart_rate::collects().has(&Part::Fetching(stream("peloton.account"))));
-        let resting = per_device::resting_heart_rate_collects();
+        assert!(heart_rate_chart().has(&Part::Fetching(stream("peloton.account"))));
+        let resting = resting_chart();
         assert!(!resting.has(&Part::Normalising(stream("garmin.hrv"))));
         for part in [
             Part::Fetching(stream("garmin.sleep")),
@@ -684,15 +700,21 @@ mod tests {
             assert!(resting.has(&part), "{part:?}");
         }
         // Body weight is canonical, and composition every normalised weigh-in.
-        let body = body::collects();
+        let body = crate::graph::collects::<(Of<Composition>, Of<BodyWeight>, Of<Plans>)>();
         for part in [
             Part::Canonicalising(CanonicalLayer::WeighIns),
             Part::Normalising(stream("myfitnesspal.exports")),
         ] {
             assert!(body.has(&part), "{part:?}");
         }
-        assert!(one_rep_max::collects().has(&Part::Canonicalising(CanonicalLayer::WeighIns)));
-        assert!(working::collects().has(&Part::Normalising(stream("garmin.daily_summary"))));
+        assert!(
+            crate::graph::collects::<Of<Strength>>()
+                .has(&Part::Canonicalising(CanonicalLayer::WeighIns))
+        );
+        assert!(
+            crate::graph::collects::<Of<Responses>>()
+                .has(&Part::Normalising(stream("garmin.daily_summary")))
+        );
     }
 
     /// **History reads no plan**, so it asks no calendar (#809).
@@ -719,7 +741,7 @@ mod tests {
                 &directory.path().join("fitness.db"),
             ))
             .expect("a store");
-        let one_rep_max = one_rep_max::collects();
+        let one_rep_max = crate::graph::collects::<Of<Strength>>();
         let history = history::collects();
         assert!(!super::collecting(&store, &one_rep_max).expect("tried"));
 

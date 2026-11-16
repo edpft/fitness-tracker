@@ -498,3 +498,8 @@ nav.choice a[aria-current] { background: var(--ink); color: var(--bg); font-weig
 .card.workout details.slot > summary p.sets { font-size: 15px; font-variant-numeric: tabular-nums; }
 .card.workout details.slot[open] > summary { margin-bottom: 14px; }
 .card.workout details.slot h4 { font-size: 13px; font-weight: 600; color: var(--ink2); margin: 14px 0 4px; }
+
+/* A page is its cards (#830): each is drawn into its own place, and a group
+   none of whose cards drew anything is not shown, heading and all. */
+div.held:empty { display: none; }
+div.cards:not(:has(.card)) { display: none; }

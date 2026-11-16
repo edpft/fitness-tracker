@@ -294,6 +294,17 @@ impl Store {
         .await
     }
 
+    /// Where what is read stands, asked once for each node however often it
+    /// is asked (#830): one for each page load.
+    pub(crate) fn drawing(
+        &self,
+    ) -> Drawing<Spanned<SqliteDerivationLedger>, Spanned<SqliteRevisions>> {
+        Drawing::new(
+            self.adapter(SqliteDerivationLedger::new),
+            self.adapter(SqliteRevisions::new),
+        )
+    }
+
     /// Keep `drawing` as the page at `address`, drawn from `drawn_from`, so
     /// it can be shown at once the next time that page is opened, by this
     /// server or after a restart (#605).
