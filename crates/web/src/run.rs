@@ -338,14 +338,14 @@ impl Runs {
             return true;
         };
         let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
-        configurator::next::wanted(
+        Box::pin(configurator::next::wanted(
             &setting.store,
             &setting.zone,
             &credentials,
             DayPart::containing(here.datetime()),
             scope,
             Frontend::Web,
-        )
+        ))
         .await
         .unwrap_or(true)
     }
