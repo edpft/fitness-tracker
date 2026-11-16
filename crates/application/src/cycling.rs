@@ -33,7 +33,7 @@ use jiff::civil::Date;
 
 use crate::{
     CyclingDeliveryStore, CyclingMesocycleStore, DestinationName, FtpHistory, HoldingRides,
-    PlanStore, PrescriptionError, RiddenVenues, RideDestination, RidesPlaced, SourceError,
+    PlanStore, PrescriptionError, RiddenVenues, RideDelivery, RideDestination, SourceError,
     StoreError,
     holding::NoHoldingRide,
     reschedule::{Reschedule, Rescheduled},
@@ -425,6 +425,11 @@ where
     /// **What is recorded is what went, not what the programme holds.** The
     /// cool-down is the destination's choice and appears in no authored record.
     ///
+    /// **Nothing is sent where the record says these rides already went**
+    /// (#664), as the gym sends nothing where the same rendering did. The
+    /// cool-down is not compared: the operator, 2026-11-16, *"it holds no
+    /// functional purpose"*.
+    ///
     /// # Errors
     ///
     /// [`RideDeliveryError::Occupied`] if the destination holds rides and
@@ -435,7 +440,29 @@ where
         ride: &PrescribedRide,
         to: &T,
         replace: bool,
-    ) -> Result<RidesPlaced, RideDeliveryError> {
+    ) -> Result<RideDelivery, RideDeliveryError> {
+        let unbuildable = |error: &dyn std::fmt::Display| RideDeliveryError::Unbuildable {
+            detail: error.to_string(),
+        };
+        let microcycle = u32::try_from(ride.next.microcycle).map_err(|_| {
+            unbuildable(&format!(
+                "microcycle {} is past counting",
+                ride.next.microcycle
+            ))
+        })?;
+        if let Some(delivered) = self
+            .ports
+            .deliveries
+            .delivered_for(ride.next.date, &self.destination)
+            .await?
+            && delivered.programme == ride.published
+            && delivered.microcycle == microcycle
+            && delivered.session == ride.next.session
+            && delivered.went(ride.next.ride.at())
+        {
+            return Ok(RideDelivery::Unchanged(delivered));
+        }
+
         if !replace {
             let holds = to.holding().await?;
             if holds > 0 {
@@ -444,17 +471,8 @@ where
         }
         let placed = to.deliver(ride.next.ride.at()).await?;
 
-        let unbuildable = |error: &dyn std::fmt::Display| RideDeliveryError::Unbuildable {
-            detail: error.to_string(),
-        };
         let mut written: Vec<RideVenue> = ride.next.ride.at().iter().cloned().collect();
         written.push(placed.cool_down.clone());
-        let microcycle = u32::try_from(ride.next.microcycle).map_err(|_| {
-            unbuildable(&format!(
-                "microcycle {} is past counting",
-                ride.next.microcycle
-            ))
-        })?;
 
         self.ports
             .deliveries
@@ -468,6 +486,6 @@ where
                 delivered_at: jiff::Timestamp::now(),
             })
             .await?;
-        Ok(placed)
+        Ok(RideDelivery::Sent(placed))
     }
 }

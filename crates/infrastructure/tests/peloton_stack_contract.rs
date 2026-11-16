@@ -118,10 +118,11 @@ fn a_class_is_stacked_by_its_join_token_and_not_its_id() {
     );
 }
 
-/// **Setting is a clear, then one add per class, then a read back.**
-/// `modifyStack` answers success and changes nothing whatever it is given, so
-/// only `addClassToStack` writes — and the result is checked rather than
-/// believed.
+/// **Setting is a clear, then one add per class**, and the list the last add
+/// answers with is checked rather than believed. `modifyStack` answers
+/// success and changes nothing whatever it is given, so only
+/// `addClassToStack` writes. The stack is not read again (#664): the add
+/// already said what it holds.
 #[test]
 fn setting_the_stack_adds_each_class_and_checks_what_landed() {
     let Ok(rt) = runtime() else {
@@ -157,12 +158,8 @@ fn setting_the_stack_adds_each_class_and_checks_what_landed() {
         Mock::given(method("POST"))
             .and(path("/graphql"))
             .and(body_string_contains("viewUserStack"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "data": { "viewUserStack": {
-                    "totalTime": 2700,
-                    "userStack": { "stackedClassList": [{ "pelotonClassId": expected_token() }] },
-                }}
-            })))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(0)
             .mount(&server)
             .await;
 
@@ -171,13 +168,14 @@ fn setting_the_stack_adds_each_class_and_checks_what_landed() {
             .await
             .expect("the stubbed sequence answers");
         assert_eq!(stacked.classes, vec![expected_token()]);
+        assert_eq!(stacked.total_seconds, 2700);
     });
 }
 
 /// **A write that reports success and does nothing is a failure here.** Twice
 /// this adapter believed a 200 that had changed nothing — once for the whole of
 /// #70, and once again for `modifyStack` after the identifier was fixed. The
-/// stack is read back and compared, so the third time says so.
+/// list the last add answers with is compared, so the third time says so.
 #[test]
 fn a_write_that_changes_nothing_is_refused_however_it_answers() {
     let Ok(rt) = runtime() else {

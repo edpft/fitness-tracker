@@ -146,6 +146,21 @@ pub async fn walk(
             break;
         }
     }
+    // **Newest first, so a page that adds nothing ends it** (#664): every
+    // older cool-down was held by an earlier walk. One request on a day
+    // Peloton published none.
+    for page in 0..PAGE_LIMIT {
+        let found = classes.cool_down_page(page).await?;
+        listed += u64::try_from(found.classes.len()).unwrap_or_default();
+        let new = store
+            .record_cool_downs(&found.classes)
+            .await
+            .map_err(|error| unwritable(&error))?;
+        added += new;
+        if !found.more || new == 0 {
+            break;
+        }
+    }
     let held = store.held().await.map_err(|error| unwritable(&error))?;
     Ok(Walked {
         listed,
@@ -424,22 +439,37 @@ impl<'a> ClassCatalogue<'a> {
             })
     }
 
-    /// The cool-down ride a session ends with.
+    /// The cool-down ride a session ends with: the newest by `instructor`, else
+    /// the newest by Matt Wilpers, whom every session falls back to.
     ///
-    /// **Still the source's answer, and deliberately.** What the operator rides
-    /// is the *most recent* five-minute cool-down by an instructor, resolved at
-    /// the moment of delivery — `class::PelotonClasses::cool_down_for` says why
-    /// a table of ids would be wrong as soon as Peloton published another. A
-    /// cool-down is not a power zone class and is not in this catalogue.
+    /// **The catalogue's answer** (#664), which the refresh earlier in the
+    /// same run brought current. The operator, 2026-11-16: the newest
+    /// cool-down *"is just a nice to have"*, there to keep from riding the same
+    /// one over and over. Peloton is asked only where the catalogue holds none
+    /// for either.
     ///
     /// # Errors
     ///
-    /// [`SourceError::Unavailable`] where there is no credential, and whatever
-    /// [`PelotonClasses::cool_down_after`] gives otherwise.
+    /// [`SourceError::Malformed`] if the catalogue cannot be read,
+    /// [`SourceError::Unavailable`] where it holds none and there is no
+    /// credential, and whatever [`PelotonClasses::cool_down_after`] gives
+    /// otherwise.
     pub async fn cool_down_after(
         &self,
         instructor: Option<&str>,
     ) -> Result<super::ClassSummary, SourceError> {
+        for whose in instructor
+            .into_iter()
+            .chain([super::class::FALLBACK_INSTRUCTOR])
+        {
+            if let Some(held) = self.stored.newest_cool_down(whose).await.map_err(|error| {
+                SourceError::Malformed {
+                    detail: format!("the class catalogue could not be read: {error}"),
+                }
+            })? {
+                return Ok(held);
+            }
+        }
         let Some(source) = self.source else {
             return Err(SourceError::Unavailable {
                 detail: "a cool-down ride is the most recent one Peloton serves, \

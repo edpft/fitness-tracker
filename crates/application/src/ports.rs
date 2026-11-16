@@ -2535,8 +2535,6 @@ pub trait ClassSource {
 /// What a ride destination did with a session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RidesPlaced {
-    /// How many rides it held before, all of which this replaced.
-    pub replaced: usize,
     /// The cool-down it chose to end the session with, which no authored
     /// record holds.
     pub cool_down: RideVenue,
@@ -2546,6 +2544,15 @@ pub struct RidesPlaced {
     pub holds: usize,
     /// How long they run in all, where the destination gives a total.
     pub total: Option<PositiveDuration>,
+}
+
+/// What delivering a cycling session did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RideDelivery {
+    /// Sent, and what the destination did with it.
+    Sent(RidesPlaced),
+    /// The record says these rides went already, so nothing was sent.
+    Unchanged(DeliveredRide),
 }
 
 /// Where a cycling session is put to be ridden.

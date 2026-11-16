@@ -678,3 +678,181 @@ fn the_walk_leaves_every_class_it_listed_outstanding() {
         );
     });
 }
+
+// ---------------------------------------------------------------------------
+// Cool-downs, held so delivering asks Peloton for nothing but the stack (#664).
+// ---------------------------------------------------------------------------
+
+const COOL_DOWN_TYPE: &str = "a1fa617f3ba14c0a8c25468d5c88b3ea";
+/// Matt Wilpers, whom every session falls back to.
+const FALLBACK: &str = "304389e2bfe44830854e071bffc137c9";
+
+fn cool_down(id: &str, instructor: &str, aired_at: i64) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "title": "5 min Cool Down Ride",
+        "duration": 300,
+        "class_type_ids": [COOL_DOWN_TYPE],
+        "instructor_id": instructor,
+        "original_air_time": aired_at,
+    })
+}
+
+/// A page of cool-downs, for the walk's own query and no other.
+async fn cool_down_page(server: &MockServer, page: &str, data: serde_json::Value, more: bool) {
+    Mock::given(method("GET"))
+        .and(path("/api/v2/ride/archived"))
+        .and(query_param("browse_category", "cycling"))
+        .and(query_param("class_type_id", COOL_DOWN_TYPE))
+        .and(query_param("duration", "300"))
+        .and(query_param("sort_by", "original_air_time"))
+        .and(query_param("desc", "true"))
+        .and(query_param_is_missing("instructor_id"))
+        .and(query_param("page", page))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "data": data, "show_next": more })),
+        )
+        .mount(server)
+        .await;
+}
+
+async fn no_power_zone_classes(server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path("/api/v2/ride/archived"))
+        .and(query_param("class_type_id", POWER_ZONE_TYPE))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "data": [], "show_next": false })),
+        )
+        .mount(server)
+        .await;
+}
+
+/// **The walk holds every instructor's cool-downs, and none is a class to
+/// read**: a cool-down is only stacked, so it never joins the detail reading.
+#[test]
+fn the_walk_holds_cool_downs_without_leaving_them_to_read() {
+    let Ok(rt) = runtime() else {
+        panic!("a current-thread runtime builds")
+    };
+    rt.block_on(async {
+        let server = MockServer::start().await;
+        authenticated(&server).await;
+        no_power_zone_classes(&server).await;
+        cool_down_page(
+            &server,
+            "0",
+            serde_json::json!([
+                cool_down("newer", "an-instructor", 200),
+                cool_down("older", "an-instructor", 100),
+                cool_down("matts", FALLBACK, 150),
+            ]),
+            false,
+        )
+        .await;
+
+        let (_directory, store) = catalogue().await.expect("a catalogue opens");
+        let walked = walk(&classes(&server), &store)
+            .await
+            .expect("the walk answers");
+        assert_eq!(walked.added, 3);
+        assert_eq!(walked.held.outstanding(), 0, "a cool-down is never read");
+        let newest = store
+            .newest_cool_down("an-instructor")
+            .await
+            .expect("the catalogue answers");
+        assert_eq!(newest.map(|held| held.id), Some("newer".to_owned()));
+    });
+}
+
+/// **Newest first, so a page that adds nothing ends the walk**: one request on
+/// a day Peloton published no cool-down.
+#[test]
+fn the_cool_down_walk_stops_at_a_page_it_already_holds() {
+    let Ok(rt) = runtime() else {
+        panic!("a current-thread runtime builds")
+    };
+    rt.block_on(async {
+        let server = MockServer::start().await;
+        authenticated(&server).await;
+        no_power_zone_classes(&server).await;
+        cool_down_page(
+            &server,
+            "0",
+            serde_json::json!([cool_down("first", FALLBACK, 200)]),
+            true,
+        )
+        .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/ride/archived"))
+            .and(query_param("class_type_id", COOL_DOWN_TYPE))
+            .and(query_param("page", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [cool_down("second", FALLBACK, 100)],
+                "show_next": false,
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let (_directory, store) = catalogue().await.expect("a catalogue opens");
+        let first = walk(&classes(&server), &store)
+            .await
+            .expect("the walk answers");
+        assert_eq!(first.added, 2, "the first walk reads to the end");
+        let again = walk(&classes(&server), &store)
+            .await
+            .expect("the walk answers");
+        assert_eq!(again.added, 0, "and the next stops at its first page");
+    });
+}
+
+/// **Delivering's cool-down comes from the catalogue**, the instructor's own
+/// where there is one and Matt Wilpers' where not, and Peloton is not asked.
+#[test]
+fn a_held_cool_down_is_chosen_without_asking_peloton() {
+    let Ok(rt) = runtime() else {
+        panic!("a current-thread runtime builds")
+    };
+    rt.block_on(async {
+        let server = MockServer::start().await;
+        authenticated(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/ride/archived"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let (_directory, store) = catalogue().await.expect("a catalogue opens");
+        let held = |id: &str, instructor: &str, aired_at: i64| ClassSummary {
+            id: id.to_owned(),
+            title: "5 min Cool Down Ride".to_owned(),
+            duration_seconds: 300,
+            series: None,
+            instructor: Some(instructor.to_owned()),
+            aired_at: Some(aired_at),
+        };
+        store
+            .record_cool_downs(&[
+                held("theirs", "an-instructor", 200),
+                held("matts", FALLBACK, 100),
+            ])
+            .await
+            .expect("the cool-downs record");
+
+        let source = classes(&server);
+        let catalogue = infrastructure::peloton::catalogue::ClassCatalogue::new(&store, &source);
+        let own = catalogue
+            .cool_down_after(Some("an-instructor"))
+            .await
+            .expect("the catalogue answers");
+        assert_eq!(own.id, "theirs");
+        let fallen_back = catalogue
+            .cool_down_after(Some("teaches-none"))
+            .await
+            .expect("the catalogue answers");
+        assert_eq!(fallen_back.id, "matts");
+    });
+}

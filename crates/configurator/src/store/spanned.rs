@@ -27,8 +27,8 @@ use application::{
     PublishedCycling, PublishedProgrammes, PublishedRead, PulseWaveVelocityHistory, RawExtent,
     Reached, Reading, Reads, RecordedDevices, RefusalStore, RenderingDigest,
     RestingHeartRateHistory, ResumptionPointStore, Revision, Revisions, RiddenSession,
-    RiddenSessionLog, RiddenVenues, Served, SessionOrdinal, SleepHistory, SourceError, StoreError,
-    StressHistory, TrainingDone, WearRecord, WeighInHistory, WorkoutStore,
+    RiddenSessionLog, RiddenVenues, RideDestination, Served, SessionOrdinal, SleepHistory,
+    SourceError, StoreError, StressHistory, TrainingDone, WearRecord, WeighInHistory, WorkoutStore,
     graph::{Calendar, Node, Table},
 };
 use domain::analytical::Weighed;
@@ -599,5 +599,12 @@ spanned! {
     }
     at_once {
             fn which(&self, programme: &ExternalProgramme) -> Option<PublishedCycling>;
+    }
+}
+
+spanned! {
+    RideDestination {
+        fn holding(&self) -> Result<usize, SourceError>;
+        fn deliver(&self, rides: &domain::sequence::NonEmpty<RideVenue>) -> Result<application::RidesPlaced, SourceError>;
     }
 }

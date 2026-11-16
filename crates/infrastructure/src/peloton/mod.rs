@@ -31,7 +31,7 @@ pub use account::{LandedRide, SessionAccount};
 pub use catalogue::{PelotonClassSource, Reading, Walked, read_details, walk};
 pub use class::{
     CataloguePage, ClassSession, ClassSummary, Instructor, PelotonClasses, cool_down_from,
-    power_zone_from,
+    cool_downs_from, power_zone_from,
 };
 pub use details::PelotonWorkoutDetails;
 pub use holding::PelotonHoldingRides;

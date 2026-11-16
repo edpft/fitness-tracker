@@ -97,13 +97,13 @@ const CATALOGUE_PAGE: u32 = 100;
 /// **His id, not his class.** Which cool-down is his most recent is resolved by
 /// the same query as everyone else's, so the fallback does not go stale where
 /// the ordinary path stays current.
-const FALLBACK_INSTRUCTOR: &str = "304389e2bfe44830854e071bffc137c9";
+pub(crate) const FALLBACK_INSTRUCTOR: &str = "304389e2bfe44830854e071bffc137c9";
 
 /// How long a cool-down ride is, in seconds.
 ///
 /// Five minutes, and it is a filter rather than a preference: the operator rides
 /// the five-minute one, and the browse endpoint takes an exact duration.
-const COOL_DOWN_SECONDS: u64 = 300;
+pub(crate) const COOL_DOWN_SECONDS: u64 = 300;
 
 /// A class as the browse endpoint lists it — enough to name it, stack it, and
 /// hold it in the catalogue.
@@ -194,6 +194,38 @@ pub fn power_zone_from(body: &str) -> Result<CataloguePage, SourceError> {
                 .as_ref()
                 .is_none_or(|types| types.iter().any(|kind| kind == POWER_ZONE_CLASS_TYPE))
         })
+        .filter(Listed::is_rideable)
+        .map(Listed::summary)
+        .collect();
+    Ok(CataloguePage { classes, more })
+}
+
+/// One page of the five-minute cool-down rides, as [`power_zone_from`] reads
+/// a page of power zone classes.
+///
+/// **Only five-minute cool-down rides are kept**, filtered again here for the
+/// reason `power_zone_from` gives: the query asked for them, and this adapter
+/// does not own the endpoint.
+///
+/// # Errors
+///
+/// [`SourceError::Malformed`] where the response cannot be read.
+pub fn cool_downs_from(body: &str) -> Result<CataloguePage, SourceError> {
+    let listing: Listing = serde_json::from_str(body).map_err(|error| SourceError::Malformed {
+        detail: format!("a page of the cool-down rides could not be read: {error}"),
+    })?;
+    let served = listing.data.len();
+    let more = listing.show_next || served >= usize::try_from(CATALOGUE_PAGE).unwrap_or(usize::MAX);
+    let classes = listing
+        .data
+        .into_iter()
+        .filter(|found| {
+            found
+                .class_type_ids
+                .as_ref()
+                .is_none_or(|types| types.iter().any(|kind| kind == COOL_DOWN_RIDE_CLASS_TYPE))
+        })
+        .filter(|found| found.duration == COOL_DOWN_SECONDS)
         .filter(Listed::is_rideable)
         .map(Listed::summary)
         .collect();
@@ -654,6 +686,46 @@ impl PelotonClasses {
                     });
                 }
                 cool_down_from(instructor, &reply.text())
+            })
+            .await
+    }
+
+    /// One page of every five-minute cool-down ride Peloton serves, newest
+    /// first, every instructor's (#664).
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError`] if the source is unreachable, refuses the token, or
+    /// answers something this cannot read.
+    pub async fn cool_down_page(&self, page: u32) -> Result<CataloguePage, SourceError> {
+        let bearer = self.auth.bearer().await?;
+        let request = self
+            .client()?
+            .get(format!("{}/api/v2/ride/archived", self.api_base))
+            .bearer_auth(bearer)
+            .header("Peloton-Platform", "web")
+            .query(&[
+                ("browse_category", "cycling"),
+                ("duration", &COOL_DOWN_SECONDS.to_string()),
+                ("class_type_id", COOL_DOWN_RIDE_CLASS_TYPE),
+                ("sort_by", "original_air_time"),
+                ("desc", "true"),
+                ("limit", &CATALOGUE_PAGE.to_string()),
+                ("page", &page.to_string()),
+            ]);
+        http::ask(request)
+            .await?
+            .read(|reply| {
+                let status = reply.status();
+                if status == reqwest::StatusCode::UNAUTHORIZED {
+                    return Err(SourceError::Unauthorised);
+                }
+                if !status.is_success() {
+                    return Err(SourceError::Unavailable {
+                        detail: format!("page {page} of the cool-down rides answered {status}"),
+                    });
+                }
+                cool_downs_from(&reply.text())
             })
             .await
     }

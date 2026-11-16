@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT reference AS \"reference!: String\",\n                   title     AS \"title!: String\",\n                   aired_at  AS \"aired_at: i64\"\n              FROM peloton_cool_down\n             WHERE instructor = ?\n             ORDER BY aired_at DESC NULLS LAST, reference ASC\n             LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "reference!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "peloton_cool_down",
+            "name": "reference"
+          }
+        }
+      },
+      {
+        "name": "title!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "peloton_cool_down",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "name": "aired_at: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "peloton_cool_down",
+            "name": "aired_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "ce6276dea7b1da8fe012a22886e77c2d0953017477b1fbb39235ec8c97a22849"
+}
