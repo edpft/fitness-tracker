@@ -527,20 +527,67 @@ async fn events(
 }
 
 /// The step the run is on, for a page drawn from the store, as `ended` once a
-/// run has ended since `since` and as `step` otherwise.
+/// run has ended since `since` and as `step` otherwise; and each part
+/// collected after the first `collected`, which the cards waiting on it ask
+/// to be drawn again on (#830).
 async fn step(
     State(runs): State<Arc<Runs>>,
     Query(query): Query<std::collections::HashMap<String, String>>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let mut since = query
-        .get("since")
-        .and_then(|since| since.parse().ok())
-        .unwrap_or_else(|| runs.view().ended());
+    let count = |name: &str, otherwise: u64| {
+        query
+            .get(name)
+            .and_then(|count| count.parse().ok())
+            .unwrap_or(otherwise)
+    };
+    let view = runs.view();
+    let mut since = count("since", view.ended());
+    let mut collected = count("collected", view.collected());
     let changes = WatchStream::new(runs.watch()).map(move |view| {
-        let (name, shown) = run::step_event(&mut since, &view);
-        Ok(Event::default().event(name).data(shown.into_string()))
+        run::page_events(&mut since, &mut collected, &view)
+            .into_iter()
+            .map(|(name, data)| Ok(Event::default().event(name).data(data)))
+            .collect::<Vec<_>>()
     });
-    Sse::new(changes).keep_alive(KeepAlive::default())
+    Sse::new(Each::new(changes)).keep_alive(KeepAlive::default())
+}
+
+/// Each item of each batch a stream yields, in order.
+///
+/// **By hand**, because `tokio-stream` has no `flat_map` and one change to
+/// the run can be several events.
+struct Each<S, T> {
+    batches: S,
+    queued: std::collections::VecDeque<T>,
+}
+
+impl<S, T> Each<S, T> {
+    const fn new(batches: S) -> Self {
+        Self {
+            batches,
+            queued: std::collections::VecDeque::new(),
+        }
+    }
+}
+
+impl<S: Stream<Item = Vec<T>> + Unpin, T: Unpin> Stream for Each<S, T> {
+    type Item = T;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<T>> {
+        loop {
+            if let Some(item) = self.queued.pop_front() {
+                return std::task::Poll::Ready(Some(item));
+            }
+            match std::pin::Pin::new(&mut self.batches).poll_next(context) {
+                std::task::Poll::Ready(Some(batch)) => self.queued.extend(batch),
+                std::task::Poll::Ready(None) => return std::task::Poll::Ready(None),
+                std::task::Poll::Pending => return std::task::Poll::Pending,
+            }
+        }
+    }
 }
 
 /// htmx 2.0.11 and its server-sent events extension 2.2.4, vendored (§ 20):

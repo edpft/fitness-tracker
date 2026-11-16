@@ -39,7 +39,8 @@ use std::{
     collections::BTreeSet,
     future::{Future, poll_fn},
     pin::pin,
-    task::Poll,
+    sync::{Mutex, PoisonError},
+    task::{Poll, Waker},
     time::{Duration, Instant},
 };
 
@@ -73,7 +74,7 @@ use crate::{
     commit::{CommitError, Due},
     cycling::{PrescribedRide, RideDeliveryError, RidingError},
     deliver::{Delivering, DeliveryPorts},
-    graph::{Calendar, Derivation, Input, Node, Reads},
+    graph::{Calendar, Derivation, Graph, Input, Node, Reads},
     microcycle::{Session, Standing},
     ports::{
         CanonicalLayer, DerivationLedger, DerivedFrom, NewestObservation, NormalisedLayers,
@@ -496,6 +497,13 @@ pub trait Progress {
     /// How long the step now running will take, where that is worth saying.
     fn estimated(&self, step: &Step, outstanding: u64, takes: std::time::Duration);
     fn finished(&self, done: &Done);
+    /// These parts are collected for this run, so what reads them can be read
+    /// again before the run ends (#830).
+    ///
+    /// **Not a step's end**: a source's walks are collected once all of them
+    /// have ended, reported or not, and a joined part once the run holding it
+    /// has.
+    fn collected(&self, parts: &[Part]);
 }
 
 /// Why `next` could not answer at all.
@@ -1059,6 +1067,9 @@ pub struct NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, 
     pub zone: OperatorZone,
     /// How soon a stream fetched a moment ago is fetched again.
     pub refetch: Refetch,
+    /// What each layer is derived from, so it is derived as soon as that has
+    /// been fetched (#830).
+    pub graph: Graph,
 }
 
 /// The use case.
@@ -1448,6 +1459,7 @@ where
                     let started = start(progress, Step::Joining(held.clone()));
                     self.ports.lock.released(&held).await.map_err(unavailable)?;
                     finish(progress, run, started, Ok(Found::Joined));
+                    progress.collected(&held.iter().cloned().collect::<Vec<_>>());
                     joined.extend(held);
                 }
             }
@@ -1463,36 +1475,87 @@ where
         progress: &(impl Progress + Sync),
         run: &mut Vec<Done>,
     ) -> Result<(), NextError> {
+        // **Each layer is derived as soon as what it reads has been fetched**
+        // (#830), while the rest is still being fetched: a weigh-in is on its
+        // cards while Garmin is still being asked.
+        let fetched = Fetched::default();
+        let fetching = async {
+            let outcome = self.fetch_all(scope, judge, progress, &fetched).await;
+            fetched.close();
+            outcome
+        };
+        let (fetching, deriving) = both(fetching, self.derive(scope, &fetched, progress)).await;
+        run.extend(fetching?);
+        // **Every layer is current before the standing is read**, and for the
+        // gym that is the whole of #361: deriving a stream deletes its rows,
+        // and a standing read inside that window once told the operator he had
+        // lost every week.
+        run.extend(deriving?);
+        Ok(())
+    }
+
+    /// Fetch every walk in `scope`, all sources at once, and each calendar,
+    /// saying in `fetched` as each source's walks end.
+    async fn fetch_all(
+        &self,
+        scope: &Scope,
+        judge: &Judge,
+        progress: &(impl Progress + Sync),
+        fetched: &Fetched,
+    ) -> Result<Vec<Done>, NextError> {
+        let collected = |parts: Vec<Part>| {
+            let parts: Vec<Part> = parts.into_iter().filter(|part| scope.has(part)).collect();
+            progress.collected(&parts);
+            fetched.end(parts);
+        };
         // The operator, 2026-10-18: *"We should pull the new data in parallel
         // if we can."* Peloton's catalogue is refreshed after its rides, on
         // the same login, and only by a run that delivers.
         let (gym, cycling, weigh_ins, watch) = all(
-            self.fetch(&self.ports.gym_records, scope, judge, progress),
             async {
-                let mut done = self
+                let done = self
+                    .fetch(&self.ports.gym_records, scope, judge, progress)
+                    .await;
+                collected(walked(&self.ports.gym_records, scope));
+                done
+            },
+            async {
+                let fetching = self
                     .fetch(&self.ports.cycling_records, scope, judge, progress)
-                    .await?;
+                    .await;
+                collected(walked(&self.ports.cycling_records, scope));
+                let mut done = fetching?;
                 if scope.has(&Part::Delivering) {
                     let (started, outcome) = self.refresh(judge, progress).await;
                     finish(progress, &mut done, started, outcome);
                 }
                 Ok::<_, NextError>(done)
             },
-            self.fetch(&self.ports.weigh_in_records, scope, judge, progress),
+            async {
+                let done = self
+                    .fetch(&self.ports.weigh_in_records, scope, judge, progress)
+                    .await;
+                collected(walked(&self.ports.weigh_in_records, scope));
+                done
+            },
             // **The watch's days after its activities**, on the one sign-in:
             // Garmin is asked one request at a time.
             async {
-                let mut done = self
+                let records = self
                     .fetch(&self.ports.watch_records, scope, judge, progress)
-                    .await?;
-                done.extend(
-                    self.fetch(&self.ports.watch_days, scope, judge, progress)
-                        .await?,
-                );
+                    .await;
+                collected(walked(&self.ports.watch_records, scope));
+                let mut done = records?;
+                let days = self
+                    .fetch(&self.ports.watch_days, scope, judge, progress)
+                    .await;
+                collected(walked(&self.ports.watch_days, scope));
+                done.extend(days?);
                 Ok::<_, NextError>(done)
             },
         )
         .await;
+        let mut run = Vec::new();
         run.extend(gym?);
         run.extend(cycling?);
         run.extend(weigh_ins?);
@@ -1505,15 +1568,11 @@ where
                     .holidays
                     .ask(calendar, judge.at.as_timestamp(), self.ports.refetch)
                     .await?;
-                finish(progress, run, started, outcome);
+                finish(progress, &mut run, started, outcome);
+                collected(vec![Part::FetchingCalendar(calendar)]);
             }
         }
-
-        // **Every layer is current before the standing is read**, and for the
-        // gym that is the whole of #361: deriving a stream deletes its rows,
-        // and a standing read inside that window once told the operator he had
-        // lost every week.
-        self.derive(scope, progress, run).await
+        Ok(run)
     }
 
     /// Fetch the walks of one catalogue entry that are in `scope`, if it is
@@ -1585,78 +1644,143 @@ where
     ///
     /// **A layer that failed records nothing**, so the next run derives it
     /// again rather than passing it over as current.
+    ///
+    /// **Each as soon as what it reads has been fetched** (#830), as the graph
+    /// says: a layer the graph does not know waits for every fetch.
     async fn derive(
         &self,
         scope: &Scope,
+        fetched: &Fetched,
+        progress: &(impl Progress + Sync),
+    ) -> Result<Vec<Done>, NextError> {
+        let mut pending: Vec<Part> = self
+            .ports
+            .normalised
+            .streams()
+            .into_iter()
+            .map(Part::Normalising)
+            .chain(CANONICAL.map(Part::Canonicalising))
+            .filter(|part| scope.has(part))
+            .collect();
+        let mut run = Vec::new();
+        let mut seen = 0;
+        while !pending.is_empty() {
+            let Some(at) = pending
+                .iter()
+                .position(|part| self.ready(part, scope, &pending, fetched))
+            else {
+                seen = fetched.changed(seen).await;
+                continue;
+            };
+            let part = pending.remove(at);
+            match &part {
+                Part::Normalising(stream) => {
+                    self.normalise(stream.clone(), progress, &mut run).await?;
+                }
+                Part::Canonicalising(layer) => {
+                    self.canonicalise(*layer, progress, &mut run).await?;
+                }
+                Part::Fetching(_) | Part::FetchingCalendar(_) | Part::Delivering => {}
+            }
+            progress.collected(&[part]);
+        }
+        Ok(run)
+    }
+
+    /// Whether the layer `part` derives reads nothing still to be fetched or
+    /// derived in this run.
+    fn ready(&self, part: &Part, scope: &Scope, pending: &[Part], fetched: &Fetched) -> bool {
+        let node = match part {
+            Part::Normalising(stream) => Node::Normalised(stream.clone()),
+            Part::Canonicalising(layer) => Node::Canonical(*layer),
+            Part::Fetching(_) | Part::FetchingCalendar(_) | Part::Delivering => return true,
+        };
+        if self.ports.graph.reads(&node).is_none() {
+            return fetched.all_ended();
+        }
+        self.ports
+            .graph
+            .parts(&Reads::of([node]))
+            .iter()
+            .filter(|read| *read != part && scope.has(read))
+            .all(|read| match read {
+                Part::Normalising(_) | Part::Canonicalising(_) => !pending.contains(read),
+                Part::Fetching(_) | Part::FetchingCalendar(_) | Part::Delivering => {
+                    fetched.ended(read)
+                }
+            })
+    }
+
+    /// Bring one stream's normalised layer current.
+    async fn normalise(
+        &self,
+        stream: LandingStream,
         progress: &(impl Progress + Sync),
         run: &mut Vec<Done>,
     ) -> Result<(), NextError> {
         let ledger = &self.ports.ledger;
-        for stream in self.ports.normalised.streams() {
-            if !scope.has(&Part::Normalising(stream.clone())) {
-                continue;
+        let started = start(progress, Step::Normalising(stream.clone()));
+        let inputs = self.ports.normalised.inputs(&stream).await?;
+        let outcome = if ledger.normalised(&stream).await?.as_ref() == Some(&inputs) {
+            Ok(Found::Unchanged)
+        } else {
+            match self.ports.normalised.normalise(&stream).await {
+                Ok(summary) => {
+                    ledger.record_normalised(summary.run_id, &inputs).await?;
+                    Ok(Found::Written(summary.workouts_written))
+                }
+                Err(error) => Err(StepFailure::Normalisation(error)),
             }
-            let started = start(progress, Step::Normalising(stream.clone()));
-            let inputs = self.ports.normalised.inputs(&stream).await?;
-            let outcome = if ledger.normalised(&stream).await?.as_ref() == Some(&inputs) {
-                Ok(Found::Unchanged)
+        };
+        finish(progress, run, started, outcome);
+        Ok(())
+    }
+
+    /// Bring one canonical layer current.
+    async fn canonicalise(
+        &self,
+        layer: CanonicalLayer,
+        progress: &(impl Progress + Sync),
+        run: &mut Vec<Done>,
+    ) -> Result<(), NextError> {
+        let ledger = &self.ports.ledger;
+        let step = match layer {
+            CanonicalLayer::Gym => Step::Canonicalising(Discipline::Gym),
+            CanonicalLayer::Cycling => Step::Canonicalising(Discipline::Cycling),
+            CanonicalLayer::WeighIns => Step::CanonicalisingWeighIns,
+        };
+        let started = start(progress, step);
+        let inputs = self.ports.canonical.inputs(layer).await?;
+        let derived = ledger.canonical(layer).await?;
+        let found = if derived.as_ref() == Some(&inputs) {
+            Found::Unchanged
+        } else {
+            // A layer derived whole once rebuilds only what changed since
+            // (#610); one never derived, or emptied by a stream re-derived
+            // whole, is built whole.
+            let rederivation = if derived.is_some() {
+                Rederivation::Incremental
             } else {
-                match self.ports.normalised.normalise(&stream).await {
-                    Ok(summary) => {
-                        ledger.record_normalised(summary.run_id, &inputs).await?;
-                        Ok(Found::Written(summary.workouts_written))
+                Rederivation::Whole
+            };
+            let canonical = &self.ports.canonical;
+            let found = match layer {
+                CanonicalLayer::Gym => Found::Canonical(canonical.gym(rederivation).await?.written),
+                CanonicalLayer::Cycling => {
+                    Found::Canonical(canonical.cycling(rederivation).await?.written)
+                }
+                CanonicalLayer::WeighIns => {
+                    let canonicalised = canonical.weigh_ins(rederivation).await?;
+                    Found::CanonicalWeighIns {
+                        written: canonicalised.written,
+                        left_out: canonicalised.left_out,
                     }
-                    Err(error) => Err(StepFailure::Normalisation(error)),
                 }
             };
-            finish(progress, run, started, outcome);
-        }
-
-        for layer in CANONICAL {
-            if !scope.has(&Part::Canonicalising(layer)) {
-                continue;
-            }
-            let step = match layer {
-                CanonicalLayer::Gym => Step::Canonicalising(Discipline::Gym),
-                CanonicalLayer::Cycling => Step::Canonicalising(Discipline::Cycling),
-                CanonicalLayer::WeighIns => Step::CanonicalisingWeighIns,
-            };
-            let started = start(progress, step);
-            let inputs = self.ports.canonical.inputs(layer).await?;
-            let derived = ledger.canonical(layer).await?;
-            let found = if derived.as_ref() == Some(&inputs) {
-                Found::Unchanged
-            } else {
-                // A layer derived whole once rebuilds only what changed since
-                // (#610); one never derived, or emptied by a stream re-derived
-                // whole, is built whole.
-                let rederivation = if derived.is_some() {
-                    Rederivation::Incremental
-                } else {
-                    Rederivation::Whole
-                };
-                let canonical = &self.ports.canonical;
-                let found = match layer {
-                    CanonicalLayer::Gym => {
-                        Found::Canonical(canonical.gym(rederivation).await?.written)
-                    }
-                    CanonicalLayer::Cycling => {
-                        Found::Canonical(canonical.cycling(rederivation).await?.written)
-                    }
-                    CanonicalLayer::WeighIns => {
-                        let canonicalised = canonical.weigh_ins(rederivation).await?;
-                        Found::CanonicalWeighIns {
-                            written: canonicalised.written,
-                            left_out: canonicalised.left_out,
-                        }
-                    }
-                };
-                ledger.record_canonical(layer, &inputs).await?;
-                found
-            };
-            finish(progress, run, started, Ok(found));
-        }
-
+            ledger.record_canonical(layer, &inputs).await?;
+            found
+        };
+        finish(progress, run, started, Ok(found));
         Ok(())
     }
 
@@ -1963,6 +2087,98 @@ const CANONICAL: [CanonicalLayer; 3] = [
     CanonicalLayer::WeighIns,
 ];
 
+/// The parts fetching `records` took in `scope`: its entry and each of its
+/// walks.
+///
+/// **Every walk from its source where there is no access**, whose walks are
+/// not known: none of them was fetched, and none will be this run.
+fn walked<W: Walks>(records: &Records<W>, scope: &Scope) -> Vec<Part> {
+    let walks: Vec<Part> = records.walks.as_ref().map_or_else(
+        |_| {
+            scope
+                .parts()
+                .iter()
+                .filter(|part| {
+                    matches!(part, Part::Fetching(stream) if stream.source() == records.entry.source())
+                })
+                .cloned()
+                .collect()
+        },
+        |walks| {
+            (0..walks.count())
+                .filter_map(|at| walks.stream(at))
+                .map(|stream| Part::Fetching(stream.clone()))
+                .collect()
+        },
+    );
+    std::iter::once(Part::Fetching(records.entry.clone()))
+        .chain(walks)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// What a run has fetched so far, which its derivations wait on (#830).
+#[derive(Default)]
+struct Fetched(Mutex<Fetching>);
+
+#[derive(Default)]
+struct Fetching {
+    ended: BTreeSet<Part>,
+    /// Every fetch has ended, whether it is named in `ended` or not.
+    closed: bool,
+    /// How many times this has changed, so a wait knows it has.
+    changes: u64,
+    waiting: Option<Waker>,
+}
+
+impl Fetched {
+    fn changing(&self, change: impl FnOnce(&mut Fetching)) {
+        let waiting = {
+            let mut fetching = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+            change(&mut fetching);
+            fetching.changes += 1;
+            fetching.waiting.take()
+        };
+        if let Some(waiting) = waiting {
+            waiting.wake();
+        }
+    }
+
+    /// These parts have been fetched.
+    fn end(&self, parts: impl IntoIterator<Item = Part>) {
+        self.changing(|fetching| fetching.ended.extend(parts));
+    }
+
+    /// Every fetch has ended.
+    fn close(&self) {
+        self.changing(|fetching| fetching.closed = true);
+    }
+
+    fn ended(&self, part: &Part) -> bool {
+        let fetching = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        fetching.closed || fetching.ended.contains(part)
+    }
+
+    fn all_ended(&self) -> bool {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).closed
+    }
+
+    /// Once anything has changed since `seen` changes, how many there now are.
+    async fn changed(&self, seen: u64) -> u64 {
+        poll_fn(|context| {
+            let mut fetching = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+            if fetching.changes == seen && !fetching.closed {
+                fetching.waiting = Some(context.waker().clone());
+                Poll::Pending
+            } else {
+                Poll::Ready(fetching.changes)
+            }
+        })
+        .await
+    }
+}
+
 /// A step that has started, and when.
 struct Started {
     step: Step,
@@ -1992,6 +2208,32 @@ fn finish(
     };
     progress.finished(&done);
     run.push(done);
+}
+
+/// Two futures run at once on the caller's task, and both outcomes.
+async fn both<A: Future, B: Future>(a: A, b: B) -> (A::Output, B::Output) {
+    let (mut a, mut b) = (pin!(a), pin!(b));
+    let (mut first, mut second) = (None, None);
+    poll_fn(|context| {
+        if first.is_none()
+            && let Poll::Ready(output) = a.as_mut().poll(context)
+        {
+            first = Some(output);
+        }
+        if second.is_none()
+            && let Poll::Ready(output) = b.as_mut().poll(context)
+        {
+            second = Some(output);
+        }
+        match (first.take(), second.take()) {
+            (Some(a), Some(b)) => Poll::Ready((a, b)),
+            (a, b) => {
+                (first, second) = (a, b);
+                Poll::Pending
+            }
+        }
+    })
+    .await
 }
 
 /// Four futures run at once on the caller's task, and all four outcomes.

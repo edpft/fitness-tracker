@@ -24,6 +24,7 @@ use application::{
     canonicalise::{Canonicalised, WeighInsCanonicalised},
     commit::{CommitError, Due},
     cycling::RidingError,
+    graph::{Derivation, Node, Reads},
     microcycle::{Session, Standing},
     next::{
         Awaits, Canonicalising, CyclingPrescribed, CyclingSessions, Daily, Done, Expects, Found,
@@ -733,7 +734,16 @@ impl Heard {
         }
     }
 
+    /// Each step's start and end.
     fn events(&self) -> Vec<String> {
+        self.everything()
+            .into_iter()
+            .filter(|event| !event.starts_with("collected "))
+            .collect()
+    }
+
+    /// Each step's start and end, and each part as it is collected.
+    fn everything(&self) -> Vec<String> {
         self.0.lock().map(|heard| heard.clone()).unwrap_or_default()
     }
 }
@@ -749,6 +759,10 @@ impl Progress for Heard {
 
     fn finished(&self, done: &Done) {
         self.push(format!("finished {:?}", done.step));
+    }
+
+    fn collected(&self, parts: &[Part]) {
+        self.push(format!("collected {parts:?}"));
     }
 }
 
@@ -890,6 +904,7 @@ fn over<H>(
         fetches: Fetches::default(),
         zone: OperatorZone::try_from("Europe/London")?,
         refetch: Refetch::WhenDue,
+        graph: application::graph::Graph::default(),
     })
 }
 
@@ -1624,6 +1639,95 @@ fn the_streams_are_fetched_at_once() {
         .map(|done| done.outcome == Ok(Found::Landed(RecordCount::from(1))))
         .collect();
     assert_eq!(fetched, vec![true, true, true, true, true]);
+}
+
+/// **A layer is derived as soon as what it reads has been fetched** (#830):
+/// the weigh-ins are normalised and canonical while the watch's activities
+/// are still being fetched, and the gym's canonical layer, which reads them,
+/// waits for them.
+#[test]
+fn a_layer_is_derived_while_what_it_does_not_read_is_still_fetched() {
+    let mut ports = ports(
+        Recorded::week().expect("a week"),
+        Week(vec![
+            SessionState::ToBePrescribed,
+            SessionState::ToBePrescribed,
+        ]),
+        Committer(None),
+    )
+    .expect("the ports build");
+    let landing = |name: &str| Node::Landing(stream(name).expect("a stream"));
+    let normalised = |name: &str| Node::Normalised(stream(name).expect("a stream"));
+    ports.graph = application::graph::Graph::of(
+        STREAMS
+            .iter()
+            .map(|name| Derivation {
+                node: normalised(name),
+                reads: Reads::of([landing(name)]),
+            })
+            .chain([
+                Derivation {
+                    node: Node::Canonical(CanonicalLayer::WeighIns),
+                    reads: Reads::of([normalised("withings.measurements")]),
+                },
+                Derivation {
+                    node: Node::Canonical(CanonicalLayer::Gym),
+                    reads: Reads::of([
+                        normalised("hevy.workouts"),
+                        normalised("garmin.activities"),
+                    ]),
+                },
+            ]),
+    );
+    // Met by nobody, so it waits until it gives up: the slow source.
+    ports.watch_records.walks = Ok(Walking(
+        vec![(
+            stream("garmin.activities").expect("a stream"),
+            Ok(landed(1)),
+        )],
+        Some(Arc::new(AtomicUsize::new(0))),
+        Vec::new(),
+    ));
+    let heard = Heard::default();
+    runtime()
+        .expect("a current-thread runtime builds")
+        .block_on(Next::new(ports).run(now(), None, IfGoing::Refuse, &heard))
+        .expect("the run answers");
+
+    let events = heard.everything();
+    let at = |event: &str, step: Step| {
+        let event = if event == "collected" {
+            let Step::Normalising(stream) = step else {
+                panic!("only a layer is asked after here");
+            };
+            format!("collected {:?}", [Part::Normalising(stream)])
+        } else {
+            format!("{event} {step:?}")
+        };
+        events
+            .iter()
+            .position(|heard| *heard == event)
+            .unwrap_or_else(|| panic!("{event} not in {events:#?}"))
+    };
+    let of = |name: &str| stream(name).expect("a stream");
+    let watch = at("finished", Step::Fetching(of("garmin.activities")));
+    assert!(
+        at("finished", Step::Normalising(of("withings.measurements"))) < watch,
+        "{events:#?}"
+    );
+    assert!(
+        at("collected", Step::Normalising(of("withings.measurements"))) < watch,
+        "it is said to be collected as it is: {events:#?}"
+    );
+    assert!(
+        at("finished", Step::CanonicalisingWeighIns) < watch,
+        "{events:#?}"
+    );
+    assert!(
+        at("started", Step::Canonicalising(Discipline::Gym))
+            > at("finished", Step::Normalising(of("garmin.activities"))),
+        "{events:#?}"
+    );
 }
 
 /// The watch's steps of a run whose day walks are whole through `whole`.

@@ -16,6 +16,7 @@ use std::{
     sync::{Arc, Mutex, PoisonError},
 };
 
+use application::Part;
 use application::next::NextError;
 use application::next::{Done, Progress, Scope, Step};
 use configurator::{
@@ -60,6 +61,12 @@ pub struct View {
     /// and not every view: a run that starts and ends between two of them
     /// would leave a flag where it found it.
     ended: u64,
+    /// The parts this server's runs have collected since none was going, in
+    /// order (#830).
+    collected: Vec<Part>,
+    /// How many parts runs before those collected, so a page knows which it
+    /// has been told of: a count, as `ended` is.
+    collected_before: u64,
 }
 
 /// One step: named as it starts, with its outcome once it ends.
@@ -118,6 +125,41 @@ impl View {
 
     pub const fn ended(&self) -> u64 {
         self.ended
+    }
+
+    /// How many parts runs have collected since the server started.
+    pub const fn collected(&self) -> u64 {
+        self.collected_before + self.collected.len() as u64
+    }
+
+    /// The parts collected after the first `since`.
+    fn collected_since(&self, since: u64) -> &[Part] {
+        let skip =
+            usize::try_from(since.saturating_sub(self.collected_before)).unwrap_or(usize::MAX);
+        self.collected.get(skip..).unwrap_or_default()
+    }
+}
+
+/// Whether a card's data is being collected, and by whom (#830).
+#[derive(Debug, PartialEq, Eq)]
+pub enum Waiting {
+    /// Nothing is collecting what it reads.
+    No,
+    /// This server's runs are, and these parts of it are still to come: each
+    /// is sent to every open page as it is collected.
+    Here(Vec<Part>),
+    /// A run started from the terminal is, which sends this server nothing.
+    Elsewhere,
+}
+
+/// The name of the event a page is sent as `part` is collected.
+pub fn event(part: &Part) -> String {
+    match part {
+        Part::Fetching(stream) => format!("fetched-{stream}"),
+        Part::Normalising(stream) => format!("normalised-{stream}"),
+        Part::Canonicalising(layer) => format!("canonical-{}", layer.as_str()),
+        Part::FetchingCalendar(calendar) => format!("calendar-{}", calendar.as_str()),
+        Part::Delivering => "delivered".to_owned(),
     }
 }
 
@@ -211,6 +253,48 @@ impl Runs {
         here || configurator::next::collecting(&self.setting.store, scope).unwrap_or(false)
     }
 
+    /// Whether a run is collecting anything `scope` reads, as a card waits on
+    /// it (#830).
+    ///
+    /// **This server's runs part by part**, so a card is drawn as soon as
+    /// what it reads is collected, while the run collects the rest. **The
+    /// store's locks for the parts none of them covers**, since a run this
+    /// server started holds them for the whole of it.
+    pub fn waiting(&self, scope: &Scope) -> Waiting {
+        let (here, elsewhere): (Vec<&Part>, Vec<&Part>) = {
+            let going = self.going.lock().unwrap_or_else(PoisonError::into_inner);
+            scope.parts().iter().partition(|part| {
+                going.iter().any(|run| match run {
+                    Asked::Everything => true,
+                    Asked::Only(going) => going.has(part),
+                })
+            })
+        };
+        let view = self.view.borrow();
+        let still: Vec<Part> = here
+            .into_iter()
+            .filter(|part| !view.collected.contains(part))
+            .cloned()
+            .collect();
+        if !still.is_empty() {
+            return Waiting::Here(still);
+        }
+        let elsewhere = Scope::new(elsewhere.into_iter().cloned());
+        if !elsewhere.parts().is_empty()
+            && configurator::next::collecting(&self.setting.store, &elsewhere).unwrap_or(false)
+        {
+            Waiting::Elsewhere
+        } else {
+            Waiting::No
+        }
+    }
+
+    /// `parts` collected, as though this server's run had collected them.
+    #[cfg(test)]
+    pub fn collect(&self, parts: &[Part]) {
+        Following(&self.view).collected(parts);
+    }
+
     /// A run going over `asked`, as though this server had started one.
     #[cfg(test)]
     pub fn going_over(&self, asked: Asked) {
@@ -284,10 +368,14 @@ impl Runs {
             // **The steps shown are this server's runs since none was going**,
             // so a run started beside another adds to what the page shows.
             if going.is_empty() {
-                let ended = self.view.borrow().ended;
+                let (ended, collected_before) = {
+                    let view = self.view.borrow();
+                    (view.ended, view.collected())
+                };
                 self.view.send_replace(View {
                     going: true,
                     ended,
+                    collected_before,
                     ..View::default()
                 });
             }
@@ -405,6 +493,21 @@ impl Runs {
     }
 }
 
+/// What a page drawn from the store is sent of a change to the run: an event
+/// for each part collected since `collected`, then the step as
+/// [`step_event`] names it.
+pub fn page_events(since: &mut u64, collected: &mut u64, view: &View) -> Vec<(String, String)> {
+    let mut events: Vec<(String, String)> = view
+        .collected_since(*collected)
+        .iter()
+        .map(|part| (event(part), String::new()))
+        .collect();
+    *collected = view.collected();
+    let (name, shown) = step_event(since, view);
+    events.push((name.to_owned(), shown.into_string()));
+    events
+}
+
 /// What a page drawn from the store is sent of a change to the run: `ended`
 /// the first time it sees a run has ended since `since`, so it redraws once
 /// for each, and `step` otherwise.
@@ -449,6 +552,13 @@ impl Progress for Following<'_> {
     /// only which one the run is on.
     fn estimated(&self, _step: &Step, _outstanding: u64, _takes: std::time::Duration) {}
 
+    fn collected(&self, parts: &[Part]) {
+        if !parts.is_empty() {
+            self.0
+                .send_modify(|view| view.collected.extend(parts.iter().cloned()));
+        }
+    }
+
     fn finished(&self, done: &Done) {
         self.0.send_modify(|view| {
             match view
@@ -479,7 +589,7 @@ mod tests {
     use domain::{landing::LandingStream, normalised::OperatorZone};
     use tokio::sync::watch;
 
-    use super::{Asked, Following, Runs, Setting, View, step_event};
+    use super::{Asked, Following, Runs, Setting, View, Waiting, page_events, step_event};
 
     fn only(streams: &[&str]) -> Asked {
         Asked::Only(Scope::new(streams.iter().map(|stream| {
@@ -630,6 +740,88 @@ mod tests {
         let runs = fresh();
         runs.going_over(Asked::Everything);
         assert!(runs.collecting(&hrv), "the whole of next");
+    }
+
+    /// **A card waits only on the parts still to be collected** (#830): while
+    /// the whole of `next` goes, the weigh-ins stop waiting once they are
+    /// normalised, and the watch's HRV still waits.
+    #[test]
+    fn a_card_waits_only_on_what_is_still_to_be_collected() {
+        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let runs = Runs::new(Setting {
+            store: runtime
+                .block_on(configurator::store::Store::open(
+                    &directory.path().join("fitness.db"),
+                ))
+                .expect("the store"),
+            zone: OperatorZone::try_from("Europe/London").expect("a zone"),
+            credentials: None,
+            build: None,
+        });
+        let normalising =
+            |name: &str| Part::Normalising(LandingStream::try_from(name).expect("a stream"));
+        let Asked::Only(weight) = only(&["withings.measurements"]) else {
+            panic!("a chart's scope");
+        };
+        let Asked::Only(hrv) = only(&["garmin.hrv"]) else {
+            panic!("a chart's scope");
+        };
+
+        assert_eq!(runs.waiting(&weight), Waiting::No, "nothing is going");
+        runs.going_over(Asked::Everything);
+        assert_eq!(
+            runs.waiting(&weight),
+            Waiting::Here(vec![normalising("withings.measurements")])
+        );
+
+        runs.collect(&[normalising("withings.measurements")]);
+        assert_eq!(runs.waiting(&weight), Waiting::No);
+        assert_eq!(
+            runs.waiting(&hrv),
+            Waiting::Here(vec![normalising("garmin.hrv")])
+        );
+    }
+
+    /// **Every open page is sent each part once**, as it is collected,
+    /// whichever change to the run it came with, and none it was drawn after.
+    #[test]
+    fn each_page_is_sent_each_part_collected_once() {
+        let view = watch::Sender::new(View {
+            going: true,
+            collected_before: 3,
+            ..View::default()
+        });
+        let withings =
+            Part::Normalising(LandingStream::try_from("withings.measurements").expect("a stream"));
+        let hrv = Part::Normalising(LandingStream::try_from("garmin.hrv").expect("a stream"));
+        let named = |events: Vec<(String, String)>| -> Vec<String> {
+            events.into_iter().map(|(name, _)| name).collect()
+        };
+        // One page drawn before anything was collected, one after the first.
+        let (mut first, mut second) = ((0, 3), (0, 4));
+
+        Following(&view).collected(std::slice::from_ref(&withings));
+        Following(&view).collected(std::slice::from_ref(&hrv));
+        assert_eq!(
+            named(page_events(&mut first.0, &mut first.1, &view.borrow())),
+            [
+                "normalised-withings.measurements",
+                "normalised-garmin.hrv",
+                "step"
+            ]
+        );
+        assert_eq!(
+            named(page_events(&mut second.0, &mut second.1, &view.borrow())),
+            ["normalised-garmin.hrv", "step"]
+        );
+        assert_eq!(
+            named(page_events(&mut first.0, &mut first.1, &view.borrow())),
+            ["step"]
+        );
     }
 
     /// **A run covers what it collects and nothing more**: the whole of
