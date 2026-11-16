@@ -28,61 +28,166 @@ use domain::analytical::{
     range::{Over, Range, Ranges},
 };
 use jiff::civil::Date;
-use maud::{DOCTYPE, Markup, html};
+use maud::{Markup, html};
+use std::sync::Arc;
+
+use configurator::{
+    analyses::{FtpTests, Plans, TestHeartRates},
+    held::Of,
+};
 
 use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Reading};
 
 pub const PATH: &str = "/ftp";
 const TITLE: &str = "FTP tests";
 
-/// The page: the summary, then the charts over the range chosen.
-pub fn page(tests: &[Test], heart_rates: &[TestHeartRate], ranges: &Ranges, over: Over) -> Markup {
+/// The days the cards are drawn over, or what to say instead.
+fn range(tests: &[Test], ranges: &Ranges, over: Over) -> Result<Range, Markup> {
+    let recorded = Range::spanning(tests.iter().map(Test::on));
+    crate::range::chosen(ranges, over, recorded, "No FTP test has been recorded.")
+}
+
+/// The summary, which is the latest whatever the range; or why there is no
+/// range, which leaves every other card empty.
+fn summary_card(tests: &[Test], ranges: &Ranges, over: Over) -> Markup {
+    match range(tests, ranges, over) {
+        Ok(range) => summary(tests, range.to),
+        Err(said) => said,
+    }
+}
+
+/// The tests over the range chosen, in watts or per kilo.
+fn tests_card(tests: &[Test], ranges: &Ranges, over: Over) -> Markup {
+    let Ok(range) = range(tests, ranges, over) else {
+        return html! {};
+    };
+    let today = range.to;
+    let shown = within(tests, range);
+    detail::choice(
+        "ftp",
+        Metric::Ftp,
+        "FTP",
+        &[
+            ("W", chart(&shown, range, today, Unit::Watts)),
+            ("W/kg", chart(&shown, range, today, Unit::PerKilo)),
+        ],
+    )
+}
+
+/// The heart rate each test over the range chosen was ridden at.
+fn heart_rate_card(
+    tests: &[Test],
+    heart_rates: &[TestHeartRate],
+    ranges: &Ranges,
+    over: Over,
+) -> Markup {
+    let Ok(range) = range(tests, ranges, over) else {
+        return html! {};
+    };
+    heart_rate(heart_rates, range, range.to)
+}
+
+/// The latest tests, and what the dots are.
+fn latest_card(tests: &[Test], ranges: &Ranges, over: Over) -> Markup {
+    let Ok(range) = range(tests, ranges, over) else {
+        return html! {};
+    };
+    html! {
+        (latest(tests, range.to))
+        (detail::foot("Dots: each FTP test; per kilo over that day's weigh-in. A change is clear beyond the noise of two tests, about 8% of the earlier (a 20-minute test repeats to 2.9%, Borszcz et al. 2020), against the test before or else the first test since the last clear change. Higher is better."))
+    }
+}
+
+/// The page: its cards, under the range chosen.
+fn laid_out(over: Over, cards: &[Markup]) -> Markup {
     detail::page(
         PATH,
         TITLE,
         Some(over),
-        &body(tests, heart_rates, ranges, over),
+        &html! { @for card in cards { (card) } },
     )
 }
 
-/// The page when the store could not be read.
-pub fn unreadable(error: &str) -> Markup {
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head { (crate::page::head(TITLE, &[])) }
-            body {
-                main {
-                    (crate::page::bar(PATH))
-                    p.failed { "the store could not be read: " (error) }
-                }
-            }
-        }
-    }
+/// The whole page over `over`, each card drawn from the same reads, as a
+/// load draws it.
+#[cfg(test)]
+pub fn page(tests: &[Test], heart_rates: &[TestHeartRate], ranges: &Ranges, over: Over) -> Markup {
+    laid_out(
+        over,
+        &[
+            summary_card(tests, ranges, over),
+            tests_card(tests, ranges, over),
+            heart_rate_card(tests, heart_rates, ranges, over),
+            latest_card(tests, ranges, over),
+        ],
+    )
 }
 
-/// The summary, the chart over the range chosen and the latest tests, or why
-/// there is no range.
-fn body(tests: &[Test], heart_rates: &[TestHeartRate], ranges: &Ranges, over: Over) -> Markup {
-    let recorded = Range::spanning(tests.iter().map(Test::on));
-    let range = match crate::range::chosen(ranges, over, recorded, "No FTP test has been recorded.")
-    {
-        Ok(range) => range,
-        Err(said) => return said,
-    };
-    let today = range.to;
-    let shown = within(tests, range);
-    html! {
-        (summary(tests, today))
-        (detail::choice("ftp", Metric::Ftp, "FTP", &[
-            ("W", chart(&shown, range, today, Unit::Watts)),
-            ("W/kg", chart(&shown, range, today, Unit::PerKilo)),
-        ]))
-        (heart_rate(heart_rates, range, today))
-        (latest(tests, today))
-        (detail::foot(
-            "Dots: each FTP test; per kilo over that day's weigh-in. A change is clear beyond the noise of two tests, about 8% of the earlier (a 20-minute test repeats to 2.9%, Borszcz et al. 2020), against the test before or else the first test since the last clear change. Higher is better."
-        ))
+crate::card::ranged_card!(
+    /// The latest test.
+    Summary,
+    "ftp-summary",
+    configurator::analyses::FtpTests,
+    summary_card,
+    over = crate::drawn::tests_over
+);
+crate::card::ranged_card!(
+    /// Every test, in watts or per kilo.
+    TestsChart,
+    "ftp-tests",
+    configurator::analyses::FtpTests,
+    tests_card,
+    over = crate::drawn::tests_over
+);
+crate::card::ranged_card!(
+    /// The latest tests.
+    Latest,
+    "ftp-latest",
+    configurator::analyses::FtpTests,
+    latest_card,
+    over = crate::drawn::tests_over
+);
+
+/// The heart rate each test was ridden at (#548): over the tests' range, so
+/// it reads the tests as well.
+pub struct HeartRates {
+    over: Over,
+}
+
+impl crate::card::Card for HeartRates {
+    const NAME: &'static str = "ftp-heart-rates";
+    type Reads = (
+        Of<FtpTests>,
+        Of<TestHeartRates>,
+        Of<Plans>,
+        configurator::clock::Today,
+    );
+
+    fn asked(query: &std::collections::HashMap<String, String>) -> Self {
+        Self {
+            over: crate::drawn::tests_over(query),
+        }
+    }
+
+    fn over(&self) -> Option<Over> {
+        Some(self.over)
+    }
+
+    fn render(
+        &self,
+        (tests, heart_rates, plans, today): (
+            Arc<Vec<Test>>,
+            Arc<Vec<TestHeartRate>>,
+            Arc<configurator::rescheduling::Plans>,
+            Date,
+        ),
+    ) -> Markup {
+        heart_rate_card(
+            &tests,
+            &heart_rates,
+            &application::ranges::of(today, plans.now()),
+            self.over,
+        )
     }
 }
 
@@ -374,13 +479,9 @@ pub struct Page {
     over: Over,
 }
 
-impl crate::drawn::Drawn for Page {
+impl crate::card::Page for Page {
     const ROUTE: &'static str = PATH;
-    type Read = (Vec<Test>, Vec<TestHeartRate>, Ranges);
-
-    fn reads() -> application::graph::Reads {
-        configurator::ftp_tests::reads()
-    }
+    type Cards = (Summary, TestsChart, HeartRates, Latest);
 
     fn asked(
         _path: &axum::extract::RawPathParams,
@@ -391,32 +492,12 @@ impl crate::drawn::Drawn for Page {
         })
     }
 
-    fn here(&self) -> String {
-        PATH.to_owned()
-    }
-
     fn over(&self) -> Option<Over> {
         Some(self.over)
     }
 
-    async fn read(
-        &self,
-        store: &configurator::store::Store,
-        zone: &domain::normalised::OperatorZone,
-    ) -> Result<Self::Read, crate::drawn::Unreadable> {
-        let page = configurator::ftp_tests::Page::open(store, zone).await?;
-        Ok((
-            page.tests().await?,
-            page.heart_rates().await?,
-            page.ranges().await?,
-        ))
-    }
-
-    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
-        match read {
-            Ok((tests, heart_rates, ranges)) => page(&tests, &heart_rates, &ranges, self.over),
-            Err(error) => unreadable(error.as_str()),
-        }
+    fn layout(&self, cards: [Markup; 4]) -> Markup {
+        laid_out(self.over, &cards)
     }
 }
 

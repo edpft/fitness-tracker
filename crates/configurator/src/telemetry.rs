@@ -264,6 +264,33 @@ pub fn rendering<T>(render: impl FnOnce() -> T) -> T {
     drawing("rendering").in_scope(render)
 }
 
+/// Deriving an analysis that is not held as it now stands (#830): the reads
+/// it makes are its children, so a slow one says what it read.
+pub(crate) fn deriving(analysis: application::graph::Analysis) -> Span {
+    let span = drawing("deriving");
+    span.record("read", analysis.as_str());
+    span
+}
+
+/// Showing the card `name` on a page load, as a `step` under it (#830): how
+/// it was served, and its derivations, reads and drawing as its children.
+pub fn card(name: &'static str) -> Span {
+    tracing::info_span!(
+        "step",
+        step = "card",
+        read = name,
+        served = Empty,
+        same = Empty
+    )
+}
+
+/// Drawing the card `card`, from what it read (#830).
+pub fn drawing_card<T>(card: &str, draw: impl FnOnce() -> T) -> T {
+    let span = drawing("rendering");
+    span.record("read", card);
+    span.in_scope(draw)
+}
+
 /// What a page reads through, which it can read only as a [`Reading`] (#804):
 /// so each read is a span, because there is no other way to make one.
 #[derive(Clone)]

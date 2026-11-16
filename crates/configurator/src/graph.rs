@@ -205,6 +205,7 @@ fn derivations() -> impl Iterator<Item = Derivation> {
     .into_iter()
     .flatten()
     .chain(Canonical::derivations())
+    .chain(crate::analyses::derivations())
 }
 
 /// Every derivation this build makes.
@@ -242,6 +243,18 @@ mod tests {
     use domain::landing::LandingStream;
 
     use crate::{catalogue, wiring};
+
+    /// **Every analysis is a derivation in the graph** (#830), so a card
+    /// reading one collects, and is drawn again with, what it is derived from.
+    #[test]
+    fn every_analysis_is_in_the_graph() {
+        for analysis in application::graph::Analysis::ALL {
+            assert!(
+                super::graph().reads(&Node::Analysis(analysis)).is_some(),
+                "{analysis:?} is not in the graph"
+            );
+        }
+    }
 
     /// **Every stream `next` derives is a derivation in the graph**, so a
     /// page reading it collects what it is derived from.

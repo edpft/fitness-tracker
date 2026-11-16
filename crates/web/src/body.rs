@@ -11,15 +11,24 @@
 //! them. Each expectation resets at every mesocycle's start. Beneath both,
 //! the weigh-ins, each its weight, fat and fat-free mass.
 
+use std::{collections::HashMap, sync::Arc};
+
+use configurator::{
+    analyses::{BodyWeight, Composition, Plans},
+    clock::Today,
+    held::Of,
+    rescheduling,
+};
 use domain::analytical::{
     body_weight::{Aim, METHOD, Series},
     composition::{ComponentSeries, TREND},
     confidence::BAND,
     range::{Over, Range, Ranges},
 };
-use maud::{DOCTYPE, Markup, html};
+use jiff::civil::Date;
+use maud::{Markup, html};
 
-use crate::{composition, detail, page::Group, weight};
+use crate::{card::Card, composition, detail, page::Group, weight};
 
 pub const PATH: &str = "/body";
 
@@ -29,7 +38,160 @@ pub const TITLE: &str = Group::Body.heading();
 /// The pages this one replaced, which now open it.
 pub const REPLACED: [&str; 2] = ["/body-weight", "/body-composition"];
 
-/// The whole page, over the range chosen.
+/// What every card on the page reads: the weigh-ins and the composition,
+/// whose recorded days together are the range each is drawn over, and the
+/// plans the aims and the ranges are drawn from.
+type Reads = (Of<BodyWeight>, Of<Composition>, Of<Plans>, Today);
+
+type Read = (
+    Arc<Series>,
+    Arc<Vec<ComponentSeries>>,
+    Arc<rescheduling::Plans>,
+    Date,
+);
+
+/// What the page's cards are drawn from, over a range.
+pub struct Body<'a> {
+    pub series: &'a Series,
+    pub components: &'a [ComponentSeries],
+    pub aims: &'a [Aim],
+    pub ranges: &'a Ranges,
+    pub over: Over,
+}
+
+impl Body<'_> {
+    /// Draw `card` from `read`, over `over`.
+    fn drawn(read: &Read, over: Over, card: impl FnOnce(&Body<'_>) -> Markup) -> Markup {
+        let (series, components, plans, today) = read;
+        let aims = application::body_weight::aims_on(*today, plans.now(), plans.holidays());
+        let ranges = application::ranges::of(*today, plans.now());
+        card(&Body {
+            series,
+            components,
+            aims: &aims,
+            ranges: &ranges,
+            over,
+        })
+    }
+
+    /// The days the cards are drawn over, or what to say instead.
+    fn range(&self) -> Result<Range, Markup> {
+        let recorded = Range::spanning(
+            [
+                weight::recorded(self.series),
+                composition::recorded(self.components),
+            ]
+            .into_iter()
+            .flatten()
+            .flat_map(|range| [range.from, range.to]),
+        );
+        crate::range::chosen(
+            self.ranges,
+            self.over,
+            recorded,
+            "Nothing has been recorded.",
+        )
+    }
+
+    /// Body weight's summary: its trend, on the latest day.
+    pub fn weight_summary(&self) -> Markup {
+        let Ok(range) = self.range() else {
+            return html! {};
+        };
+        weight::cell(self.series).map_or_else(
+            || html! {},
+            |(cell, on)| {
+                detail::summary(&[cell], &format!("Trend on {}", detail::day(on, range.to)))
+            },
+        )
+    }
+
+    /// Body weight's charts, against where the aims would have taken it.
+    pub fn weight_charts(&self) -> Markup {
+        match self.range() {
+            Ok(range) if weight::recorded(self.series).is_some() => weight::charts(
+                self.series,
+                self.aims,
+                self.ranges.macrocycle.map(|cycle| cycle.from),
+                range,
+            ),
+            _ => html! {},
+        }
+    }
+
+    /// Body composition's summary: each component, by the latest method.
+    pub fn composition_summary(&self) -> Markup {
+        let Ok(range) = self.range() else {
+            return html! {};
+        };
+        let (cells, asof) = composition::summary(self.components, range.to);
+        if cells.is_empty() {
+            return html! {};
+        }
+        detail::summary(&cells, &asof.join("; "))
+    }
+
+    /// Fat and fat-free mass, against what the aims expect of them.
+    pub fn composition_charts(&self) -> Markup {
+        match self.range() {
+            Ok(range) if composition::recorded(self.components).is_some() => composition::charts(
+                self.components,
+                self.aims,
+                self.ranges.macrocycle.map(|cycle| cycle.from),
+                range,
+            ),
+            _ => html! {},
+        }
+    }
+
+    /// The latest weigh-ins, and what the dots, lines and bands are; or why
+    /// there is no range, which leaves every other card empty.
+    pub fn weigh_ins(&self) -> Markup {
+        match self.range() {
+            Ok(range) => html! {
+                (weight::latest(self.series, range.to))
+                (detail::foot(&foot(self.series, self.components, range)))
+            },
+            Err(said) => said,
+        }
+    }
+}
+
+/// The page: each section under its heading, then the weigh-ins.
+///
+/// **A heading over nothing is not shown**: a section none of whose cards
+/// drew anything is hidden by the stylesheet.
+fn laid_out(over: Over, cards: [Markup; 5]) -> Markup {
+    let [
+        weighed,
+        weight_charts,
+        measured,
+        composition_charts,
+        weigh_ins,
+    ] = cards;
+    detail::page(
+        PATH,
+        TITLE,
+        Some(over),
+        &html! {
+            div.cards {
+                h2.group { "Body weight" }
+                (weighed)
+                (weight_charts)
+            }
+            div.cards {
+                h2.group { "Body composition" }
+                (measured)
+                (composition_charts)
+            }
+            (weigh_ins)
+        },
+    )
+}
+
+/// The whole page over `over`, each card drawn from the same reads, as a
+/// load draws it.
+#[cfg(test)]
 pub fn page(
     series: &Series,
     aims: &[Aim],
@@ -37,70 +199,23 @@ pub fn page(
     ranges: &Ranges,
     over: Over,
 ) -> Markup {
-    detail::page(
-        PATH,
-        TITLE,
-        Some(over),
-        &body(series, aims, components, ranges, over),
-    )
-}
-
-/// The page when the store could not be read.
-pub fn unreadable(error: &str) -> Markup {
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head { (crate::page::head(TITLE, &[])) }
-            body {
-                main {
-                    (crate::page::bar(PATH))
-                    p.failed { "the store could not be read: " (error) }
-                }
-            }
-        }
-    }
-}
-
-/// The summary, the charts over the range chosen and the latest weigh-ins, or
-/// why there is no range.
-fn body(
-    series: &Series,
-    aims: &[Aim],
-    components: &[ComponentSeries],
-    ranges: &Ranges,
-    over: Over,
-) -> Markup {
-    let recorded = Range::spanning(
-        [weight::recorded(series), composition::recorded(components)]
-            .into_iter()
-            .flatten()
-            .flat_map(|range| [range.from, range.to]),
-    );
-    let range = match crate::range::chosen(ranges, over, recorded, "Nothing has been recorded.") {
-        Ok(range) => range,
-        Err(said) => return said,
+    let body = Body {
+        series,
+        components,
+        aims,
+        ranges,
+        over,
     };
-    let today = range.to;
-    let began = ranges.macrocycle.map(|cycle| cycle.from);
-    let weighed = weight::cell(series).map(|(cell, on)| {
-        detail::summary(&[cell], &format!("Trend on {}", detail::day(on, today)))
-    });
-    let (cells, asof) = composition::summary(components, today);
-    let measured = (!cells.is_empty()).then(|| detail::summary(&cells, &asof.join("; ")));
-    html! {
-        @if weight::recorded(series).is_some() {
-            h2.group { "Body weight" }
-            @if let Some(summary) = weighed { (summary) }
-            (weight::charts(series, aims, began, range))
-        }
-        @if composition::recorded(components).is_some() {
-            h2.group { "Body composition" }
-            @if let Some(summary) = measured { (summary) }
-            (composition::charts(components, aims, began, range))
-        }
-        (weight::latest(series, today))
-        (detail::foot(&foot(series, components, range)))
-    }
+    laid_out(
+        over,
+        [
+            body.weight_summary(),
+            body.weight_charts(),
+            body.composition_summary(),
+            body.composition_charts(),
+            body.weigh_ins(),
+        ],
+    )
 }
 
 /// What the dots, lines and bands are, for what the page draws.
@@ -126,54 +241,96 @@ fn foot(series: &Series, components: &[ComponentSeries], range: Range) -> String
     format!("{}.", said.join(". "))
 }
 
+macro_rules! body_card {
+    ($(#[$meta:meta])* $card:ident, $name:literal, $draw:ident) => {
+        $(#[$meta])*
+        pub struct $card {
+            over: Over,
+        }
+
+        impl Card for $card {
+            const NAME: &'static str = $name;
+            type Reads = Reads;
+
+            fn asked(query: &HashMap<String, String>) -> Self {
+                Self {
+                    over: crate::drawn::over(query),
+                }
+            }
+
+            fn over(&self) -> Option<Over> {
+                Some(self.over)
+            }
+
+            fn render(&self, read: Read) -> Markup {
+                Body::drawn(&read, self.over, |body| body.$draw())
+            }
+        }
+    };
+}
+
+body_card!(
+    /// Body weight's summary.
+    WeightSummary,
+    "body-weight-summary",
+    weight_summary
+);
+body_card!(
+    /// Body weight's charts.
+    WeightCharts,
+    "body-weight-charts",
+    weight_charts
+);
+body_card!(
+    /// Body composition's summary.
+    CompositionSummary,
+    "body-composition-summary",
+    composition_summary
+);
+body_card!(
+    /// Fat and fat-free mass.
+    CompositionCharts,
+    "body-composition-charts",
+    composition_charts
+);
+body_card!(
+    /// The latest weigh-ins.
+    WeighIns,
+    "body-weigh-ins",
+    weigh_ins
+);
+
 /// Body weight and body composition over a range (#786).
 #[derive(Debug)]
 pub struct Page {
     over: Over,
 }
 
-impl crate::drawn::Drawn for Page {
+impl crate::card::Page for Page {
     const ROUTE: &'static str = PATH;
-    type Read = (Series, Vec<Aim>, Vec<ComponentSeries>, Ranges);
-
-    fn reads() -> application::graph::Reads {
-        configurator::body::reads()
-    }
+    type Cards = (
+        WeightSummary,
+        WeightCharts,
+        CompositionSummary,
+        CompositionCharts,
+        WeighIns,
+    );
 
     fn asked(
         _path: &axum::extract::RawPathParams,
-        query: &std::collections::HashMap<String, String>,
+        query: &HashMap<String, String>,
     ) -> Result<Self, axum::response::Redirect> {
         Ok(Self {
             over: crate::drawn::over(query),
         })
     }
 
-    fn here(&self) -> String {
-        PATH.to_owned()
-    }
-
     fn over(&self) -> Option<Over> {
         Some(self.over)
     }
 
-    async fn read(
-        &self,
-        store: &configurator::store::Store,
-        zone: &domain::normalised::OperatorZone,
-    ) -> Result<Self::Read, crate::drawn::Unreadable> {
-        let page = configurator::body::Page::open(store, zone).await?;
-        let (aims, ranges) = page.aims_and_ranges().await?;
-        Ok((page.series().await?, aims, page.by_method().await?, ranges))
-    }
-
-    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
-        match read {
-            Ok((series, aims, components, ranges)) => {
-                page(&series, &aims, &components, &ranges, self.over)
-            }
-            Err(error) => unreadable(error.as_str()),
-        }
+    fn layout(&self, cards: [Markup; 5]) -> Markup {
+        laid_out(self.over, cards)
     }
 }
 

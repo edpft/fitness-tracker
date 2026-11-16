@@ -86,12 +86,6 @@ impl<E: std::fmt::Display> From<E> for Unreadable {
     }
 }
 
-impl Unreadable {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
 /// The router, taking a page only as [`Drawn`], so a page cannot be served
 /// that is not served its kept drawing (#805).
 ///
@@ -100,6 +94,7 @@ impl Unreadable {
 pub struct Pages {
     router: Router<Arc<Runs>>,
     reads: Vec<(&'static str, Reads)>,
+    cards: std::collections::BTreeMap<&'static str, Reads>,
 }
 
 impl Pages {
@@ -107,7 +102,30 @@ impl Pages {
         Self {
             router: Router::new(),
             reads: Vec::new(),
+            cards: std::collections::BTreeMap::new(),
         }
+    }
+
+    /// `P`, drawn as its cards (#830), and each card asked for alone.
+    pub fn cards<P: crate::card::Page>(mut self) -> Self {
+        self.router = self.router.route(P::ROUTE, get(crate::card::page::<P>));
+        self.reads.push((P::ROUTE, crate::card::reads::<P>()));
+        <P::Cards as crate::card::Cards>::routed(self)
+    }
+
+    /// `C`, asked for alone: routed once, however many pages show it.
+    pub fn card<C: crate::card::Card>(mut self) -> Self {
+        if self
+            .cards
+            .insert(C::NAME, <C::Reads as application::graph::Input>::reads())
+            .is_none()
+        {
+            self.router = self.router.route(
+                &format!("{}{}", crate::card::CARDS, C::NAME),
+                get(crate::card::card::<C>),
+            );
+        }
+        self
     }
 
     /// `P`, served its kept drawing while nothing it reads has moved.
@@ -140,6 +158,12 @@ impl Pages {
     #[cfg(test)]
     pub fn reads(&self) -> &[(&'static str, Reads)] {
         &self.reads
+    }
+
+    /// Each card routed, by its name, and what it reads.
+    #[cfg(test)]
+    pub const fn cards_read(&self) -> &std::collections::BTreeMap<&'static str, Reads> {
+        &self.cards
     }
 
     pub fn with_state(self, runs: Arc<Runs>) -> Router {

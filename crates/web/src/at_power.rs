@@ -18,58 +18,104 @@ use domain::analytical::{
     resting::{Change, Day},
 };
 use jiff::civil::Date;
-use maud::{DOCTYPE, Markup, html};
+use maud::{Markup, html};
 
 use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced};
 
 pub const PATH: &str = "/heart-rate";
 pub const TITLE: &str = "Heart rate per power zone";
 
-/// The page: the summary, then the chart over the range chosen.
-pub fn page(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
-    detail::page(PATH, TITLE, Some(over), &body(trended, ranges, over))
-}
-
-/// The page when the store could not be read.
-pub fn unreadable(error: &str) -> Markup {
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head { (crate::page::head(TITLE, &[])) }
-            body {
-                main {
-                    (crate::page::bar(PATH))
-                    p.failed { "the store could not be read: " (error) }
-                }
-            }
-        }
-    }
-}
-
 /// The summary, the chart over the range chosen and the latest rides, or why
 /// there is no range.
-fn body(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
+/// The days the cards are drawn over, or what to say instead.
+fn range(trended: &[Trended], ranges: &Ranges, over: Over) -> Result<Range, Markup> {
     let recorded = Range::spanning(trended.iter().flat_map(|one| {
         one.rides
             .iter()
             .map(|ride| ride.on)
             .chain(one.constant.iter().copied())
     }));
-    let range = match crate::range::chosen(ranges, over, recorded, "Nothing has been recorded.") {
-        Ok(range) => range,
-        Err(said) => return said,
+    crate::range::chosen(ranges, over, recorded, "Nothing has been recorded.")
+}
+
+/// The summary, which is the latest whatever the range; or why there is no
+/// range, which leaves every other card empty.
+fn summary_card(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
+    match range(trended, ranges, over) {
+        Ok(range) => summary(trended, range.to),
+        Err(said) => said,
+    }
+}
+
+/// Rides, over the range chosen.
+fn rides_card(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
+    let Ok(range) = range(trended, ranges, over) else {
+        return html! {};
     };
     let today = range.to;
     let within: Vec<Trended> = trended.iter().map(|one| one.within(range)).collect();
+    detail::chart(&chart(&within, range, today))
+}
+
+/// The latest readings, and what the dots, lines and bands are.
+fn latest_card(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
+    let Ok(range) = range(trended, ranges, over) else {
+        return html! {};
+    };
+    let today = range.to;
     html! {
-        (summary(trended, today))
-        (detail::chart(&chart(&within, range, today)))
         (latest(trended, today))
         (detail::foot(&format!(
             "Dots: each ride's {METHOD}. Line: each device's {LINE}. Band: 95%."
         )))
     }
 }
+
+/// The page: its cards, under the range chosen.
+fn laid_out(over: Over, cards: &[Markup]) -> Markup {
+    detail::page(
+        PATH,
+        TITLE,
+        Some(over),
+        &html! { @for card in cards { (card) } },
+    )
+}
+
+/// The whole page over `over`, each card drawn from the same reads, as a
+/// load draws it.
+#[cfg(test)]
+pub fn page(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
+    laid_out(
+        over,
+        &[
+            summary_card(trended, ranges, over),
+            rides_card(trended, ranges, over),
+            latest_card(trended, ranges, over),
+        ],
+    )
+}
+
+crate::card::ranged_card!(
+    /// The summary.
+    Summary,
+    "heart-rate-summary",
+    configurator::analyses::HeartRateAtPower,
+    summary_card, over = crate::drawn::tests_over
+);
+crate::card::ranged_card!(
+    /// Rides.
+    RidesChart,
+    "heart-rate-rides",
+    configurator::analyses::HeartRateAtPower,
+    rides_card, over = crate::drawn::tests_over
+);
+crate::card::ranged_card!(
+    /// The latest readings.
+    Latest,
+    "heart-rate-latest",
+    configurator::analyses::HeartRateAtPower,
+    latest_card, over = crate::drawn::tests_over
+);
 
 /// The device whose latest ride is the latest, the line on that ride, and its
 /// change on the 42 days before.
@@ -253,13 +299,9 @@ pub struct Page {
     over: Over,
 }
 
-impl crate::drawn::Drawn for Page {
+impl crate::card::Page for Page {
     const ROUTE: &'static str = PATH;
-    type Read = (Vec<domain::analytical::heart_rate::RideHeartRate>, Ranges);
-
-    fn reads() -> application::graph::Reads {
-        configurator::heart_rate::reads()
-    }
+    type Cards = (Summary, RidesChart, Latest);
 
     fn asked(
         _path: &axum::extract::RawPathParams,
@@ -270,32 +312,12 @@ impl crate::drawn::Drawn for Page {
         })
     }
 
-    fn here(&self) -> String {
-        PATH.to_owned()
-    }
-
     fn over(&self) -> Option<Over> {
         Some(self.over)
     }
 
-    async fn read(
-        &self,
-        store: &configurator::store::Store,
-        zone: &domain::normalised::OperatorZone,
-    ) -> Result<Self::Read, crate::drawn::Unreadable> {
-        let page = configurator::heart_rate::Page::open(store, zone).await?;
-        Ok((page.rides().await?, page.ranges().await?))
-    }
-
-    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
-        match read {
-            Ok((rides, ranges)) => page(
-                &domain::analytical::heart_rate_at_power::trended(&rides),
-                &ranges,
-                self.over,
-            ),
-            Err(error) => unreadable(error.as_str()),
-        }
+    fn layout(&self, cards: [Markup; 3]) -> Markup {
+        laid_out(self.over, &cards)
     }
 }
 

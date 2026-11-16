@@ -8,6 +8,7 @@
 
 mod at_power;
 mod body;
+mod card;
 mod collected;
 mod composition;
 mod curves;
@@ -189,16 +190,16 @@ fn pages() -> Pages {
     Pages::new()
         .live("/", get(index))
         .page::<plan::Page>()
-        .page::<at_power::Page>()
-        .page::<ftp::Page>()
-        .page::<body::Page>()
-        .page::<pulse_wave_velocity::Page>()
-        .page::<hrv::Page>()
-        .page::<resting::Page>()
-        .page::<sleep::Page>()
-        .page::<one_rep_max::Page>()
-        .page::<working::Page>()
-        .page::<progress::Page>()
+        .cards::<at_power::Page>()
+        .cards::<ftp::Page>()
+        .cards::<body::Page>()
+        .cards::<pulse_wave_velocity::Page>()
+        .cards::<hrv::Page>()
+        .cards::<resting::Page>()
+        .cards::<sleep::Page>()
+        .cards::<one_rep_max::Page>()
+        .cards::<working::Page>()
+        .cards::<progress::Page>()
         .page::<history::Page>()
         .page::<history::Opened>()
         .file(body::REPLACED[0], get(to_body))
@@ -585,6 +586,50 @@ mod tests {
                 .collect();
             assert!(unversioned.is_empty(), "{route} reads {unversioned:?}");
         }
+    }
+
+    /// **A weigh-in redraws the cards that read body weight, on every page
+    /// they appear on, and no other card** (#830): each card is drawn again
+    /// only when a node upstream of what it reads has moved, and a weigh-in
+    /// moves Withings's normalised layer and everything derived from it.
+    ///
+    /// Body weight is read further than its own cards: the FTP tests are per
+    /// kilo, the 1RM estimates are over body weight, and pulse wave velocity is
+    /// a part of the Body Scan's weigh-in.
+    #[test]
+    fn a_weigh_in_redraws_only_the_cards_reading_body_weight() {
+        let graph = configurator::graph::graph();
+        let weighed = application::graph::Node::Normalised(
+            domain::landing::LandingStream::try_from("withings.measurements").expect("a stream"),
+        );
+        let redrawn: Vec<&str> = super::pages()
+            .cards_read()
+            .iter()
+            .filter(|(_, reads)| graph.upstream(reads).contains(&weighed))
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(
+            redrawn,
+            [
+                "body-composition-charts",
+                "body-composition-summary",
+                "body-weigh-ins",
+                "body-weight-charts",
+                "body-weight-summary",
+                "ftp-heart-rates",
+                "ftp-latest",
+                "ftp-summary",
+                "ftp-tests",
+                "one-rep-max-lifts",
+                "progress-body",
+                "progress-cycling",
+                "progress-gym",
+                "pulse-wave-velocity-latest",
+                "pulse-wave-velocity-readings",
+                "pulse-wave-velocity-summary",
+                "working-so-far",
+            ]
+        );
     }
 
     /// A span as it was opened: its name, the fields that say what it is,

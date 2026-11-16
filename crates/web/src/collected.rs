@@ -23,16 +23,17 @@ struct Row {
 /// What the chart page at `path` collects, `None` for a page that is not a
 /// chart.
 fn chart(path: &str) -> Option<Scope> {
+    use crate::card::{reads, scope};
     Some(match path {
-        "/working" => configurator::working::collects(),
-        "/heart-rate" => configurator::heart_rate::collects(),
-        "/ftp" => configurator::ftp_tests::collects(),
-        crate::body::PATH => configurator::body::collects(),
-        "/resting-heart-rate" => configurator::per_device::resting_heart_rate_collects(),
-        "/hrv" => configurator::per_device::overnight_hrv_collects(),
-        "/pulse-wave-velocity" => configurator::pulse_wave_velocity::collects(),
-        "/sleep" => configurator::sleep::collects(),
-        "/estimated-1rm" => configurator::one_rep_max::collects(),
+        crate::working::PATH => scope(&reads::<crate::working::Page>()),
+        crate::at_power::PATH => scope(&reads::<crate::at_power::Page>()),
+        crate::ftp::PATH => scope(&reads::<crate::ftp::Page>()),
+        crate::body::PATH => scope(&reads::<crate::body::Page>()),
+        crate::resting::PATH => scope(&reads::<crate::resting::Page>()),
+        crate::hrv::PATH => scope(&reads::<crate::hrv::Page>()),
+        crate::pulse_wave_velocity::PATH => scope(&reads::<crate::pulse_wave_velocity::Page>()),
+        crate::sleep::PATH => scope(&reads::<crate::sleep::Page>()),
+        crate::one_rep_max::PATH => scope(&reads::<crate::one_rep_max::Page>()),
         _ => return None,
     })
 }

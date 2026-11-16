@@ -51,28 +51,39 @@ use crate::{
     ports::{OvernightHrvHistory, RestingHeartRateHistory, StressHistory, TrainingDone},
 };
 
-/// What the page says on a day.
-#[derive(Debug, Clone, PartialEq)]
-pub struct View {
-    /// The day it was read through.
-    pub today: Date,
-    /// `None` on a day no plan is in force.
-    pub macrocycle: Option<Macrocycle>,
-}
-
-/// The macrocycle in force, so far.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Macrocycle {
+/// The macrocycle in force on a day, as every card measured against it reads
+/// it: when it began and the days of its mesocycles (#830).
+///
+/// **The macrocycle is the plan in force**, as the pages' ranges read it
+/// (#443), and its start is the plan's first day whatever was performed in its
+/// first weeks (operator, 2026-11-11).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Frame {
     /// Its intended start: the first day of the plan.
     pub began: Date,
     /// The days of each of its mesocycles, oldest first.
     pub mesocycles: Vec<Span>,
     /// The first day of the macrocycle before it, where there was one.
     pub last_began: Option<Date>,
-    /// Each test with its estimate: FTP first, then each lift.
-    pub performance: Vec<Performance>,
-    pub body: Body,
-    pub responses: Vec<Responding>,
+}
+
+impl Frame {
+    /// The macrocycle in force on `today` among `plans`, the plans as they
+    /// now stand; `None` on a day no plan is in force.
+    #[must_use]
+    pub fn on(today: Date, plans: &[Plan]) -> Option<Self> {
+        let plan = plans.iter().find(|plan| plan.span().covers(today))?;
+        let began = plan.span().start();
+        Some(Self {
+            began,
+            mesocycles: plan.mesocycle_spans(),
+            last_began: plans
+                .iter()
+                .map(|plan| plan.span().start())
+                .filter(|start| *start < began)
+                .max(),
+        })
+    }
 }
 
 /// Body weight and body composition, read together (#769).
@@ -114,22 +125,6 @@ pub struct Performance {
     /// test, each since the start; `None` where its line has too few days in
     /// the macrocycle.
     pub estimated: Option<SinceStart>,
-}
-
-/// What the other pages' use cases have already read, which Progress reads
-/// beside the response readings.
-pub struct Readings<'a> {
-    /// Every FTP test.
-    pub ftp: &'a [ftp_test::Test],
-    /// Every lift's 1RM tests.
-    pub strength: &'a [Tests],
-    /// Each lift's estimated 1RM over the macrocycle in force.
-    pub estimated: &'a [Lift],
-    /// Heart rate at 140 W, one series per device.
-    pub at_power: &'a [heart_rate_at_power::Trended],
-    pub weight: &'a Series,
-    pub aims: &'a [Aim],
-    pub composition: &'a [ComponentSeries],
 }
 
 /// A reading that answers training.
@@ -176,39 +171,21 @@ where
         }
     }
 
-    /// The macrocycle in force on `today`, read through `today`.
+    /// Resting heart rate, overnight HRV and stress over the macrocycle that
+    /// `began`, read through `today`, each against the training done: what
+    /// the response readings say (#830).
     ///
-    /// `plans` are the plans as they now stand, `register` says which device
-    /// sent each reading, and `readings` is what the other pages' use cases
-    /// read: each is read once for the page (#817).
-    ///
-    /// **The macrocycle is the plan in force**, as the pages' ranges read it
-    /// (#443), and its start is the plan's first day whatever was performed
-    /// in its first weeks (operator, 2026-11-11).
+    /// `register` says which device sent each reading.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if any store is unavailable.
-    pub async fn view(
+    pub async fn responses(
         &self,
+        began: Date,
         today: Date,
-        plans: &[Plan],
         register: &Register,
-        readings: &Readings<'_>,
-    ) -> Result<View, StoreError> {
-        let Some(plan) = plans.iter().find(|plan| plan.span().covers(today)) else {
-            return Ok(View {
-                today,
-                macrocycle: None,
-            });
-        };
-        let began = plan.span().start();
-        let last_began = plans
-            .iter()
-            .map(|plan| plan.span().start())
-            .filter(|start| *start < began)
-            .max();
-
+    ) -> Result<Vec<Responding>, StoreError> {
         let carried = Carried::through(&self.training.sessions().await?, today);
         let read = |reading: Answering, series: Option<(SentBy, BTreeMap<Date, f64>)>| {
             let (sent_by, days) = series.unzip();
@@ -247,39 +224,57 @@ where
             today,
         )
         .map(|series| (series.sent_by, stress::whole_days(&series.readings)));
-
-        Ok(View {
-            today,
-            macrocycle: Some(Macrocycle {
-                began,
-                mesocycles: plan.mesocycle_spans(),
-                last_began,
-                performance: performance(readings, began, today),
-                body: Body {
-                    weight: against_aims(&readings.weight.trend, readings.aims, began, today),
-                    fat: composed(readings.composition, Component::Fat, began, today),
-                    fat_free: composed(readings.composition, Component::FatFree, began, today),
-                },
-                responses: vec![
-                    read(Answering::RestingHeartRate, resting),
-                    read(Answering::OvernightHrv, hrv),
-                    read(Answering::Stress, stress),
-                ],
-            }),
-        })
+        Ok(vec![
+            read(Answering::RestingHeartRate, resting),
+            read(Answering::OvernightHrv, hrv),
+            read(Answering::Stress, stress),
+        ])
     }
 }
 
-/// Each test's reading over the macrocycle that `began` on a day, with its
-/// estimate: the FTP test, then each lift's 1RM test.
-fn performance(read: &Readings<'_>, began: Date, today: Date) -> Vec<Performance> {
-    let watts: Vec<(Date, u32)> = read
-        .ftp
+/// Body weight against the plan's aims, then fat and fat-free mass, over the
+/// macrocycle that `began`, through `today`.
+#[must_use]
+pub fn body(
+    weight: &Series,
+    aims: &[Aim],
+    composition: &[ComponentSeries],
+    began: Date,
+    today: Date,
+) -> Body {
+    Body {
+        weight: against_aims(&weight.trend, aims, began, today),
+        fat: composed(composition, Component::Fat, began, today),
+        fat_free: composed(composition, Component::FatFree, began, today),
+    }
+}
+
+/// The FTP test's reading over the macrocycle that `began`, with heart rate
+/// at 140 W, one series per device, read beside it.
+#[must_use]
+pub fn cycling(
+    ftp: &[ftp_test::Test],
+    at_power: &[heart_rate_at_power::Trended],
+    began: Date,
+    today: Date,
+) -> Performance {
+    let watts: Vec<(Date, u32)> = ftp
         .iter()
         .map(|test| (test.on(), test.ftp.watts().as_u32()))
         .collect();
-    let estimated = |lift: RepsExercise| {
-        let trend = &read.estimated.iter().find(|one| one.lift == lift)?.absolute;
+    Performance {
+        tested: Tested::Ftp,
+        since: since_entry(&watts, began, today, ftp_test::noise),
+        estimated: self::at_power(at_power, began, today),
+    }
+}
+
+/// Each lift's 1RM test over the macrocycle that `began`, with its estimate
+/// read beside it, and each lift estimated but never tested.
+#[must_use]
+pub fn gym(strength: &[Tests], estimated: &[Lift], began: Date, today: Date) -> Vec<Performance> {
+    let estimate = |lift: RepsExercise| {
+        let trend = &estimated.iter().find(|one| one.lift == lift)?.absolute;
         let change = trend.change?;
         let now = trend.now()?;
         Some(SinceStart {
@@ -288,28 +283,20 @@ fn performance(read: &Readings<'_>, began: Date, today: Date) -> Vec<Performance
             margin: Some(change.margin),
         })
     };
-    let lifts = read.strength.iter().map(|lift| Performance {
+    let lifts = strength.iter().map(|lift| Performance {
         tested: Tested::OneRepMax(lift.lift),
         since: since_entry(&lift.tests, began, today, one_rep_max::noise),
-        estimated: estimated(lift.lift),
+        estimated: estimate(lift.lift),
     });
-    let estimated_only = read
-        .estimated
+    let estimated_only = estimated
         .iter()
-        .filter(|one| !read.strength.iter().any(|tests| tests.lift == one.lift))
+        .filter(|one| !strength.iter().any(|tests| tests.lift == one.lift))
         .map(|one| Performance {
             tested: Tested::OneRepMax(one.lift),
             since: None,
-            estimated: estimated(one.lift),
+            estimated: estimate(one.lift),
         });
-    std::iter::once(Performance {
-        tested: Tested::Ftp,
-        since: since_entry(&watts, began, today, ftp_test::noise),
-        estimated: at_power(read.at_power, began, today),
-    })
-    .chain(lifts)
-    .chain(estimated_only)
-    .collect()
+    lifts.chain(estimated_only).collect()
 }
 
 /// Heart rate at 140 W since the start, on the line of the device that rode

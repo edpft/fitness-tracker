@@ -21,57 +21,103 @@ use domain::analytical::{
     resting::Change,
 };
 use jiff::civil::Date;
-use maud::{DOCTYPE, Markup, html};
+use maud::{Markup, html};
 
 use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced};
 
 pub const PATH: &str = "/pulse-wave-velocity";
 const TITLE: &str = "Pulse wave velocity";
 
-/// The page: the summary, then the chart over the range chosen.
-pub fn page(series: &[Series], ranges: &Ranges, over: Over) -> Markup {
-    detail::page(PATH, TITLE, Some(over), &body(series, ranges, over))
-}
-
-/// The page when the store could not be read.
-pub fn unreadable(error: &str) -> Markup {
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head { (crate::page::head(TITLE, &[])) }
-            body {
-                main {
-                    (crate::page::bar(PATH))
-                    p.failed { "the store could not be read: " (error) }
-                }
-            }
-        }
-    }
-}
-
 /// The summary, the chart over the range chosen and the latest readings, or
 /// why there is no range.
-fn body(series: &[Series], ranges: &Ranges, over: Over) -> Markup {
+/// The days the cards are drawn over, or what to say instead.
+fn range(series: &[Series], ranges: &Ranges, over: Over) -> Result<Range, Markup> {
     let recorded = Range::spanning(
         series
             .iter()
             .flat_map(|one| one.readings.iter().map(|reading| reading.on)),
     );
-    let range = match crate::range::chosen(ranges, over, recorded, "Nothing has been recorded.") {
-        Ok(range) => range,
-        Err(said) => return said,
+    crate::range::chosen(ranges, over, recorded, "Nothing has been recorded.")
+}
+
+/// The summary, which is the latest whatever the range; or why there is no
+/// range, which leaves every other card empty.
+fn summary_card(series: &[Series], ranges: &Ranges, over: Over) -> Markup {
+    match range(series, ranges, over) {
+        Ok(range) => summary(series, range.to),
+        Err(said) => said,
+    }
+}
+
+/// Readings, over the range chosen.
+fn readings_card(series: &[Series], ranges: &Ranges, over: Over) -> Markup {
+    let Ok(range) = range(series, ranges, over) else {
+        return html! {};
     };
     let today = range.to;
     let within: Vec<Series> = series.iter().map(|one| one.within(range)).collect();
+    detail::chart(&chart(series, &within, range, today))
+}
+
+/// The latest readings, and what the dots, lines and bands are.
+fn latest_card(series: &[Series], ranges: &Ranges, over: Over) -> Markup {
+    let Ok(range) = range(series, ranges, over) else {
+        return html! {};
+    };
+    let today = range.to;
     html! {
-        (summary(series, today))
-        (detail::chart(&chart(series, &within, range, today)))
         (latest(series, today))
         (detail::foot(&format!(
             "Dots: each Body Scan reading. Line: each algorithm's {METHOD}. Band: 95%. Lower is better. Whether the scale follows one person's change has not been tested."
         )))
     }
 }
+
+/// The page: its cards, under the range chosen.
+fn laid_out(over: Over, cards: &[Markup]) -> Markup {
+    detail::page(
+        PATH,
+        TITLE,
+        Some(over),
+        &html! { @for card in cards { (card) } },
+    )
+}
+
+/// The whole page over `over`, each card drawn from the same reads, as a
+/// load draws it.
+#[cfg(test)]
+pub fn page(series: &[Series], ranges: &Ranges, over: Over) -> Markup {
+    laid_out(
+        over,
+        &[
+            summary_card(series, ranges, over),
+            readings_card(series, ranges, over),
+            latest_card(series, ranges, over),
+        ],
+    )
+}
+
+crate::card::ranged_card!(
+    /// The summary.
+    Summary,
+    "pulse-wave-velocity-summary",
+    configurator::analyses::PulseWaveVelocity,
+    summary_card
+);
+crate::card::ranged_card!(
+    /// Readings.
+    ReadingsChart,
+    "pulse-wave-velocity-readings",
+    configurator::analyses::PulseWaveVelocity,
+    readings_card
+);
+crate::card::ranged_card!(
+    /// The latest readings.
+    Latest,
+    "pulse-wave-velocity-latest",
+    configurator::analyses::PulseWaveVelocity,
+    latest_card
+);
 
 /// The latest line, its ±, and its change, read against its noise.
 fn summary(series: &[Series], today: Date) -> Markup {
@@ -230,13 +276,9 @@ pub struct Page {
     over: Over,
 }
 
-impl crate::drawn::Drawn for Page {
+impl crate::card::Page for Page {
     const ROUTE: &'static str = PATH;
-    type Read = (Vec<Series>, Ranges);
-
-    fn reads() -> application::graph::Reads {
-        configurator::pulse_wave_velocity::reads()
-    }
+    type Cards = (Summary, ReadingsChart, Latest);
 
     fn asked(
         _path: &axum::extract::RawPathParams,
@@ -247,28 +289,12 @@ impl crate::drawn::Drawn for Page {
         })
     }
 
-    fn here(&self) -> String {
-        PATH.to_owned()
-    }
-
     fn over(&self) -> Option<Over> {
         Some(self.over)
     }
 
-    async fn read(
-        &self,
-        store: &configurator::store::Store,
-        zone: &domain::normalised::OperatorZone,
-    ) -> Result<Self::Read, crate::drawn::Unreadable> {
-        let page = configurator::pulse_wave_velocity::Page::open(store, zone).await?;
-        Ok((page.by_algorithm().await?, page.ranges().await?))
-    }
-
-    fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
-        match read {
-            Ok((series, ranges)) => page(&series, &ranges, self.over),
-            Err(error) => unreadable(error.as_str()),
-        }
+    fn layout(&self, cards: [Markup; 3]) -> Markup {
+        laid_out(self.over, &cards)
     }
 }
 
