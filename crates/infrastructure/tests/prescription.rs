@@ -361,6 +361,28 @@ fn asking_twice_issues_once() {
     );
 }
 
+/// **Proposing a session issues nothing** (#830), which is what the home page
+/// shows of it: the run that follows still issues it, the same session, and
+/// once it has, the next proposal is that prescription.
+#[test]
+fn proposing_issues_nothing() {
+    let (prescriber, _directory) = prescriber!();
+
+    let proposed = run!(prescriber.propose(monday()));
+    assert_eq!(proposed.issued(), None, "nothing is in force yet");
+
+    let issued = run!(prescriber.prescribe(monday()));
+    assert_eq!(
+        issued.issuance,
+        Issuance::Issued,
+        "proposing wrote nothing, so the run issues it"
+    );
+    assert_eq!(proposed.workout().shape(), issued.workout.shape());
+
+    let again = run!(prescriber.propose(monday()));
+    assert_eq!(again.issued(), Some(issued.id));
+}
+
 /// § 38: the prescription reports how far the history it read reaches.
 #[test]
 fn the_prescription_reports_its_history_horizon() {

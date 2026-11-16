@@ -40,6 +40,10 @@ pub trait Card: Send + Sync + Sized + 'static {
     /// Its name, unique among cards: where it is asked for alone.
     const NAME: &'static str;
 
+    /// Whether it shows what a run delivers, and so waits on a run
+    /// delivering as it waits on what it reads.
+    const DELIVERED: bool = false;
+
     /// What it reads.
     type Reads: Fetch;
 
@@ -131,7 +135,18 @@ impl<'a> Showing<'a> {
     async fn shown<C: Card>(&self, card: &C) -> Markup {
         let address = card.address();
         let reads = <C::Reads as application::graph::Input>::reads();
-        let trigger = match self.runs.waiting(&scope(&reads)) {
+        let waits = if C::DELIVERED {
+            Scope::new(
+                scope(&reads)
+                    .parts()
+                    .iter()
+                    .cloned()
+                    .chain([application::Part::Delivering]),
+            )
+        } else {
+            scope(&reads)
+        };
+        let trigger = match self.runs.waiting(&waits) {
             Waiting::No => None,
             Waiting::Here(parts) => Some(
                 parts
@@ -311,6 +326,9 @@ pub trait Page: Send + Sync + Sized + 'static {
     /// Where it is routed.
     const ROUTE: &'static str;
 
+    /// Whether it says which step a run is on.
+    const FOLLOWS: bool = true;
+
     /// The cards it shows.
     type Cards: Cards;
 
@@ -324,6 +342,11 @@ pub trait Page: Send + Sync + Sized + 'static {
     /// The range it is read over, where it offers a choice of one.
     fn over(&self) -> Option<Over> {
         None
+    }
+
+    /// What opening it asks a run to collect: what its cards read.
+    fn run() -> Asked {
+        Asked::Only(scope(&reads::<Self>()))
     }
 
     /// The page, its cards laid out.
@@ -358,12 +381,12 @@ pub async fn page<P: Page>(
     }
     let redraw = headers.contains_key("hx-request");
     if !redraw {
-        runs.open(&Asked::Only(scope(&reads::<P>()))).await;
+        runs.open(&P::run()).await;
     }
     let view = runs.view();
     let showing = Showing::new(&runs, redraw);
     let shown = <P::Cards as Cards>::shown(&query, &showing).await;
-    crate::page::carded(&page.layout(shown).0, &view).into_response()
+    crate::page::carded(&page.layout(shown).0, &view, P::FOLLOWS).into_response()
 }
 
 /// `C` alone, as the request asks for it: what a card asking to be drawn

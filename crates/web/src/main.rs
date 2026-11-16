@@ -1,10 +1,10 @@
 //! The HTTP driving adapter: `next` from a browser (#398).
 //!
-//! Opening a page starts a run of `next` (#466); the front page follows the
-//! run's steps as they end, pushed as server-sent events, and ends on the
-//! report the terminal prints, and a chart redraws from the store when it ends. The use case comes from the
-//! configurator, so this crate requests, renders and interacts, and names no
-//! adapter.
+//! Opening a page starts a run of `next` (#466), and each page is its cards,
+//! each drawn again as what it reads moves (#830): the front page's from what
+//! is next and where the plan stands, which the run issues and delivers from.
+//! The use case comes from the configurator, so this crate requests, renders
+//! and interacts, and names no adapter.
 
 mod at_power;
 mod body;
@@ -17,6 +17,7 @@ mod drawn;
 mod equipment;
 mod ftp;
 mod history;
+mod home;
 mod hrv;
 mod input;
 mod one_rep_max;
@@ -47,7 +48,7 @@ use std::{
 use axum::{
     Form, Router,
     extract::{Query, RawQuery, Request, State},
-    http::{HeaderMap, header},
+    http::header,
     middleware::{self, Next},
     response::{
         IntoResponse, Redirect, Response,
@@ -62,7 +63,7 @@ use tracing::Instrument as _;
 
 use domain::planner::Relative;
 use drawn::Pages;
-use run::{Asked, Runs, Setting};
+use run::{Runs, Setting};
 
 fn main() -> std::process::ExitCode {
     // `clippy::exit` is `forbid`, so returning `ExitCode` is not a style
@@ -189,7 +190,7 @@ fn app(runs: Arc<Runs>) -> Router {
 /// Every page, each drawn page as its type (#805).
 fn pages() -> Pages {
     Pages::new()
-        .live("/", get(index))
+        .cards::<home::Page>()
         .page::<plan::Page>()
         .cards::<at_power::Page>()
         .cards::<ftp::Page>()
@@ -224,23 +225,6 @@ async fn recorded(request: Request, next: Next) -> Response {
     let response = next.run(request).instrument(span.clone()).await;
     configurator::telemetry::request_ended(&span, response.status().is_success());
     response
-}
-
-async fn index(State(runs): State<Arc<Runs>>, headers: HeaderMap) -> Markup {
-    page::index(&opened(&runs, &headers, Asked::Everything).await)
-}
-
-/// Start a run of what a page asks for as it is opened, or join one going
-/// that covers it, and say where it has got to.
-///
-/// **Not when htmx asks**, which is a page redrawing itself because a run
-/// ended: starting another would redraw it again when that one ended, for
-/// ever.
-async fn opened(runs: &Arc<Runs>, headers: &HeaderMap, asked: Asked) -> run::View {
-    if !headers.contains_key("hx-request") {
-        runs.open(&asked).await;
-    }
-    runs.view()
 }
 
 /// The equipment, read afresh from the store, with the last post if it was
@@ -704,6 +688,25 @@ mod tests {
                 "working-so-far",
             ]
         );
+    }
+
+    /// **A gym session made canonical redraws the home page's cards** (#830):
+    /// what is next and this microcycle are read from where the plan stands,
+    /// which the sessions performed move.
+    #[test]
+    fn a_canonical_gym_session_redraws_the_home_page() {
+        let graph = configurator::graph::graph();
+        let performed = application::graph::Node::Canonical(application::CanonicalLayer::Gym);
+        let cards = super::pages();
+        let redrawn: Vec<&str> = cards
+            .cards_read()
+            .iter()
+            .filter(|(name, reads)| {
+                name.starts_with("home-") && graph.upstream(reads).contains(&performed)
+            })
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(redrawn, ["home-curves", "home-microcycle", "home-next"]);
     }
 
     /// A span as it was opened: its name, the fields that say what it is,

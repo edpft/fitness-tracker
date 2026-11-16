@@ -110,6 +110,14 @@ impl Fetch for Today {
     }
 }
 
+impl Fetch for Now {
+    type Fetched = DayPart;
+
+    fn fetch<'a>(holding: &'a Holding<'a>) -> FetchFuture<'a, Self::Fetched> {
+        Box::pin(std::future::ready(Ok(holding.now)))
+    }
+}
+
 impl Fetch for () {
     type Fetched = ();
 
@@ -239,6 +247,37 @@ impl<'a> Holding<'a> {
         F::fetch(self).await
     }
 
+    /// `A`, as held where what it reads still stands, and `derive`'s
+    /// otherwise, which is then what is held (#830): a run handed what a page
+    /// derived, and a page what a run did.
+    async fn held_or<A: Analysed>(
+        &self,
+        derive: impl Future<Output = A::Value> + Send,
+    ) -> Arc<A::Value> {
+        let node = Node::Analysis(A::ANALYSIS);
+        let slot = self
+            .drawn_from(&Reads::of([node]))
+            .await
+            .map(|from| self.held.slot(A::ANALYSIS, from));
+        if let Some(value) = slot
+            .as_ref()
+            .and_then(|slot| slot.get())
+            .and_then(|value| Arc::clone(value).downcast::<A::Value>().ok())
+        {
+            return value;
+        }
+        let derived = Arc::new(
+            derive
+                .instrument(crate::telemetry::deriving(A::ANALYSIS))
+                .await,
+        );
+        if let Some(slot) = slot {
+            let held: Arc<dyn Any + Send + Sync> = Arc::clone(&derived) as _;
+            let _first = slot.set(held);
+        }
+        derived
+    }
+
     /// `A`, as held where what it reads still stands, and derived otherwise.
     async fn held<A: Analysed>(&self) -> Result<Arc<A::Value>, NextFailure> {
         let node = Node::Analysis(A::ANALYSIS);
@@ -264,5 +303,36 @@ impl<'a> Holding<'a> {
                 detail: format!("{} is held as another type", A::ANALYSIS.as_str()),
             })
         })
+    }
+}
+
+/// What is next as this server holds it, for a run to deliver (#830).
+pub struct HeldNext<'a>(Holding<'a>);
+
+impl<'a> HeldNext<'a> {
+    #[must_use]
+    pub const fn new(holding: Holding<'a>) -> Self {
+        Self(holding)
+    }
+}
+
+impl application::next::HeldUpcoming for HeldNext<'_> {
+    async fn held<F>(&self, derive: F) -> Arc<application::next::Upcoming>
+    where
+        F: Future<Output = application::next::Upcoming> + Send,
+    {
+        self.0
+            .held_or::<crate::analyses::Prescription>(derive)
+            .await
+    }
+}
+
+impl crate::next::Holds for HeldNext<'_> {
+    fn store(&self) -> &Store {
+        self.0.store
+    }
+
+    fn zone(&self) -> &OperatorZone {
+        self.0.zone
     }
 }

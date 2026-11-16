@@ -54,7 +54,9 @@ use domain::{
     plan::{MesocycleOrdinal, Plan, PlanName, Span},
     planner::{self, RerunOrdinal, SessionState},
     planner::{Discipline, ScheduledSlot},
-    prescription::{GymMesocycle, schedule::WeekKind, shape::SlotId},
+    prescription::{
+        DestinationName, GymMesocycle, SessionOrdinal, schedule::WeekKind, shape::SlotId,
+    },
     schedule::{DayPart, Diary, Holidays, Skip},
 };
 use jiff::civil::Date;
@@ -67,8 +69,7 @@ use crate::{
     NormalisedGymSessionReader, NormalisedWeighInReader, Part, PlanStore, PrescribedWorkoutStore,
     Prescription, PrescriptionDeliverer as _, PrescriptionDeliveryStore, PrescriptionDestination,
     PrescriptionError, PrescriptionLifecycle, ProgressionStore, RideDelivery, RideDestination,
-    RunLockError, RunSummary, SourceError, StoreError, Taken, WorkoutExtractor,
-    WorkoutPrescriber as _, WorkoutStore,
+    RunLockError, RunSummary, SourceError, StoreError, Taken, WorkoutExtractor, WorkoutStore,
     calendars::KeptCalendars,
     canonicalise::{Canonicalised, WeighInsCanonicalised},
     commit::{CommitError, Due},
@@ -80,7 +81,7 @@ use crate::{
         CanonicalLayer, DerivationLedger, DerivedFrom, NewestObservation, NormalisedLayers,
         Rederivation,
     },
-    prescribe::{NextSession, Prescribing, PrescriptionPorts},
+    prescribe::{NextSession, Prescribing, PrescriptionPorts, Proposal},
     reschedule::{Reschedule, Rescheduled, ReschedulingPlans},
 };
 
@@ -648,12 +649,55 @@ pub enum Prescribed {
     Cycling(Result<CyclingPrescribed, RidingError>),
 }
 
-/// What is next.
-#[derive(Debug)]
-pub enum WhatIsNext {
+/// The gym's next session, derived from the store and not yet issued (#830).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GymDerived {
+    Session {
+        date: Date,
+        proposal: Box<Proposal>,
+        /// The slot the mesocycle progresses, as [`GymPrescribed::Issued`]'s.
+        primary: Option<SlotId>,
+        /// Where the record says it already is, `None` where it is not.
+        in_place: Option<InPlace>,
+    },
+    /// Nothing is programmed at or after the slot.
+    NothingPlanned {
+        from: Date,
+        last: Option<(PlanName, Date)>,
+    },
+}
+
+/// Where the record says a derived session already is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InPlace {
+    pub destination: DestinationName,
+    pub ordinal: SessionOrdinal,
+}
+
+/// The cycling session that is next, and whether the record says it went.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CyclingDerived {
+    pub ride: Box<PrescribedRide>,
+    pub in_place: bool,
+}
+
+/// The next session as the store says it now, whichever discipline it is:
+/// what a page shows, and what a run issues and delivers (#830).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Derived {
+    Gym(Result<GymDerived, PrescriptionError>),
+    Cycling(Result<CyclingDerived, RidingError>),
+}
+
+/// What is next, and the session derived for it, written nowhere (#830).
+pub type Upcoming = WhatIsNext<Derived>;
+
+/// What is next: the session, prescribed as `P` says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WhatIsNext<P = Prescribed> {
     Session {
         session: Box<Session>,
-        prescribed: Prescribed,
+        prescribed: P,
     },
     /// Every session of the microcycle is settled.
     MicrocycleComplete { after: Option<ScheduledSlot> },
@@ -764,17 +808,29 @@ where
     }
 }
 
-/// The gym's sessions: which is next, prescribed, and delivered.
-pub trait GymSessions {
-    fn prescribed(
+/// The gym's next session, derived from the store and written nowhere.
+pub trait GymDeriving {
+    /// The first session at or after `from`, derived, and where it already
+    /// is.
+    fn derived(
         &self,
         from: Date,
+        reschedule: &Reschedule,
+    ) -> impl Future<Output = Result<GymDerived, PrescriptionError>> + Send;
+}
+
+/// The gym's sessions: derived, then issued and delivered.
+pub trait GymSessions: GymDeriving {
+    /// Issue what `derived` holds and deliver it.
+    fn prescribed(
+        &self,
+        derived: GymDerived,
         reschedule: &Reschedule,
     ) -> impl Future<Output = Result<GymPrescribed, PrescriptionError>> + Send;
 }
 
-/// Everything the gym's next session is read from and written to.
-pub struct GymPorts<X, M, P, G, W, L, V, T> {
+/// Everything the gym's next session is derived from.
+pub struct GymReads<X, M, P, G, W, L, V> {
     pub history: X,
     /// The gym's mesocycles as authored; read through the reschedule each call.
     pub mesocycles: M,
@@ -783,7 +839,132 @@ pub struct GymPorts<X, M, P, G, W, L, V, T> {
     pub prescriptions: W,
     pub lifecycle: L,
     pub deliveries: V,
+    /// Where its sessions go, as the record names it.
+    pub destination: DestinationName,
+}
+
+/// Everything the gym's next session is read from and written to.
+pub struct GymPorts<X, M, P, G, W, L, V, T> {
+    pub reads: GymReads<X, M, P, G, W, L, V>,
     pub destination: Result<T, NoAccess>,
+}
+
+impl<X, M, P, G, W, L, V> GymReads<X, M, P, G, W, L, V>
+where
+    X: ExerciseHistory + Clone + Send + Sync,
+    M: MesocycleStore + Clone + Send + Sync,
+    P: PlanStore + Clone + Send + Sync,
+    G: GenerationParameterStore + WorkoutStore + ProgressionStore + Clone + Send + Sync,
+    W: PrescribedWorkoutStore + Clone + Send + Sync,
+    L: PrescriptionLifecycle + Clone + Send + Sync,
+    V: PrescriptionDeliveryStore + Clone + Send + Sync,
+{
+    fn mesocycles(&self, reschedule: &Reschedule) -> Rescheduled<M, P> {
+        Rescheduled::new(
+            self.mesocycles.clone(),
+            self.plans.clone(),
+            reschedule.clone(),
+        )
+    }
+
+    fn prescribing(&self, reschedule: &Reschedule) -> Prescribing<X, Rescheduled<M, P>, G, W, L> {
+        Prescribing::new(PrescriptionPorts {
+            history: self.history.clone(),
+            mesocycles: self.mesocycles(reschedule),
+            parameters: self.parameters.clone(),
+            prescriptions: self.prescriptions.clone(),
+            lifecycle: self.lifecycle.clone(),
+        })
+    }
+
+    /// Where the record says `proposal` already is: the place the date's
+    /// session holds at the destination, where it is this very prescription.
+    async fn in_place(
+        &self,
+        mesocycles: &Rescheduled<M, P>,
+        date: Date,
+        proposal: &Proposal,
+    ) -> Result<Option<InPlace>, PrescriptionError> {
+        let Some(id) = proposal.issued() else {
+            return Ok(None);
+        };
+        let occupant = self
+            .deliveries
+            .occupying(date, &self.destination)
+            .await?
+            .filter(|occupant| occupant.prescription == id);
+        if occupant.is_none() {
+            return Ok(None);
+        }
+        let Some(found) = mesocycles.on(date).await? else {
+            return Ok(None);
+        };
+        Ok(self
+            .prescriptions
+            .ordinal_in(&found.plan, date)
+            .await?
+            .map(|ordinal| InPlace {
+                destination: self.destination.clone(),
+                ordinal,
+            }))
+    }
+}
+
+impl<X, M, P, G, W, L, V> GymDeriving for GymReads<X, M, P, G, W, L, V>
+where
+    X: ExerciseHistory + Clone + Send + Sync,
+    M: MesocycleStore + Clone + Send + Sync,
+    P: PlanStore + Clone + Send + Sync,
+    G: GenerationParameterStore + WorkoutStore + ProgressionStore + Clone + Send + Sync,
+    W: PrescribedWorkoutStore + Clone + Send + Sync,
+    L: PrescriptionLifecycle + Clone + Send + Sync,
+    V: PrescriptionDeliveryStore + Clone + Send + Sync,
+{
+    /// **The first session at or after the slot, found once** (#122), and
+    /// handed on with what was derived for it, so issuing and delivering
+    /// cannot disagree about which session they mean.
+    async fn derived(
+        &self,
+        from: Date,
+        reschedule: &Reschedule,
+    ) -> Result<GymDerived, PrescriptionError> {
+        let mesocycles = self.mesocycles(reschedule);
+        let date = match crate::prescribe::next_session(&mesocycles, from).await? {
+            NextSession::On(date) => date,
+            NextSession::NothingPlanned { last } => {
+                return Ok(GymDerived::NothingPlanned { from, last });
+            }
+        };
+        let proposal = self.prescribing(reschedule).propose(date).await?;
+        // **The mesocycle the session was prescribed from**: a missed test
+        // carried to this slot is the earlier week's (#732).
+        let on = mesocycles.carried_to(date).await?.unwrap_or(date);
+        let primary = mesocycles
+            .on(on)
+            .await?
+            .map(|found| found.mesocycle.primary().slot());
+        let in_place = self.in_place(&mesocycles, date, &proposal).await?;
+        Ok(GymDerived::Session {
+            date,
+            proposal: Box::new(proposal),
+            primary,
+            in_place,
+        })
+    }
+}
+
+impl<X, M, P, G, W, L, V, T> GymDeriving for GymPorts<X, M, P, G, W, L, V, T>
+where
+    GymReads<X, M, P, G, W, L, V>: GymDeriving + Sync,
+    T: Sync,
+{
+    async fn derived(
+        &self,
+        from: Date,
+        reschedule: &Reschedule,
+    ) -> Result<GymDerived, PrescriptionError> {
+        self.reads.derived(from, reschedule).await
+    }
 }
 
 impl<X, M, P, G, W, L, V, T> GymSessions for GymPorts<X, M, P, G, W, L, V, T>
@@ -797,45 +978,32 @@ where
     V: PrescriptionDeliveryStore + Clone + Send + Sync,
     T: PrescriptionDestination + Sync,
 {
-    /// **The first session at or after the slot, found once** (#122), and
-    /// handed to both steps, so they cannot disagree about which session they
-    /// mean. **Delivery reads what prescribing issued** rather than deriving
-    /// again, so a destination being unreachable costs a retry rather than a
-    /// ladder position (§ 36).
+    /// **Delivery reads what issuing wrote** rather than deriving again, so a
+    /// destination being unreachable costs a retry rather than a ladder
+    /// position (§ 36).
     async fn prescribed(
         &self,
-        from: Date,
+        derived: GymDerived,
         reschedule: &Reschedule,
     ) -> Result<GymPrescribed, PrescriptionError> {
-        let mesocycles = || {
-            Rescheduled::new(
-                self.mesocycles.clone(),
-                self.plans.clone(),
-                reschedule.clone(),
-            )
-        };
-        let date = match crate::prescribe::next_session(&mesocycles(), from).await? {
-            NextSession::On(date) => date,
-            NextSession::NothingPlanned { last } => {
+        let (date, proposal, primary) = match derived {
+            GymDerived::NothingPlanned { from, last } => {
                 return Ok(GymPrescribed::NothingPlanned { from, last });
             }
+            GymDerived::Session {
+                date,
+                proposal,
+                primary,
+                ..
+            } => (date, proposal, primary),
         };
-        let issued = Prescribing::new(PrescriptionPorts {
-            history: self.history.clone(),
-            mesocycles: mesocycles(),
-            parameters: self.parameters.clone(),
-            prescriptions: self.prescriptions.clone(),
-            lifecycle: self.lifecycle.clone(),
-        })
-        .prescribe(date)
-        .await?;
-
+        let issued = self.reads.prescribing(reschedule).issue(*proposal).await?;
         let delivery = match &self.destination {
             Err(why) => Err(Undelivered::NoAccess(why.clone())),
             Ok(destination) => Delivering::new(DeliveryPorts {
-                prescriptions: self.prescriptions.clone(),
-                mesocycles: mesocycles(),
-                deliveries: self.deliveries.clone(),
+                prescriptions: self.reads.prescriptions.clone(),
+                mesocycles: self.reads.mesocycles(reschedule),
+                deliveries: self.reads.deliveries.clone(),
                 destination,
             })
             .deliver(date)
@@ -843,14 +1011,6 @@ where
             .map(Box::new)
             .map_err(Undelivered::Failed),
         };
-        // **The mesocycle the session was prescribed from**: a missed test
-        // carried to this slot is the earlier week's (#732).
-        let read = mesocycles();
-        let on = read.carried_to(date).await?.unwrap_or(date);
-        let primary = read
-            .on(on)
-            .await?
-            .map(|found| found.mesocycle.primary().slot());
         Ok(GymPrescribed::Issued {
             issued: Box::new(issued),
             primary,
@@ -859,20 +1019,63 @@ where
     }
 }
 
-/// Cycling's sessions: which ride is next, and delivered.
-pub trait CyclingSessions {
-    fn prescribed(
+/// Cycling's next ride, derived from the store and written nowhere.
+pub trait CyclingDeriving {
+    /// The first ride at or after `from`, and whether it already went.
+    fn derived(
         &self,
         from: Date,
         reschedule: &Reschedule,
         diary: &Diary,
-    ) -> impl Future<Output = Result<CyclingPrescribed, RidingError>> + Send;
+    ) -> impl Future<Output = Result<CyclingDerived, RidingError>> + Send;
+}
+
+/// Cycling's sessions: derived, then delivered.
+pub trait CyclingSessions: CyclingDeriving {
+    /// Deliver what `derived` holds.
+    fn prescribed(&self, derived: CyclingDerived)
+    -> impl Future<Output = CyclingPrescribed> + Send;
 }
 
 /// The cycling use case and where its rides go.
 pub struct CyclingPorts<U, T> {
     pub riding: U,
     pub destination: Result<T, NoAccess>,
+}
+
+impl<S, P, H, R, F, Y> CyclingDeriving for crate::cycling::Riding<S, P, H, R, F, Y>
+where
+    S: CyclingMesocycleStore + Clone + Send + Sync,
+    P: PlanStore + Clone + Send + Sync,
+    H: crate::HoldingRides + Sync,
+    R: crate::RiddenVenues + Sync,
+    F: crate::FtpHistory + Sync,
+    Y: crate::CyclingDeliveryStore + Sync,
+{
+    async fn derived(
+        &self,
+        from: Date,
+        reschedule: &Reschedule,
+        diary: &Diary,
+    ) -> Result<CyclingDerived, RidingError> {
+        let ride = self.next(from, reschedule.clone(), diary, None).await?;
+        let in_place = self.in_place(&ride).await?;
+        Ok(CyclingDerived {
+            ride: Box::new(ride),
+            in_place,
+        })
+    }
+}
+
+impl<U: CyclingDeriving + Sync, T: Sync> CyclingDeriving for CyclingPorts<U, T> {
+    async fn derived(
+        &self,
+        from: Date,
+        reschedule: &Reschedule,
+        diary: &Diary,
+    ) -> Result<CyclingDerived, RidingError> {
+        self.riding.derived(from, reschedule, diary).await
+    }
 }
 
 impl<S, P, H, R, F, Y, T> CyclingSessions
@@ -888,28 +1091,105 @@ where
 {
     /// **`next` replaces whatever the stack holds** (the operator, 2026-09-21:
     /// *"The default behaviour should be replace"*). What it replaced is said.
-    async fn prescribed(
-        &self,
-        from: Date,
-        reschedule: &Reschedule,
-        diary: &Diary,
-    ) -> Result<CyclingPrescribed, RidingError> {
-        let ride = self
-            .riding
-            .next(from, reschedule.clone(), diary, None)
-            .await?;
+    async fn prescribed(&self, derived: CyclingDerived) -> CyclingPrescribed {
         let delivery = match &self.destination {
             Err(why) => Err(Undelivered::NoAccess(why.clone())),
             Ok(destination) => self
                 .riding
-                .deliver(&ride, destination, true)
+                .deliver(&derived.ride, destination, true)
                 .await
                 .map_err(Undelivered::Failed),
         };
-        Ok(CyclingPrescribed {
-            ride: Box::new(ride),
+        CyclingPrescribed {
+            ride: derived.ride,
             delivery,
-        })
+        }
+    }
+}
+
+/// What a run delivers, as the frontend holds it (#830).
+///
+/// Derived by the run where nothing holds it at what the store now says, and
+/// handed over where something does, so a page and a run share one
+/// derivation.
+pub trait HeldUpcoming {
+    /// What `derive` would give, held where it already is.
+    fn held<F>(&self, derive: F) -> impl Future<Output = std::sync::Arc<Upcoming>> + Send
+    where
+        F: Future<Output = Upcoming> + Send;
+}
+
+impl<H: HeldUpcoming + Sync> HeldUpcoming for &H {
+    async fn held<F>(&self, derive: F) -> std::sync::Arc<Upcoming>
+    where
+        F: Future<Output = Upcoming> + Send,
+    {
+        (**self).held(derive).await
+    }
+}
+
+/// Nothing held: every run derives for itself, as the terminal's does.
+pub struct Unheld;
+
+impl HeldUpcoming for Unheld {
+    async fn held<F>(&self, derive: F) -> std::sync::Arc<Upcoming>
+    where
+        F: Future<Output = Upcoming> + Send,
+    {
+        std::sync::Arc::new(derive.await)
+    }
+}
+
+/// What is next as the store says it now, and the session derived for it,
+/// written nowhere (#830).
+///
+/// **The same answer a run delivers**, so a page showing it and a run
+/// issuing it cannot disagree about which session is next.
+pub async fn upcoming(
+    gym: &(impl GymDeriving + Sync),
+    cycling: &(impl CyclingDeriving + Sync),
+    now: DayPart,
+    standing: &Standing,
+    diary: &Diary,
+    reschedule: &Reschedule,
+) -> Upcoming {
+    if standing.sessions.is_empty() {
+        // **Two empty answers, and they are different facts.** A week the
+        // diary holds nothing for is a week off; a week it holds slots for
+        // that no plan covers is a plan to author.
+        let monday = standing
+            .commencing
+            .unwrap_or_else(|| planner::commencing(now.date));
+        let has_slots = (0..7)
+            .filter_map(|offset| monday.checked_add(jiff::Span::new().days(offset)).ok())
+            .any(|date| !diary.ordinary_slots_of(date).is_empty());
+        return if has_slots {
+            WhatIsNext::NoPlanCovers { week_of: monday }
+        } else {
+            WhatIsNext::NoSlot { from: now.date }
+        };
+    }
+    let Some(session) = standing.current() else {
+        if let Some(illness) = diary.open_illness() {
+            return WhatIsNext::Ill {
+                since: illness.from(),
+            };
+        }
+        let after = standing
+            .sessions
+            .last()
+            .and_then(|last| diary.first_ordinary_after(last.slot.date));
+        return WhatIsNext::MicrocycleComplete { after };
+    };
+
+    let from = session.slot.date;
+    let prescribed = match session.slot.discipline {
+        Discipline::Gym => Derived::Gym(gym.derived(from, reschedule).await),
+        Discipline::Cycling => Derived::Cycling(cycling.derived(from, reschedule, diary).await),
+    };
+    WhatIsNext::Session {
+        session: Box::new(session.clone()),
+        prescribed,
     }
 }
 
@@ -1033,7 +1313,7 @@ impl<GR: Input, GC, CR: Input, CC, WR: Input, WC> CanonicalPorts<GR, GC, CR, CC,
 }
 
 /// Everything `next` reads, writes and drives.
-pub struct NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F> {
+pub struct NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F, U> {
     pub gym_records: Records<GW>,
     pub cycling_records: Records<CW>,
     /// Body weight, which no discipline collects (#409, #357).
@@ -1070,6 +1350,8 @@ pub struct NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, 
     /// What each layer is derived from, so it is derived as soon as that has
     /// been fetched (#830).
     pub graph: Graph,
+    /// What is next, as the frontend holds it (#830).
+    pub upcoming: U,
 }
 
 /// The use case.
@@ -1077,12 +1359,12 @@ pub struct NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, 
     clippy::type_complexity,
     reason = "one parameter per port the run drives; each stage is already behind a trait"
 )]
-pub struct Next<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F> {
-    ports: NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F>,
+pub struct Next<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F, U> {
+    ports: NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F, U>,
 }
 
-impl<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F>
-    Next<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F>
+impl<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F, U>
+    Next<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F, U>
 where
     GW: Walks + Sync,
     CW: Walks + Sync,
@@ -1102,13 +1384,14 @@ where
     CY: CyclingSessions + Sync,
     L: NextLock + Sync,
     F: FetchLog + Clock + Sync,
+    U: HeldUpcoming + Sync,
 {
     #[expect(
         clippy::type_complexity,
         reason = "one parameter per port the run drives; each stage is already behind a trait"
     )]
     pub const fn new(
-        ports: NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F>,
+        ports: NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, L, F, U>,
     ) -> Self {
         Self { ports }
     }
@@ -1186,8 +1469,22 @@ where
             .plan(now, holidays, &standing, &diary, &reschedule)
             .await?;
 
-        // 4. The first session that can still be performed, prescribed or not.
-        let next = self.next(now, &standing, &diary, &reschedule).await;
+        // 4. The first session that can still be performed, derived as a page
+        // holds it, then issued and delivered.
+        let upcoming = self
+            .ports
+            .upcoming
+            .held(upcoming(
+                &self.ports.gym,
+                &self.ports.cycling,
+                now,
+                &standing,
+                &diary,
+                &reschedule,
+            ))
+            .await;
+        let next = self.deliver(&upcoming, &reschedule).await;
+        progress.collected(&[Part::Delivering]);
         Ok(Report { run, plan, next })
     }
 
@@ -1917,109 +2214,110 @@ where
         diary: &Diary,
         reschedule: &Reschedule,
     ) -> Result<PlanStanding, NextError> {
-        let curves = match &holidays {
-            Ok(holidays) => self
-                .ports
-                .committing
-                .planned(now, holidays, standing, diary)
-                .await
-                .map(|planned| planned.map(|planned| curves_of(&planned, standing))),
-            Err(_) => Ok(None),
-        };
-        let macrocycle = match holidays {
-            Err(error) => MacrocycleStanding::Unreadable(error),
-            Ok(holidays) => Macrocycle::on(now.date, &holidays).map_or_else(
-                || MacrocycleStanding::Unknown {
-                    published_to: holidays.school_published_to(),
-                },
-                |macrocycle| MacrocycleStanding::Week {
-                    week: weeks_between(macrocycle.start(), now.date).saturating_add(1),
-                    of: weeks_between(macrocycle.start(), macrocycle.last()).saturating_add(1),
-                    macrocycle,
-                },
-            ),
-        };
+        plan_standing(
+            &self.ports.committing,
+            &self.ports.plans,
+            now,
+            holidays,
+            standing,
+            diary,
+            reschedule,
+        )
+        .await
+    }
 
-        let plans = ReschedulingPlans::new(self.ports.plans.clone(), reschedule.clone());
-        let plan = match standing.commencing {
-            Some(monday) => covering(&plans, monday).await?,
-            None => None,
-        };
-        let disciplines = [Discipline::Gym, Discipline::Cycling]
-            .into_iter()
-            .map(|discipline| {
-                let position = plan.as_ref().and_then(|plan| {
-                    let date = standing
-                        .sessions
-                        .iter()
-                        .find(|session| session.slot.discipline == discipline)
-                        .map(|session| session.slot.date)?;
-                    position(plan, discipline, date, &standing.reruns)
-                });
-                (discipline, position)
-            })
-            .collect();
+    /// Issue and deliver what is next, as `upcoming` derived it.
+    async fn deliver(&self, upcoming: &Upcoming, reschedule: &Reschedule) -> WhatIsNext {
+        match upcoming.clone() {
+            WhatIsNext::Session {
+                session,
+                prescribed,
+            } => WhatIsNext::Session {
+                session,
+                prescribed: match prescribed {
+                    Derived::Gym(Err(error)) => Prescribed::Gym(Err(error)),
+                    Derived::Gym(Ok(derived)) => {
+                        Prescribed::Gym(self.ports.gym.prescribed(derived, reschedule).await)
+                    }
+                    Derived::Cycling(Err(error)) => Prescribed::Cycling(Err(error)),
+                    Derived::Cycling(Ok(derived)) => {
+                        Prescribed::Cycling(Ok(self.ports.cycling.prescribed(derived).await))
+                    }
+                },
+            },
+            WhatIsNext::MicrocycleComplete { after } => WhatIsNext::MicrocycleComplete { after },
+            WhatIsNext::Ill { since } => WhatIsNext::Ill { since },
+            WhatIsNext::NoPlanCovers { week_of } => WhatIsNext::NoPlanCovers { week_of },
+            WhatIsNext::NoSlot { from } => WhatIsNext::NoSlot { from },
+        }
+    }
+}
 
-        Ok(PlanStanding {
-            macrocycle,
-            curves,
-            disciplines,
-            microcycle: standing
-                .commencing
-                .filter(|_| !standing.sessions.is_empty())
-                .map(|monday| (monday, standing.sessions.clone())),
+/// Where the plan stands at `now`: the macrocycle's week, its curves, where
+/// each discipline's mesocycle is, and the microcycle's sessions (#830).
+///
+/// # Errors
+///
+/// [`NextError`] if the plans cannot be read.
+pub async fn plan_standing<P: PlanStore + Clone + Send + Sync>(
+    committing: &(impl MesocycleCommitter + Sync),
+    plans: &P,
+    now: DayPart,
+    holidays: Result<Holidays, SourceError>,
+    standing: &Standing,
+    diary: &Diary,
+    reschedule: &Reschedule,
+) -> Result<PlanStanding, NextError> {
+    let curves = match &holidays {
+        Ok(holidays) => committing
+            .planned(now, holidays, standing, diary)
+            .await
+            .map(|planned| planned.map(|planned| curves_of(&planned, standing))),
+        Err(_) => Ok(None),
+    };
+    let macrocycle = match holidays {
+        Err(error) => MacrocycleStanding::Unreadable(error),
+        Ok(holidays) => Macrocycle::on(now.date, &holidays).map_or_else(
+            || MacrocycleStanding::Unknown {
+                published_to: holidays.school_published_to(),
+            },
+            |macrocycle| MacrocycleStanding::Week {
+                week: weeks_between(macrocycle.start(), now.date).saturating_add(1),
+                of: weeks_between(macrocycle.start(), macrocycle.last()).saturating_add(1),
+                macrocycle,
+            },
+        ),
+    };
+
+    let plans = ReschedulingPlans::new(plans.clone(), reschedule.clone());
+    let plan = match standing.commencing {
+        Some(monday) => covering(&plans, monday).await?,
+        None => None,
+    };
+    let disciplines = [Discipline::Gym, Discipline::Cycling]
+        .into_iter()
+        .map(|discipline| {
+            let position = plan.as_ref().and_then(|plan| {
+                let date = standing
+                    .sessions
+                    .iter()
+                    .find(|session| session.slot.discipline == discipline)
+                    .map(|session| session.slot.date)?;
+                position(plan, discipline, date, &standing.reruns)
+            });
+            (discipline, position)
         })
-    }
+        .collect();
 
-    /// What is next, prescribed and delivered where it can be.
-    async fn next(
-        &self,
-        now: DayPart,
-        standing: &Standing,
-        diary: &Diary,
-        reschedule: &Reschedule,
-    ) -> WhatIsNext {
-        if standing.sessions.is_empty() {
-            // **Two empty answers, and they are different facts.** A week the
-            // diary holds nothing for is a week off; a week it holds slots for
-            // that no plan covers is a plan to author.
-            let monday = standing
-                .commencing
-                .unwrap_or_else(|| planner::commencing(now.date));
-            let has_slots = (0..7)
-                .filter_map(|offset| monday.checked_add(jiff::Span::new().days(offset)).ok())
-                .any(|date| !diary.ordinary_slots_of(date).is_empty());
-            return if has_slots {
-                WhatIsNext::NoPlanCovers { week_of: monday }
-            } else {
-                WhatIsNext::NoSlot { from: now.date }
-            };
-        }
-        let Some(session) = standing.current() else {
-            if let Some(illness) = diary.open_illness() {
-                return WhatIsNext::Ill {
-                    since: illness.from(),
-                };
-            }
-            let after = standing
-                .sessions
-                .last()
-                .and_then(|last| diary.first_ordinary_after(last.slot.date));
-            return WhatIsNext::MicrocycleComplete { after };
-        };
-
-        let from = session.slot.date;
-        let prescribed = match session.slot.discipline {
-            Discipline::Gym => Prescribed::Gym(self.ports.gym.prescribed(from, reschedule).await),
-            Discipline::Cycling => {
-                Prescribed::Cycling(self.ports.cycling.prescribed(from, reschedule, diary).await)
-            }
-        };
-        WhatIsNext::Session {
-            session: Box::new(session.clone()),
-            prescribed,
-        }
-    }
+    Ok(PlanStanding {
+        macrocycle,
+        curves,
+        disciplines,
+        microcycle: standing
+            .commencing
+            .filter(|_| !standing.sessions.is_empty())
+            .map(|monday| (monday, standing.sessions.clone())),
+    })
 }
 
 /// Every canonical layer, in the order they are derived.

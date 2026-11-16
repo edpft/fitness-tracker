@@ -24,7 +24,7 @@ use configurator::{
     telemetry::{Frontend, Run},
 };
 use domain::{normalised::OperatorZone, schedule::DayPart};
-use maud::{Markup, PreEscaped, html};
+use maud::{Markup, html};
 use tokio::sync::watch;
 
 use crate::{collected, report};
@@ -47,12 +47,10 @@ pub struct Setting {
 /// The latest run, as the page shows it.
 #[derive(Clone, Default)]
 pub struct View {
-    /// Why the latest attempt did not start, above the run before it.
+    /// Why the latest attempt did not start or could not answer, above the
+    /// run before it.
     refused: Option<String>,
     steps: Vec<Line>,
-    /// The report, or why there is none. Rendered as the run ends, because a
-    /// report is read once and not kept.
-    ending: Option<PreEscaped<String>>,
     going: bool,
     /// How many runs have ended since the server started, so a page drawn
     /// from the store knows whether a run has ended since it was drawn.
@@ -77,8 +75,8 @@ struct Line {
 }
 
 impl View {
-    /// The home page's cards: what is next once the run has said, then
-    /// whether what each page reads has been collected (#666).
+    /// Whether what each page reads has been collected (#666), under why
+    /// the latest run did not start or answer, if it did not.
     ///
     /// **Not the steps**: the operator, 2026-11-09, *"I just want to know, for
     /// the high level metrics and prescriptions has the data been fetched and
@@ -90,13 +88,6 @@ impl View {
             .map(|line| (&line.step, line.done.as_ref().map(|done| &done.outcome)));
         html! {
             @if let Some(refused) = &self.refused { section.card { p.failed { (refused) } } }
-            @match &self.ending {
-                Some(ending) => (ending),
-                None if self.going => section.card {
-                    p.collecting { "Collecting what this page shows…" }
-                },
-                None => {}
-            }
             (collected::matrix(&steps, self.going))
         }
     }
@@ -394,10 +385,8 @@ impl Runs {
             .name("next".to_owned())
             .spawn(move || runs.run(&started, run))
         {
-            self.end(
-                asked,
-                Some(refused(&format!("the run could not be started: {error}"))),
-            );
+            self.refuse(&format!("the run could not be started: {error}"));
+            self.end(asked);
         }
     }
 
@@ -412,8 +401,9 @@ impl Runs {
     /// **Its own runtime**, so nothing about the run's futures has to suit the
     /// server's: what is shared is the channel each step is sent down.
     ///
-    /// **Only a run of the whole of `next` ends on a report**: a chart's run
-    /// delivers nothing, and its page redraws from the store.
+    /// **Only a run of the whole of `next` delivers**, and what it delivers is
+    /// what the home page's Next card is drawn from (#830): handed over where
+    /// it is held at what the store then says, and held once derived.
     fn run(&self, asked: &Asked, run: Run) {
         let setting = &self.setting;
         let started = tokio::runtime::Builder::new_current_thread()
@@ -428,54 +418,55 @@ impl Runs {
         let (runtime, credentials) = match started {
             Ok(started) => started,
             Err(error) => {
-                return self.end(
-                    asked,
-                    Some(refused(&format!("the run could not be started: {error}"))),
-                );
+                self.refuse(&format!("the run could not be started: {error}"));
+                return self.end(asked);
             }
         };
         let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
         let following = Following(&self.view);
-        let ending = match asked {
-            Asked::Everything => Some(
-                match runtime.block_on(configurator::next::run(
+        let failed = match asked {
+            Asked::Everything => {
+                let held = configurator::held::HeldNext::new(configurator::held::Holding::new(
+                    &self.held,
                     &setting.store,
                     &setting.zone,
+                    setting.build,
+                ));
+                match runtime.block_on(configurator::next::run(
+                    &held,
                     &credentials,
                     DayPart::containing(here.datetime()),
                     None,
                     run,
                     &following,
                 )) {
-                    Ok(answered) => report::report(&answered),
-                    Err(failure @ NextFailure::Next(NextError::Joined)) => {
-                        html! { p { (failure) } }
-                    }
-                    Err(failure) => refused(&unanswered(&failure)),
-                },
-            ),
-            Asked::Only(scope) => match runtime.block_on(configurator::next::collect(
-                &setting.store,
-                &setting.zone,
-                &credentials,
-                DayPart::containing(here.datetime()),
-                scope,
-                run,
-                &following,
-            )) {
-                Ok(_) => None,
-                Err(failure) => {
-                    self.refuse(&failure.to_string());
-                    None
+                    // **Joining the terminal's run is not a failure**: the
+                    // cards follow it through the store's locks.
+                    Ok(_) | Err(NextFailure::Next(NextError::Joined)) => None,
+                    Err(failure) => Some(unanswered(&failure)),
                 }
-            },
+            }
+            Asked::Only(scope) => runtime
+                .block_on(configurator::next::collect(
+                    &setting.store,
+                    &setting.zone,
+                    &credentials,
+                    DayPart::containing(here.datetime()),
+                    scope,
+                    run,
+                    &following,
+                ))
+                .err()
+                .map(|failure| failure.to_string()),
         };
-        self.end(asked, ending);
+        if let Some(failure) = failed {
+            self.refuse(&failure);
+        }
+        self.end(asked);
     }
 
-    /// A run is over: every page is shown how it ended, where it ended on
-    /// something to show.
-    fn end(&self, asked: &Asked, ending: Option<Markup>) {
+    /// A run is over, and every page is told.
+    fn end(&self, asked: &Asked) {
         let still = {
             let mut going = self.going.lock().unwrap_or_else(PoisonError::into_inner);
             if let Some(at) = going.iter().position(|run| run == asked) {
@@ -484,9 +475,6 @@ impl Runs {
             !going.is_empty()
         };
         self.view.send_modify(|view| {
-            if let Some(ending) = ending {
-                view.ending = Some(ending);
-            }
             view.going = still;
             view.ended += 1;
         });
@@ -529,10 +517,6 @@ fn unanswered(failure: &NextFailure) -> String {
         }
         other => other.to_string(),
     }
-}
-
-fn refused(message: &str) -> Markup {
-    html! { p.failed { (message) } }
 }
 
 /// Progress, sent to every open page as each step starts and ends.

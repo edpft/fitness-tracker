@@ -15,8 +15,8 @@ use application::{
     cycling::RidingPorts,
     microcycle::{Microcycle, MicrocyclePorts},
     next::{
-        CanonicalPorts, CyclingPorts, Done, GymPorts, IfGoing, Next, NextError, NextPorts,
-        NoAccess, Progress, Refetch, Report, Scope,
+        CanonicalPorts, CyclingPorts, Done, GymPorts, GymReads, HeldUpcoming, IfGoing, Next,
+        NextError, NextPorts, NoAccess, Progress, Refetch, Report, Scope, Unheld,
     },
 };
 use domain::{
@@ -66,7 +66,9 @@ pub enum NextFailure {
 /// Collect everything, say where the plan stands, and deliver what is next.
 ///
 /// `skip` takes what is left of the current session's window first, for the
-/// reason given (#391). Progress is reported as each step runs.
+/// reason given (#391). Progress is reported as each step runs. What is
+/// delivered is what `held` holds of what is next, where it holds it at what
+/// the store then says (#830).
 ///
 /// # Errors
 ///
@@ -75,14 +77,14 @@ pub enum NextFailure {
 /// source that cannot be reached is a failed step in the report and nothing
 /// more (§ 36).
 pub async fn run(
-    store: &Store,
-    zone: &OperatorZone,
+    held: &impl Holds,
     credentials: &infrastructure::Credentials,
     now: DayPart,
     skip: Option<&str>,
     run: Run,
     progress: &(impl Progress + Sync),
 ) -> Result<Report, NextFailure> {
+    let (store, zone) = (held.store(), held.zone());
     let if_going = run.if_going();
     let refetch = run.refetch();
     let spanned = telemetry::Spanned::new(progress, run.span);
@@ -96,6 +98,7 @@ pub async fn run(
             skip,
             if_going,
         },
+        held,
         &spanned,
     )
     .instrument(spanned.run.clone())
@@ -107,6 +110,39 @@ pub async fn run(
     match answered? {
         Answered::Report(report) => Ok(*report),
         Answered::Collected(_) | Answered::Wanted(_) => unreachable_answer(),
+    }
+}
+
+/// The store a run of `next` reads and writes, and what of it the frontend
+/// holds (#830).
+pub trait Holds: HeldUpcoming + Sync {
+    fn store(&self) -> &Store;
+    fn zone(&self) -> &OperatorZone;
+}
+
+/// The store as the terminal runs over it, holding nothing: each run derives
+/// what is next for itself.
+pub struct Afresh<'a> {
+    pub store: &'a Store,
+    pub zone: &'a OperatorZone,
+}
+
+impl HeldUpcoming for Afresh<'_> {
+    async fn held<F>(&self, derive: F) -> std::sync::Arc<application::next::Upcoming>
+    where
+        F: Future<Output = application::next::Upcoming> + Send,
+    {
+        Unheld.held(derive).await
+    }
+}
+
+impl Holds for Afresh<'_> {
+    fn store(&self) -> &Store {
+        self.store
+    }
+
+    fn zone(&self) -> &OperatorZone {
+        self.zone
     }
 }
 
@@ -134,6 +170,7 @@ pub async fn collect(
         credentials,
         refetch,
         Asked::Collect { scope, now },
+        &Unheld,
         &spanned,
     )
     .instrument(spanned.run.clone())
@@ -167,6 +204,7 @@ pub async fn wanted(
         credentials,
         frontend.refetch(),
         Asked::Wanted { scope, now },
+        &Unheld,
         &Unheard,
     )
     .instrument(telemetry::checking())
@@ -244,6 +282,7 @@ async fn over(
     credentials: &infrastructure::Credentials,
     refetch: Refetch,
     asked: Asked<'_>,
+    held: &(impl HeldUpcoming + Sync),
     progress: &(impl Progress + Sync),
 ) -> Result<Answered, NextFailure> {
     // **This build collects the gym from Hevy and cycling from Peloton**, and
@@ -315,14 +354,7 @@ async fn over(
             zone.clone(),
         )),
         gym: Staged(GymPorts {
-            history: store.adapter(SqliteExerciseHistory::new),
-            mesocycles: store.adapter_with(SqliteGymMesocycleStore::new, zone.clone()),
-            plans,
-            parameters,
-            prescriptions: store
-                .adapter_with(SqlitePrescribedWorkoutStore::new, zone.id().to_owned()),
-            lifecycle: deliveries.clone(),
-            deliveries,
+            reads: gym_reads(store, zone, plans, parameters, deliveries)?,
             destination: gym_destination,
         }),
         cycling: Staged(CyclingPorts {
@@ -335,6 +367,7 @@ async fn over(
         fetches: Fetches(store.adapter(SqliteExtractionRunLog::new)),
         zone: zone.clone(),
         refetch,
+        upcoming: held,
     });
 
     // **Boxed, because it holds every source's fetch at once** (#468).
@@ -351,6 +384,75 @@ async fn over(
         }
         Asked::Wanted { scope, now } => Answered::Wanted(next.wanted(scope, now).await?),
     })
+}
+
+/// What the gym's next session is derived from, over this build's stores.
+pub(crate) type GymDerivation = GymReads<
+    Spanned<SqliteExerciseHistory>,
+    Spanned<SqliteGymMesocycleStore>,
+    Spanned<SqlitePlanStore>,
+    Spanned<SqliteGenerationParameterStore>,
+    Spanned<SqlitePrescribedWorkoutStore>,
+    Spanned<SqlitePrescriptionDeliveryStore>,
+    Spanned<SqlitePrescriptionDeliveryStore>,
+>;
+
+/// What the gym's next session is derived from, over `store`.
+///
+/// # Errors
+///
+/// [`NextFailure`] if the catalogue names no destination for the gym.
+pub(crate) fn gym_reads(
+    store: &Store,
+    zone: &OperatorZone,
+    plans: Spanned<SqlitePlanStore>,
+    parameters: Spanned<SqliteGenerationParameterStore>,
+    deliveries: Spanned<SqlitePrescriptionDeliveryStore>,
+) -> Result<GymDerivation, NextFailure> {
+    Ok(GymReads {
+        history: store.adapter(SqliteExerciseHistory::new),
+        mesocycles: store.adapter_with(SqliteGymMesocycleStore::new, zone.clone()),
+        plans,
+        parameters,
+        prescriptions: store.adapter_with(SqlitePrescribedWorkoutStore::new, zone.id().to_owned()),
+        lifecycle: deliveries.clone(),
+        deliveries,
+        destination: destination(Discipline::Gym)?,
+    })
+}
+
+/// What is next, as the store says it where the plan stood at `stood`, and
+/// the session derived for it, written nowhere (#830).
+///
+/// **Without a login**, as the plan reads it: the classes a ride is chosen
+/// from are the ones stored.
+///
+/// # Errors
+///
+/// [`NextFailure`] if the catalogue names no destination for a discipline.
+pub(crate) async fn upcoming(
+    store: &Store,
+    zone: &OperatorZone,
+    stood: &crate::macrocycle::Stood,
+) -> Result<application::next::Upcoming, NextFailure> {
+    let classes = store.peloton_classes();
+    let riding = riding(store, zone, ClassCatalogue::over(&classes, None))?;
+    let gym = gym_reads(
+        store,
+        zone,
+        store.adapter_with(SqlitePlanStore::new, zone.clone()),
+        store.adapter(SqliteGenerationParameterStore::new),
+        store.adapter(SqlitePrescriptionDeliveryStore::new),
+    )?;
+    Ok(application::next::upcoming(
+        &gym,
+        &riding,
+        stood.now,
+        &stood.standing,
+        &stood.diary,
+        &stood.reschedule,
+    )
+    .await)
 }
 
 /// What a discipline's next session is prescribed from (#666, #809): what its

@@ -4,32 +4,6 @@ use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 use crate::run::View;
 
-/// The page, showing the run as it stands when it is opened.
-///
-/// **Connected to the run whether or not one is going**, so a run started
-/// elsewhere — the terminal's is refused, but one started by opening another
-/// page is not — appears here without asking.
-pub fn index(view: &View) -> Markup {
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head {
-                (head(Place::Today.name(), &[]))
-                script src="/htmx.min.js" {}
-                script src="/sse.min.js" {}
-            }
-            body {
-                main {
-                    div.home hx-ext="sse" sse-connect="/run/events" sse-swap="run" {
-                        (view.render())
-                    }
-                    (bar(Place::Today.path()))
-                }
-            }
-        }
-    }
-}
-
 /// The places the bar takes him between (#768), in the order it shows them.
 ///
 /// The operator, 2026-11-10 (#749): *"I like the idea of a bottom bar and
@@ -225,11 +199,16 @@ pub fn following(run: &View) -> Markup {
 /// **Connected on `body`**, so every card is inside the connection whose
 /// events it asks on, and **no redraw of the page when the run ends**: each
 /// card asks on that for itself.
-pub fn carded(drawn: &str, run: &View) -> Markup {
+///
+/// **The step the run is on is shown where `follows`**: every page but the
+/// home page, which shows none (#666).
+pub fn carded(drawn: &str, run: &View, follows: bool) -> Markup {
     let connected = html! {
         script src="/htmx.min.js" {}
         script src="/sse.min.js" {}
-        div.following sse-swap="step,ended" { (run.step()) }
+        @if follows {
+            div.following sse-swap="step,ended" { (run.step()) }
+        }
     };
     let body = format!(
         r#"<body hx-ext="sse" sse-connect="/run/step?since={}&amp;collected={}">"#,

@@ -40,9 +40,10 @@ pub async fn next(
     let now = moment(zone, date, part)?;
     // **Boxed, because the run is large**: it holds every source's walk, and a
     // third (#409) took it past what a stack frame should carry.
+    // **Nothing is held between runs from the terminal**: each derives what
+    // is next for itself (#830).
     let report = Box::pin(configurator::next::run(
-        store,
-        zone,
+        &configurator::next::Afresh { store, zone },
         credentials,
         now,
         skip,
