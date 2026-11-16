@@ -52,6 +52,18 @@ pub struct DeliveredRide {
 }
 
 impl DeliveredRide {
+    /// Whether `rides`, in order, are what went before the cool-down.
+    #[must_use]
+    pub fn went(&self, rides: &NonEmpty<RideVenue>) -> bool {
+        let written: Vec<&RideVenue> = self.classes.iter().collect();
+        written.split_last().is_some_and(|(_, before)| {
+            before
+                .iter()
+                .map(|venue| venue.reference())
+                .eq(rides.iter().map(RideVenue::reference))
+        })
+    }
+
     /// Whether one of the classes written was this one.
     ///
     /// What a comparison against the record turns on: a performed ride names

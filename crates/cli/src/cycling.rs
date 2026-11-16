@@ -22,7 +22,7 @@
 //! is still the session to ride.
 
 use application::{
-    PlanAuthor as _, PlanStore as _, RidesPlaced,
+    PlanAuthor as _, PlanStore as _, RideDelivery,
     cycling::{PrescribedRide, RideDeliveryError, RidingError},
 };
 use configurator::{access::Peloton, store::Store};
@@ -291,14 +291,20 @@ pub async fn deliver(
     Ok(())
 }
 
-/// What went to the stack, and what it now holds.
-pub fn delivered(ride: &PrescribedRide, placed: &RidesPlaced) {
-    if placed.replaced > 0 {
-        println!(
-            "  replaced   the {} class(es) that were in the stack",
-            placed.replaced
-        );
-    }
+/// What went to the stack, and what it now holds; or what went already, where
+/// nothing was sent.
+pub fn delivered(ride: &PrescribedRide, delivery: &RideDelivery) {
+    let placed = match delivery {
+        RideDelivery::Sent(placed) => placed,
+        RideDelivery::Unchanged(went) => {
+            for venue in went.classes.iter() {
+                println!("  delivered  {venue}");
+            }
+            println!();
+            println!("  already delivered to {}", went.destination);
+            return;
+        }
+    };
     for venue in ride.next.ride.at().iter() {
         println!("  delivered  {venue}");
     }

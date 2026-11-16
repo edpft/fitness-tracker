@@ -44,7 +44,7 @@ use crate::store::{Spanned, Store};
 use crate::{
     access, catalogue,
     config::{SourceAccess, source_access_for},
-    telemetry::{self, Run},
+    telemetry::{self, Run, Staged},
     wiring::{self, Command, Outcome, SystemClock, Unreported, WiringError},
 };
 
@@ -272,7 +272,7 @@ async fn over(
         .map_err(unreachable);
     let ride_destination = peloton
         .as_ref()
-        .map(|peloton| PelotonRideDestination::new(&peloton.classes, &peloton.stack))
+        .map(|peloton| Spanned::new(PelotonRideDestination::new(catalogue, &peloton.stack)))
         .map_err(unreachable);
     let gym_destination = access::hevy_routines(known(Discipline::Gym)?.delivers_to(), credentials)
         .map_err(|error| unreachable(&error));
@@ -296,13 +296,13 @@ async fn over(
         holidays: crate::holidays::calendars(store),
         diary: store.adapter(SqliteDiaryStore::new),
         plans: plans.clone(),
-        microcycle: microcycle(
+        microcycle: Staged(microcycle(
             store,
             &plans,
             &deliveries,
             crate::holidays::term(store).await,
-        )?,
-        committing: Committing::new(
+        )?),
+        committing: Staged(Committing::new(
             CommitPorts {
                 plans: plans.clone(),
                 parameters: parameters.clone(),
@@ -311,8 +311,8 @@ async fn over(
                 published: Spanned::new(PelotonProgrammes::new(catalogue)),
             },
             zone.clone(),
-        ),
-        gym: GymPorts {
+        )),
+        gym: Staged(GymPorts {
             history: store.adapter(SqliteExerciseHistory::new),
             mesocycles: store.adapter_with(SqliteGymMesocycleStore::new, zone.clone()),
             plans,
@@ -322,11 +322,11 @@ async fn over(
             lifecycle: deliveries.clone(),
             deliveries,
             destination: gym_destination,
-        },
-        cycling: CyclingPorts {
+        }),
+        cycling: Staged(CyclingPorts {
             riding: riding(store, zone, catalogue)?,
             destination: ride_destination,
-        },
+        }),
         // Beside the store, as extraction's are: a copy of the store elsewhere
         // is a separate system with its own lock.
         lock: store.run_lock(),

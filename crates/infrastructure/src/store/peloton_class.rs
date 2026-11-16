@@ -161,6 +161,78 @@ impl SqlitePelotonClassStore {
         Ok(u64::try_from(after - before).unwrap_or_default())
     }
 
+    /// Record the five-minute cool-down rides a walk listed, and say how many
+    /// were new (#664).
+    ///
+    /// **Their own table, not `peloton_class`**: a cool-down is only ever
+    /// stacked, never read for what it prescribes, so it is never one of the
+    /// classes [`unread`](Self::unread) offers for a detail read.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    pub async fn record_cool_downs(&self, classes: &[ClassSummary]) -> Result<u64, StoreError> {
+        let listed_at = Timestamp::now().to_string();
+        let mut transaction = self.store.writing::<Self>().await?;
+        let mut added = 0;
+        for found in classes {
+            let inserted = sqlx::query!(
+                r#"
+                INSERT INTO peloton_cool_down (reference, title, instructor, aired_at, listed_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (reference) DO NOTHING
+                "#,
+                found.id,
+                found.title,
+                found.instructor,
+                found.aired_at,
+                listed_at,
+            )
+            .execute(&mut **transaction)
+            .await
+            .map_err(|error| store_error(&error))?
+            .rows_affected();
+            added += inserted;
+        }
+        transaction.commit().await?;
+        Ok(added)
+    }
+
+    /// The newest five-minute cool-down ride `instructor` teaches, where the
+    /// catalogue holds one.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    pub async fn newest_cool_down(
+        &self,
+        instructor: &str,
+    ) -> Result<Option<ClassSummary>, StoreError> {
+        let row = sqlx::query!(
+            r#"
+            SELECT reference AS "reference!: String",
+                   title     AS "title!: String",
+                   aired_at  AS "aired_at: i64"
+              FROM peloton_cool_down
+             WHERE instructor = ?
+             ORDER BY aired_at DESC NULLS LAST, reference ASC
+             LIMIT 1
+            "#,
+            instructor,
+        )
+        .fetch_optional(&mut *self.store.reading().await?)
+        .await
+        .map_err(|error| store_error(&error))?;
+        Ok(row.map(|row| ClassSummary {
+            id: row.reference,
+            title: row.title,
+            duration_seconds: class::COOL_DOWN_SECONDS,
+            series: None,
+            instructor: Some(instructor.to_owned()),
+            aired_at: row.aired_at,
+        }))
+    }
+
     /// Which classes are listed and still worth asking Peloton for, newest first.
     ///
     /// **Newest first because that is what gets ridden.** A library read oldest

@@ -80,9 +80,9 @@ pub use ports::{
     PublishedRead, PulseWaveVelocityHistory, RawExtent, Reached, ReadUpTo, Reading,
     RecordedDevices, Rederivation, RefusalReport, RefusalReporter, RefusalStore, RenderingDigest,
     ReplyStatus, RestingHeartRateHistory, ResumptionPointResetter, ResumptionPointStore, Revision,
-    Revisions, RiddenSession, RiddenSessionLog, RiddenVenues, RideDestination, RidesPlaced,
-    RunLock, RunSummary, Served, SessionOrdinal, SleepHistory, SourceAccount, SourceEvent,
-    StreamStatus, StressHistory, Taken, Terms, TrainingDone, Translation, Translator,
+    Revisions, RiddenSession, RiddenSessionLog, RiddenVenues, RideDelivery, RideDestination,
+    RidesPlaced, RunLock, RunSummary, Served, SessionOrdinal, SleepHistory, SourceAccount,
+    SourceEvent, StreamStatus, StressHistory, Taken, Terms, TrainingDone, Translation, Translator,
     UnderivableReason, UnderivableSlot, Unexpressed, WearRecord, WeighInHistory,
     WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber, WorkoutStore,
 };

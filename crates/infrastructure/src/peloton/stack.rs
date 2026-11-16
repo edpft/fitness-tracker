@@ -164,8 +164,10 @@ impl PelotonStack {
     ///
     /// **The result is checked against what was asked for.** Twice now a write
     /// has been believed on the strength of a 200, and twice it had done
-    /// nothing — so this reads the list back and refuses rather than reporting a
-    /// success it has not seen.
+    /// nothing — so the list the last add answers with is compared, and a
+    /// success this has not seen is refused. That answer is the stack's list,
+    /// not its counters, so reading the stack again would ask for what it
+    /// already said (#664).
     ///
     /// # Errors
     ///
@@ -174,11 +176,14 @@ impl PelotonStack {
     /// sent.
     pub async fn set(&self, ride_ids: &[String]) -> Result<Stacked, SourceError> {
         self.clear().await?;
+        let mut stacked = None;
         for ride in ride_ids {
-            self.add(ride).await?;
+            stacked = Some(self.add(ride).await?);
         }
-
-        let stacked = self.view().await?;
+        let stacked = match stacked {
+            Some(stacked) => stacked,
+            None => self.view().await?,
+        };
         let wanted: Vec<String> = ride_ids.iter().map(|id| join_token(id)).collect();
         if stacked.classes != wanted {
             return Err(SourceError::Malformed {
@@ -344,18 +349,23 @@ struct StackedClass {
 
 /// Peloton, as where a cycling session is put to be ridden.
 ///
-/// **The stack, and the classes the cool-down is chosen from.** The cool-down
-/// is the most recent five-minute one by the session's own instructor, which
-/// the authored programme does not carry — it stores where a ride is done, not
-/// who teaches it — so the last class is read back to find out.
+/// **The stack, and the catalogue the cool-down is chosen from.** The
+/// cool-down is the newest five-minute one by the session's own instructor,
+/// which the authored programme does not carry — it stores where a ride is
+/// done, not who teaches it — so the last class is looked up to find out.
+/// Both come from the catalogue the refresh keeps (#664), so delivering asks
+/// Peloton for nothing but the stack.
 #[derive(Debug, Clone, Copy)]
 pub struct PelotonRideDestination<'a> {
-    classes: &'a super::PelotonClasses,
+    classes: super::catalogue::ClassCatalogue<'a>,
     stack: &'a PelotonStack,
 }
 
 impl<'a> PelotonRideDestination<'a> {
-    pub const fn new(classes: &'a super::PelotonClasses, stack: &'a PelotonStack) -> Self {
+    pub const fn new(
+        classes: super::catalogue::ClassCatalogue<'a>,
+        stack: &'a PelotonStack,
+    ) -> Self {
         Self { classes, stack }
     }
 }
@@ -369,8 +379,6 @@ impl application::RideDestination for PelotonRideDestination<'_> {
         &self,
         rides: &domain::sequence::NonEmpty<domain::cycling::RideVenue>,
     ) -> Result<application::RidesPlaced, SourceError> {
-        let replaced = self.stack.view().await?.count();
-
         let last = rides.iter().last().map_or("", |venue| venue.reference());
         let taught_by = self.classes.class(last).await?.instructor;
         let cool_down = self
@@ -386,7 +394,6 @@ impl application::RideDestination for PelotonRideDestination<'_> {
         let now = self.stack.set(&stacked).await?;
 
         Ok(application::RidesPlaced {
-            replaced,
             cool_down: domain::cycling::RideVenue::new(&cool_down.id, &cool_down.title).map_err(
                 |error| SourceError::Malformed {
                     detail: format!("the cool-down could not be named: {error}"),

@@ -477,6 +477,24 @@ fn a_second_delivery_for_a_date_replaces_the_first() {
     assert!(held.wrote("4d302bef"));
 }
 
+/// **What went is compared without its cool-down** (#664): the same rides are
+/// the same delivery whichever cool-down followed them, so nothing is sent
+/// again.
+#[test]
+fn what_went_is_the_rides_before_the_cool_down() {
+    let held = a_delivered_ride(Date::constant(2026, 9, 20)).expect("a delivery builds");
+    let ride = |reference: &str| RideVenue::new(reference, "a ride").expect("a venue builds");
+    assert!(held.went(&NonEmpty::of(ride("725d6185"), vec![])));
+    assert!(
+        !held.went(&NonEmpty::of(ride("4d302bef"), vec![])),
+        "another ride is another delivery"
+    );
+    assert!(
+        !held.went(&NonEmpty::of(ride("725d6185"), vec![ride("9cc35942")])),
+        "the cool-down is not one of the rides"
+    );
+}
+
 /// Every session of the week, read on the Friday evening.
 #[test]
 fn the_microcycle_reports_a_state_for_every_session() {

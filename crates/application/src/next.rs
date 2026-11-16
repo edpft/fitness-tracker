@@ -65,7 +65,7 @@ use crate::{
     MesocycleStore, NextLock, NormalisationError, NormalisedCyclingSessionReader,
     NormalisedGymSessionReader, NormalisedWeighInReader, Part, PlanStore, PrescribedWorkoutStore,
     Prescription, PrescriptionDeliverer as _, PrescriptionDeliveryStore, PrescriptionDestination,
-    PrescriptionError, PrescriptionLifecycle, ProgressionStore, RideDestination, RidesPlaced,
+    PrescriptionError, PrescriptionLifecycle, ProgressionStore, RideDelivery, RideDestination,
     RunLockError, RunSummary, SourceError, StoreError, Taken, WorkoutExtractor,
     WorkoutPrescriber as _, WorkoutStore,
     calendars::KeptCalendars,
@@ -627,7 +627,7 @@ pub enum GymPrescribed {
 #[derive(Debug)]
 pub struct CyclingPrescribed {
     pub ride: Box<PrescribedRide>,
-    pub delivery: Result<RidesPlaced, Undelivered<RideDeliveryError>>,
+    pub delivery: Result<RideDelivery, Undelivered<RideDeliveryError>>,
 }
 
 /// The prescription, whichever discipline the session is.
@@ -1127,7 +1127,10 @@ where
         if joined.contains(&Part::Delivering) {
             return Err(NextError::Joined);
         }
-        if self.ports.diary.diary().await?.patterns().is_empty() {
+        // **The diary is read once**: nothing a run does writes it but a skip,
+        // which reads it again (#664).
+        let mut diary = self.ports.diary.diary().await?;
+        if diary.patterns().is_empty() {
             return Err(NextError::NoWeek);
         }
 
@@ -1138,9 +1141,11 @@ where
             .await?;
 
         // 2. The next concurrent mesocycle, if the one before it has ended.
+        //
+        // **The standing is read again only where something changed it**
+        // (#664): gathering, a mesocycle committed, a skip taken.
         let holidays = self.ports.holidays.holidays().await;
-        let standing = self.ports.microcycle.standing(now).await?;
-        let diary = self.ports.diary.diary().await?;
+        let mut standing = self.ports.microcycle.standing(now).await?;
         // What the mesocycles that have completed settled, written once, so the
         // walk reads it from here on rather than deriving it again (#801).
         if let Some((plan, completed)) = &standing.completed
@@ -1154,17 +1159,17 @@ where
                 .await
         {
             finish(progress, &mut run, started, outcome);
+            standing = self.ports.microcycle.standing(now).await?;
         }
 
         // 3. Where the plan stands, after taking a skip if one was asked for.
-        let mut standing = self.ports.microcycle.standing(now).await?;
         if let Some(reason) = skip {
             let started = start(progress, Step::Skipping);
             let found = self.skip(&standing, now, reason).await?;
             finish(progress, &mut run, started, Ok(found));
             standing = self.ports.microcycle.standing(now).await?;
+            diary = self.ports.diary.diary().await?;
         }
-        let diary = self.ports.diary.diary().await?;
         let reschedule = standing.reschedule(diary.clone());
         let plan = self
             .plan(now, holidays, &standing, &diary, &reschedule)

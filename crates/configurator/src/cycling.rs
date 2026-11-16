@@ -5,7 +5,7 @@
 //! absent credential costs is the delivery and nothing else (§ 36).
 
 use application::{
-    PublishedCycling, PublishedProgrammes as _, PublishedRead, RidesPlaced, SourceError,
+    PublishedCycling, PublishedProgrammes as _, PublishedRead, RideDelivery, SourceError,
     cycling::{PrescribedRide, RideDeliveryError, RidingError},
     holding::NoHoldingRide,
 };
@@ -69,13 +69,14 @@ pub async fn deliver(
     ride: &PrescribedRide,
     peloton: &Peloton,
     replace: bool,
-) -> Result<Result<RidesPlaced, RideDeliveryError>, NextFailure> {
+) -> Result<Result<RideDelivery, RideDeliveryError>, NextFailure> {
     let stored = store.peloton_classes();
-    let riding = crate::next::riding(store, zone, ClassCatalogue::new(&stored, &peloton.classes))?;
+    let catalogue = ClassCatalogue::new(&stored, &peloton.classes);
+    let riding = crate::next::riding(store, zone, catalogue)?;
     Ok(riding
         .deliver(
             ride,
-            &PelotonRideDestination::new(&peloton.classes, &peloton.stack),
+            &Spanned::new(PelotonRideDestination::new(catalogue, &peloton.stack)),
             replace,
         )
         .await)

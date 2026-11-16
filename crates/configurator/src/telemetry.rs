@@ -5,10 +5,24 @@
 use std::path::Path;
 
 use application::{
-    CanonicalLayer, DerivedFrom, Rederivation, StoreError,
+    CanonicalLayer, DerivedFrom, PrescriptionError, Rederivation, StoreError,
     canonicalise::{Canonicalised, WeighInsCanonicalised},
-    next::{Canonicalising, Done, Found, IfGoing, NotDue, Progress, Refetch, Step, StepFailure},
+    commit::{CommitError, Due},
+    cycling::RidingError,
+    microcycle::Standing,
+    next::{
+        Canonicalising, CyclingPrescribed, CyclingSessions, Done, Found, GymPrescribed,
+        GymSessions, IfGoing, MesocycleCommitter, NotDue, Progress, Refetch, StandingReader, Step,
+        StepFailure,
+    },
+    reschedule::Reschedule,
 };
+use domain::{
+    macrocycle::PlannedMacrocycle,
+    planner::Discipline,
+    schedule::{DayPart, Diary, Holidays},
+};
+use jiff::civil::Date;
 use tracing::{Instrument as _, Span, field::Empty};
 use tracing_subscriber::layer::SubscriberExt as _;
 
@@ -96,6 +110,99 @@ impl<C: Canonicalising + Sync> Canonicalising for Traced<C> {
 
     async fn inputs(&self, layer: CanonicalLayer) -> Result<DerivedFrom, StoreError> {
         self.0.inputs(layer).await
+    }
+}
+
+/// Each stage of a run after gathering as a `step` span (#664): reading the
+/// standing, planning, and prescribing, so a run's time is accounted for
+/// after the last fetch as well as before it.
+///
+/// **A wrapper on the port, as [`Traced`] is**, because the stages are the
+/// ports the use case drives and the use case knows nothing of spans.
+pub struct Staged<P>(pub P);
+
+/// A stage of a run, with `field` naming which.
+fn stage(step: &'static str, field: &'static str, which: &'static str) -> Span {
+    let span = tracing::info_span!(
+        "step",
+        step,
+        read = Empty,
+        asked = Empty,
+        discipline = Empty
+    );
+    span.record(field, which);
+    span
+}
+
+impl<M: StandingReader + Sync> StandingReader for Staged<M> {
+    async fn standing(&self, now: DayPart) -> Result<Standing, StoreError> {
+        self.0
+            .standing(now)
+            .instrument(stage("reading", "read", "standing"))
+            .await
+    }
+}
+
+impl<C: MesocycleCommitter + Sync> MesocycleCommitter for Staged<C> {
+    async fn due(
+        &self,
+        now: DayPart,
+        holidays: &Holidays,
+        standing: &Standing,
+        diary: &Diary,
+    ) -> Result<Option<Due>, CommitError> {
+        self.0
+            .due(now, holidays, standing, diary)
+            .instrument(stage("planning", "asked", "due"))
+            .await
+    }
+
+    async fn commit(&self, due: &Due) -> Result<(), CommitError> {
+        self.0.commit(due).await
+    }
+
+    async fn planned(
+        &self,
+        now: DayPart,
+        holidays: &Holidays,
+        standing: &Standing,
+        diary: &Diary,
+    ) -> Result<Option<PlannedMacrocycle>, CommitError> {
+        self.0
+            .planned(now, holidays, standing, diary)
+            .instrument(stage("planning", "asked", "planned"))
+            .await
+    }
+}
+
+impl<G: GymSessions + Sync> GymSessions for Staged<G> {
+    async fn prescribed(
+        &self,
+        from: Date,
+        reschedule: &Reschedule,
+    ) -> Result<GymPrescribed, PrescriptionError> {
+        self.0
+            .prescribed(from, reschedule)
+            .instrument(stage("prescribing", "discipline", Discipline::Gym.as_str()))
+            .await
+    }
+}
+
+impl<Y: CyclingSessions + Sync> CyclingSessions for Staged<Y> {
+    async fn prescribed(
+        &self,
+        from: Date,
+        reschedule: &Reschedule,
+        diary: &Diary,
+    ) -> Result<CyclingPrescribed, RidingError> {
+        self.0
+            .prescribed(from, reschedule, diary)
+            .instrument(stage(
+                "prescribing",
+                "discipline",
+                Discipline::Cycling.as_str(),
+            ))
+            .await
     }
 }
 
