@@ -28,7 +28,10 @@ use std::{collections::HashMap, sync::Arc};
 
 use application::working::{self, Answering, Frame, Performance, Responding, Tested};
 use configurator::{
-    analyses::{FtpTests, HeartRateAtPower, Plans, Responses, Strength},
+    analyses::{
+        FtpTests, HeartRateAtPower, OvernightHrvResponse, Plans, RestingHeartRateResponse,
+        Strength, StressResponse,
+    },
     clock::Today,
     held::Of,
     rescheduling,
@@ -40,7 +43,8 @@ use maud::{Markup, html};
 use crate::{
     card::Card,
     detail::{self, Axis, Chart, Layer, Traced, name},
-    progress::{NoMacrocycle, Written, answering, change, row, tested},
+    progress::NoMacrocycle,
+    summary::{FTP, ONE_REP_MAX, Written, answering, change, row},
 };
 
 pub const PATH: &str = "/working";
@@ -67,7 +71,9 @@ impl Card for SoFar {
         Of<FtpTests>,
         Of<HeartRateAtPower>,
         Of<Strength>,
-        Of<Responses>,
+        Of<RestingHeartRateResponse>,
+        Of<OvernightHrvResponse>,
+        Of<StressResponse>,
         Today,
     );
 
@@ -77,7 +83,7 @@ impl Card for SoFar {
 
     fn render(
         &self,
-        (plans, tests, rides, strength, responses, today): (
+        (plans, tests, rides, strength, resting, hrv, stress, today): (
             Arc<rescheduling::Plans>,
             Arc<Vec<ftp_test::Test>>,
             Arc<Vec<heart_rate_at_power::Trended>>,
@@ -85,7 +91,9 @@ impl Card for SoFar {
                 Vec<application::one_rep_max::Tests>,
                 application::one_rep_max::View,
             )>,
-            Arc<Option<Vec<Responding>>>,
+            Arc<Option<Responding>>,
+            Arc<Option<Responding>>,
+            Arc<Option<Responding>>,
             Date,
         ),
     ) -> Markup {
@@ -93,7 +101,7 @@ impl Card for SoFar {
             return html! {};
         };
         let performance: Vec<Performance> =
-            std::iter::once(crate::progress::cycling(&tests, &rides, &frame, today))
+            std::iter::once(working::cycling(&tests, &rides, frame.began, today))
                 .chain(working::gym(
                     &strength.0,
                     &strength.1.lifts,
@@ -101,8 +109,8 @@ impl Card for SoFar {
                     today,
                 ))
                 .collect();
-        let responses = responses.as_deref().unwrap_or_default();
-        so_far(&performance, responses, frame.began, today)
+        let responses = responses(&[resting, hrv, stress]);
+        so_far(&performance, &responses, frame.began, today)
     }
 }
 
@@ -111,7 +119,13 @@ pub struct EachWeek;
 
 impl Card for EachWeek {
     const NAME: &'static str = "working-each-week";
-    type Reads = (Of<Plans>, Of<Responses>, Today);
+    type Reads = (
+        Of<Plans>,
+        Of<RestingHeartRateResponse>,
+        Of<OvernightHrvResponse>,
+        Of<StressResponse>,
+        Today,
+    );
 
     fn asked(_: &HashMap<String, String>) -> Self {
         Self
@@ -119,12 +133,31 @@ impl Card for EachWeek {
 
     fn render(
         &self,
-        (plans, responses, today): (Arc<rescheduling::Plans>, Arc<Option<Vec<Responding>>>, Date),
+        (plans, resting, hrv, stress, today): (
+            Arc<rescheduling::Plans>,
+            Arc<Option<Responding>>,
+            Arc<Option<Responding>>,
+            Arc<Option<Responding>>,
+            Date,
+        ),
     ) -> Markup {
         let Some(frame) = Frame::on(today, plans.now()) else {
             return html! {};
         };
-        each_week(responses.as_deref().unwrap_or_default(), &frame, today)
+        each_week(&responses(&[resting, hrv, stress]), &frame, today)
+    }
+}
+
+/// Each response reading there is, in order.
+fn responses(read: &[Arc<Option<Responding>>]) -> Vec<Responding> {
+    read.iter().filter_map(|one| one.as_ref().clone()).collect()
+}
+
+/// How a test's figures are written.
+const fn tested(tested: Tested) -> Written {
+    match tested {
+        Tested::Ftp => FTP,
+        Tested::OneRepMax(_) => ONE_REP_MAX,
     }
 }
 

@@ -1,10 +1,10 @@
 //! Overnight HRV, on the detail template (#622, #417).
 //!
-//! **The summary is the last 7 nights' mean and where it sits against the 60
-//! nights before**: below, within or above, the band being how far a week can
-//! differ from them by chance (#688). It is the latest whatever the range: the
-//! range only chooses which days the chart shows. The 7 nights' variation is
-//! not shown: there is nothing to read it against (operator, 2026-11-02).
+//! **It opens on the summary Progress shows** ([`crate::summary`], #830):
+//! overnight HRV since the macrocycle's start
+//! against the expected result of the training done, one card on both pages. On a
+//! day no plan is in force there is no summary, and the page opens on its
+//! chart.
 //!
 //! **No ± on the trend** (#616): the band it is read against is already the
 //! noise.
@@ -16,19 +16,17 @@
 use std::collections::BTreeMap;
 
 use domain::analytical::{
-    hrv::{BAND, Band, Day, METHOD, Trended},
+    hrv::{BAND, Day, METHOD, Trended},
     range::{Over, Range, Ranges},
 };
 use jiff::civil::Date;
 use maud::{Markup, html};
 
-use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Segment, Traced, name};
+use crate::detail::{self, Axis, Chart, Layer, Metric, Traced, name};
 
 pub const PATH: &str = "/hrv";
 pub const TITLE: &str = "Overnight HRV";
 
-/// The summary, the chart over the range chosen and the latest nights, or
-/// why there is no range.
 /// The days the cards are drawn over, or what to say instead.
 fn range(trended: &[Trended], ranges: &Ranges, over: Over) -> Result<Range, Markup> {
     let recorded = Range::spanning(
@@ -39,19 +37,11 @@ fn range(trended: &[Trended], ranges: &Ranges, over: Over) -> Result<Range, Mark
     crate::range::chosen(ranges, over, recorded, "Nothing has been recorded.")
 }
 
-/// The summary, which is the latest whatever the range; or why there is no
-/// range, which leaves every other card empty.
-fn summary_card(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
-    match range(trended, ranges, over) {
-        Ok(range) => summary(trended, range.to),
-        Err(said) => said,
-    }
-}
-
 /// Nights, over the range chosen.
 fn nights_card(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
-    let Ok(range) = range(trended, ranges, over) else {
-        return html! {};
+    let range = match range(trended, ranges, over) {
+        Ok(range) => range,
+        Err(said) => return said,
     };
     let today = range.to;
     let within: Vec<Trended> = trended.iter().map(|one| one.within(range)).collect();
@@ -89,20 +79,12 @@ pub fn page(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
     laid_out(
         over,
         &[
-            summary_card(trended, ranges, over),
             nights_card(trended, ranges, over),
             latest_card(trended, ranges, over),
         ],
     )
 }
 
-crate::card::ranged_card!(
-    /// The summary.
-    Summary,
-    "hrv-summary",
-    configurator::analyses::OvernightHrv,
-    summary_card
-);
 crate::card::ranged_card!(
     /// Nights.
     NightsChart,
@@ -117,63 +99,6 @@ crate::card::ranged_card!(
     configurator::analyses::OvernightHrv,
     latest_card
 );
-
-/// The last 7 nights' mean against its band.
-fn summary(trended: &[Trended], today: Date) -> Markup {
-    let Some((one, day)) = trended
-        .iter()
-        .filter_map(|one| {
-            one.trend
-                .iter()
-                .flatten()
-                .next_back()
-                .map(|day| (one, *day))
-        })
-        .max_by_key(|(_, day)| day.on)
-    else {
-        return html! {};
-    };
-    let against = day.band.map_or_else(
-        || Reading::NoRule("Too few nights before to read it against.".to_owned()),
-        |band| position(band, day.milliseconds),
-    );
-    detail::summary(
-        &[Cell {
-            metric: Metric::Hrv,
-            label: "Last 7 nights",
-            figure: format!("{:.0}", day.milliseconds),
-            unit: "ms",
-            margin: None,
-            readings: vec![against],
-        }],
-        &format!(
-            "Trend on {} · {}",
-            detail::day(day.on, today),
-            name(&one.series.sent_by)
-        ),
-    )
-}
-
-/// Below, within or above the band, the outer two as wide as the band.
-fn position(band: Band, at: f64) -> Reading {
-    let width = band.high - band.low;
-    Reading::Position {
-        segments: vec![
-            segment((band.low - width).max(0.0), band.low, "below"),
-            segment(band.low, band.high, "within"),
-            segment(band.high, band.high + width, "above"),
-        ],
-        at,
-    }
-}
-
-fn segment(from: f64, to: f64, name: &str) -> Segment {
-    Segment {
-        from,
-        to,
-        name: name.to_owned(),
-    }
-}
 
 /// Each night, each watch's trend, and its band in grey, one region per
 /// unbroken stretch of it.
@@ -290,7 +215,7 @@ pub struct Page {
 
 impl crate::card::Page for Page {
     const ROUTE: &'static str = PATH;
-    type Cards = (Summary, NightsChart, Latest);
+    type Cards = (crate::summary::OvernightHrv, NightsChart, Latest);
 
     fn asked(
         _path: &axum::extract::RawPathParams,
@@ -306,7 +231,8 @@ impl crate::card::Page for Page {
     }
 
     fn layout(&self, cards: [Markup; 3]) -> Markup {
-        laid_out(self.over, &cards)
+        let [summary, nights, latest] = cards;
+        laid_out(self.over, &[crate::summary::atop(&summary), nights, latest])
     }
 }
 
@@ -354,43 +280,6 @@ mod tests {
 
     fn shown(trended: &[Trended], ranges: &Ranges, over: Over) -> String {
         super::page(trended, ranges, over).into_string()
-    }
-
-    #[test]
-    fn the_summary_is_the_week_against_its_band() {
-        // 67 nights alternating 50 and 56 ms, then a week at 30: far below.
-        let page = shown(
-            &nights(74, |index| match index {
-                67.. => 30,
-                _ if index % 2 == 0 => 50,
-                _ => 56,
-            }),
-            &NO_PLAN,
-            Over::All,
-        );
-
-        assert!(page.contains(r#"class="cell hrv""#), "{page}");
-        assert!(page.contains("30<small>ms</small>"), "{page}");
-        assert!(!page.contains("Variation"), "nothing to read it against");
-        assert_eq!(page.matches(r#"class="segment lit""#).count(), 1);
-        let lit = page.find(r#"class="segment lit""#).expect("lit");
-        let below = page.find(">below<").expect("below");
-        let within = page.find(">within<").expect("within");
-        assert!(lit < below && below < within, "below is the one lit");
-        assert!(page.contains("Trend on 15 Mar · device unknown"), "{page}");
-        assert!(
-            !page.contains(r#"class="margin""#),
-            "no ± on the trend: the band is the noise already"
-        );
-    }
-
-    #[test]
-    fn too_few_nights_before_is_said() {
-        let page = shown(&nights(10, |_| 50), &NO_PLAN, Over::All);
-        assert!(
-            page.contains("Too few nights before to read it against."),
-            "{page}"
-        );
     }
 
     #[test]

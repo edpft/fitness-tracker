@@ -11,9 +11,6 @@
 //! **Against where the plan's aims would have taken it** (#786): the trend
 //! against expectation, as Progress's body tile draws it. The weight change
 //! chart (#689) went with it (operator, 2026-11-13).
-//!
-//! **The summary is the latest trend weight**, whatever the range: the range
-//! only chooses which days the chart shows.
 
 use std::collections::BTreeMap;
 
@@ -28,7 +25,7 @@ use domain::{
 use jiff::civil::Date;
 use maud::{Markup, html};
 
-use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Traced};
+use crate::detail::{self, Axis, Chart, Layer, Metric, Traced};
 
 /// The days a weigh-in was recorded on.
 pub fn recorded(series: &Series) -> Option<Range> {
@@ -107,23 +104,6 @@ pub fn latest(series: &Series, today: Date) -> Markup {
         return html! {};
     }
     detail::latest("Weigh-ins", "weight · fat · fat-free, kg", &rows)
-}
-
-/// The latest trend weight: what the underlying weight is taken to be now,
-/// and the day it is the trend on.
-pub fn cell(series: &Series) -> Option<(Cell<'static>, Date)> {
-    let latest = series.trend.iter().flatten().next_back()?;
-    Some((
-        Cell {
-            metric: Metric::BodyWeight,
-            label: "Trend weight",
-            figure: tenths(latest.mass),
-            unit: "kg",
-            margin: latest.margin.map(|margin| format!("{margin:.1} kg")),
-            readings: Vec::new(),
-        },
-        latest.on,
-    ))
 }
 
 /// What a tap on each day shows: its weigh-ins, its trend and where the aims
@@ -311,11 +291,9 @@ mod tests {
     }
 
     #[test]
-    fn the_summary_is_trend_weight_and_weight_change_is_not_charted() {
+    fn weight_change_is_not_charted() {
         let weigh_ins = (1..=28).map(|d| day(d, 84_000)).collect();
         let page = shown(weigh_ins, &ranges(date(2026, 9, 28)), Over::All);
-        assert!(page.contains("Trend weight"), "{page}");
-        assert!(!page.contains(r#"class="badge""#), "no arrow: {page}");
         assert!(
             !page.contains("Weight change"),
             "weight change went (2026-11-13): {page}"

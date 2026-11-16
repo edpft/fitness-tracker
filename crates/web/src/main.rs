@@ -31,6 +31,7 @@ mod resting;
 mod run;
 mod schedule;
 mod sleep;
+mod summary;
 mod weight;
 mod working;
 mod workout;
@@ -612,21 +613,47 @@ mod tests {
             redrawn,
             [
                 "body-composition-charts",
-                "body-composition-summary",
                 "body-weigh-ins",
                 "body-weight-charts",
-                "body-weight-summary",
                 "ftp-heart-rates",
                 "ftp-latest",
-                "ftp-summary",
                 "ftp-tests",
                 "one-rep-max-lifts",
-                "progress-body",
-                "progress-cycling",
                 "progress-gym",
                 "pulse-wave-velocity-latest",
                 "pulse-wave-velocity-readings",
                 "pulse-wave-velocity-summary",
+                "summary-body-weight",
+                "summary-fat",
+                "summary-fat-free",
+                "summary-ftp-test",
+                "working-so-far",
+            ]
+        );
+    }
+
+    /// **A night of HRV redraws the HRV cards and no other** (#830): its
+    /// response is a node of its own, so resting heart rate and stress, on
+    /// Progress and on /working, are served as they were.
+    #[test]
+    fn a_night_of_hrv_redraws_only_the_cards_reading_hrv() {
+        let graph = configurator::graph::graph();
+        let night = application::graph::Node::Normalised(
+            domain::landing::LandingStream::try_from("garmin.hrv").expect("a stream"),
+        );
+        let redrawn: Vec<&str> = super::pages()
+            .cards_read()
+            .iter()
+            .filter(|(_, reads)| graph.upstream(reads).contains(&night))
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(
+            redrawn,
+            [
+                "hrv-latest",
+                "hrv-nights",
+                "summary-overnight-hrv",
+                "working-each-week",
                 "working-so-far",
             ]
         );

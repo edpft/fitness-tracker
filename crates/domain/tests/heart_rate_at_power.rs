@@ -6,7 +6,6 @@ use std::collections::BTreeSet;
 
 use domain::{
     analytical::{
-        body_weight::Direction,
         heart_rate::{RideHeartRate, SentBy, ride_heart_rate},
         heart_rate_at_power::{AtPower, Second, seconds, trended},
     },
@@ -271,7 +270,7 @@ fn a_ride_whose_device_is_not_known_is_in_no_series() {
 }
 
 #[test]
-fn the_last_42_days_are_read_against_the_42_before_beyond_the_noise_of_the_two() {
+fn the_noise_is_the_scatter_of_successive_rides() {
     // Every fourth day for twelve weeks: 140 bpm, alternating a beat either
     // side, then 130 for the last six weeks.
     let rides: Vec<RideHeartRate> = (0..21)
@@ -292,17 +291,10 @@ fn the_last_42_days_are_read_against_the_42_before_beyond_the_noise_of_the_two()
         noise < 3.0,
         "the noise is successive rides' scatter: {noise}"
     );
-    let change = watch.change().expect("both windows hold three rides");
-    assert!(
-        (change.by + 10.0).abs() < 1.0,
-        "fell ten beats: {}",
-        change.by
-    );
-    assert_eq!(change.direction, Some(Direction::Falling));
 }
 
 #[test]
-fn fewer_than_three_rides_in_42_days_is_no_line_and_not_known_yet() {
+fn fewer_than_three_rides_in_42_days_is_no_line() {
     let rides: Vec<RideHeartRate> = [0, 30, 75, 76]
         .into_iter()
         .map(|day| modelled(FIRST + day.days(), 140.0))
@@ -314,5 +306,4 @@ fn fewer_than_three_rides_in_42_days_is_no_line_and_not_known_yet() {
         panic!("one device");
     };
     assert!(watch.line.is_empty(), "no window holds three rides");
-    assert_eq!(watch.change(), None);
 }

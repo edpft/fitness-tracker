@@ -1,9 +1,9 @@
 //! Heart rate at a fixed power, on the detail template (#621, #688).
 //!
-//! **The summary is the latest 42-day mean, its ±, and its change on the 42
-//! days before**, read against the noise of the two: the arrow only where the
-//! change is beyond it. It is the latest whatever the range: the range only
-//! chooses which rides the chart shows.
+//! **It opens on the summary Progress shows** ([`crate::summary`], #830):
+//! heart rate at 140 W since the macrocycle's start, one card on both pages. On a
+//! day no plan is in force there is no summary, and the page opens on its
+//! chart.
 //!
 //! **One chart**, on the mock the operator reviewed on 2026-11-06: each ride a
 //! dot, and each device's line over its band. Each device's line is its own
@@ -15,18 +15,16 @@ use std::collections::BTreeMap;
 use domain::analytical::{
     heart_rate_at_power::{LINE, METHOD, Trended},
     range::{Over, Range, Ranges},
-    resting::{Change, Day},
+    resting::Day,
 };
 use jiff::civil::Date;
 use maud::{Markup, html};
 
-use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced};
+use crate::detail::{self, Axis, Chart, Layer, Metric, Traced};
 
 pub const PATH: &str = "/heart-rate";
 pub const TITLE: &str = "Heart rate per power zone";
 
-/// The summary, the chart over the range chosen and the latest rides, or why
-/// there is no range.
 /// The days the cards are drawn over, or what to say instead.
 fn range(trended: &[Trended], ranges: &Ranges, over: Over) -> Result<Range, Markup> {
     let recorded = Range::spanning(trended.iter().flat_map(|one| {
@@ -38,19 +36,11 @@ fn range(trended: &[Trended], ranges: &Ranges, over: Over) -> Result<Range, Mark
     crate::range::chosen(ranges, over, recorded, "Nothing has been recorded.")
 }
 
-/// The summary, which is the latest whatever the range; or why there is no
-/// range, which leaves every other card empty.
-fn summary_card(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
-    match range(trended, ranges, over) {
-        Ok(range) => summary(trended, range.to),
-        Err(said) => said,
-    }
-}
-
 /// Rides, over the range chosen.
 fn rides_card(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
-    let Ok(range) = range(trended, ranges, over) else {
-        return html! {};
+    let range = match range(trended, ranges, over) {
+        Ok(range) => range,
+        Err(said) => return said,
     };
     let today = range.to;
     let within: Vec<Trended> = trended.iter().map(|one| one.within(range)).collect();
@@ -88,20 +78,12 @@ pub fn page(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
     laid_out(
         over,
         &[
-            summary_card(trended, ranges, over),
             rides_card(trended, ranges, over),
             latest_card(trended, ranges, over),
         ],
     )
 }
 
-crate::card::ranged_card!(
-    /// The summary.
-    Summary,
-    "heart-rate-summary",
-    configurator::analyses::HeartRateAtPower,
-    summary_card, over = crate::drawn::tests_over
-);
 crate::card::ranged_card!(
     /// Rides.
     RidesChart,
@@ -116,73 +98,6 @@ crate::card::ranged_card!(
     configurator::analyses::HeartRateAtPower,
     latest_card, over = crate::drawn::tests_over
 );
-
-/// The device whose latest ride is the latest, the line on that ride, and its
-/// change on the 42 days before.
-fn latest_line(trended: &[Trended]) -> Option<(&Trended, Option<Day>, Option<Change>)> {
-    trended
-        .iter()
-        .filter_map(|one| {
-            let last = one.rides.last()?;
-            Some((one, last.on, one.window(last.on), one.change()))
-        })
-        .max_by_key(|(_, on, ..)| *on)
-        .map(|(one, _, day, change)| (one, day, change))
-}
-
-/// The latest line, its ±, and its change, read against its noise.
-fn summary(trended: &[Trended], today: Date) -> Markup {
-    let Some((one, day, change)) = latest_line(trended) else {
-        return html! {};
-    };
-    let Some(day) = day else {
-        return detail::summary(
-            &[Cell {
-                metric: Metric::HeartRateAtPower,
-                label: "Heart rate at 140 W",
-                figure: "—".to_owned(),
-                unit: "bpm",
-                margin: None,
-                readings: vec![Reading::NoRule(
-                    "Fewer than 3 rides in the last 42 days.".to_owned(),
-                )],
-            }],
-            one.device.name().as_str(),
-        );
-    };
-    let reading = match change {
-        Some(Change {
-            by,
-            margin: Some(noise),
-            direction,
-            ..
-        }) => Reading::Change {
-            by,
-            noise,
-            direction,
-            said: format!("{} bpm", signed(by)),
-            over: "in 42 days".to_owned(),
-        },
-        Some(_) => Reading::NoRule("Too few rides to measure the noise.".to_owned()),
-        None => Reading::NoRule("Fewer than 3 rides in the 42 days before.".to_owned()),
-    };
-    let asof = format!(
-        "Line on {} · {}",
-        detail::day(day.on, today),
-        one.device.name()
-    );
-    detail::summary(
-        &[Cell {
-            metric: Metric::HeartRateAtPower,
-            label: "Heart rate at 140 W",
-            figure: format!("{:.1}", day.bpm),
-            unit: "bpm",
-            margin: day.margin.map(|margin| format!("{margin:.1}")),
-            readings: vec![reading],
-        }],
-        &asof,
-    )
-}
 
 /// Each ride, and each device's line over its band.
 fn chart(within: &[Trended], range: Range, today: Date) -> Chart<'static> {
@@ -279,11 +194,6 @@ fn latest(trended: &[Trended], today: Date) -> Markup {
     detail::latest("Rides", "at 140 W", &rows)
 }
 
-/// A change with its sign, to one place.
-fn signed(by: f64) -> String {
-    format!("{by:+.1}").replace('-', "−")
-}
-
 fn counted(count: usize, one: &str) -> String {
     if count == 1 {
         format!("1 {one}")
@@ -301,7 +211,7 @@ pub struct Page {
 
 impl crate::card::Page for Page {
     const ROUTE: &'static str = PATH;
-    type Cards = (Summary, RidesChart, Latest);
+    type Cards = (crate::summary::AtPower, RidesChart, Latest);
 
     fn asked(
         _path: &axum::extract::RawPathParams,
@@ -317,7 +227,8 @@ impl crate::card::Page for Page {
     }
 
     fn layout(&self, cards: [Markup; 3]) -> Markup {
-        laid_out(self.over, &cards)
+        let [summary, rides, latest] = cards;
+        laid_out(self.over, &[crate::summary::atop(&summary), rides, latest])
     }
 }
 
@@ -412,46 +323,6 @@ mod tests {
 
     fn shown(trended: &[Trended]) -> String {
         super::page(trended, &NO_PLAN, Over::All).into_string()
-    }
-
-    #[test]
-    fn the_summary_is_the_last_42_days_its_band_and_its_change_on_the_42_before() {
-        // 140 for twelve rides, then 128 for eleven: the last 42 days are
-        // 128.0 against 140.0, a fall far beyond the noise.
-        let mut figures = vec![140.0; 12];
-        figures.extend([128.0; 11]);
-        let page = shown(&rides(&figures, &[]));
-
-        assert!(
-            page.contains(r#"class="cell heart-rate-at-power""#),
-            "{page}"
-        );
-        assert!(page.contains("Heart rate at 140 W"), "{page}");
-        assert!(page.contains("128.0<small>bpm</small>"), "{page}");
-        assert!(page.contains("−12.0 bpm"), "{page}");
-        assert!(page.contains("in 42 days"), "{page}");
-        assert!(page.contains(r#"class="badge""#), "falling, with its arrow");
-        assert!(page.contains("Line on 28 Oct · Forerunner 165"), "{page}");
-    }
-
-    #[test]
-    fn a_change_within_the_noise_has_no_arrow() {
-        let figures: Vec<f64> = (0..23)
-            .map(|n| if n % 2 == 0 { 138.0 } else { 141.0 })
-            .collect();
-        let page = shown(&rides(&figures, &[]));
-
-        assert!(page.contains(r#"class="change plain""#), "{page}");
-        assert!(!page.contains(r#"class="badge"#), "{page}");
-    }
-
-    #[test]
-    fn fewer_than_three_rides_in_the_42_days_before_is_said() {
-        let page = shown(&rides(&[140.0; 6], &[]));
-        assert!(
-            page.contains("Fewer than 3 rides in the 42 days before."),
-            "{page}"
-        );
     }
 
     #[test]

@@ -1,11 +1,10 @@
 //! The FTP tests, in watts and over body weight, on the detail template
 //! (#620, #469).
 //!
-//! **The summary is the latest test in watts and per kilo**, each with its
-//! change against its noise (#688): against the test before, or since the
-//! start of its run where that is what decided the reading. The arrow only
-//! where the change is beyond the noise; higher is better. It is the latest
-//! whatever the range.
+//! **It opens on the summary Progress shows** ([`crate::summary`], #830):
+//! the macrocycle's latest test against its entry test, in watts, one card on
+//! both pages. On a day no plan is in force there is no summary, and the page
+//! opens on its chart.
 //!
 //! **One chart, the unit a choice**: each test a dot, nothing joining them,
 //! since a test is a measurement and no line claims anything about the days
@@ -24,7 +23,7 @@
 use std::collections::BTreeMap;
 
 use domain::analytical::{
-    ftp_test::{Moved, Test, TestHeartRate, noise, within},
+    ftp_test::{Moved, Test, TestHeartRate, within},
     range::{Over, Range, Ranges},
 };
 use jiff::civil::Date;
@@ -36,7 +35,7 @@ use configurator::{
     held::Of,
 };
 
-use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Reading};
+use crate::detail::{self, Axis, Chart, Layer, Metric};
 
 pub const PATH: &str = "/ftp";
 const TITLE: &str = "FTP tests";
@@ -47,19 +46,11 @@ fn range(tests: &[Test], ranges: &Ranges, over: Over) -> Result<Range, Markup> {
     crate::range::chosen(ranges, over, recorded, "No FTP test has been recorded.")
 }
 
-/// The summary, which is the latest whatever the range; or why there is no
-/// range, which leaves every other card empty.
-fn summary_card(tests: &[Test], ranges: &Ranges, over: Over) -> Markup {
-    match range(tests, ranges, over) {
-        Ok(range) => summary(tests, range.to),
-        Err(said) => said,
-    }
-}
-
 /// The tests over the range chosen, in watts or per kilo.
 fn tests_card(tests: &[Test], ranges: &Ranges, over: Over) -> Markup {
-    let Ok(range) = range(tests, ranges, over) else {
-        return html! {};
+    let range = match range(tests, ranges, over) {
+        Ok(range) => range,
+        Err(said) => return said,
     };
     let today = range.to;
     let shown = within(tests, range);
@@ -115,7 +106,6 @@ pub fn page(tests: &[Test], heart_rates: &[TestHeartRate], ranges: &Ranges, over
     laid_out(
         over,
         &[
-            summary_card(tests, ranges, over),
             tests_card(tests, ranges, over),
             heart_rate_card(tests, heart_rates, ranges, over),
             latest_card(tests, ranges, over),
@@ -123,14 +113,6 @@ pub fn page(tests: &[Test], heart_rates: &[TestHeartRate], ranges: &Ranges, over
     )
 }
 
-crate::card::ranged_card!(
-    /// The latest test.
-    Summary,
-    "ftp-summary",
-    configurator::analyses::FtpTests,
-    summary_card,
-    over = crate::drawn::tests_over
-);
 crate::card::ranged_card!(
     /// Every test, in watts or per kilo.
     TestsChart,
@@ -188,68 +170,6 @@ impl crate::card::Card for HeartRates {
             &application::ranges::of(today, plans.now()),
             self.over,
         )
-    }
-}
-
-/// The latest test, in watts and per kilo, each read against its noise.
-fn summary(tests: &[Test], today: Date) -> Markup {
-    let Some(last) = tests.last() else {
-        return html! {};
-    };
-    let mut cells = vec![Cell {
-        metric: Metric::Ftp,
-        label: "FTP",
-        figure: last.ftp.watts().as_u32().to_string(),
-        unit: "W",
-        margin: None,
-        readings: vec![reading(
-            last.ftp.watts().as_u32(),
-            last.watts_moved,
-            &|by| format!("{} W", signed(by)),
-        )],
-    }];
-    if let Some(ratio) = last.per_kilo {
-        cells.push(Cell {
-            metric: Metric::Ftp,
-            label: "Per kilo",
-            figure: hundredths(i64::from(ratio.as_hundredths()), ""),
-            unit: "W/kg",
-            margin: None,
-            readings: vec![reading(ratio.as_hundredths(), last.per_kilo_moved, &|by| {
-                format!("{} W/kg", hundredths(by, "+"))
-            })],
-        });
-    }
-    detail::summary(
-        &cells,
-        &format!("Test on {}", detail::day(last.on(), today)),
-    )
-}
-
-/// A figure's change against the noise of two tests: since the start of its
-/// run where that decided it, else against the test before.
-fn reading(now: u32, moved: Option<Moved>, said: &dyn Fn(i64) -> String) -> Reading {
-    let Some(moved) = moved else {
-        return Reading::NoRule("No test before it to read it against.".to_owned());
-    };
-    let (by, over) = moved.since.map_or_else(
-        || (moved.by, "against the test before".to_owned()),
-        |since| {
-            (
-                since.by,
-                format!("since {}", since.on.strftime("%-d %b %Y")),
-            )
-        },
-    );
-    let Ok(earlier) = u32::try_from(i64::from(now) - by) else {
-        return Reading::NoRule("No test before it to read it against.".to_owned());
-    };
-    Reading::Change {
-        by: f64::from(now) - f64::from(earlier),
-        noise: noise(earlier),
-        direction: moved.direction,
-        said: said(by),
-        over,
     }
 }
 
@@ -481,7 +401,7 @@ pub struct Page {
 
 impl crate::card::Page for Page {
     const ROUTE: &'static str = PATH;
-    type Cards = (Summary, TestsChart, HeartRates, Latest);
+    type Cards = (crate::summary::FtpTest, TestsChart, HeartRates, Latest);
 
     fn asked(
         _path: &axum::extract::RawPathParams,
@@ -497,7 +417,11 @@ impl crate::card::Page for Page {
     }
 
     fn layout(&self, cards: [Markup; 4]) -> Markup {
-        laid_out(self.over, &cards)
+        let [summary, tests, heart_rates, latest] = cards;
+        laid_out(
+            self.over,
+            &[crate::summary::atop(&summary), tests, heart_rates, latest],
+        )
     }
 }
 
@@ -589,26 +513,6 @@ mod tests {
     }
 
     #[test]
-    fn the_summary_is_the_latest_test_against_its_noise() {
-        let page = shown(&autumn().expect("the tests"), Over::Macrocycle);
-        assert!(page.contains(r#"class="cell ftp""#), "{page}");
-        assert!(page.contains("182<small>W</small>"), "{page}");
-        assert!(page.contains("2.16<small>W/kg</small>"), "{page}");
-        assert!(page.contains("+5 W"), "{page}");
-        assert!(page.contains("+0.05 W/kg"), "{page}");
-        assert_eq!(
-            page.matches("<span>against the test before</span>").count(),
-            2,
-            "{page}"
-        );
-        assert!(
-            !page.contains(r#"class="badge"#),
-            "no arrow: +5 W is within 177 W's noise"
-        );
-        assert!(page.contains("Test on 25 Oct"), "{page}");
-    }
-
-    #[test]
     fn per_kilo_has_no_direction_after_an_unweighed_test() {
         let page = shown(&autumn().expect("the tests"), Over::Macrocycle);
         assert!(
@@ -645,7 +549,6 @@ mod tests {
         );
         let page = shown(&tests, Over::Macrocycle);
         assert!(page.contains("since 22 Jul 2026"), "{page}");
-        assert!(page.contains(r#"class="badge"#), "rising: {page}");
         assert!(
             page.contains("187 W · +5 W, rising, +15 W since 22 Jul 2026"),
             "{page}"

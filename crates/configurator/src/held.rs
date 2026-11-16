@@ -137,6 +137,8 @@ tuple_fetch!(A, B, C);
 tuple_fetch!(A, B, C, D);
 tuple_fetch!(A, B, C, D, E);
 tuple_fetch!(A, B, C, D, E, F);
+tuple_fetch!(A, B, C, D, E, F, G);
+tuple_fetch!(A, B, C, D, E, F, G, H);
 
 /// A value held, and the version of what it was derived from.
 struct Slot {

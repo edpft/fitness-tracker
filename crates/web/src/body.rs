@@ -93,19 +93,6 @@ impl Body<'_> {
         )
     }
 
-    /// Body weight's summary: its trend, on the latest day.
-    pub fn weight_summary(&self) -> Markup {
-        let Ok(range) = self.range() else {
-            return html! {};
-        };
-        weight::cell(self.series).map_or_else(
-            || html! {},
-            |(cell, on)| {
-                detail::summary(&[cell], &format!("Trend on {}", detail::day(on, range.to)))
-            },
-        )
-    }
-
     /// Body weight's charts, against where the aims would have taken it.
     pub fn weight_charts(&self) -> Markup {
         match self.range() {
@@ -117,18 +104,6 @@ impl Body<'_> {
             ),
             _ => html! {},
         }
-    }
-
-    /// Body composition's summary: each component, by the latest method.
-    pub fn composition_summary(&self) -> Markup {
-        let Ok(range) = self.range() else {
-            return html! {};
-        };
-        let (cells, asof) = composition::summary(self.components, range.to);
-        if cells.is_empty() {
-            return html! {};
-        }
-        detail::summary(&cells, &asof.join("; "))
     }
 
     /// Fat and fat-free mass, against what the aims expect of them.
@@ -161,11 +136,12 @@ impl Body<'_> {
 ///
 /// **A heading over nothing is not shown**: a section none of whose cards
 /// drew anything is hidden by the stylesheet.
-fn laid_out(over: Over, cards: [Markup; 5]) -> Markup {
+fn laid_out(over: Over, cards: [Markup; 6]) -> Markup {
     let [
         weighed,
         weight_charts,
-        measured,
+        fat,
+        fat_free,
         composition_charts,
         weigh_ins,
     ] = cards;
@@ -176,12 +152,12 @@ fn laid_out(over: Over, cards: [Markup; 5]) -> Markup {
         &html! {
             div.cards {
                 h2.group { "Body weight" }
-                (weighed)
+                (crate::summary::atop(&weighed))
                 (weight_charts)
             }
             div.cards {
                 h2.group { "Body composition" }
-                (measured)
+                section.card.tile.summary-of { (fat) (fat_free) }
                 (composition_charts)
             }
             (weigh_ins)
@@ -209,9 +185,10 @@ pub fn page(
     laid_out(
         over,
         [
-            body.weight_summary(),
+            maud::html! {},
             body.weight_charts(),
-            body.composition_summary(),
+            maud::html! {},
+            maud::html! {},
             body.composition_charts(),
             body.weigh_ins(),
         ],
@@ -270,22 +247,10 @@ macro_rules! body_card {
 }
 
 body_card!(
-    /// Body weight's summary.
-    WeightSummary,
-    "body-weight-summary",
-    weight_summary
-);
-body_card!(
     /// Body weight's charts.
     WeightCharts,
     "body-weight-charts",
     weight_charts
-);
-body_card!(
-    /// Body composition's summary.
-    CompositionSummary,
-    "body-composition-summary",
-    composition_summary
 );
 body_card!(
     /// Fat and fat-free mass.
@@ -309,9 +274,10 @@ pub struct Page {
 impl crate::card::Page for Page {
     const ROUTE: &'static str = PATH;
     type Cards = (
-        WeightSummary,
+        crate::summary::BodyWeightSince,
         WeightCharts,
-        CompositionSummary,
+        crate::summary::Fat,
+        crate::summary::FatFree,
         CompositionCharts,
         WeighIns,
     );
@@ -329,7 +295,7 @@ impl crate::card::Page for Page {
         Some(self.over)
     }
 
-    fn layout(&self, cards: [Markup; 5]) -> Markup {
+    fn layout(&self, cards: [Markup; 6]) -> Markup {
         laid_out(self.over, cards)
     }
 }
@@ -352,7 +318,7 @@ mod tests {
     use super::page;
 
     /// **One page reads both, in two sections**: body weight with its own
-    /// summary, then composition with its own.
+    /// summary, then composition with fat's and fat-free mass's.
     #[test]
     fn body_weight_and_composition_are_one_page() {
         let weigh_ins = (1..=28)
@@ -401,16 +367,10 @@ mod tests {
             "{page}"
         );
         assert_eq!(
-            page.matches(r#"class="card summary""#).count(),
+            page.matches(r#"class="card tile summary-of""#).count(),
             2,
             "a summary for each section: {page}"
         );
-        for label in ["Trend weight", "Fat", "Fat-free"] {
-            assert!(
-                page.contains(&format!(r#"<i class="swatch"></i>{label}</div>"#)),
-                "{label}: {page}"
-            );
-        }
         let order: Vec<usize> = [
             r#"<h2 class="group">Body weight</h2>"#,
             "<h2>Body weight</h2>",
@@ -424,10 +384,6 @@ mod tests {
         .collect();
         assert!(order.is_sorted(), "{order:?}");
         assert!(!page.contains("Weight change"), "{page}");
-        assert!(
-            page.contains("Trend on 28 Oct · Body Scan, algorithm 218300672<"),
-            "{page}"
-        );
         assert!(page.contains(r#"href="/body?over=all""#), "{page}");
     }
 }

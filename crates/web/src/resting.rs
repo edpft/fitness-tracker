@@ -1,9 +1,10 @@
 //! Resting heart rate, on the detail template (#623, #417).
 //!
-//! **The summary is the latest 90-day line, its ±, and its change on the
-//! line 90 days before**, read against the noise of the two (#615): the arrow
-//! only where the change is beyond it. It is the latest whatever the range:
-//! the range only chooses which days the chart shows.
+//! **It opens on the summary Progress shows** ([`crate::summary`], #830):
+//! resting heart rate since the macrocycle's start
+//! against the expected result of the training done, one card on both pages. On a
+//! day no plan is in force there is no summary, and the page opens on its
+//! chart.
 //!
 //! **One chart**: each day a dot, each watch's line over its band, and the
 //! nights flagged as possible illness ringed. Each watch's line is its own
@@ -15,18 +16,16 @@ use std::collections::BTreeMap;
 use domain::analytical::{
     per_device::SentBy,
     range::{Over, Range, Ranges},
-    resting::{Change, Day, FLAG, METHOD, Trended},
+    resting::{Day, FLAG, METHOD, Trended},
 };
 use jiff::civil::Date;
 use maud::{Markup, html};
 
-use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced, name};
+use crate::detail::{self, Axis, Chart, Layer, Metric, Traced, name};
 
 pub const PATH: &str = "/resting-heart-rate";
 pub const TITLE: &str = "Resting heart rate";
 
-/// The summary, the chart over the range chosen and the latest nights, or why
-/// there is no range.
 /// The days the cards are drawn over, or what to say instead.
 fn range(trended: &[Trended], ranges: &Ranges, over: Over) -> Result<Range, Markup> {
     let recorded = Range::spanning(
@@ -37,19 +36,11 @@ fn range(trended: &[Trended], ranges: &Ranges, over: Over) -> Result<Range, Mark
     crate::range::chosen(ranges, over, recorded, "Nothing has been recorded.")
 }
 
-/// The summary, which is the latest whatever the range; or why there is no
-/// range, which leaves every other card empty.
-fn summary_card(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
-    match range(trended, ranges, over) {
-        Ok(range) => summary(trended, range.to),
-        Err(said) => said,
-    }
-}
-
 /// Days, over the range chosen.
 fn days_card(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
-    let Ok(range) = range(trended, ranges, over) else {
-        return html! {};
+    let range = match range(trended, ranges, over) {
+        Ok(range) => range,
+        Err(said) => return said,
     };
     let today = range.to;
     let within: Vec<Trended> = trended.iter().map(|one| one.within(range)).collect();
@@ -87,20 +78,12 @@ pub fn page(trended: &[Trended], ranges: &Ranges, over: Over) -> Markup {
     laid_out(
         over,
         &[
-            summary_card(trended, ranges, over),
             days_card(trended, ranges, over),
             latest_card(trended, ranges, over),
         ],
     )
 }
 
-crate::card::ranged_card!(
-    /// The summary.
-    Summary,
-    "resting-heart-rate-summary",
-    configurator::analyses::RestingHeartRate,
-    summary_card
-);
 crate::card::ranged_card!(
     /// Days.
     DaysChart,
@@ -115,63 +98,6 @@ crate::card::ranged_card!(
     configurator::analyses::RestingHeartRate,
     latest_card
 );
-
-/// The watch whose line is the latest, its last day, and that day against the
-/// line 90 days before.
-fn latest_line(trended: &[Trended]) -> Option<(&Trended, Day, Option<Change>)> {
-    trended
-        .iter()
-        .filter_map(|one| {
-            one.line
-                .iter()
-                .flatten()
-                .next_back()
-                .map(|day| (one, *day, one.change()))
-        })
-        .max_by_key(|(_, day, _)| day.on)
-}
-
-/// The latest line, its ±, and its change, read against its noise.
-fn summary(trended: &[Trended], today: Date) -> Markup {
-    let Some((one, day, change)) = latest_line(trended) else {
-        return html! {};
-    };
-    let reading = match change {
-        Some(Change {
-            by,
-            margin: Some(noise),
-            direction,
-            ..
-        }) => Reading::Change {
-            by,
-            noise,
-            direction,
-            said: format!("{} bpm", signed(by)),
-            over: "in 90 days".to_owned(),
-        },
-        Some(_) => Reading::NoRule("Too few days to measure the noise.".to_owned()),
-        None => Reading::NoRule("No line 90 days before to read it against.".to_owned()),
-    };
-    let flagged = one.flags.last().map_or_else(String::new, |flag| {
-        format!(" · last flagged {}", detail::day(flag.on, today))
-    });
-    let asof = format!(
-        "Line on {} · {}{flagged}",
-        detail::day(day.on, today),
-        name(&one.series.sent_by)
-    );
-    detail::summary(
-        &[Cell {
-            metric: Metric::RestingHeartRate,
-            label: "90-day average",
-            figure: format!("{:.1}", day.bpm),
-            unit: "bpm",
-            margin: day.margin.map(|margin| format!("{margin:.1}")),
-            readings: vec![reading],
-        }],
-        &asof,
-    )
-}
 
 /// Each day, each watch's line over its band, and the flagged nights ringed.
 fn chart(within: &[Trended], range: Range, today: Date) -> Chart<'static> {
@@ -273,11 +199,6 @@ fn latest(trended: &[Trended], today: Date) -> Markup {
     detail::latest("Days", "bpm", &rows)
 }
 
-/// A change with its sign, to one place.
-fn signed(by: f64) -> String {
-    format!("{by:+.1}").replace('-', "−")
-}
-
 fn counted(count: usize, one: &str) -> String {
     if count == 1 {
         format!("1 {one}")
@@ -295,7 +216,7 @@ pub struct Page {
 
 impl crate::card::Page for Page {
     const ROUTE: &'static str = PATH;
-    type Cards = (Summary, DaysChart, Latest);
+    type Cards = (crate::summary::RestingHeartRate, DaysChart, Latest);
 
     fn asked(
         _path: &axum::extract::RawPathParams,
@@ -311,7 +232,8 @@ impl crate::card::Page for Page {
     }
 
     fn layout(&self, cards: [Markup; 3]) -> Markup {
-        laid_out(self.over, &cards)
+        let [summary, days, latest] = cards;
+        laid_out(self.over, &[crate::summary::atop(&summary), days, latest])
     }
 }
 
@@ -362,52 +284,6 @@ mod tests {
     }
 
     #[test]
-    fn the_summary_is_the_latest_line_its_band_and_its_change() {
-        // 180 days scattering around 57, then 120 around 51: on 27 Oct the
-        // line is 51.0, and 55.0 on 29 Jul, a fall far beyond the noise.
-        let page = shown(
-            &days(300, |index| {
-                let base = if index < 180 { 56 } else { 50 };
-                base + u32::try_from(index % 3).expect("small")
-            }),
-            &NO_PLAN,
-            Over::All,
-        );
-
-        assert!(
-            page.contains(r#"class="cell resting-heart-rate""#),
-            "{page}"
-        );
-        assert!(page.contains("51.0<small>bpm</small>"), "{page}");
-        assert!(page.contains("± "), "{page}");
-        assert!(page.contains("−4.0 bpm"), "{page}");
-        assert!(page.contains("in 90 days"), "{page}");
-        assert!(page.contains(r#"class="badge""#), "falling, with its arrow");
-        assert!(page.contains(r#"class="noise""#), "{page}");
-        assert!(page.contains("Line on 27 Oct · device unknown"), "{page}");
-    }
-
-    #[test]
-    fn a_change_within_the_noise_has_no_arrow() {
-        let page = shown(
-            &days(200, |index| 50 + u32::try_from(index % 5).expect("small")),
-            &NO_PLAN,
-            Over::All,
-        );
-        assert!(page.contains(r#"class="change plain""#), "{page}");
-        assert!(!page.contains(r#"class="badge"#), "{page}");
-    }
-
-    #[test]
-    fn no_line_ninety_days_before_is_said() {
-        let page = shown(&days(100, |_| 50), &NO_PLAN, Over::All);
-        assert!(
-            page.contains("No line 90 days before to read it against."),
-            "{page}"
-        );
-    }
-
-    #[test]
     fn a_day_is_a_dot_the_line_has_its_band_and_a_flagged_night_is_ringed() {
         let page = shown(
             &days(42, |index| match index {
@@ -429,7 +305,6 @@ mod tests {
         );
         assert!(page.contains("flagged, against 51 normally"), "{page}");
         assert!(page.contains("58 bpm · flagged"), "the latest days say so");
-        assert!(page.contains("last flagged 11 Feb"), "{page}");
     }
 
     #[test]
