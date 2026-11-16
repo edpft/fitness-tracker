@@ -286,6 +286,10 @@ tuple_cards!(A, B, C);
 tuple_cards!(A, B, C, D);
 tuple_cards!(A, B, C, D, E);
 tuple_cards!(A, B, C, D, E, F);
+tuple_cards!(A, B, C, D, E, F, G);
+tuple_cards!(A, B, C, D, E, F, G, H);
+tuple_cards!(A, B, C, D, E, F, G, H, I);
+tuple_cards!(A, B, C, D, E, F, G, H, I, J);
 
 /// A page: its cards, laid out among words that read nothing.
 pub trait Page: Send + Sync + Sized + 'static {

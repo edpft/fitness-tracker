@@ -588,8 +588,8 @@ mod tests {
 
     use crate::{
         analyses::{
-            BodyWeight, Composition, OvernightHrv, Plans, Responses, RestingHeartRate,
-            RideHeartRates, Strength,
+            BodyWeight, Composition, OvernightHrv, Plans, RestingHeartRate, RideHeartRates,
+            Strength, StressResponse,
         },
         held::Of,
         history, macrocycle,
@@ -712,7 +712,7 @@ mod tests {
                 .has(&Part::Canonicalising(CanonicalLayer::WeighIns))
         );
         assert!(
-            crate::graph::collects::<Of<Responses>>()
+            crate::graph::collects::<Of<StressResponse>>()
                 .has(&Part::Normalising(stream("garmin.daily_summary")))
         );
     }

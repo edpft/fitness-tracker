@@ -84,8 +84,8 @@ pub struct Flag {
     pub normal: f64,
 }
 
-/// The line on one day against the line [`LINE_DAYS`] days before. Pulse
-/// wave velocity's line is read the same way (#688).
+/// A line on one day against the line [`LINE_DAYS`] days before: pulse
+/// wave velocity's (#688).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Change {
     pub on: Date,
@@ -100,12 +100,6 @@ pub struct Change {
 }
 
 impl Change {
-    /// `now` against `then`, read by the rule.
-    #[must_use]
-    pub fn between(now: &Day, then: &Day) -> Self {
-        Self::of(now.on, (now.bpm, now.margin), (then.bpm, then.margin))
-    }
-
     /// The line on `on`, and its margin, against the line and its margin
     /// [`LINE_DAYS`] days before.
     #[must_use]
@@ -149,17 +143,6 @@ impl Trended {
             line,
             flags,
         }
-    }
-
-    /// The line's latest day against the line [`LINE_DAYS`] days before it;
-    /// `None` where either has no line.
-    #[must_use]
-    pub fn change(&self) -> Option<Change> {
-        let mut days = self.line.iter().flatten();
-        let now = days.clone().next_back()?;
-        let before = now.on.checked_sub(jiff::Span::new().days(LINE_DAYS)).ok()?;
-        let then = days.find(|day| day.on == before)?;
-        Some(Change::between(now, then))
     }
 
     /// Only `range`'s days. The line and the flags on each are the whole

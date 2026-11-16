@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use application::{
-    FtpHistory as _,
+    FtpHistory as _, StressHistory as _, TrainingDone as _,
     ftp_tests::TestHeartRates as HeartRatesOfTests,
     graph::Analysis,
     heart_rate::RideHeartRates as HeartRatesOfRides,
@@ -16,15 +16,21 @@ use application::{
     per_device::PerDevice,
     pulse_wave_velocity::PulseWaveVelocities,
     sleep::Sleeping,
-    working::{Frame, IsItWorking, Responding},
+    working::{self, Frame, Responding},
 };
 use domain::{
     analytical::{
-        body_weight, composition::ComponentSeries, ftp_test, heart_rate::RideHeartRate,
-        heart_rate_at_power, hrv, pulse_wave_velocity, resting, sleep,
+        body_weight,
+        composition::ComponentSeries,
+        ftp_test,
+        heart_rate::RideHeartRate,
+        heart_rate_at_power, hrv,
+        per_device::{DeviceSeries, per_device},
+        pulse_wave_velocity, resting, sleep, stress,
+        training_done::Carried,
     },
     cycling::Ftp,
-    device,
+    device::{self, Measurand},
     normalised::OperatorZone,
 };
 use infrastructure::{
@@ -254,40 +260,100 @@ impl Analysed for Strength {
     }
 }
 
-/// Resting heart rate, overnight HRV and stress over the macrocycle in force,
-/// each against the training done: `None` on a day no plan is in force.
-pub struct Responses;
+/// The training each day carries, through today.
+pub struct Training;
 
-impl Analysed for Responses {
-    const ANALYSIS: Analysis = Analysis::Responses;
-    type Ports = IsItWorking<
-        Spanned<SqliteOvernightHrvHistory>,
-        Spanned<SqliteRestingHeartRateHistory>,
-        Spanned<SqliteStressHistory>,
-        Spanned<SqliteTrainingDone>,
-    >;
-    type Reads = (Of<Plans>, Of<Register>, Today);
-    type Value = Option<Vec<Responding>>;
+impl Analysed for Training {
+    const ANALYSIS: Analysis = Analysis::Training;
+    type Ports = Spanned<SqliteTrainingDone>;
+    type Reads = Today;
+    type Value = Carried;
 
     async fn open(store: &Store, _: &OperatorZone) -> Result<Self::Ports, NextFailure> {
-        Ok(IsItWorking::new(
-            store.adapter(SqliteOvernightHrvHistory::new),
-            store.adapter(SqliteRestingHeartRateHistory::new),
-            store.adapter(SqliteStressHistory::new),
-            store.adapter(SqliteTrainingDone::new),
-        ))
+        Ok(store.adapter(SqliteTrainingDone::new))
+    }
+
+    async fn derive(ports: Self::Ports, today: Date) -> Result<Self::Value, NextFailure> {
+        Ok(Carried::through(&ports.sessions().await?, today))
+    }
+}
+
+/// Each day's stress, one series per watch.
+pub struct Stress;
+
+impl Analysed for Stress {
+    const ANALYSIS: Analysis = Analysis::Stress;
+    type Ports = Spanned<SqliteStressHistory>;
+    type Reads = Of<Register>;
+    type Value = Vec<DeviceSeries<stress::Measured>>;
+
+    async fn open(store: &Store, _: &OperatorZone) -> Result<Self::Ports, NextFailure> {
+        Ok(store.adapter(SqliteStressHistory::new))
     }
 
     async fn derive(
         ports: Self::Ports,
-        (plans, register, today): (Arc<rescheduling::Plans>, Arc<device::Register>, Date),
+        register: Arc<device::Register>,
     ) -> Result<Self::Value, NextFailure> {
-        let Some(frame) = Frame::on(today, plans.now()) else {
-            return Ok(None);
-        };
-        Ok(Some(ports.responses(frame.began, today, &register).await?))
+        Ok(per_device(
+            ports.days().await?,
+            Measurand::HeartRate,
+            &register,
+        ))
     }
 }
+
+/// A response reading over the macrocycle in force, against the training
+/// done: `None` on a day no plan is in force.
+macro_rules! response {
+    ($(#[$meta:meta])* $node:ident, $series:ty, $read:path) => {
+        $(#[$meta])*
+        pub struct $node;
+
+        impl Analysed for $node {
+            const ANALYSIS: Analysis = Analysis::$node;
+            type Ports = ();
+            type Reads = (Of<Plans>, Of<$series>, Of<Training>, Today);
+            type Value = Option<Responding>;
+
+            async fn open(_: &Store, _: &OperatorZone) -> Result<Self::Ports, NextFailure> {
+                Ok(())
+            }
+
+            async fn derive(
+                (): Self::Ports,
+                (plans, series, carried, today): (
+                    Arc<rescheduling::Plans>,
+                    Arc<<$series as Analysed>::Value>,
+                    Arc<Carried>,
+                    Date,
+                ),
+            ) -> Result<Self::Value, NextFailure> {
+                Ok(Frame::on(today, plans.now())
+                    .map(|frame| $read(&series, &carried, frame.began, today)))
+            }
+        }
+    };
+}
+
+response!(
+    /// Resting heart rate against the training done.
+    RestingHeartRateResponse,
+    RestingHeartRate,
+    working::resting
+);
+response!(
+    /// Overnight HRV against the training done.
+    OvernightHrvResponse,
+    OvernightHrv,
+    working::overnight_hrv
+);
+response!(
+    /// Stress against the training done.
+    StressResponse,
+    Stress,
+    working::stress
+);
 
 /// Last night's average HRV, one series per watch, and the trend through each.
 pub struct OvernightHrv;
@@ -401,7 +467,11 @@ pub(crate) fn derivations() -> [application::graph::Derivation; Analysis::ALL.le
         derivation::<RideHeartRates>(),
         derivation::<HeartRateAtPower>(),
         derivation::<Strength>(),
-        derivation::<Responses>(),
+        derivation::<Training>(),
+        derivation::<Stress>(),
+        derivation::<RestingHeartRateResponse>(),
+        derivation::<OvernightHrvResponse>(),
+        derivation::<StressResponse>(),
         derivation::<OvernightHrv>(),
         derivation::<RestingHeartRate>(),
         derivation::<Sleep>(),

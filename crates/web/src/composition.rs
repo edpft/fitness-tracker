@@ -1,10 +1,5 @@
 //! Body composition, on the body page (#619, #786).
 //!
-//! **Fat and fat-free mass side by side**: each one's latest trend and its
-//! change over [`AGAINST_DAYS`] days against the method's own noise, as #419
-//! reads it. It is the latest whatever the range: the range only chooses
-//! which days the charts show.
-//!
 //! **A chart per component, its colour the component's** (operator,
 //! 2026-10-28, on the mocks). Fat is one chart with its unit a choice, kilograms
 //! first (operator, 2026-10-20). Nothing joins two points, so a gap in the
@@ -21,7 +16,7 @@ use std::collections::BTreeMap;
 use domain::{
     analytical::{
         body_weight::Aim,
-        composition::{AGAINST_DAYS, Change, ComponentSeries, Method, MethodSeries, Unit},
+        composition::{AGAINST_DAYS, Change, ComponentSeries, Method, Unit},
         range::Range,
     },
     body::Component,
@@ -29,7 +24,7 @@ use domain::{
 use jiff::civil::Date;
 use maud::{Markup, html};
 
-use crate::detail::{self, Axis, Cell, Chart, Layer, Metric, Reading, Traced};
+use crate::detail::{self, Axis, Chart, Layer, Metric, Traced};
 
 /// The component in the unit, where anything measured it.
 fn charted(
@@ -145,85 +140,6 @@ const fn heading(component: Component) -> &'static str {
         Component::Protein => "Protein",
         Component::Minerals => "Minerals",
     }
-}
-
-/// The method whose trend is the latest, and that trend.
-fn latest_trend(
-    component: &ComponentSeries,
-) -> Option<(&MethodSeries, domain::analytical::composition::Trend)> {
-    component
-        .series
-        .iter()
-        .filter_map(|one| {
-            one.trend
-                .iter()
-                .flatten()
-                .next_back()
-                .map(|day| (one, *day))
-        })
-        .max_by_key(|(_, day)| day.on)
-}
-
-/// Fat and fat-free mass, each its latest trend and its change over
-/// [`AGAINST_DAYS`] days against the method's noise, and the day and method
-/// each trend is.
-pub fn summary(components: &[ComponentSeries], today: Date) -> (Vec<Cell<'static>>, Vec<String>) {
-    let read: Vec<(
-        Metric,
-        &'static str,
-        &MethodSeries,
-        domain::analytical::composition::Trend,
-    )> = [
-        (Component::Fat, Metric::Fat, "Fat"),
-        (Component::FatFree, Metric::FatFree, "Fat-free"),
-    ]
-    .into_iter()
-    .filter_map(|(component, metric, label)| {
-        let (one, latest) = latest_trend(charted(components, component, Unit::Kilograms)?)?;
-        Some((metric, label, one, latest))
-    })
-    .collect();
-    let cells: Vec<Cell<'static>> = read
-        .iter()
-        .map(|(metric, label, one, latest)| Cell {
-            metric: *metric,
-            label,
-            figure: format!("{:.1}", latest.value),
-            unit: "kg",
-            margin: latest.margin.map(|margin| format!("{margin:.1} kg")),
-            readings: vec![
-                one.changes
-                    .last()
-                    .filter(|change| change.on == latest.on)
-                    .map_or_else(
-                        || {
-                            Reading::NoRule(format!(
-                                "No trend {AGAINST_DAYS} days before to read it against."
-                            ))
-                        },
-                        |change| Reading::Change {
-                            by: change.by,
-                            noise: change.noise,
-                            direction: None,
-                            said: format!("{} kg", signed(change.by)),
-                            over: format!("in {AGAINST_DAYS} days"),
-                        },
-                    ),
-            ],
-        })
-        .collect();
-    let mut asof: Vec<String> = read
-        .iter()
-        .map(|(_, _, one, latest)| {
-            format!(
-                "Trend on {} · {}",
-                detail::day(latest.on, today),
-                one.method
-            )
-        })
-        .collect();
-    asof.dedup();
-    (cells, asof)
 }
 
 /// One component in one unit over `range`: each method's trend, its points,
@@ -458,54 +374,6 @@ mod tests {
         assert!(page.contains("<b>17.6 kg</b>"), "{page}");
         assert!(page.contains("<b>21.1%</b>"), "{page}");
         assert!(!page.contains("spreadsheets"), "{page}");
-    }
-
-    #[test]
-    fn the_summary_is_the_latest_trend_and_its_change_against_the_noise() {
-        let readings: Vec<Reading<f64>> = jiff::civil::date(2026, 1, 1)
-            .series(jiff::Span::new().days(1))
-            .take(70)
-            .enumerate()
-            .map(|(day, on)| {
-                let level = if day < 35 { 62.0 } else { 63.0 };
-                let wobble = if day % 2 == 0 { 0.1 } else { -0.1 };
-                Reading {
-                    on,
-                    value: level + wobble,
-                }
-            })
-            .collect();
-        let fat_free = ComponentSeries {
-            component: Component::FatFree,
-            unit: Unit::Kilograms,
-            series: vec![MethodSeries::of(SCAN, readings)],
-        };
-        let page = drawn(&[fat_free], &[], &NO_PLAN, Over::All);
-
-        assert_eq!(
-            page.matches(r#"class="line""#).count(),
-            1,
-            "one unbroken run: {page}"
-        );
-        assert!(page.contains(r#"class="cell fat-free""#), "{page}");
-        assert!(
-            page.contains(r#"<div class="figure">63.0<small>kg</small></div>"#),
-            "{page}"
-        );
-        assert!(
-            page.contains("<b>+0.00 kg</b><span>in 28 days</span>"),
-            "{page}"
-        );
-        assert!(page.contains(r#"class="noise""#), "{page}");
-        assert!(
-            page.contains("Trend on 11 Mar · Body Scan, algorithm 218300672"),
-            "{page}"
-        );
-        assert!(!page.contains("rising"), "no verdict words: {page}");
-        assert!(
-            !page.contains(r#"class="badge"#),
-            "no badge, which would contradict the line: {page}"
-        );
     }
 
     #[test]

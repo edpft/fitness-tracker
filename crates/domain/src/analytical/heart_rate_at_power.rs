@@ -38,7 +38,7 @@ use jiff::{ToSpan as _, civil::Date};
 use super::{
     heart_rate::{RideHeartRate, SentBy},
     range::Range,
-    resting::{Change, Day},
+    resting::Day,
 };
 use crate::{
     cycling::{CanonicalBikePlusRide, Ftp},
@@ -217,20 +217,6 @@ pub struct Trended {
 }
 
 impl Trended {
-    /// The rides in the [`LINE_DAYS`] ending on the latest ride against the
-    /// [`LINE_DAYS`] before them, or `None` where either holds too few.
-    #[must_use]
-    pub fn change(&self) -> Option<Change> {
-        let last = self.rides.last()?.on;
-        let now = self.window(last)?;
-        let then = self.window(last.checked_sub(LINE_DAYS.days()).ok()?)?;
-        Some(Change::of(
-            last,
-            (now.bpm, now.margin),
-            (then.bpm, then.margin),
-        ))
-    }
-
     /// The mean of the rides in the [`LINE_DAYS`] ending on `on`, and its
     /// margin, where at least [`LINE_RIDES`] fall in it.
     #[must_use]

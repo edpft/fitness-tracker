@@ -68,9 +68,16 @@ pub enum Analysis {
     HeartRateAtPower,
     /// Each lift's 1RM tests and its estimates over the macrocycle.
     Strength,
-    /// Resting heart rate, overnight HRV and stress, each against the
-    /// training done, over the macrocycle.
-    Responses,
+    /// The training each day carries, through today.
+    Training,
+    /// Each day's stress, one series per watch.
+    Stress,
+    /// Resting heart rate against the training done, over the macrocycle.
+    RestingHeartRateResponse,
+    /// Overnight HRV against the training done, over the macrocycle.
+    OvernightHrvResponse,
+    /// Stress against the training done, over the macrocycle.
+    StressResponse,
     /// Each night's HRV, one series per watch.
     OvernightHrv,
     /// Each day's resting heart rate, one series per watch.
@@ -82,7 +89,7 @@ pub enum Analysis {
 }
 
 impl Analysis {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 19] = [
         Self::BodyWeight,
         Self::Composition,
         Self::Plans,
@@ -93,7 +100,11 @@ impl Analysis {
         Self::RideHeartRates,
         Self::HeartRateAtPower,
         Self::Strength,
-        Self::Responses,
+        Self::Training,
+        Self::Stress,
+        Self::RestingHeartRateResponse,
+        Self::OvernightHrvResponse,
+        Self::StressResponse,
         Self::OvernightHrv,
         Self::RestingHeartRate,
         Self::Sleep,
@@ -113,7 +124,11 @@ impl Analysis {
             Self::RideHeartRates => "ride heart rates",
             Self::HeartRateAtPower => "heart rate at power",
             Self::Strength => "strength",
-            Self::Responses => "responses",
+            Self::Training => "training",
+            Self::Stress => "stress",
+            Self::RestingHeartRateResponse => "resting heart rate response",
+            Self::OvernightHrvResponse => "overnight hrv response",
+            Self::StressResponse => "stress response",
             Self::OvernightHrv => "overnight hrv",
             Self::RestingHeartRate => "resting heart rate",
             Self::Sleep => "sleep",
@@ -294,6 +309,7 @@ tuple_input!(A, B, C, D);
 tuple_input!(A, B, C, D, E);
 tuple_input!(A, B, C, D, E, F);
 tuple_input!(A, B, C, D, E, F, G);
+tuple_input!(A, B, C, D, E, F, G, H);
 
 /// **A use case reads what its ports read**, each port a type parameter:
 /// `through!(Sleeping<S, R, W>)` reads what `S`, `R` and `W` do.

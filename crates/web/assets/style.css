@@ -195,7 +195,10 @@ main.progress h2.group, main.plan h2.group { font-size: 13px; font-weight: 600; 
 .card.tile { margin-bottom: 12px; }
 .card.tile h3 { font-size: 15px; font-weight: 600; margin: 0 0 2px; }
 a.row { display: block; color: inherit; text-decoration: none; }
-a.row + a.row .reading { border-top: 1px solid var(--grid); }
+a.row:has(.reading) ~ a.row .reading { border-top: 1px solid var(--grid); }
+/* A tile is laid out around its readings' summary cards (#830), so one none
+   of them drew anything for is hidden, as is a group with nothing left. */
+section.card.tile:not(:has(.reading)) { display: none; }
 svg.trace { display: block; width: 100%; height: 64px; margin-top: 8px; }
 svg.trace .band { fill: var(--c); fill-opacity: 0.16; }
 svg.trace .read { fill: none; stroke: var(--c); stroke-width: 2; }
@@ -303,8 +306,8 @@ details.folded[open] > summary { margin-bottom: 14px; }
 form.input button { border: 0; border-radius: 999px; font-size: 16px; padding: 13px; background: var(--ink); color: var(--bg); }
 .card > h2.small, .card > h3 { font-size: 13px; font-weight: 600; color: var(--ink2); margin: 0; }
 .card > h3 { margin-top: 18px; }
-.card .held { font-size: 19px; font-weight: 600; margin: 4px 0 0; }
-.card .held .from, .card .held.from { font-size: 14px; font-weight: 400; color: var(--muted); }
+.card p.held { font-size: 19px; font-weight: 600; margin: 4px 0 0; }
+.card p.held .from, .card p.held.from { font-size: 14px; font-weight: 400; color: var(--muted); }
 /* A range of bands as the ladder a prescription steps through (#667): each
    step's bands, and their load. */
 .card > h2.small .period { font-weight: 400; color: var(--muted); }
@@ -502,4 +505,4 @@ nav.choice a[aria-current] { background: var(--ink); color: var(--bg); font-weig
 /* A page is its cards (#830): each is drawn into its own place, and a group
    none of whose cards drew anything is not shown, heading and all. */
 div.held:empty { display: none; }
-div.cards:not(:has(.card)) { display: none; }
+div.cards:not(:has(.card:not(.tile), .tile .reading)) { display: none; }

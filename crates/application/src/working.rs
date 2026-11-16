@@ -14,10 +14,11 @@
 //! *"Progress must be measured against plan or expectation, and the plan is
 //! the training in the macrocycle."*
 //!
-//! **The readings are `domain`'s** ([`since_entry`], [`response`]); this reads
-//! the plans, the readings, the register and the training done, and hands
-//! them over. Nothing is written: the view re-derives from them exactly
-//! (§ 5).
+//! **The readings are `domain`'s** ([`since_entry`], [`response`]); this
+//! hands each the series it reads. **Each response reading is read alone**
+//! (#830), from its own series and the training done, so a new night of HRV
+//! reads HRV again and nothing else. Nothing is written: each re-derives from
+//! what it reads exactly (§ 5).
 //!
 //! **One watch's days**, the one that recorded the latest of each reading: a
 //! watch's figures are never read against another's (§ 6), and the line the
@@ -27,29 +28,24 @@ use std::collections::BTreeMap;
 
 use domain::{
     analytical::{
-        body_weight::{Aim, Series, Weight, against_aims},
         composition::{ComponentSeries, Unit},
-        ftp_test, heart_rate_at_power, one_rep_max,
-        per_device::{DeviceSeries, SentBy, per_device},
+        ftp_test, heart_rate_at_power, hrv, one_rep_max,
+        per_device::{DeviceSeries, SentBy},
         response::{Response, response},
+        resting,
         since_entry::{SinceEntry, since_entry},
         since_start::{SinceStart, since_start},
         stress,
         training_done::Carried,
     },
     body::Component,
-    device::{Measurand, Register},
     gym::exercise::RepsExercise,
     plan::{Plan, Span},
     planner::Discipline,
 };
 use jiff::civil::Date;
 
-use crate::{
-    error::StoreError,
-    one_rep_max::{Lift, Tests},
-    ports::{OvernightHrvHistory, RestingHeartRateHistory, StressHistory, TrainingDone},
-};
+use crate::one_rep_max::{Lift, Tests};
 
 /// The macrocycle in force on a day, as every card measured against it reads
 /// it: when it began and the days of its mesocycles (#830).
@@ -84,16 +80,6 @@ impl Frame {
                 .max(),
         })
     }
-}
-
-/// Body weight and body composition, read together (#769).
-#[derive(Debug, Clone, PartialEq)]
-pub struct Body {
-    /// `None` where fewer than two trend days fall in the macrocycle.
-    pub weight: Option<Weight>,
-    /// In kilograms, by the method whose trend is the latest.
-    pub fat: Option<SinceStart>,
-    pub fat_free: Option<SinceStart>,
 }
 
 /// What a test measures.
@@ -145,107 +131,85 @@ pub struct Responding {
     pub response: Option<Response>,
 }
 
-/// The use case.
-pub struct IsItWorking<N, D, S, T> {
-    nights: N,
-    days: D,
-    stress: S,
-    training: T,
-}
-
-crate::graph::through!(IsItWorking<N, D, S, T>);
-
-impl<N, D, S, T> IsItWorking<N, D, S, T>
-where
-    N: OvernightHrvHistory + Sync,
-    D: RestingHeartRateHistory + Sync,
-    S: StressHistory + Sync,
-    T: TrainingDone + Sync,
-{
-    pub const fn new(nights: N, days: D, stress: S, training: T) -> Self {
-        Self {
-            nights,
-            days,
-            stress,
-            training,
-        }
-    }
-
-    /// Resting heart rate, overnight HRV and stress over the macrocycle that
-    /// `began`, read through `today`, each against the training done: what
-    /// the response readings say (#830).
-    ///
-    /// `register` says which device sent each reading.
-    ///
-    /// # Errors
-    ///
-    /// [`StoreError`] if any store is unavailable.
-    pub async fn responses(
-        &self,
-        began: Date,
-        today: Date,
-        register: &Register,
-    ) -> Result<Vec<Responding>, StoreError> {
-        let carried = Carried::through(&self.training.sessions().await?, today);
-        let read = |reading: Answering, series: Option<(SentBy, BTreeMap<Date, f64>)>| {
-            let (sent_by, days) = series.unzip();
-            Responding {
-                reading,
-                sent_by,
-                response: days.and_then(|days| response(&days, &carried, began, today)),
-            }
-        };
-        let resting = latest(
-            per_device(self.days.days().await?, Measurand::HeartRate, register),
-            today,
-        )
-        .map(|series| {
-            let days = series
-                .readings
-                .iter()
-                .map(|reading| (reading.on, f64::from(reading.value.as_u32())))
-                .collect();
-            (series.sent_by, days)
-        });
-        let hrv = latest(
-            per_device(self.nights.nights().await?, Measurand::HeartRate, register),
-            today,
-        )
-        .map(|series| {
-            let days = series
-                .readings
-                .iter()
-                .map(|reading| (reading.on, f64::from(reading.value.as_milliseconds())))
-                .collect();
-            (series.sent_by, days)
-        });
-        let stress = latest(
-            per_device(self.stress.days().await?, Measurand::HeartRate, register),
-            today,
-        )
-        .map(|series| (series.sent_by, stress::whole_days(&series.readings)));
-        Ok(vec![
-            read(Answering::RestingHeartRate, resting),
-            read(Answering::OvernightHrv, hrv),
-            read(Answering::Stress, stress),
-        ])
-    }
-}
-
-/// Body weight against the plan's aims, then fat and fat-free mass, over the
-/// macrocycle that `began`, through `today`.
+/// Resting heart rate over the macrocycle that `began`, through `today`,
+/// against the training `carried`.
 #[must_use]
-pub fn body(
-    weight: &Series,
-    aims: &[Aim],
-    composition: &[ComponentSeries],
+pub fn resting(
+    trended: &[resting::Trended],
+    carried: &Carried,
     began: Date,
     today: Date,
-) -> Body {
-    Body {
-        weight: against_aims(&weight.trend, aims, began, today),
-        fat: composed(composition, Component::Fat, began, today),
-        fat_free: composed(composition, Component::FatFree, began, today),
+) -> Responding {
+    responding(
+        Answering::RestingHeartRate,
+        trended.iter().map(|one| &one.series),
+        |reading| f64::from(reading.as_u32()),
+        carried,
+        began,
+        today,
+    )
+}
+
+/// Overnight HRV over the macrocycle that `began`, through `today`, against
+/// the training `carried`.
+#[must_use]
+pub fn overnight_hrv(
+    trended: &[hrv::Trended],
+    carried: &Carried,
+    began: Date,
+    today: Date,
+) -> Responding {
+    responding(
+        Answering::OvernightHrv,
+        trended.iter().map(|one| &one.series),
+        |reading| f64::from(reading.as_milliseconds()),
+        carried,
+        began,
+        today,
+    )
+}
+
+/// Stress over the macrocycle that `began`, through `today`, against the
+/// training `carried`: each whole day's average.
+#[must_use]
+pub fn stress(
+    series: &[DeviceSeries<stress::Measured>],
+    carried: &Carried,
+    began: Date,
+    today: Date,
+) -> Responding {
+    let latest = latest(series, today);
+    Responding {
+        reading: Answering::Stress,
+        sent_by: latest.map(|series| series.sent_by.clone()),
+        response: latest.and_then(|series| {
+            response(&stress::whole_days(&series.readings), carried, began, today)
+        }),
+    }
+}
+
+/// One response reading, on the watch that recorded its latest day, each
+/// day's figure as `figure` reads it.
+fn responding<'a, T: Copy + 'a>(
+    reading: Answering,
+    series: impl IntoIterator<Item = &'a DeviceSeries<T>>,
+    figure: impl Fn(T) -> f64,
+    carried: &Carried,
+    began: Date,
+    today: Date,
+) -> Responding {
+    let latest = latest(series, today);
+    Responding {
+        reading,
+        sent_by: latest.map(|series| series.sent_by.clone()),
+        response: latest.and_then(|series| {
+            let days: BTreeMap<Date, f64> = series
+                .readings
+                .iter()
+                .map(|day| (day.on, figure(day.value)))
+                .collect();
+            response(&days, carried, began, today)
+        }),
     }
 }
 
@@ -253,20 +217,27 @@ pub fn body(
 /// at 140 W, one series per device, read beside it.
 #[must_use]
 pub fn cycling(
-    ftp: &[ftp_test::Test],
+    ftp_tests: &[ftp_test::Test],
     at_power: &[heart_rate_at_power::Trended],
     began: Date,
     today: Date,
 ) -> Performance {
-    let watts: Vec<(Date, u32)> = ftp
+    Performance {
+        tested: Tested::Ftp,
+        since: ftp(ftp_tests, began, today),
+        estimated: self::at_power(at_power, began, today),
+    }
+}
+
+/// The latest FTP test over the macrocycle that `began`, against its entry
+/// test; `None` where it holds no test.
+#[must_use]
+pub fn ftp(tests: &[ftp_test::Test], began: Date, today: Date) -> Option<SinceEntry> {
+    let watts: Vec<(Date, u32)> = tests
         .iter()
         .map(|test| (test.on(), test.ftp.watts().as_u32()))
         .collect();
-    Performance {
-        tested: Tested::Ftp,
-        since: since_entry(&watts, began, today, ftp_test::noise),
-        estimated: self::at_power(at_power, began, today),
-    }
+    since_entry(&watts, began, today, ftp_test::noise)
 }
 
 /// Each lift's 1RM test over the macrocycle that `began`, with its estimate
@@ -301,7 +272,8 @@ pub fn gym(strength: &[Tests], estimated: &[Lift], began: Date, today: Date) -> 
 
 /// Heart rate at 140 W since the start, on the line of the device that rode
 /// last: a device's line is never read against another's (§ 6).
-fn at_power(
+#[must_use]
+pub fn at_power(
     trended: &[heart_rate_at_power::Trended],
     began: Date,
     today: Date,
@@ -323,8 +295,9 @@ fn at_power(
 }
 
 /// A component's mass since the start, by the method whose trend is the
-/// latest, as its page's summary reads it.
-fn composed(
+/// latest.
+#[must_use]
+pub fn component(
     components: &[ComponentSeries],
     component: Component,
     began: Date,
@@ -352,7 +325,10 @@ fn composed(
 
 /// The watch that recorded the latest day on or before `today`: the one in
 /// use. A day no watch can be placed on is not one's.
-fn latest<T>(series: Vec<DeviceSeries<T>>, today: Date) -> Option<DeviceSeries<T>> {
+fn latest<'a, T: 'a>(
+    series: impl IntoIterator<Item = &'a DeviceSeries<T>>,
+    today: Date,
+) -> Option<&'a DeviceSeries<T>> {
     series
         .into_iter()
         .filter(|series| matches!(series.sent_by, SentBy::Device(_)))
