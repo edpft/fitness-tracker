@@ -224,6 +224,10 @@ impl Progress for Terminal {
             println!("{text}");
         }
     }
+
+    /// **Not printed**: the terminal shows the steps, and has nothing that
+    /// reads a part to draw again.
+    fn collected(&self, _parts: &[application::Part]) {}
 }
 
 impl Line {

@@ -779,6 +779,10 @@ impl<P: Progress + Sync> Progress for Spanned<'_, P> {
         drop(span);
         self.progress.finished(done);
     }
+
+    fn collected(&self, parts: &[application::Part]) {
+        self.progress.collected(parts);
+    }
 }
 
 #[cfg(test)]
@@ -814,6 +818,8 @@ mod tests {
                 heard.push(format!("finished {:?}", done.step));
             }
         }
+
+        fn collected(&self, _: &[Part]) {}
     }
 
     struct Row {

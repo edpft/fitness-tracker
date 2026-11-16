@@ -32,7 +32,7 @@ use tracing::Instrument as _;
 
 use crate::{
     range,
-    run::{Asked, Runs},
+    run::{Asked, Runs, Waiting},
 };
 
 /// A card: what it reads, and how it is drawn from that.
@@ -114,7 +114,10 @@ impl<'a> Showing<'a> {
     /// `card`, as it now stands.
     ///
     /// - **While a run collects what it reads**, as it was last drawn, or a
-    ///   placeholder where it never has been, asking to be drawn again (#467).
+    ///   placeholder where it never has been, asking to be drawn again (#467):
+    ///   as each part it waits on is collected where this server's run is
+    ///   collecting it, so it is drawn while the run collects the rest
+    ///   (#830), and every two seconds where the terminal's is.
     /// - **While nothing it reads has moved**, as it was last drawn, with no
     ///   read (#805).
     /// - **Once something has**, as it was last drawn, asking at once to be
@@ -128,7 +131,19 @@ impl<'a> Showing<'a> {
     async fn shown<C: Card>(&self, card: &C) -> Markup {
         let address = card.address();
         let reads = <C::Reads as application::graph::Input>::reads();
-        if self.runs.collecting(&scope(&reads)) {
+        let trigger = match self.runs.waiting(&scope(&reads)) {
+            Waiting::No => None,
+            Waiting::Here(parts) => Some(
+                parts
+                    .iter()
+                    .map(|part| format!("sse:{}", crate::run::event(part)))
+                    .chain(["sse:ended".to_owned()])
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            Waiting::Elsewhere => Some("every 2s".to_owned()),
+        };
+        if let Some(trigger) = trigger {
             let kept = self.kept(&address).await;
             configurator::telemetry::served(if kept.is_some() {
                 Served::Kept
@@ -139,7 +154,7 @@ impl<'a> Showing<'a> {
                 || html! { section.card { p.collecting { "Collecting what this card shows…" } } }.0,
                 |kept| kept.drawing,
             );
-            return asking(&address, &drawing, "every 2s");
+            return asking(&address, &drawing, &trigger);
         }
         let from = self.holding.drawn_from(&reads).await;
         let kept = self.kept(&address).await;
@@ -323,8 +338,11 @@ pub fn reads<P: Page>() -> Reads {
 /// `P` as the request asks for it: each card as it now stands.
 ///
 /// **Opening it starts a run** of what its cards read, unless htmx asks,
-/// which is a page redrawing itself because a run ended: starting another
-/// would redraw it again when that one ended, for ever.
+/// which is a page redrawing itself: starting another would redraw it again
+/// when that one ended, for ever.
+///
+/// **Each card follows the run itself** (#830), so the page is not drawn
+/// again when the run ends.
 pub async fn page<P: Page>(
     State(runs): State<Arc<Runs>>,
     headers: HeaderMap,
@@ -345,7 +363,7 @@ pub async fn page<P: Page>(
     let view = runs.view();
     let showing = Showing::new(&runs, redraw);
     let shown = <P::Cards as Cards>::shown(&query, &showing).await;
-    crate::page::followed(&page.layout(shown).0, &view).into_response()
+    crate::page::carded(&page.layout(shown).0, &view).into_response()
 }
 
 /// `C` alone, as the request asks for it: what a card asking to be drawn
@@ -486,6 +504,106 @@ mod tests {
             let drawn = DATED.fetch_add(1, Ordering::SeqCst) + 1;
             html! { section.card { p { "dated " (drawn) } } }
         }
+    }
+
+    /// The weigh-ins, normalised, read for their version and nothing else.
+    struct Weighed;
+
+    impl Input for Weighed {
+        fn reads() -> Reads {
+            Reads::of([Node::Normalised(
+                domain::landing::LandingStream::try_from("withings.measurements")
+                    .expect("a stream"),
+            )])
+        }
+    }
+
+    impl Fetch for Weighed {
+        type Fetched = ();
+
+        fn fetch<'a>(_: &'a Holding<'a>) -> FetchFuture<'a, ()> {
+            Box::pin(std::future::ready(Ok(())))
+        }
+    }
+
+    static WEIGHT: AtomicUsize = AtomicUsize::new(0);
+
+    /// A card reading the weigh-ins, counting its drawings.
+    struct Weight;
+
+    impl Card for Weight {
+        const NAME: &'static str = "test-weight";
+        type Reads = Weighed;
+
+        fn asked(_: &HashMap<String, String>) -> Self {
+            Self
+        }
+
+        fn render(&self, (): ()) -> Markup {
+            let drawn = WEIGHT.fetch_add(1, Ordering::SeqCst) + 1;
+            html! { section.card { p { "weight " (drawn) } } }
+        }
+    }
+
+    /// **A card is drawn as soon as what it reads is collected** (#830),
+    /// while the run collects the rest: until then it asks to be drawn again
+    /// on each part it still waits on, and on the run ending; the card beside
+    /// it, reading nothing the run collects, is drawn at once.
+    #[test]
+    fn a_card_is_drawn_once_what_it_reads_is_collected_mid_run() {
+        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let runs = Runs::new(Setting {
+            store: runtime
+                .block_on(configurator::store::Store::open(
+                    &directory.path().join("fitness.db"),
+                ))
+                .expect("the store"),
+            zone: OperatorZone::try_from("Europe/London").expect("a zone"),
+            credentials: None,
+            build: Some("a build"),
+        });
+        let load = || -> (String, String) {
+            runtime.block_on(async {
+                let showing = Showing::new(&runs, true);
+                (
+                    showing.card(&Weight).await.into_string(),
+                    showing.card(&Dated).await.into_string(),
+                )
+            })
+        };
+        let stream =
+            domain::landing::LandingStream::try_from("withings.measurements").expect("a stream");
+        runs.going_over(crate::run::Asked::Everything);
+
+        let (weight, dated) = load();
+        assert!(
+            weight.contains("Collecting what this card shows"),
+            "{weight}"
+        );
+        assert!(
+            weight.contains(
+                r#"hx-trigger="sse:fetched-withings.measurements, sse:normalised-withings.measurements, sse:ended""#
+            ),
+            "{weight}"
+        );
+        assert!(!dated.contains("hx-trigger"), "{dated}");
+
+        runs.collect(&[application::Part::Fetching(stream.clone())]);
+        let (weight, _) = load();
+        assert!(
+            weight.contains(r#"hx-trigger="sse:normalised-withings.measurements, sse:ended""#),
+            "{weight}"
+        );
+        assert_eq!(WEIGHT.load(Ordering::SeqCst), 0, "not drawn while it waits");
+
+        runs.collect(&[application::Part::Normalising(stream)]);
+        let (weight, _) = load();
+        assert!(weight.contains("weight 1"), "{weight}");
+        assert!(!weight.contains("hx-trigger"), "{weight}");
     }
 
     /// **A card is drawn again only when something it reads has moved**

@@ -218,6 +218,27 @@ pub fn following(run: &View) -> Markup {
     }
 }
 
+/// `drawn`, a page of cards, below the step the run is on, each card that
+/// waits on a part of the run asking to be drawn again as it is collected
+/// (#830).
+///
+/// **Connected on `body`**, so every card is inside the connection whose
+/// events it asks on, and **no redraw of the page when the run ends**: each
+/// card asks on that for itself.
+pub fn carded(drawn: &str, run: &View) -> Markup {
+    let connected = html! {
+        script src="/htmx.min.js" {}
+        script src="/sse.min.js" {}
+        div.following sse-swap="step,ended" { (run.step()) }
+    };
+    let body = format!(
+        r#"<body hx-ext="sse" sse-connect="/run/step?since={}&amp;collected={}">"#,
+        run.ended(),
+        run.collected()
+    );
+    PreEscaped(drawn.replacen("<body>", &format!("{body}{}", connected.0), 1))
+}
+
 /// A page whose data a run is collecting, where it has never been drawn on
 /// this store (#467, #605): the step the run is on, and the page once no run
 /// is collecting what it reads.

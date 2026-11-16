@@ -190,6 +190,7 @@ impl Progress for Unheard {
     ) {
     }
     fn finished(&self, _done: &Done) {}
+    fn collected(&self, _parts: &[application::Part]) {}
 }
 
 /// Whether a run, started by either frontend, holds any part of `scope`
@@ -291,6 +292,7 @@ async fn over(
             zone: zone.clone(),
         },
         canonical: canonical(store),
+        graph: crate::graph::graph().clone(),
         ledger: store.adapter(SqliteDerivationLedger::new),
         classes: class_source,
         holidays: crate::holidays::calendars(store),
