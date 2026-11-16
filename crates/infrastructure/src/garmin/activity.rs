@@ -1,5 +1,5 @@
 //! What one Garmin activity's normalised layer holds: the gym session or the
-//! padel game, where it is one, and the devices its recording names (#569,
+//! padel match, where it is one, and the devices its recording names (#569,
 //! #517).
 //!
 //! **A sum rather than separate derivations because the stream is one**, as
@@ -17,7 +17,7 @@ use domain::{
     gym::MeasuredGymSession,
     landing::{LandingRecordId, SourceRecordId},
     normalised::{NormalisedEntity, RefusalLocus, StatedZones},
-    padel::PadelGame,
+    padel::PadelMatch,
     sequence::NonEmpty,
 };
 
@@ -44,9 +44,9 @@ impl NormalisedEntity for ActivityDevices {
 pub enum GarminActivityEntity {
     /// Boxed for [`crate::spreadsheets::SpreadsheetEntity`]'s reason.
     GymSession(Box<MeasuredGymSession>),
-    /// A game of padel, which is not a gym session and is not refused as one
+    /// A match of padel, which is not a gym session and is not refused as one
     /// (#517).
-    PadelGame(Box<PadelGame>),
+    PadelMatch(Box<PadelMatch>),
     /// Boxed for the same reason: a recording's devices are a list of
     /// sightings, and the sum is only how one pass hands back both.
     Devices(Box<ActivityDevices>),
@@ -56,7 +56,7 @@ impl NormalisedEntity for GarminActivityEntity {
     fn composes(&self) -> Vec<&SourceRecordId> {
         match self {
             Self::GymSession(session) => session.composes(),
-            Self::PadelGame(game) => game.composes(),
+            Self::PadelMatch(played) => played.composes(),
             Self::Devices(devices) => devices.composes(),
         }
     }
@@ -92,9 +92,9 @@ impl GarminActivityTranslator {
 impl Translator for GarminActivityTranslator {
     type Account = ActivityAccount;
     type Entity = GarminActivityEntity;
-    /// 2: a padel game is a padel game, where 1 refused it as unmodelled
-    /// (#517).
-    const VERSION: u32 = 2;
+    /// 2: a padel match is a padel match, where 1 refused it as unmodelled
+    /// (#517). 3: the same output, its entity renamed from a game (#817).
+    const VERSION: u32 = 3;
 
     /// **A refusal as a gym session stays a refusal**, beside the devices: the
     /// activity is still not a session this layer models.
@@ -106,15 +106,15 @@ impl Translator for GarminActivityTranslator {
         let gym = self.gym.translate(account, zones)?;
         let record = account.activity();
         // **Only where the gym refused it**: a retraction is still one, and
-        // nothing is both a gym session and a game.
+        // nothing is both a gym session and a match.
         let played = matches!(gym, Translation::Refused(_))
-            .then(|| padel::game(record, zones))
+            .then(|| padel::translate(record, zones))
             .flatten();
         let gym = match played {
-            Some(Ok(game)) => {
+            Some(Ok(played)) => {
                 return Ok(Translation::Entities {
                     entities: NonEmpty::of(
-                        GarminActivityEntity::PadelGame(Box::new(game)),
+                        GarminActivityEntity::PadelMatch(Box::new(played)),
                         Self::devices(account, zones).into_iter().collect(),
                     ),
                     refusals: Vec::new(),

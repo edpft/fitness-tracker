@@ -19,6 +19,7 @@ pub mod manual;
 pub mod measured;
 pub mod normalised;
 pub mod outcome;
+pub mod performance;
 pub mod performed;
 pub mod set;
 pub mod workout;
@@ -39,6 +40,7 @@ pub use measured::{
 };
 pub use normalised::{NormalisedGymSession, Recorder};
 pub use outcome::Performed;
+pub use performance::{Performance, PerformedSet};
 pub use performed::PerformedGymSession;
 pub use set::{Set, SetKind};
 pub use workout::{GymWorkout, PerformedExercise, Superset, WorkoutItem};

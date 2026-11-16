@@ -48,7 +48,7 @@ use super::{
 pub const TEST_RETEST: f64 = 0.029;
 use crate::{
     canonical::Occurred,
-    cycling::{CanonicalCyclingSession, Ftp, FtpProvenance, Watts},
+    cycling::{CanonicalBikePlusRide, Ftp, FtpProvenance, Watts},
     device::Register,
     measure::{BeatsPerMinute, Kg},
     normalised::StartedAt,
@@ -170,12 +170,8 @@ pub struct TestHeartRate {
 pub const LAST_SECONDS: u64 = 300;
 
 /// The heart rate of a test session's effort, the twenty minutes after its
-/// warm-up. `None` for a ride that is not a test, or an effort with no heart
-/// rate.
-pub fn heart_rate(session: &CanonicalCyclingSession, register: &Register) -> Option<TestHeartRate> {
-    let CanonicalCyclingSession::Test { effort, .. } = session else {
-        return None;
-    };
+/// warm-up. `None` for an effort with no heart rate.
+pub fn heart_rate(effort: &CanonicalBikePlusRide, register: &Register) -> Option<TestHeartRate> {
     let samples: Vec<(u64, u32)> = effort
         .heart_rate()?
         .value()

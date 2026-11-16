@@ -12,39 +12,40 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use application::{
-    AccountReader, CalendarStore, CanonicalCyclingSessionStore, CanonicalGymSessionStore,
-    CanonicalLayer, CanonicalWeighInStore, ClassSource, ClassesHeld, ClassesListed, ClassesRead,
-    CompositionHistory, CyclingDeliveryStore, CyclingMesocycleStore, DeliveryReference,
-    DerivationLedger, DerivedFrom, DestinationName, DestinationReply, DiaryAuthor, DiaryStore,
-    EquipmentStore, ExerciseHistory, ExtractionRunLog, FetchLog, Fetched, FillChangeStore,
-    FtpHistory, GenerationParameterStore, HoldingRides, HolidayCalendar, Input, Kept, LandingStore,
-    LastPerformance, Mark, MesocycleInForce, MesocycleStore, NewestObservation,
-    NormalisationRunLog, NormalisedCyclingSessionReader, NormalisedEntityStore,
-    NormalisedGymSessionReader, NormalisedWeighInReader, Occupant, Output, OvernightHrvHistory,
-    Performance, PerformedCyclingSessions, PerformedGymSessions, PerformedSessionLog, PlanStore,
-    PlayedPadelGame, PlayedPadelGames, PrescribedWorkoutId, PrescribedWorkoutStore,
-    PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore, PublishedCycling,
-    PublishedProgrammes, PublishedRead, PulseWaveVelocityHistory, RawExtent, Reached, Reading,
-    Reads, RecordedDevices, RefusalStore, RenderingDigest, RestingHeartRateHistory,
-    ResumptionPointStore, Revision, Revisions, RiddenSession, RiddenSessionLog, RiddenVenues,
-    Served, SessionOrdinal, SleepHistory, SourceError, StoreError, StressHistory, TrainingDone,
-    WearRecord, WeighInHistory, WorkoutStore,
+    AccountReader, Activities, CalendarStore, CanonicalCyclingSessionStore,
+    CanonicalGymSessionStore, CanonicalLayer, CanonicalWeighInStore, ClassSource, ClassesHeld,
+    ClassesListed, ClassesRead, CompositionHistory, CyclingDeliveryStore, CyclingMesocycleStore,
+    DeliveryReference, DerivationLedger, DerivedFrom, DestinationName, DestinationReply,
+    DiaryAuthor, DiaryStore, EquipmentStore, ExerciseHistory, ExtractionRunLog, FetchLog, Fetched,
+    FillChangeStore, FtpHistory, FulfilledSession, GenerationParameterStore, HoldingRides,
+    HolidayCalendar, Input, Kept, LandingStore, LastPerformance, Mark, MesocycleInForce,
+    MesocycleStore, NewestObservation, NormalisationRunLog, NormalisedCyclingSessionReader,
+    NormalisedEntityStore, NormalisedGymSessionReader, NormalisedWeighInReader, Occupant, Output,
+    OvernightHrvHistory, Performances, PerformedCyclingSessions, PerformedGymSessions,
+    PerformedSessionLog, PlanStore, PlayedPadelMatch, PlayedPadelMatches, PrescribedWorkoutId,
+    PrescribedWorkoutStore, PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore,
+    PublishedCycling, PublishedProgrammes, PublishedRead, PulseWaveVelocityHistory, RawExtent,
+    Reached, Reading, Reads, RecordedDevices, RefusalStore, RenderingDigest,
+    RestingHeartRateHistory, ResumptionPointStore, Revision, Revisions, RiddenSession,
+    RiddenSessionLog, RiddenVenues, Served, SessionOrdinal, SleepHistory, SourceError, StoreError,
+    StressHistory, TrainingDone, WearRecord, WeighInHistory, WorkoutStore,
     graph::{Calendar, Node, Table},
 };
 use domain::analytical::Weighed;
 use domain::body::{CanonicalWeighIn, WeighInAccount, WeighInCount};
 use domain::canonical::{Occurred, Reach, SessionCount};
 use domain::cycling::{
-    CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide,
-    Ftp, RideVenue,
+    CanonicalBikePlusRide, CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId,
+    CyclingSession, DeliveredRide, Ftp, RideVenue,
 };
-use domain::gym::{CanonicalGymSession, NormalisedGymSession, exercise::RepsExercise};
+use domain::gym::{CanonicalGymSession, NormalisedGymSession, Performance, exercise::RepsExercise};
 use domain::landing::{
     ExtractionRun, FetchedAt, LandingRecord, LandingRecordId, LandingStream, PayloadDigest,
     RecordCount, RunId, RunOutcome, SourceRecordId, Watermark,
 };
 use domain::normalised::{
-    NormalisationOutcome, NormalisationRun, NormalisationRunId, Refusal, RefusalCount, WorkoutCount,
+    NormalisationOutcome, NormalisationRun, NormalisationRunId, Refusal, RefusalCount, StartedAt,
+    WorkoutCount,
 };
 use domain::plan::{Plan, PlanId, PlanName, PlanWindow};
 use domain::planner::{Completed, Relative, RerunOrdinal, SessionRole};
@@ -264,7 +265,17 @@ spanned! {
 
 spanned! {
     PerformedCyclingSessions {
-        fn all(&self) -> Result<Vec<CanonicalCyclingSession>, StoreError>;
+        fn main_rides(&self) -> Result<Vec<CanonicalBikePlusRide>, StoreError>;
+        fn efforts(&self) -> Result<Vec<CanonicalBikePlusRide>, StoreError>;
+        fn tested(&self) -> Result<Vec<StartedAt>, StoreError>;
+        fn between(&self, from: Date, to: Date) -> Result<Vec<CanonicalCyclingSession>, StoreError>;
+    }
+}
+
+spanned! {
+    Activities {
+        fn between(&self, from: Date, to: Date) -> Result<Vec<(Occurred, application::Activity)>, StoreError>;
+        fn first(&self) -> Result<Option<Date>, StoreError>;
     }
 }
 
@@ -292,8 +303,14 @@ spanned! {
 spanned! {
     ExerciseHistory {
         fn last_performances(&self, exercises: &[RepsExercise]) -> Result<BTreeMap<RepsExercise, LastPerformance>, StoreError>;
-        fn performances(&self, exercise: RepsExercise) -> Result<Vec<Performance>, StoreError>;
+        fn performances(&self, exercise: RepsExercise) -> Result<Vec<(Performance, Option<FulfilledSession>)>, StoreError>;
         fn newest_performance(&self) -> Result<Option<Date>, StoreError>;
+    }
+}
+
+spanned! {
+    Performances {
+        fn of(&self, exercises: &[RepsExercise], from: Date, to: Date) -> Result<Vec<Performance>, StoreError>;
     }
 }
 
@@ -311,8 +328,8 @@ spanned! {
 }
 
 spanned! {
-    PlayedPadelGames {
-        fn all(&self) -> Result<Vec<PlayedPadelGame>, StoreError>;
+    PlayedPadelMatches {
+        fn between(&self, from: Date, to: Date) -> Result<Vec<PlayedPadelMatch>, StoreError>;
     }
 }
 
@@ -438,6 +455,7 @@ spanned! {
 spanned! {
     PlanStore {
         fn windows(&self) -> Result<Vec<PlanWindow>, StoreError>;
+        fn plans(&self) -> Result<Vec<Plan>, StoreError>;
         fn named(&self, name: &PlanName) -> Result<Option<Plan>, StoreError>;
         fn author(&self, plan: &Plan) -> Result<PlanId, StoreError>;
         fn commit(&self, plan: &PlanName, gym: &[GymMesocycle], cycling: &[CyclingMesocycle]) -> Result<(), StoreError>;
@@ -449,6 +467,7 @@ spanned! {
 spanned! {
     FtpHistory {
         fn in_force_on(&self, date: Date) -> Result<Option<Ftp>, StoreError>;
+        fn series(&self) -> Result<Vec<Ftp>, StoreError>;
     }
 }
 

@@ -5,8 +5,7 @@
 //! absent credential costs is the delivery and nothing else (§ 36).
 
 use application::{
-    DiaryStore as _, PublishedCycling, PublishedProgrammes as _, PublishedRead, RidesPlaced,
-    SourceError,
+    PublishedCycling, PublishedProgrammes as _, PublishedRead, RidesPlaced, SourceError,
     cycling::{PrescribedRide, RideDeliveryError, RidingError},
     holding::NoHoldingRide,
 };
@@ -53,9 +52,10 @@ pub async fn prescribed(
         crate::next::riding(store, zone, catalogue)?,
         Walk::over(store, zone).await?,
     );
-    let reschedule = walk.reschedule(zone).await?;
-    let diary = store.diary().diary().await?;
-    Ok(riding.next(from, reschedule, &diary, ftp).await)
+    let walked = walk.walked(zone).await?;
+    Ok(riding
+        .next(from, walked.reschedule, &walked.diary, ftp)
+        .await)
 }
 
 /// Put a ride in Peloton's stack.

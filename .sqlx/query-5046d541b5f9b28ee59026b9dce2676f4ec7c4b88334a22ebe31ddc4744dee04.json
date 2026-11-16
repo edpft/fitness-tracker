@@ -1,0 +1,167 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT c.id AS \"session!: i64\",\n                   c.started_at_utc, c.zone, c.on_day,\n                   NULL AS \"plan: String\",\n                   NULL AS \"session_intensity: String\",\n                   NULL AS \"session_volume: String\",\n                   e.exercise AS \"exercise!: String\",\n                   st.load_kind AS \"load_kind!: String\",\n                   st.load_grams AS \"load_grams!: i64\",\n                   st.outcome AS \"outcome!: String\",\n                   st.reps AS \"reps: i64\",\n                   st.rir AS \"rir: String\",\n                   st.set_kind AS \"set_kind!: String\"\n            FROM canonical_gym_session AS c\n            JOIN canonical_gym_exercise AS e ON e.session = c.id\n            JOIN canonical_gym_set AS st\n              ON st.session = e.session\n             AND st.item_position = e.item_position\n             AND st.exercise_position = e.position\n            WHERE e.measure = 'reps'\n              AND e.identified = 'recorded'\n              AND e.exercise IN (SELECT value FROM json_each(?))\n              AND COALESCE(c.started_at_utc, c.on_day) >= ?\n              AND COALESCE(c.started_at_utc, c.on_day) < ?\n              AND st.load_kind IS NOT NULL\n              AND st.set_kind IS NOT NULL\n              AND ((st.outcome = 'completed' AND st.reps IS NOT NULL)\n                OR (st.set_kind = 'working' AND st.outcome = 'failed'))\n            ORDER BY COALESCE(c.started_at_utc, c.on_day) ASC, c.id ASC, e.exercise ASC,\n                     e.item_position ASC, e.position ASC, st.position ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "session!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "started_at_utc",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "on_day",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "on_day"
+          }
+        }
+      },
+      {
+        "name": "plan: String",
+        "ordinal": 4,
+        "type_info": "Null",
+        "origin": "Expression"
+      },
+      {
+        "name": "session_intensity: String",
+        "ordinal": 5,
+        "type_info": "Null",
+        "origin": "Expression"
+      },
+      {
+        "name": "session_volume: String",
+        "ordinal": 6,
+        "type_info": "Null",
+        "origin": "Expression"
+      },
+      {
+        "name": "exercise!: String",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise",
+            "name": "exercise"
+          }
+        }
+      },
+      {
+        "name": "load_kind!: String",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "load_kind"
+          }
+        }
+      },
+      {
+        "name": "load_grams!: i64",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "load_grams"
+          }
+        }
+      },
+      {
+        "name": "outcome!: String",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "outcome"
+          }
+        }
+      },
+      {
+        "name": "reps: i64",
+        "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "reps"
+          }
+        }
+      },
+      {
+        "name": "rir: String",
+        "ordinal": 12,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "rir"
+          }
+        }
+      },
+      {
+        "name": "set_kind!: String",
+        "ordinal": 13,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "set_kind"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "5046d541b5f9b28ee59026b9dce2676f4ec7c4b88334a22ebe31ddc4744dee04"
+}

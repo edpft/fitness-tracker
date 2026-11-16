@@ -2038,11 +2038,11 @@ async fn covering<P: PlanStore + Sync>(
     plans: &ReschedulingPlans<P>,
     date: Date,
 ) -> Result<Option<Plan>, StoreError> {
-    let windows = plans.windows().await?;
-    let Some(window) = windows.iter().find(|window| window.span().covers(date)) else {
-        return Ok(None);
-    };
-    plans.named(window.name()).await
+    Ok(plans
+        .plans()
+        .await?
+        .into_iter()
+        .find(|plan| plan.span().covers(date)))
 }
 
 /// Which mesocycle of the plan a discipline is in on a date, and which week of

@@ -1,23 +1,25 @@
 //! Is what I'm doing working?, for the macrocycle in force, over this build's
 //! store (#517): what Progress shows (#769).
 
+use std::future::ready;
+
 use application::{
-    StoreError,
+    FtpHistory as _, StoreError,
     heart_rate::RideHeartRates,
     next::Scope,
+    one_rep_max::Strength,
     working::{IsItWorking, Readings, View},
 };
-use domain::normalised::OperatorZone;
+use domain::{analytical::body_weight::Series, normalised::OperatorZone};
 use infrastructure::{
-    GarminRecordedDevices, GarminWear, SqliteCanonicalCyclingSessionStore, SqliteFtpHistory,
-    SqliteOvernightHrvHistory, SqliteRestingHeartRateHistory, SqliteStressHistory,
-    SqliteTrainingDone,
+    SqliteCanonicalCyclingSessionStore, SqliteFtpHistory, SqliteOvernightHrvHistory,
+    SqliteRestingHeartRateHistory, SqliteStressHistory, SqliteTrainingDone,
 };
 
 use crate::clock::Today;
 use crate::store::Spanned;
 use crate::{
-    body_weight::{self, Aimed},
+    body_weight,
     composition::{self, ByMethod},
     devices, ftp_tests,
     graph::{page, read},
@@ -31,28 +33,23 @@ page! {
     /// What Progress reads: the three response readings, each normalised; the
     /// training done; the FTP tests, the 1RM tests and estimates, heart rate
     /// at a fixed power, body weight and its aims, and body composition; and
-    /// the register.
+    /// the weigh-ins, the register, the FTP series, and the plans and
+    /// holidays the walk read, each read once for every reading over them
+    /// (#817).
     pub struct Page {
         working: IsItWorking<
             Spanned<SqliteOvernightHrvHistory>,
             Spanned<SqliteRestingHeartRateHistory>,
             Spanned<SqliteStressHistory>,
             Spanned<SqliteTrainingDone>,
-            Spanned<GarminRecordedDevices>,
-            Spanned<GarminWear>,
-            Plans,
         >,
         ftp: ftp_tests::Tests,
-        strength: one_rep_max::Tests,
-        estimated: one_rep_max::Estimated,
-        rides: RideHeartRates<
-            Spanned<SqliteCanonicalCyclingSessionStore>,
-            Spanned<SqliteFtpHistory>,
-            Spanned<GarminRecordedDevices>,
-            Spanned<GarminWear>,
-        >,
+        strength: one_rep_max::Strength,
+        rides: RideHeartRates<Spanned<SqliteCanonicalCyclingSessionStore>>,
+        ftp_history: Spanned<SqliteFtpHistory>,
         weight: body_weight::Series,
-        aims: Aimed,
+        devices: devices::Register,
+        plans: Plans,
         composition: ByMethod,
         today: Today,
     }
@@ -77,28 +74,26 @@ impl Page {
     ///
     /// [`NextFailure`] if the store cannot be read.
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
-        let plans = rescheduling::plans(store, zone).await?;
         Ok(Self {
             working: IsItWorking::new(
                 store.adapter(SqliteOvernightHrvHistory::new),
                 store.adapter(SqliteRestingHeartRateHistory::new),
                 store.adapter(SqliteStressHistory::new),
                 store.adapter(SqliteTrainingDone::new),
-                devices::register(store),
-                plans.clone(),
             )
             .into(),
             ftp: ftp_tests::over(store).into(),
-            strength: one_rep_max::tests(store, zone).into(),
-            estimated: one_rep_max::estimated(store, plans.clone()).into(),
-            rides: RideHeartRates::new(
-                store.adapter(SqliteCanonicalCyclingSessionStore::new),
-                store.adapter(SqliteFtpHistory::new),
-                devices::register(store),
+            strength: Strength::new(
+                one_rep_max::estimated(store),
+                one_rep_max::tests(store, zone),
             )
             .into(),
+            rides: RideHeartRates::new(store.adapter(SqliteCanonicalCyclingSessionStore::new))
+                .into(),
+            ftp_history: store.adapter(SqliteFtpHistory::new).into(),
             weight: body_weight::series(store).into(),
-            aims: body_weight::aims_over(store, plans).into(),
+            devices: devices::register(store).into(),
+            plans: rescheduling::plans(store, zone).await?.into(),
             composition: composition::over(store).into(),
             today: Today::new(zone.clone()).into(),
         })
@@ -112,13 +107,20 @@ impl Page {
     /// [`StoreError`] if the store cannot be read.
     pub async fn view(&self) -> Result<View, StoreError> {
         let today = self.today.date();
-        let ftp = read!(self.ftp.tests()).await?;
-        let strength = read!(self.strength.tests(today)).await?;
-        let estimated = read!(self.estimated.view(today)).await?.lifts;
-        let at_power =
-            domain::analytical::heart_rate_at_power::trended(&read!(self.rides.rides()).await?);
-        let weight = read!(self.weight.series()).await?;
-        let aims = read!(self.aims.on(today)).await?;
+        let weigh_ins = read!(self.weight.weigh_ins()).await?;
+        let register = read!(self.devices.register()).await?;
+        let walked = read!(self.plans, ready).await;
+        let (written, plans) = (walked.written(), walked.now());
+        let ftp_history = read!(self.ftp_history.series()).await?;
+        let ftp = read!(self.ftp.tests(&ftp_history, &weigh_ins)).await?;
+        let (strength, estimated) =
+            read!(self.strength.read(today, written, plans, &weigh_ins)).await?;
+        let estimated = estimated.lifts;
+        let at_power = domain::analytical::heart_rate_at_power::trended(
+            &read!(self.rides.rides(&register, &ftp_history)).await?,
+        );
+        let weight = Series::of(weigh_ins);
+        let aims = application::body_weight::aims_on(today, plans, walked.holidays());
         let composition = read!(self.composition.by_method()).await?;
         let readings = Readings {
             ftp: &ftp,
@@ -129,6 +131,6 @@ impl Page {
             aims: &aims,
             composition: &composition,
         };
-        read!(self.working.view(today, &readings)).await
+        read!(self.working.view(today, plans, &register, &readings)).await
     }
 }

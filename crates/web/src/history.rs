@@ -1,12 +1,12 @@
-//! History: the sessions he has done, newest first and by day, and one of
-//! them opened (#772).
+//! History: the activities he has done, newest first and by day, a page at a
+//! time as the list is scrolled, and one of them opened (#772, #817).
 //!
 //! The operator, 2026-11-10 (#749), asked whether measurements belong here:
 //! *"Only sessions for now."*
 
 use application::{
-    PlayedPadelGame,
-    history::{Day, Number, Session},
+    PlayedPadelMatch,
+    history::{Activity, Day, Number, Page as Listed, opened},
 };
 use domain::{
     cycling::{CanonicalBikePlusRide, CanonicalCyclingSession},
@@ -21,13 +21,22 @@ use maud::{DOCTYPE, Markup, html};
 
 use crate::page::{self, Place};
 
-/// Where a session is opened.
+/// Where an activity is opened.
 pub fn address(on: Date, number: Number) -> String {
     format!("{}/{on}/{}", Place::History.path(), number.get())
 }
 
-/// The feed as it stands today, or the reason it could not be read.
-pub fn page(days: &Result<(Vec<Day>, Date), String>) -> Markup {
+/// Where the list's page of days before `before` is.
+fn before_address(before: Date) -> String {
+    format!("{}?before={before}", Place::History.path())
+}
+
+/// A page of the list, or the reason it could not be read.
+///
+/// **Scrolled in a page at a time** (operator, 2026-11-15: *"pagination on the
+/// backend and infinite scroll on the front end"*): the end of a page asks for
+/// the next as it comes into view, and the next replaces it.
+pub fn page(read: &Result<(Listed, Date), String>) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -35,9 +44,9 @@ pub fn page(days: &Result<(Vec<Day>, Date), String>) -> Markup {
             body {
                 main.history {
                     h1 { (Place::History.name()) }
-                    @match days {
-                        Ok((days, _)) if days.is_empty() => p.sub { "No session is recorded." },
-                        Ok((days, today)) => @for day in days { (feed_day(day, *today)) },
+                    @match read {
+                        Ok((listed, _)) if listed.days.is_empty() => p.sub { "No activity is recorded." },
+                        Ok((listed, today)) => (days(listed, *today)),
                         Err(error) => p.failed { "History could not be read: " (error) },
                     }
                     (page::bar(Place::History.path()))
@@ -47,19 +56,35 @@ pub fn page(days: &Result<(Vec<Day>, Date), String>) -> Markup {
     }
 }
 
+/// One page's days, and where the next page is asked for.
+fn days(listed: &Listed, today: Date) -> Markup {
+    html! {
+        section.days {
+            @for day in &listed.days { (feed_day(day, today)) }
+            @if let Some(before) = listed.before {
+                div.more
+                    hx-get=(before_address(before))
+                    hx-trigger="revealed"
+                    hx-select="section.days"
+                    hx-swap="outerHTML" {}
+            }
+        }
+    }
+}
+
 fn feed_day(day: &Day, today: Date) -> Markup {
     html! {
         h2.group { (day_name(day.on, today)) }
         ul.sessions {
-            @for (number, session) in &day.sessions {
+            @for (number, activity) in &day.activities {
                 li {
                     a href=(address(day.on, *number)) {
-                        i.dot.gym[matches!(session, Session::Gym { .. })]
-                            .cycling[matches!(session, Session::Cycling(_))]
-                            .padel[matches!(session, Session::Padel(_))] {}
-                        span.name { (name(session)) }
-                        @if let Some(test) = test(session) { " " em.test { (test) } }
-                        span.facts { (facts(session)) }
+                        i.dot.gym[matches!(activity, Activity::Gym { .. })]
+                            .cycling[matches!(activity, Activity::Cycling { .. })]
+                            .padel[matches!(activity, Activity::Padel { .. })] {}
+                        span.name { (name(activity)) }
+                        @if let Some(test) = test(activity) { " " em.test { (test) } }
+                        span.facts { (facts(activity)) }
                     }
                 }
             }
@@ -77,44 +102,90 @@ fn day_name(on: Date, today: Date) -> String {
 }
 
 /// The test it was, where it was one.
-const fn test(session: &Session) -> Option<&'static str> {
-    match session {
-        _ if !session.is_test() => None,
-        Session::Gym { .. } => Some(ONE_REP_MAX_TEST),
-        Session::Cycling(_) => Some("FTP test"),
-        Session::Padel(_) => None,
+const fn test(activity: &Activity) -> Option<&'static str> {
+    match activity {
+        _ if !activity.is_test() => None,
+        Activity::Gym { .. } => Some(ONE_REP_MAX_TEST),
+        Activity::Cycling { .. } => Some(FTP_TEST),
+        Activity::Padel { .. } => None,
+    }
+}
+
+/// The test an opened activity was, where it was one.
+const fn opened_test(activity: &opened::Activity) -> Option<&'static str> {
+    match activity {
+        _ if !activity.is_test() => None,
+        opened::Activity::Gym { .. } => Some(ONE_REP_MAX_TEST),
+        opened::Activity::Cycling(_) => Some(FTP_TEST),
+        opened::Activity::Padel(_) => None,
     }
 }
 
 const ONE_REP_MAX_TEST: &str = "1RM test";
+const FTP_TEST: &str = "FTP test";
+const GYM: &str = "Gym session";
+const PELOTON: &str = "Peloton session";
+const PADEL: &str = "Padel match";
 
-/// What the session is: the classes a cycling session was ridden to are on
+/// What the activity is: the classes a cycling session was ridden to are on
 /// its page, not its name.
-const fn name(session: &Session) -> &'static str {
-    match session {
-        Session::Gym { .. } => "Gym session",
-        Session::Cycling(_) => "Cycling session",
-        Session::Padel(_) => "Padel game",
+const fn name(activity: &Activity) -> &'static str {
+    match activity {
+        Activity::Gym { .. } => GYM,
+        Activity::Cycling { .. } => PELOTON,
+        Activity::Padel { .. } => PADEL,
+    }
+}
+
+const fn opened_name(activity: &opened::Activity) -> &'static str {
+    match activity {
+        opened::Activity::Gym { .. } => GYM,
+        opened::Activity::Cycling(_) => PELOTON,
+        opened::Activity::Padel(_) => PADEL,
     }
 }
 
 /// Enough of it to recognise it by.
-fn facts(session: &Session) -> String {
-    match session {
-        Session::Gym { session, .. } => gym_facts(session).join(" · "),
-        Session::Cycling(session) => [
-            length(ridden(session)),
-            session.working_ride().average_power().value().to_string(),
-        ]
-        .join(" · "),
-        Session::Padel(game) => padel_facts(game).join(" · "),
-    }
+fn facts(activity: &Activity) -> String {
+    let facts = match activity {
+        Activity::Gym {
+            length: lasted,
+            exercises,
+            sets,
+            heart_rate,
+            ..
+        } => {
+            let mut facts: Vec<String> = lasted
+                .iter()
+                .map(|lasted| length(Duration::from_seconds(lasted.as_seconds())))
+                .collect();
+            facts.push(counted(*exercises, "exercise"));
+            facts.push(counted(*sets, "set"));
+            facts.extend(heart_rate.map(|heart_rate| heart_rate.to_string()));
+            facts
+        }
+        Activity::Cycling {
+            length: ridden,
+            power,
+            ..
+        } => vec![length(*ridden), power.to_string()],
+        Activity::Padel {
+            length: played,
+            heart_rate,
+        } => {
+            let mut facts = vec![length(Duration::from_seconds(played.as_seconds()))];
+            facts.extend(heart_rate.map(|heart_rate| heart_rate.to_string()));
+            facts
+        }
+    };
+    facts.join(" · ")
 }
 
-fn padel_facts(game: &PlayedPadelGame) -> Vec<String> {
-    let mut facts = vec![length(Duration::from_seconds(game.duration.as_seconds()))];
+fn padel_facts(played: &PlayedPadelMatch) -> Vec<String> {
+    let mut facts = vec![length(Duration::from_seconds(played.duration.as_seconds()))];
     facts.extend(
-        game.heart_rate
+        played
+            .heart_rate
             .map(|heart_rate| heart_rate.average().to_string()),
     );
     facts
@@ -167,17 +238,17 @@ fn length(duration: Duration) -> String {
     }
 }
 
-/// One session opened, or why it could not be.
-pub fn session(here: &str, on: Date, session: &Result<Option<Session>, String>) -> Markup {
+/// One activity opened, or why it could not be.
+pub fn session(here: &str, on: Date, session: &Result<Option<opened::Activity>, String>) -> Markup {
     let title = match session {
-        Ok(Some(session)) => name(session),
-        Ok(None) | Err(_) => "Session",
+        Ok(Some(session)) => opened_name(session),
+        Ok(None) | Err(_) => "Activity",
     };
     let marked = session
         .as_ref()
         .ok()
         .and_then(Option::as_ref)
-        .and_then(test);
+        .and_then(opened_test);
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -187,11 +258,11 @@ pub fn session(here: &str, on: Date, session: &Result<Option<Session>, String>) 
                     (page::header(here, title))
                     @if let Some(test) = marked { p.test { (test) } }
                     @match session {
-                        Ok(Some(Session::Gym { session, tested })) => (gym(on, session, tested)),
-                        Ok(Some(Session::Cycling(session))) => (cycling(session)),
-                        Ok(Some(Session::Padel(game))) => (padel(game)),
-                        Ok(None) => p.sub { "No such session on " (on.strftime("%A %-d %B %Y")) "." },
-                        Err(error) => p.failed { "The session could not be read: " (error) },
+                        Ok(Some(opened::Activity::Gym { session, tested })) => (gym(on, session, tested)),
+                        Ok(Some(opened::Activity::Cycling(session))) => (cycling(session)),
+                        Ok(Some(opened::Activity::Padel(played))) => (padel(played)),
+                        Ok(None) => p.sub { "No such activity on " (on.strftime("%A %-d %B %Y")) "." },
+                        Err(error) => p.failed { "The activity could not be read: " (error) },
                     }
                     (page::bar(here))
                 }
@@ -200,11 +271,11 @@ pub fn session(here: &str, on: Date, session: &Result<Option<Session>, String>) 
     }
 }
 
-fn padel(game: &PlayedPadelGame) -> Markup {
+fn padel(played: &PlayedPadelMatch) -> Markup {
     html! {
-        p.sub { (game.started_at.wall_clock().strftime("%A %-d %B %Y, %H:%M")) }
-        p.sub { (padel_facts(game).join(" · ")) }
-        @if let Some(heart_rate) = game.heart_rate {
+        p.sub { (played.started_at.wall_clock().strftime("%A %-d %B %Y, %H:%M")) }
+        p.sub { (padel_facts(played).join(" · ")) }
+        @if let Some(heart_rate) = played.heart_rate {
             p.sub { "Highest " (heart_rate.highest()) }
         }
     }
@@ -354,13 +425,16 @@ fn kilometres(distance: domain::measure::Metres) -> String {
     format!("{}.{} km", tenths / 10, tenths % 10)
 }
 
-/// History, once a run has collected what it reads (#772).
+/// A page of History, once a run has collected what it reads (#772): the
+/// newest, or the one before a day.
 #[derive(Debug)]
-pub struct Page;
+pub struct Page {
+    before: Option<Date>,
+}
 
 impl crate::drawn::Drawn for Page {
     const ROUTE: &'static str = Place::History.path();
-    type Read = (Vec<Day>, Date);
+    type Read = (Listed, Date);
 
     fn reads() -> application::graph::Reads {
         configurator::history::reads()
@@ -368,13 +442,26 @@ impl crate::drawn::Drawn for Page {
 
     fn asked(
         _path: &axum::extract::RawPathParams,
-        _query: &std::collections::HashMap<String, String>,
+        query: &std::collections::HashMap<String, String>,
     ) -> Result<Self, axum::response::Redirect> {
-        Ok(Self)
+        query
+            .get("before")
+            .map_or(Ok(Self { before: None }), |before| {
+                before
+                    .parse::<Date>()
+                    .map(|before| Self {
+                        before: Some(before),
+                    })
+                    .map_err(|_| axum::response::Redirect::to(Place::History.path()))
+            })
     }
 
     fn here(&self) -> String {
         Place::History.path().to_owned()
+    }
+
+    fn address(&self) -> String {
+        self.before.map_or_else(|| self.here(), before_address)
     }
 
     async fn read(
@@ -382,8 +469,8 @@ impl crate::drawn::Drawn for Page {
         store: &configurator::store::Store,
         zone: &domain::normalised::OperatorZone,
     ) -> Result<Self::Read, crate::drawn::Unreadable> {
-        let page = configurator::history::Page::open(store, zone);
-        Ok((page.days().await?, page.today()))
+        let list = configurator::history::List::open(store, zone);
+        Ok((list.page(self.before).await?, list.today()))
     }
 
     fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {
@@ -391,7 +478,7 @@ impl crate::drawn::Drawn for Page {
     }
 }
 
-/// One session opened from History (#772): the `number`th done `on`.
+/// One activity opened from History (#772): the `number`th done `on`.
 ///
 /// **No run of its own**: History started one as it was opened, and this
 /// waits on it as any page reading the same layers does.
@@ -404,10 +491,10 @@ pub struct Opened {
 impl crate::drawn::Drawn for Opened {
     const ROUTE: &'static str = "/history/{on}/{number}";
     const OPENS: bool = false;
-    type Read = Option<Session>;
+    type Read = Option<opened::Activity>;
 
     fn reads() -> application::graph::Reads {
-        configurator::history::reads()
+        configurator::history::opened_reads()
     }
 
     fn asked(
@@ -438,8 +525,8 @@ impl crate::drawn::Drawn for Opened {
         store: &configurator::store::Store,
         zone: &domain::normalised::OperatorZone,
     ) -> Result<Self::Read, crate::drawn::Unreadable> {
-        Ok(configurator::history::Page::open(store, zone)
-            .session(self.on, self.number)
+        Ok(configurator::history::Opened::open(store, zone)
+            .activity(self.on, self.number)
             .await?)
     }
 

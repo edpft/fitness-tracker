@@ -6,21 +6,24 @@
 //! chart's ([`crate::ranges`]).
 
 use domain::{
-    analytical::body_weight::{Aim, Series, aims},
+    analytical::{
+        Weighed,
+        body_weight::{Aim, Series, aims},
+    },
     macrocycle::Macrocycle,
+    plan::Plan,
+    schedule::Holidays,
 };
 use jiff::civil::Date;
 
-use crate::{
-    error::StoreError,
-    graph::through,
-    ports::{HolidayCalendar, PlanStore, WeighInHistory},
-};
+use crate::{error::StoreError, graph::through, ports::WeighInHistory};
 
 /// The body-weight use case.
 pub struct BodyWeight<W> {
     weigh_ins: W,
 }
+
+through!(BodyWeight<W>);
 
 impl<W> BodyWeight<W>
 where
@@ -36,50 +39,31 @@ where
     ///
     /// [`StoreError`] if the store is unavailable.
     pub async fn series(&self) -> Result<Series, StoreError> {
-        Ok(Series::of(self.weigh_ins.weigh_ins().await?))
-    }
-}
-
-/// What the plans intended over the current macrocycle's mesocycles (#689).
-pub struct Aims<P, H> {
-    plans: P,
-    holidays: H,
-}
-
-through!(BodyWeight<W>, Aims<P, H>);
-
-impl<P, H> Aims<P, H>
-where
-    P: PlanStore + Sync,
-    H: HolidayCalendar + Sync,
-{
-    pub const fn new(plans: P, holidays: H) -> Self {
-        Self { plans, holidays }
+        Ok(Series::of(self.weigh_ins().await?))
     }
 
-    /// Each started mesocycle's aim on `today`; none where the school
-    /// calendar could not be read or `today` is past its reach, since then
-    /// there is no macrocycle to assume a phase from.
+    /// Every canonical weigh-in, as the store holds them: for a page whose
+    /// other readings are over body weight too, which reads them once (#817).
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
-    pub async fn on(&self, today: Date) -> Result<Vec<Aim>, StoreError> {
-        let Some(macrocycle) = self
-            .holidays
-            .holidays()
-            .await
-            .ok()
-            .and_then(|holidays| Macrocycle::on(today, &holidays))
-        else {
-            return Ok(Vec::new());
-        };
-        let mut mesocycles = Vec::new();
-        for window in self.plans.windows().await? {
-            if let Some(plan) = self.plans.named(window.name()).await? {
-                mesocycles.extend(plan.mesocycle_spans());
-            }
-        }
-        Ok(aims(macrocycle, &mesocycles, today))
+    pub async fn weigh_ins(&self) -> Result<Vec<Weighed>, StoreError> {
+        self.weigh_ins.weigh_ins().await
     }
+}
+
+/// What `plans`, as they now stand, intended over the mesocycles of the
+/// macrocycle `today` falls in (#689).
+///
+/// None where the school calendar could not be read, `holidays` being
+/// `None`, or `today` is past its reach, since then there is no macrocycle
+/// to assume a phase from.
+#[must_use]
+pub fn aims_on(today: Date, plans: &[Plan], holidays: Option<&Holidays>) -> Vec<Aim> {
+    let Some(macrocycle) = holidays.and_then(|holidays| Macrocycle::on(today, holidays)) else {
+        return Vec::new();
+    };
+    let mesocycles: Vec<_> = plans.iter().flat_map(Plan::mesocycle_spans).collect();
+    aims(macrocycle, &mesocycles, today)
 }

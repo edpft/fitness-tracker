@@ -9,16 +9,8 @@
 use domain::{
     cycling::CyclingProvenance,
     macrocycle::{MesocycleState, PlannedMacrocycle},
-    plan::{MesocycleOrdinal, Plan, PlanName, Span},
+    plan::{MesocycleOrdinal, PlanName, Span},
     prescription::GymMesocycle,
-    schedule::DayPart,
-};
-
-use crate::{
-    commit::CommitError,
-    error::StoreError,
-    next::{MesocycleCommitter, StandingReader},
-    ports::{DiaryStore, HolidayCalendar, PlanStore},
 };
 
 /// The planned macrocycle, mesocycle by mesocycle, as Plan lays it out.
@@ -62,66 +54,4 @@ impl From<&PlannedMacrocycle> for Macrocycle {
                 .collect(),
         }
     }
-}
-
-/// Everything reading the planned macrocycle reads.
-pub struct PlanningPorts<W, C, D, H> {
-    /// Where the microcycle walk stands, which says each mesocycle's state.
-    pub walk: W,
-    /// What builds the planned mesocycles after the written ones.
-    pub committing: C,
-    pub diary: D,
-    /// The school calendar, which says what the term is.
-    pub holidays: H,
-}
-
-/// The use case.
-pub struct Planned<W, C, D, H> {
-    ports: PlanningPorts<W, C, D, H>,
-}
-
-crate::graph::through!(Planned<W, C, D, H>);
-
-impl<W, C, D, H> Planned<W, C, D, H>
-where
-    W: StandingReader + Sync,
-    C: MesocycleCommitter + Sync,
-    D: DiaryStore + Sync,
-    H: HolidayCalendar + Sync,
-{
-    pub const fn new(ports: PlanningPorts<W, C, D, H>) -> Self {
-        Self { ports }
-    }
-
-    /// The macrocycle `now` falls in, as planned.
-    ///
-    /// `None` where the school calendar does not reach `now`, or no plan
-    /// following a chain is in force this macrocycle.
-    ///
-    /// # Errors
-    ///
-    /// [`CommitError`] if the store or the school calendar cannot be read, or
-    /// a planned mesocycle will not build.
-    pub async fn on(&self, now: DayPart) -> Result<Option<PlannedMacrocycle>, CommitError> {
-        let holidays = self.ports.holidays.holidays().await?;
-        let standing = self.ports.walk.standing(now).await?;
-        let diary = self.ports.diary.diary().await?;
-        self.ports
-            .committing
-            .planned(now, &holidays, &standing, &diary)
-            .await
-    }
-}
-
-/// Every plan in the store, the latest version of each, oldest first.
-pub(crate) async fn every<P: PlanStore + Sync>(store: &P) -> Result<Vec<Plan>, StoreError> {
-    let mut plans = Vec::new();
-    for window in store.windows().await? {
-        if let Some(plan) = store.named(window.name()).await?
-            && !plans.contains(&plan)
-        {
-            plans.push(plan);
-        }
-    }
-    Ok(plans)
 }

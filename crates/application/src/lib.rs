@@ -49,7 +49,6 @@ pub mod reschedule;
 pub mod schedule;
 pub mod sleep;
 pub mod status;
-pub mod strength;
 pub mod working;
 
 /// What a port reads is part of the port (#809).
@@ -61,7 +60,7 @@ pub use error::{
 };
 pub use graph::{Authors, Calendar, Generation, Input, Node, Output, Reads, Table};
 pub use ports::{
-    AccountReader, Authored, ByReason, CalendarPublisher, CalendarStore,
+    AccountReader, Activities, Activity, Authored, ByReason, CalendarPublisher, CalendarStore,
     CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalLayer, CanonicalWeighInStore,
     ClassSource, ClassesHeld, ClassesListed, ClassesRead, Clock, CompositionHistory,
     CyclingDeliveryStore, CyclingMesocycleStore, Deliverable, Delivered, Delivery, DeliveryAttempt,
@@ -73,9 +72,9 @@ pub use ports::{
     MesocycleInForce, MesocycleStore, NewestObservation, NextLock, NormalisationRunLog,
     NormalisationSummary, NormalisedCyclingSessionReader, NormalisedEntityStore,
     NormalisedGymSessionReader, NormalisedLayers, NormalisedWeighInReader, Occupant,
-    OvernightHrvHistory, Part, Performance, PerformedCyclingSessions, PerformedGymSessions,
-    PerformedSessionLog, PerformedSetSummary, Placed, PlanAuthor, PlanStore, PlannedWith,
-    PlayedPadelGame, PlayedPadelGames, PrescribedWorkoutId, PrescribedWorkoutStore, Prescription,
+    OvernightHrvHistory, Part, Performances, PerformedCyclingSessions, PerformedGymSessions,
+    PerformedSessionLog, Placed, PlanAuthor, PlanStore, PlannedWith, PlayedPadelMatch,
+    PlayedPadelMatches, PrescribedWorkoutId, PrescribedWorkoutStore, Prescription,
     PrescriptionDeliverer, PrescriptionDeliveryStore, PrescriptionDestination,
     PrescriptionLifecycle, ProgressionStore, PublishedCell, PublishedCycling, PublishedProgrammes,
     PublishedRead, PulseWaveVelocityHistory, RawExtent, Reached, ReadUpTo, Reading,

@@ -29,8 +29,8 @@ use domain::{
 use infrastructure::{
     GarminActivityFileLandingStore, GarminActivityLandingStore, GarminExerciseSetLandingStore,
     GarminGymAccountReader, SqliteExtractionRunLog, SqliteGarminActivityStore,
-    SqliteMeasuredGymSessionStore, SqliteNormalisationRunLog, SqlitePadelGames, SqliteRefusalStore,
-    SqliteTrainingDone, connect,
+    SqliteMeasuredGymSessionStore, SqliteNormalisationRunLog, SqlitePadelMatches,
+    SqliteRefusalStore, SqliteTrainingDone, connect,
     garmin::{
         ActivityAccount, GarminActivityEntity, GarminGymTranslator, account::activities,
         activity::GarminActivityTranslator,
@@ -1674,7 +1674,7 @@ fn its_version_names_what_it_translates() {
 fn the_activity_version_names_what_it_translates() {
     let zones = StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("zone"));
     let mut accounts = suite().expect("the accounts");
-    accounts.push(account(&padel("2026-07-04 23:30:00"), None, None).expect("a game"));
+    accounts.push(account(&padel("2026-07-04 23:30:00"), None, None).expect("a match"));
     accounts.push(
         account(
             &activity(
@@ -1686,7 +1686,7 @@ fn the_activity_version_names_what_it_translates() {
             None,
             None,
         )
-        .expect("a game"),
+        .expect("a match"),
     );
     let translations: Vec<_> = accounts
         .iter()
@@ -1704,7 +1704,7 @@ fn the_activity_version_names_what_it_translates() {
 
 const PADEL: &str = "20871245560";
 
-/// A game of padel as the watch's Padel profile files one: 118 minutes.
+/// A match of padel as the watch's Padel profile files one: 118 minutes.
 fn padel(started: &str) -> Value {
     activity(
         PADEL,
@@ -1726,25 +1726,27 @@ fn activity_entities(activity: &Value) -> Result<Translation<GarminActivityEntit
     )?)
 }
 
-/// **A padel game is a padel game** (operator, 2026-11-11), where it was
-/// refused as an activity this layer does not model (#517).
+/// **A padel game is a padel game** (operator, 2026-11-11; a match,
+/// 2026-11-15), where it was refused as an activity this layer does not
+/// model (#517).
 #[test]
-fn a_padel_game_is_a_padel_game() {
+fn a_padel_match_is_a_padel_match() {
     let translated = activity_entities(&padel("2026-10-11 17:07:00")).expect("translated");
     let Translation::Entities { entities, refusals } = translated else {
-        panic!("no game: {translated:?}");
+        panic!("no match: {translated:?}");
     };
     assert!(refusals.is_empty(), "{refusals:?}");
-    let GarminActivityEntity::PadelGame(game) = entities.first() else {
-        panic!("not a game: {entities:?}");
+    let GarminActivityEntity::PadelMatch(played) = entities.first() else {
+        panic!("not a match: {entities:?}");
     };
     assert_eq!(
-        game.started_at().wall_clock().datetime(),
+        played.started_at().wall_clock().datetime(),
         jiff::civil::date(2026, 10, 11).at(18, 7, 0, 0)
     );
-    assert_eq!(game.duration().as_seconds(), 7_080);
+    assert_eq!(played.duration().as_seconds(), 7_080);
     assert_eq!(
-        game.heart_rate()
+        played
+            .heart_rate()
             .map(|summary| (summary.average().as_u32(), summary.highest().as_u32())),
         Some((121, 168))
     );
@@ -1765,13 +1767,13 @@ fn a_game_the_watch_gave_no_length_is_nothing_happening() {
     assert_eq!(refusals.first().reason, RefusalReason::NothingHappened);
 }
 
-/// A game reaches the store and is read back as training done, on the day it
+/// A match reaches the store and is read back as training done, on the day it
 /// started in the zone it was played in: half past midnight, not the evening
 /// before. **And as History reads it** (#772), with its time and the heart
 /// rate the watch stated.
 #[test]
-fn a_padel_game_is_training_done_on_the_day_it_was_played() {
-    use application::{PlayedPadelGames as _, TrainingDone as _};
+fn a_padel_match_is_training_done_on_the_day_it_was_played() {
+    use application::{PlayedPadelMatches, TrainingDone as _};
     use domain::analytical::training_done::{Kind, Session};
 
     let runtime = runtime().expect("a runtime");
@@ -1824,17 +1826,27 @@ fn a_padel_game_is_training_done_on_the_day_it_was_played() {
                 length: domain::measure::PositiveDuration::from_seconds(7_080).expect("a duration"),
             }]
         );
-        let games = SqlitePadelGames::new(pool.clone())
-            .all()
+        let store = SqlitePadelMatches::new(pool.clone());
+        let saturday = jiff::civil::date(2026, 7, 4);
+        let sunday = jiff::civil::date(2026, 7, 5);
+        assert_eq!(
+            PlayedPadelMatches::between(&store, saturday, saturday)
+                .await
+                .expect("Saturday's"),
+            vec![],
+            "half past midnight is Sunday's"
+        );
+        let matches = PlayedPadelMatches::between(&store, sunday, sunday)
             .await
-            .expect("games");
-        let read: Vec<_> = games
+            .expect("matches");
+        let read: Vec<_> = matches
             .iter()
-            .map(|game| {
+            .map(|played| {
                 (
-                    game.started_at.wall_clock().datetime(),
-                    game.duration.as_seconds(),
-                    game.heart_rate
+                    played.started_at.wall_clock().datetime(),
+                    played.duration.as_seconds(),
+                    played
+                        .heart_rate
                         .map(|summary| (summary.average().as_u32(), summary.highest().as_u32())),
                 )
             })

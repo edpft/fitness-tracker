@@ -34,7 +34,13 @@ mod weight;
 mod working;
 mod workout;
 
-use std::{collections::HashMap, convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    convert::Infallible,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use axum::{
     Form, Router,
@@ -70,11 +76,17 @@ fn main() -> std::process::ExitCode {
             };
         }
     };
-    let served = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| error.to_string())
-        .and_then(|runtime| runtime.block_on(serve(&matches)));
+    let served = database(&matches).and_then(|database| {
+        // **Dropped after the runtime, never before** (#817): a span closes
+        // when its last child does, and a child can be in a task the runtime
+        // holds, so a recording dropped first loses every span still open.
+        let _recording = configurator::telemetry::record(&database);
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| error.to_string())
+            .and_then(|runtime| runtime.block_on(serve(&matches, &database)))
+    });
     match served {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(message) => {
@@ -114,15 +126,21 @@ fn command() -> Command {
 }
 
 /// Resolve what every run reads, then serve until stopped.
-async fn serve(matches: &ArgMatches) -> Result<(), String> {
-    let database = match matches.get_one::<PathBuf>("database") {
-        Some(path) => path.clone(),
-        None => configurator::paths::store(&configurator::paths::SystemEnvironment)
-            .map_err(|error| error.to_string())?,
-    };
+/// Where the store is: what this invocation passed, else the default.
+fn database(matches: &ArgMatches) -> Result<PathBuf, String> {
+    matches.get_one::<PathBuf>("database").map_or_else(
+        || {
+            configurator::paths::store(&configurator::paths::SystemEnvironment)
+                .map_err(|error| error.to_string())
+        },
+        |path| Ok(path.clone()),
+    )
+}
+
+async fn serve(matches: &ArgMatches, database: &Path) -> Result<(), String> {
     // **Opened once, here, and shared by every page** (#663): a pool per page
     // load cost each one more than the reads it was opened for.
-    let store = configurator::store::Store::open(&database)
+    let store = configurator::store::Store::open(database)
         .await
         .map_err(|error| error.to_string())?;
     let stated = store.timezone().await.map_err(|error| error.to_string())?;
@@ -136,8 +154,6 @@ async fn serve(matches: &ArgMatches) -> Result<(), String> {
     let credentials =
         configurator::paths::credentials(&configurator::paths::SystemEnvironment).ok();
 
-    // Held until the server stops, when what it was given is written.
-    let _recording = configurator::telemetry::record(&database);
     let runs = Arc::new(Runs::new(Setting {
         store,
         zone,
@@ -724,7 +740,7 @@ mod tests {
                 .collect()
         };
         let session = parts("/history/2026-11-02/1");
-        for part in ["reading tests", "rendering", "keeping"] {
+        for part in ["reading opened", "rendering", "keeping"] {
             assert!(
                 session.iter().any(|seen| seen == part),
                 "{part}: {session:?}"

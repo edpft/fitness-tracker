@@ -20,7 +20,7 @@ use application::{
     NormalisationSummary, WorkoutNormaliser,
     normalise::{Normalisation, NormalisationPorts},
 };
-use domain::gym::{Load, Performed, SetKind, exercise::RepsExercise};
+use domain::gym::{Load, PerformedSet, exercise::RepsExercise};
 use domain::measure::Kg;
 use domain::normalised::StatedZones;
 use infrastructure::{
@@ -125,7 +125,10 @@ fn the_primarys_series_is_ordered_and_complete() {
     let (history, _directory) = history!();
     let front_squat = RepsExercise::FrontSquatBarbell;
 
-    let performances = run!(history.performances(front_squat));
+    let performances: Vec<_> = run!(history.performances(front_squat))
+        .into_iter()
+        .map(|(performance, _)| performance)
+        .collect();
 
     assert!(
         performances.len() > 20,
@@ -137,17 +140,17 @@ fn the_primarys_series_is_ordered_and_complete() {
     for pair in performances.windows(2) {
         if let [earlier, later] = pair {
             assert!(
-                earlier.on <= later.on,
+                earlier.on() <= later.on(),
                 "performances must be oldest first: {} then {}",
-                earlier.on,
-                later.on
+                earlier.on(),
+                later.on()
             );
         }
     }
 
     // A performance with no sets is not one.
     for performance in &performances {
-        assert!(!performance.sets.is_empty(), "a performance holds sets");
+        assert!(performance.sets.count() > 0, "a performance holds sets");
     }
 }
 
@@ -167,10 +170,13 @@ fn the_primarys_series_is_ordered_and_complete() {
 fn the_record_includes_its_warm_ups() {
     let (history, _directory) = history!();
 
-    let performances = run!(history.performances(RepsExercise::BackSquatBarbell));
+    let performances: Vec<_> = run!(history.performances(RepsExercise::BackSquatBarbell))
+        .into_iter()
+        .map(|(performance, _)| performance)
+        .collect();
     let Some(july) = performances
         .iter()
-        .find(|performance| performance.on.to_string() == "2025-07-04")
+        .find(|performance| performance.on().to_string() == "2025-07-04")
     else {
         panic!("the corpus holds a back squat session on 2025-07-04")
     };
@@ -178,17 +184,17 @@ fn the_record_includes_its_warm_ups() {
     let warmups = july
         .sets
         .iter()
-        .filter(|set| set.kind == SetKind::Warmup)
+        .filter(|set| matches!(set, PerformedSet::Warmup { .. }))
         .count();
     assert_eq!(warmups, 6, "the session's ramp is six steps");
-    assert_eq!(july.sets.len(), 9, "and three working sets follow it");
+    assert_eq!(july.sets.count(), 9, "and three working sets follow it");
 
     // The heaviest completed set of the session is the ramp's top single, which
     // is the whole point: it is 22.5kg above every working set below it.
     let heaviest = july
         .sets
         .iter()
-        .filter_map(|set| match (set.load, set.outcome.completed()) {
+        .filter_map(|set| match (set.load(), set.reps()) {
             (Load::Absolute(mass), Some(_)) => Some(mass),
             _ => None,
         })
@@ -212,10 +218,13 @@ fn the_july_test_session_reads_back() {
     let (history, _directory) = history!();
     let front_squat = RepsExercise::FrontSquatBarbell;
 
-    let performances = run!(history.performances(front_squat));
+    let performances: Vec<_> = run!(history.performances(front_squat))
+        .into_iter()
+        .map(|(performance, _)| performance)
+        .collect();
     let Some(july) = performances
         .iter()
-        .find(|performance| performance.on.to_string() == "2026-07-03")
+        .find(|performance| performance.on().to_string() == "2026-07-03")
     else {
         panic!("the corpus holds a front squat session on 2026-07-03")
     };
@@ -223,7 +232,7 @@ fn the_july_test_session_reads_back() {
     let loads: Vec<String> = july
         .sets
         .iter()
-        .map(|set| format!("{}", set.load))
+        .map(|set| format!("{}", set.load()))
         .collect();
     assert!(
         loads.iter().any(|load| load.contains("90")),
@@ -233,8 +242,8 @@ fn the_july_test_session_reads_back() {
     let failures: Vec<String> = july
         .sets
         .iter()
-        .filter(|set| set.outcome.is_failed())
-        .map(|set| format!("{}", set.load))
+        .filter(|set| matches!(set, PerformedSet::Failed { .. }))
+        .map(|set| format!("{}", set.load()))
         .collect();
     assert_eq!(failures.len(), 1, "the failed attempt is in the record");
     assert!(
@@ -269,7 +278,8 @@ fn an_alternating_fill_reaches_past_the_last_session() {
     // bounded lookback were reading "the last session" for both, these would be
     // equal.
     assert_ne!(
-        nordic_last.on, back_last.on,
+        nordic_last.on(),
+        back_last.on(),
         "an alternating pair is not performed on the same day"
     );
 }
@@ -379,14 +389,17 @@ fn warm_ups_are_history() {
     let (history, _directory) = history!();
     let front_squat = RepsExercise::FrontSquatBarbell;
 
-    let performances = run!(history.performances(front_squat));
+    let performances: Vec<_> = run!(history.performances(front_squat))
+        .into_iter()
+        .map(|(performance, _)| performance)
+        .collect();
     let Some(recent) = performances.last() else {
         panic!("the corpus holds front squat sessions")
     };
 
-    assert_eq!(recent.on.to_string(), "2026-08-10");
+    assert_eq!(recent.on().to_string(), "2026-08-10");
     assert_eq!(
-        recent.sets.len(),
+        recent.sets.count(),
         8,
         "four ramp steps and four working sets"
     );
@@ -394,7 +407,7 @@ fn warm_ups_are_history() {
         recent
             .sets
             .iter()
-            .filter(|set| set.kind == SetKind::Warmup)
+            .filter(|set| matches!(set, PerformedSet::Warmup { .. }))
             .count(),
         4,
         "the ramp is in the record, and says it is the ramp"
@@ -407,18 +420,18 @@ fn a_completed_set_carries_its_count() {
     let (history, _directory) = history!();
     let front_squat = RepsExercise::FrontSquatBarbell;
 
-    let performances = run!(history.performances(front_squat));
+    let performances: Vec<_> = run!(history.performances(front_squat))
+        .into_iter()
+        .map(|(performance, _)| performance)
+        .collect();
     let mut counted = 0_usize;
     for performance in &performances {
         for set in &performance.sets {
-            match set.outcome {
-                Performed::Completed(reps) => {
-                    assert!(reps.as_u32() > 0, "a completed set has a positive count");
-                    counted += 1;
-                }
-                // A failure carries nothing, which is the point: no arithmetic
-                // can take a quantity from it.
-                Performed::Failed => {}
+            // A failure carries nothing, which is the point: no arithmetic can
+            // take a quantity from it.
+            if let Some(reps) = set.reps() {
+                assert!(reps.as_u32() > 0, "a completed set has a positive count");
+                counted += 1;
             }
         }
     }

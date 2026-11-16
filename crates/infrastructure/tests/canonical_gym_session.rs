@@ -399,3 +399,102 @@ fn a_reading_spanning_a_replacement_sees_the_layer_it_began_on() {
         );
     });
 }
+
+/// **A session as History lists it** (#817): its length, its counts and its
+/// stated average, read without its sets; a session only a sheet dated has no
+/// length; and a day's list holds that day's sessions only.
+#[test]
+fn a_session_is_listed_by_its_counts_and_averages() {
+    use application::{Activities, history::Activity};
+
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (_directory, pool) = support::store::derived_and_authored()
+            .await
+            .expect("a derived store");
+        let ids = normalised(&pool).await.expect("normalised sessions");
+        let (sheet, watch) = (ids[0], ids[1]);
+        let store = SqliteCanonicalGymSessionStore::new(pool.clone());
+
+        let deadlift = CanonicalExercise::ForReps {
+            identified: Attributed::new(Identified::Recorded(RepsExercise::DeadliftBarbell), sheet),
+            sets: NonEmpty::of(
+                merged_set(4, sheet, 63_000, watch).expect("a set"),
+                vec![merged_set(4, sheet, 65_000, watch).expect("a set")],
+            ),
+        };
+        let squat = CanonicalExercise::ForReps {
+            identified: Attributed::new(
+                Identified::Recorded(RepsExercise::BackSquatBarbell),
+                sheet,
+            ),
+            sets: NonEmpty::of(merged_set(5, sheet, 80_000, watch).expect("a set"), vec![]),
+        };
+        let clocked = at("2020-10-09T07:12:00Z").expect("an instant");
+        let dated = on("2020-10-10").expect("a day");
+        store
+            .replace(vec![
+                CanonicalGymSession::new(
+                    clocked.clone(),
+                    NonEmpty::of(
+                        CanonicalItem::Exercise(deadlift),
+                        vec![CanonicalItem::Exercise(squat.clone())],
+                    ),
+                    Some(heart_rate(watch).expect("a heart rate")),
+                    Some(Attributed::new(
+                        PositiveDuration::from_seconds(3_120).expect("a duration"),
+                        watch,
+                    )),
+                ),
+                CanonicalGymSession::new(
+                    dated.clone(),
+                    NonEmpty::of(CanonicalItem::Exercise(squat), vec![]),
+                    None,
+                    None,
+                ),
+            ])
+            .await
+            .expect("a write");
+
+        let friday = "2020-10-09".parse::<Date>().expect("a day");
+        let saturday = "2020-10-10".parse::<Date>().expect("a day");
+        assert_eq!(
+            Activities::between(&store, friday, saturday)
+                .await
+                .expect("a read"),
+            vec![
+                (
+                    clocked,
+                    Activity::Gym {
+                        length: Some(PositiveDuration::from_seconds(3_120).expect("a duration")),
+                        exercises: 2,
+                        sets: 3,
+                        heart_rate: Some("77".parse().expect("a rate")),
+                        tested: Vec::new(),
+                    },
+                ),
+                (
+                    dated.clone(),
+                    Activity::Gym {
+                        length: None,
+                        exercises: 1,
+                        sets: 1,
+                        heart_rate: None,
+                        tested: Vec::new(),
+                    },
+                ),
+            ]
+        );
+        assert_eq!(
+            Activities::between(&store, saturday, saturday)
+                .await
+                .expect("a read")
+                .len(),
+            1
+        );
+        assert_eq!(
+            Activities::first(&store).await.expect("first"),
+            Some(friday)
+        );
+    });
+}

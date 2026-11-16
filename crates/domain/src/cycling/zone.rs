@@ -392,6 +392,16 @@ impl Ftp {
     pub const fn provenance(self) -> FtpProvenance {
         self.provenance
     }
+
+    /// The value in force on `date` in `series`, oldest first: the latest
+    /// dated on or before it, or [`None`] where none is.
+    ///
+    /// **In force, not nearest**, as the FTP history reads it, for a reader
+    /// that looks up many dates in one read of the series (#817).
+    #[must_use]
+    pub fn in_force_on(series: &[Self], date: jiff::civil::Date) -> Option<Self> {
+        series.iter().rev().find(|ftp| ftp.from <= date).copied()
+    }
 }
 
 impl fmt::Display for Ftp {
@@ -401,5 +411,28 @@ impl fmt::Display for Ftp {
             "{} ({}, from {})",
             self.watts, self.provenance, self.from
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use jiff::civil::date;
+
+    use super::{Ftp, FtpProvenance, InvalidFtp, Watts};
+
+    fn ftp(watts: u32, from: jiff::civil::Date) -> Result<Ftp, InvalidFtp> {
+        Ftp::new(Watts::from_u32(watts), from, FtpProvenance::Tested)
+    }
+
+    #[test]
+    fn the_value_in_force_is_the_latest_on_or_before_the_day() {
+        let series = [
+            ftp(180, date(2026, 1, 5)).expect("a positive FTP"),
+            ftp(195, date(2026, 3, 2)).expect("a positive FTP"),
+        ];
+        assert_eq!(Ftp::in_force_on(&series, date(2026, 1, 4)), None);
+        assert_eq!(Ftp::in_force_on(&series, date(2026, 1, 5)), Some(series[0]));
+        assert_eq!(Ftp::in_force_on(&series, date(2026, 3, 1)), Some(series[0]));
+        assert_eq!(Ftp::in_force_on(&series, date(2026, 3, 2)), Some(series[1]));
     }
 }

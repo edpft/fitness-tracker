@@ -132,6 +132,15 @@ impl PlanStore for SqlitePlanStore {
             .collect())
     }
 
+    async fn plans(&self) -> Result<Vec<Plan>, StoreError> {
+        Ok(self
+            .in_force()
+            .await?
+            .into_iter()
+            .map(|(_, plan)| plan)
+            .collect())
+    }
+
     async fn named(&self, name: &PlanName) -> Result<Option<Plan>, StoreError> {
         Ok(self
             .in_force()

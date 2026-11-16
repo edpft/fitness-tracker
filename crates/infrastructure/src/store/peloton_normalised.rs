@@ -764,29 +764,45 @@ impl application::FtpHistory for SqliteFtpHistory {
         .await
         .map_err(|error| store_error(&error))?;
 
-        let Some(row) = row else {
-            return Ok(None);
-        };
-
-        let corrupt = |detail: String| StoreError::Corrupt { detail };
-        let watts = u32::try_from(row.watts)
-            .map(Watts::from_u32)
-            .map_err(|_| corrupt(format!("an FTP of {} watts", row.watts)))?;
-        let from: Date = row
-            .effect_from
-            .parse()
-            .map_err(|_| corrupt(format!("{:?} does not date an FTP", row.effect_from)))?;
-        let provenance = match row.provenance.as_str() {
-            "tested" => FtpProvenance::Tested,
-            "estimated" => FtpProvenance::Estimated,
-            "asserted" => FtpProvenance::Asserted,
-            other => return Err(corrupt(format!("{other:?} does not name a provenance"))),
-        };
-
-        Ftp::new(watts, from, provenance)
-            .map(Some)
-            .map_err(|error| corrupt(error.to_string()))
+        row.map(|row| ftp(&row.effect_from, row.watts, &row.provenance))
+            .transpose()
     }
+
+    async fn series(&self) -> Result<Vec<Ftp>, StoreError> {
+        sqlx::query!(
+            r#"
+            SELECT effect_from AS "effect_from!: String",
+                   watts       AS "watts!: i64",
+                   provenance  AS "provenance!: String"
+              FROM ftp
+             ORDER BY effect_from ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?
+        .iter()
+        .map(|row| ftp(&row.effect_from, row.watts, &row.provenance))
+        .collect()
+    }
+}
+
+/// One stored FTP.
+fn ftp(effect_from: &str, watts: i64, provenance: &str) -> Result<Ftp, StoreError> {
+    let corrupt = |detail: String| StoreError::Corrupt { detail };
+    let watts = u32::try_from(watts)
+        .map(Watts::from_u32)
+        .map_err(|_| corrupt(format!("an FTP of {watts} watts")))?;
+    let from: Date = effect_from
+        .parse()
+        .map_err(|_| corrupt(format!("{effect_from:?} does not date an FTP")))?;
+    let provenance = match provenance {
+        "tested" => FtpProvenance::Tested,
+        "estimated" => FtpProvenance::Estimated,
+        "asserted" => FtpProvenance::Asserted,
+        other => return Err(corrupt(format!("{other:?} does not name a provenance"))),
+    };
+    Ftp::new(watts, from, provenance).map_err(|error| corrupt(error.to_string()))
 }
 
 /// Both of Peloton's landing tables, counted as one.

@@ -64,12 +64,12 @@ pub use store::{
     SqliteKeptDrawings, SqliteMeasuredGymSessionStore, SqliteMyFitnessPalStore,
     SqliteNormalisationRunLog, SqliteNormalisedCyclingSessionReader,
     SqliteNormalisedGymSessionReader, SqliteNormalisedWeighInReader, SqliteOperatorSettingsStore,
-    SqliteOvernightHrvHistory, SqliteOvernightHrvStore, SqlitePelotonClassStore, SqlitePlanStore,
-    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqlitePulseWaveVelocityHistory,
-    SqliteRefusalStore, SqliteRestingHeartRateHistory, SqliteRestingHeartRateStore,
-    SqliteResumptionPointStore, SqliteSleepHistory, SqliteSleepStore, SqliteSpreadsheetStore,
-    SqliteWeighInStore, WahooFileLandingStore, WithingsMeasurementLandingStore,
-    WithingsWeighInAccountReader, connect,
+    SqliteOvernightHrvHistory, SqliteOvernightHrvStore, SqlitePelotonClassStore,
+    SqlitePerformances, SqlitePlanStore, SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore, SqlitePulseWaveVelocityHistory, SqliteRefusalStore,
+    SqliteRestingHeartRateHistory, SqliteRestingHeartRateStore, SqliteResumptionPointStore,
+    SqliteSleepHistory, SqliteSleepStore, SqliteSpreadsheetStore, SqliteWeighInStore,
+    WahooFileLandingStore, WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
 };
 pub use store::{
     GarminBodyBatteryEventLandingStore, GarminBodyBatteryLandingStore,
@@ -80,7 +80,7 @@ pub use store::{
     GarminStepsLandingStore, GarminStressLandingStore, GarminVo2MaxLandingStore,
 };
 pub use store::{
-    GarminDailySummaryAccountReader, SqlitePadelGames, SqliteStressHistory, SqliteStressStore,
+    GarminDailySummaryAccountReader, SqlitePadelMatches, SqliteStressHistory, SqliteStressStore,
     SqliteTrainingDone,
 };
 pub use store::{WithingsEcgLandingStore, WithingsEcgSignalLandingStore};

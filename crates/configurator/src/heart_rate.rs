@@ -1,6 +1,6 @@
 //! Each main ride's heart rate, over this build's store (#152, #621).
 
-use application::{StoreError, heart_rate::RideHeartRates, next::Scope};
+use application::{FtpHistory as _, StoreError, heart_rate::RideHeartRates, next::Scope};
 use domain::{
     analytical::{heart_rate::RideHeartRate, range::Ranges},
     normalised::OperatorZone,
@@ -22,12 +22,9 @@ page! {
     /// with them, the monitor each was ridden with and which watch was in use
     /// (#559, #569), and the ranges.
     pub struct Page {
-        rides: RideHeartRates<
-            Spanned<SqliteCanonicalCyclingSessionStore>,
-            Spanned<SqliteFtpHistory>,
-            Spanned<infrastructure::GarminRecordedDevices>,
-            Spanned<infrastructure::GarminWear>,
-        >,
+        rides: RideHeartRates<Spanned<SqliteCanonicalCyclingSessionStore>>,
+        ftp_history: Spanned<SqliteFtpHistory>,
+        devices: devices::Register,
         ranges: Current,
         today: Today,
     }
@@ -53,12 +50,10 @@ impl Page {
     /// [`NextFailure`] if the store cannot be read.
     pub async fn open(store: &Store, zone: &OperatorZone) -> Result<Self, NextFailure> {
         Ok(Self {
-            rides: RideHeartRates::new(
-                store.adapter(SqliteCanonicalCyclingSessionStore::new),
-                store.adapter(SqliteFtpHistory::new),
-                devices::register(store),
-            )
-            .into(),
+            rides: RideHeartRates::new(store.adapter(SqliteCanonicalCyclingSessionStore::new))
+                .into(),
+            ftp_history: store.adapter(SqliteFtpHistory::new).into(),
+            devices: devices::register(store).into(),
             ranges: ranges::over(store, zone).await?.into(),
             today: Today::new(zone.clone()).into(),
         })
@@ -70,7 +65,9 @@ impl Page {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub async fn rides(&self) -> Result<Vec<RideHeartRate>, StoreError> {
-        read!(self.rides.rides()).await
+        let register = read!(self.devices.register()).await?;
+        let ftp = read!(self.ftp_history.series()).await?;
+        read!(self.rides.rides(&register, &ftp)).await
     }
 
     /// The ranges today.
@@ -80,6 +77,6 @@ impl Page {
     /// [`StoreError`] if the store cannot be read.
     pub async fn ranges(&self) -> Result<Ranges, StoreError> {
         let today = self.today.date();
-        read!(self.ranges, |of| of.on(today)).await
+        read!(self.ranges, |plans| ranges::on(plans, today)).await
     }
 }

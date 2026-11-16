@@ -17,7 +17,7 @@ use application::{
     PerformedCyclingSessions, RiddenSession, RiddenSessionLog, RiddenVenues, StoreError,
 };
 use domain::{
-    canonical::{Attributed, NormalisedSessionId, Reach, SessionCount},
+    canonical::{Attributed, NormalisedSessionId, Occurred, Reach, SessionCount},
     cycling::{
         self, Cadence, CanonicalBikePlusRide, CanonicalCyclingSession, CanonicalRideRecord,
         Resistance, RideSample, RideVenue, Speed, Watts,
@@ -125,9 +125,14 @@ impl NormalisedCyclingSessionReader for SqliteNormalisedCyclingSessionReader {
 
 /// The day a ride started on, where its zone puts it.
 pub(super) fn day_of(started_at_utc: &str, zone: &str) -> Result<Date, StoreError> {
+    Ok(started_at(started_at_utc, zone)?.wall_clock().date())
+}
+
+/// When a ride started, in the zone it was ridden in.
+fn started_at(started_at_utc: &str, zone: &str) -> Result<StartedAt, StoreError> {
     let instant: Timestamp = started_at_utc.parse().map_err(|e| corrupt(&e))?;
     let zone = OperatorZone::try_from(zone.to_owned()).map_err(|e| corrupt(&e))?;
-    Ok(StartedAt::new(instant, zone).wall_clock().date())
+    Ok(StartedAt::new(instant, zone))
 }
 
 impl SqliteNormalisedCyclingSessionReader {
@@ -320,7 +325,188 @@ struct CanonicalRideRow {
 }
 
 impl PerformedCyclingSessions for SqliteCanonicalCyclingSessionStore {
-    async fn all(&self) -> Result<Vec<CanonicalCyclingSession>, StoreError> {
+    async fn main_rides(&self) -> Result<Vec<CanonicalBikePlusRide>, StoreError> {
+        self.rides_in("main").await
+    }
+
+    async fn efforts(&self) -> Result<Vec<CanonicalBikePlusRide>, StoreError> {
+        self.rides_in("effort").await
+    }
+
+    async fn tested(&self) -> Result<Vec<StartedAt>, StoreError> {
+        // A bare `zone` beside `MIN(started_at_utc)` is the first ride's, as
+        // History's read has it.
+        let rows = sqlx::query!(
+            r#"
+            SELECT MIN(r.started_at_utc) AS "started_at_utc!: String",
+                   r.zone AS "zone!: String"
+              FROM canonical_cycling_session AS s
+              JOIN canonical_bike_plus_ride AS r ON r.session = s.id
+             WHERE s.kind = 'test'
+             GROUP BY s.id
+             ORDER BY MIN(r.started_at_utc)
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| store_error(&e))?;
+        rows.iter()
+            .map(|row| started_at(&row.started_at_utc, &row.zone))
+            .collect()
+    }
+
+    async fn between(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> Result<Vec<CanonicalCyclingSession>, StoreError> {
+        let mut sessions = Vec::new();
+        for (session, started_at) in self.started_between(from, to).await? {
+            if (from..=to).contains(&started_at.wall_clock().date()) {
+                sessions.push(session);
+            }
+        }
+        if sessions.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.read(Some(super::ids_json(sessions))).await
+    }
+}
+
+/// Each session as History lists it (#817): every ride's length and the
+/// working ride's power, in one query, and none of their series.
+impl application::Activities for SqliteCanonicalCyclingSessionStore {
+    async fn between(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> Result<Vec<(Occurred, application::Activity)>, StoreError> {
+        let (lower, upper) = super::canonical_gym::widened(from, to)?;
+        // A bare `zone` beside `MIN(started_at_utc)` is the first ride's:
+        // SQLite takes a bare column from the row the `MIN` chose.
+        let rows = sqlx::query!(
+            r#"
+            SELECT s.kind AS "kind!: String",
+                   MIN(r.started_at_utc) AS "started_at_utc!: String",
+                   r.zone AS "zone!: String",
+                   SUM(r.duration_seconds) AS "length!: i64",
+                   MAX(CASE WHEN r.role IN ('main', 'effort')
+                            THEN r.average_power_watts END) AS "power!: i64"
+              FROM canonical_cycling_session AS s
+              JOIN canonical_bike_plus_ride AS r ON r.session = s.id
+             WHERE s.id IN (SELECT session FROM canonical_bike_plus_ride
+                             WHERE started_at_utc >= ? AND started_at_utc < ?)
+             GROUP BY s.id
+             ORDER BY MIN(r.started_at_utc)
+            "#,
+            lower,
+            upper
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| store_error(&e))?;
+        let mut read = Vec::new();
+        for row in rows {
+            let started_at = started_at(&row.started_at_utc, &row.zone)?;
+            if !(from..=to).contains(&started_at.wall_clock().date()) {
+                continue;
+            }
+            read.push((
+                Occurred::At(started_at),
+                application::Activity::Cycling {
+                    length: Duration::from_seconds(
+                        u64::try_from(row.length).map_err(|e| corrupt(&e))?,
+                    ),
+                    power: Watts::from_u32(u32::try_from(row.power).map_err(|e| corrupt(&e))?),
+                    test: row.kind == "test",
+                },
+            ));
+        }
+        Ok(read)
+    }
+
+    async fn first(&self) -> Result<Option<Date>, StoreError> {
+        let row = sqlx::query!(
+            r#"
+            SELECT started_at_utc AS "started_at_utc!: String", zone AS "zone!: String"
+              FROM canonical_bike_plus_ride
+             ORDER BY started_at_utc
+             LIMIT 1
+            "#
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| store_error(&e))?;
+        row.map(|row| day_of(&row.started_at_utc, &row.zone))
+            .transpose()
+    }
+}
+
+impl SqliteCanonicalCyclingSessionStore {
+    /// Each session whose first ride started in the widened window, and when.
+    async fn started_between(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> Result<Vec<(i64, StartedAt)>, StoreError> {
+        let (lower, upper) = super::canonical_gym::widened(from, to)?;
+        let rows = sqlx::query!(
+            r#"
+            SELECT session AS "session!: i64",
+                   MIN(started_at_utc) AS "started_at_utc!: String",
+                   zone AS "zone!: String"
+              FROM canonical_bike_plus_ride
+             WHERE session IN (SELECT session FROM canonical_bike_plus_ride
+                                WHERE started_at_utc >= ? AND started_at_utc < ?)
+             GROUP BY session
+            "#,
+            lower,
+            upper
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| store_error(&e))?;
+        rows.into_iter()
+            .map(|row| Ok((row.session, started_at(&row.started_at_utc, &row.zone)?)))
+            .collect()
+    }
+
+    /// Every ride in `role`, oldest first, and no other.
+    async fn rides_in(&self, role: &str) -> Result<Vec<CanonicalBikePlusRide>, StoreError> {
+        let mut rides: Vec<CanonicalBikePlusRide> = self
+            .rides(None, Some(role))
+            .await?
+            .into_iter()
+            .map(|(_, _, ride)| ride)
+            .collect();
+        rides.sort_by_key(|ride| ride.started_at().value().instant());
+        Ok(rides)
+    }
+
+    /// The sessions named, as a JSON array of their ids, or every one.
+    async fn read(&self, only: Option<String>) -> Result<Vec<CanonicalCyclingSession>, StoreError> {
+        let mut grouped: Vec<(i64, String, Vec<CanonicalBikePlusRide>)> = Vec::new();
+        for (session, kind, ride) in self.rides(only, None).await? {
+            match grouped.last_mut() {
+                Some((last, _, rides)) if *last == session => rides.push(ride),
+                _ => grouped.push((session, kind, vec![ride])),
+            }
+        }
+        let mut sessions = grouped
+            .into_iter()
+            .map(|(_, kind, rides)| session_of(&kind, rides))
+            .collect::<Result<Vec<_>, _>>()?;
+        sessions.sort_by_key(|session| session.started_at().instant());
+        Ok(sessions)
+    }
+
+    /// Each ride of the sessions named, or of every one, in `role` or any,
+    /// with its session and that session's kind, in session order.
+    async fn rides(
+        &self,
+        only: Option<String>,
+        role: Option<&str>,
+    ) -> Result<Vec<(i64, String, CanonicalBikePlusRide)>, StoreError> {
         // **Three queries, one snapshot** (#467). `replace` rebuilds the layer
         // under fresh session ids, so rides read before its commit and series
         // read after it would name sessions the other no longer holds, and a
@@ -352,8 +538,12 @@ impl PerformedCyclingSessions for SqliteCanonicalCyclingSessionStore {
                    r.heart_rate_device_normalised_session AS "heart_rate_device_from: i64"
               FROM canonical_cycling_session AS s
               JOIN canonical_bike_plus_ride AS r ON r.session = s.id
+             WHERE (?1 IS NULL OR s.id IN (SELECT value FROM json_each(?1)))
+               AND (?2 IS NULL OR r.role = ?2)
              ORDER BY s.id, r.position
-            "#
+            "#,
+            only,
+            role
         )
         .fetch_all(&mut *snapshot)
         .await
@@ -369,8 +559,13 @@ impl PerformedCyclingSessions for SqliteCanonicalCyclingSessionStore {
                        resistance_percentage, speed_millimetres_per_hour
                    )) AS "rows!: String"
               FROM canonical_bike_plus_ride_sample
+             WHERE (?1 IS NULL OR session IN (SELECT value FROM json_each(?1)))
+               AND (?2 IS NULL OR (session, ride_position) IN
+                        (SELECT session, position FROM canonical_bike_plus_ride WHERE role = ?2))
              GROUP BY session, ride_position
-            "#
+            "#,
+            only,
+            role
         )
         .fetch_all(&mut *snapshot)
         .await
@@ -388,45 +583,56 @@ impl PerformedCyclingSessions for SqliteCanonicalCyclingSessionStore {
             series.insert((row.session, row.position), ride);
         }
 
-        let heart_rate = sqlx::query!(
-            r#"
+        let mut hearts = canonical_hearts(&mut snapshot, only.as_deref(), role).await?;
+
+        rides
+            .into_iter()
+            .map(|row| {
+                let (session, kind) = (row.session, row.kind.clone());
+                Ok((
+                    session,
+                    kind,
+                    canonical_ride_of(row, &mut series, &mut hearts)?,
+                ))
+            })
+            .collect()
+    }
+}
+
+/// Each canonical ride's heart-rate series, of every session or only the ones
+/// named, in `role` or any, keyed on the ride.
+async fn canonical_hearts(
+    snapshot: &mut sqlx::SqliteConnection,
+    only: Option<&str>,
+    role: Option<&str>,
+) -> Result<BTreeMap<(i64, i64), Vec<HeartRateSample>>, StoreError> {
+    let heart_rate = sqlx::query!(
+        r#"
             SELECT session AS "session!: i64", ride_position AS "position!: i64",
                    json_group_array(json_array(at_seconds, beats_per_minute)) AS "rows!: String"
               FROM canonical_bike_plus_ride_heart_rate
+             WHERE (?1 IS NULL OR session IN (SELECT value FROM json_each(?1)))
+               AND (?2 IS NULL OR (session, ride_position) IN
+                        (SELECT session, position FROM canonical_bike_plus_ride WHERE role = ?2))
              GROUP BY session, ride_position
-            "#
-        )
-        .fetch_all(&mut *snapshot)
-        .await
-        .map_err(|e| store_error(&e))?;
-        let mut hearts: BTreeMap<(i64, i64), Vec<HeartRateSample>> = BTreeMap::new();
-        for row in heart_rate {
-            let values: Vec<[i64; 2]> = serde_json::from_str(&row.rows).map_err(|e| corrupt(&e))?;
-            let mut beats = values
-                .into_iter()
-                .map(|[at, beats]| beat(at, beats))
-                .collect::<Result<Vec<_>, _>>()?;
-            beats.sort_by_key(|beat| beat.at);
-            hearts.insert((row.session, row.position), beats);
-        }
-
-        let mut grouped: Vec<(i64, String, Vec<CanonicalBikePlusRide>)> = Vec::new();
-        for row in rides {
-            let session = row.session;
-            let kind = row.kind.clone();
-            let ride = canonical_ride_of(row, &mut series, &mut hearts)?;
-            match grouped.last_mut() {
-                Some((last, _, rides)) if *last == session => rides.push(ride),
-                _ => grouped.push((session, kind, vec![ride])),
-            }
-        }
-        let mut sessions = grouped
+            "#,
+        only,
+        role
+    )
+    .fetch_all(snapshot)
+    .await
+    .map_err(|e| store_error(&e))?;
+    let mut hearts: BTreeMap<(i64, i64), Vec<HeartRateSample>> = BTreeMap::new();
+    for row in heart_rate {
+        let values: Vec<[i64; 2]> = serde_json::from_str(&row.rows).map_err(|e| corrupt(&e))?;
+        let mut beats = values
             .into_iter()
-            .map(|(_, kind, rides)| session_of(&kind, rides))
+            .map(|[at, beats]| beat(at, beats))
             .collect::<Result<Vec<_>, _>>()?;
-        sessions.sort_by_key(|session| session.started_at().instant());
-        Ok(sessions)
+        beats.sort_by_key(|beat| beat.at);
+        hearts.insert((row.session, row.position), beats);
     }
+    Ok(hearts)
 }
 
 fn canonical_ride_of(

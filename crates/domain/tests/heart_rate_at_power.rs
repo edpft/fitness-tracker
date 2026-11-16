@@ -12,8 +12,8 @@ use domain::{
     },
     canonical::{Attributed, NormalisedSessionId},
     cycling::{
-        Cadence, CanonicalBikePlusRide, CanonicalCyclingSession, CanonicalRideRecord, Ftp,
-        FtpProvenance, Resistance, RideSample, RideVenue, Speed, Watts,
+        Cadence, CanonicalBikePlusRide, CanonicalRideRecord, Ftp, FtpProvenance, Resistance,
+        RideSample, RideVenue, Speed, Watts,
     },
     device::{
         AntDeviceNumber, DeviceIdentifier, DeviceName, Measurand, Register, Role, SerialNumber,
@@ -121,12 +121,8 @@ fn forerunner() -> Fallible<Register> {
 }
 
 /// A ride's heart rate per zone and at power, through the domain's own entry.
-fn read(ride: CanonicalBikePlusRide, register: &Register) -> Fallible<RideHeartRate> {
-    let session = CanonicalCyclingSession::Ride {
-        main: ride,
-        cool_down: None,
-    };
-    Ok(ride_heart_rate(&session, Some(ftp()?), register).ok_or("a main ride")?)
+fn read(ride: &CanonicalBikePlusRide, register: &Register) -> Fallible<RideHeartRate> {
+    Ok(ride_heart_rate(ride, Some(ftp()?), register))
 }
 
 /// A ride on `on` whose seconds lie, to the beat, on
@@ -137,7 +133,7 @@ fn read(ride: CanonicalBikePlusRide, register: &Register) -> Fallible<RideHeartR
     reason = "a heart rate between 100 and 160, rounded"
 )]
 fn modelled(on: Date, level: f64) -> Fallible<RideHeartRate> {
-    let mut ridden = read(ride(on, &[140; 2], Some(&[120; 2]))?, &forerunner()?)?;
+    let mut ridden = read(&ride(on, &[140; 2], Some(&[120; 2]))?, &forerunner()?)?;
     let seconds = (0_u32..2_400)
         .step_by(5)
         .map(|at| {

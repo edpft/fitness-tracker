@@ -41,7 +41,7 @@ pub mod myfitnesspal_normalised;
 pub mod normalisation_run_log;
 pub mod normalised;
 pub mod normalised_gym;
-pub mod padel_game;
+pub mod padel_match;
 pub mod parameters;
 pub mod peloton_account_landing;
 pub mod peloton_class;
@@ -109,14 +109,14 @@ pub use garmin_metric_landing::{
 };
 pub use garmin_normalised::{GarminHrvAccountReader, SqliteOvernightHrvStore};
 pub use gym_mesocycle::SqliteGymMesocycleStore;
-pub use history::SqliteExerciseHistory;
+pub use history::{SqliteExerciseHistory, SqlitePerformances};
 pub use landing::HevyWorkoutLandingStore;
 pub use myfitnesspal_export_landing::MyFitnessPalExportLandingStore;
 pub use myfitnesspal_normalised::{MyFitnessPalExportAccountReader, SqliteMyFitnessPalStore};
 pub use normalisation_run_log::SqliteNormalisationRunLog;
 pub use normalised::{HevySessionAccountReader, SqliteGymSessionStore};
 pub use normalised_gym::SqliteNormalisedGymSessionReader;
-pub use padel_game::SqlitePadelGames;
+pub use padel_match::SqlitePadelMatches;
 pub use parameters::SqliteGenerationParameterStore;
 pub use peloton_account_landing::PelotonAccountLandingStore;
 pub use peloton_class::{Held, SqlitePelotonClassStore};
@@ -352,6 +352,6 @@ pub(crate) mod table {
     pub const WEAR_DAY: Table = Table::named("wear_day");
     pub const SLEEP: Table = Table::named("sleep");
     pub const STRESS: Table = Table::named("stress");
-    pub const PADEL_GAME: Table = Table::named("padel_game");
+    pub const PADEL_MATCH: Table = Table::named("padel_match");
     pub const DEVICE_SIGHTING: Table = Table::named("device_sighting");
 }

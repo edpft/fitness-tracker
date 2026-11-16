@@ -1,0 +1,88 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT s.started_at_utc, s.zone, s.on_day, s.duration_seconds, s.average_bpm,\n                   (SELECT COUNT(*) FROM canonical_gym_exercise AS e\n                     WHERE e.session = s.id) AS \"exercises!: i64\",\n                   (SELECT COUNT(*) FROM canonical_gym_set AS t\n                     WHERE t.session = s.id) AS \"sets!: i64\"\n              FROM canonical_gym_session AS s\n             WHERE COALESCE(s.started_at_utc, s.on_day) >= ?\n               AND COALESCE(s.started_at_utc, s.on_day) < ?\n             ORDER BY COALESCE(s.started_at_utc, s.on_day), s.id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "started_at_utc",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "on_day",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "on_day"
+          }
+        }
+      },
+      {
+        "name": "duration_seconds",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "duration_seconds"
+          }
+        }
+      },
+      {
+        "name": "average_bpm",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "average_bpm"
+          }
+        }
+      },
+      {
+        "name": "exercises!: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "sets!: i64",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "63263f6699a12627104d1ad06dbcd3461066ad8b7f0729c460d588be1499ea3b"
+}

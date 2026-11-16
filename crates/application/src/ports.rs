@@ -24,21 +24,19 @@ use domain::analytical::Weighed;
 use domain::body::{CanonicalWeighIn, WeighInAccount, WeighInCount};
 use domain::canonical::{Occurred, Reach, SessionCount};
 use domain::cycling::{
-    CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId, CyclingSession, DeliveredRide,
-    Ftp, PublishedProgramme, RideVenue,
+    CanonicalBikePlusRide, CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId,
+    CyclingSession, DeliveredRide, Ftp, PublishedProgramme, RideVenue, Watts,
 };
-use domain::gym::{
-    CanonicalGymSession, Load, NormalisedGymSession, Performed, SetKind, exercise::RepsExercise,
-};
+use domain::gym::{CanonicalGymSession, NormalisedGymSession, Performance, exercise::RepsExercise};
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
     LandingStream, PayloadDigest, Provenance, RawPayload, RecordCount, RunId, RunOutcome,
     SourceRecordId, Watermark,
 };
-use domain::measure::{PositiveDuration, RepCount};
+use domain::measure::{BeatsPerMinute, Duration, PositiveDuration};
 use domain::normalised::{
     NormalisationOutcome, NormalisationRun, NormalisationRunId, Refusal, RefusalCount, RefusalKind,
-    RefusalReason, StatedZones, WorkoutCount,
+    RefusalReason, StartedAt, StatedZones, WorkoutCount,
 };
 use domain::plan::{MesocycleOrdinal, Plan, PlanId, PlanName, PlanWindow};
 use domain::planner::{Completed, RerunOrdinal};
@@ -976,15 +974,51 @@ pub trait CanonicalCyclingSessionStore {
     fn count(&self) -> impl Future<Output = Result<SessionCount, StoreError>> + Send;
 }
 
-/// Every cycling session the canonical layer holds, as the analytical layer
-/// reads it (§ II.4).
+/// The cycling sessions the canonical layer holds, as the analytical layer
+/// reads them (§ II.4).
+///
+/// **No read of every session whole** (#817). Each read is of what a page
+/// draws: a day's sessions, the rides a chart compares, or when each test
+/// was. The operator, 2026-11-14, on a compile check over a list or a test:
+/// *"less likely for future agents to ignore them"*.
 pub trait PerformedCyclingSessions {
-    /// Every canonical cycling session, oldest first.
+    /// Every session's main ride, its series with it, oldest first: no
+    /// warm-up, effort or cool-down.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
-    fn all(&self) -> impl Future<Output = Result<Vec<CanonicalCyclingSession>, StoreError>> + Send;
+    fn main_rides(
+        &self,
+    ) -> impl Future<Output = Result<Vec<CanonicalBikePlusRide>, StoreError>> + Send;
+
+    /// Every FTP test's effort, its series with it, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn efforts(
+        &self,
+    ) -> impl Future<Output = Result<Vec<CanonicalBikePlusRide>, StoreError>> + Send;
+
+    /// When each FTP test session started, oldest first, and nothing else.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn tested(&self) -> impl Future<Output = Result<Vec<StartedAt>, StoreError>> + Send;
+
+    /// Each canonical cycling session that started between the two days,
+    /// both included, in the zone it was ridden in, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn between(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> impl Future<Output = Result<Vec<CanonicalCyclingSession>, StoreError>> + Send;
 }
 
 /// What the domain would not accept, for one stream.
@@ -1256,33 +1290,6 @@ pub trait RefusalReporter {
 // port below returns both kinds of value.
 // ---------------------------------------------------------------------------
 
-/// One performance of one exercise, on one date, as the canonical layer holds
-/// it.
-///
-/// **No landing record.** A canonical session is merged from however many
-/// normalised sessions recorded it, each of them derived from however many
-/// landing records, so there is no one record for this to name — and nothing
-/// ever read the one it used to carry. Provenance lives on the canonical
-/// session's own fields (§ II.4), which is where a reader asking "whose figure
-/// is this?" should go.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Performance {
-    pub on: Date,
-    /// The prescribed session this performance was against, where the record
-    /// names one.
-    ///
-    /// **The published id is the only thing that links the two.** A performance
-    /// carries the reference the destination assigned when the session was
-    /// delivered, and that reference resolves to the prescription it came from.
-    /// Nothing else does: not the date, not the exercise, not the order they
-    /// appear in.
-    ///
-    /// `None` is a session performed against no prescription of ours -- logged
-    /// freehand, or against a routine that was never delivered from here.
-    pub fulfilled: Option<FulfilledSession>,
-    pub sets: Vec<PerformedSetSummary>,
-}
-
 /// The prescription a performance was performed against.
 ///
 /// Two facts, because two is what reading a performance's role needs: whose
@@ -1297,28 +1304,6 @@ pub struct FulfilledSession {
     /// picks the latest authoring by name for the same reason.
     pub plan: PlanName,
     pub role: SessionRole,
-}
-
-/// Enough of a set for double progression and for the gate.
-///
-/// Deliberately not the whole `Set<M>`: rest is never recorded by the one source
-/// in use, and an effort report is not an input to any derivation, so `intensity`
-/// is absent too.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PerformedSetSummary {
-    pub load: Load,
-    /// A completed count, or a failed attempt. The gate reads this and nothing
-    /// else.
-    pub outcome: Performed<RepCount>,
-    /// Warm-up or working, as the record has it.
-    ///
-    /// **Carried rather than filtered on, because only one caller's question is
-    /// about working sets.** What the heaviest weight lifted was does not depend
-    /// on which sets the source called warm-ups; whether every set of a slot
-    /// reached the top of its rep range does, since a warm-up is not one of the
-    /// sets the range was prescribed for. Excluding warm-ups in the store made
-    /// the first question unanswerable to serve the second.
-    pub kind: SetKind,
 }
 
 /// What the projection knows about an exercise.
@@ -1474,7 +1459,7 @@ pub trait ExerciseHistory {
     fn performances(
         &self,
         exercise: RepsExercise,
-    ) -> impl Future<Output = Result<Vec<Performance>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Vec<(Performance, Option<FulfilledSession>)>, StoreError>> + Send;
 
     /// The newest performance in the record, whatever exercise it was of.
     ///
@@ -1487,6 +1472,30 @@ pub trait ExerciseHistory {
     fn newest_performance(&self) -> impl Future<Output = Result<Option<Date>, StoreError>> + Send;
 }
 
+/// The performances of some lifts over some days, as a chart reads them (#817).
+///
+/// **What a chart draws, asked for in one query.** A page reading a lift's
+/// estimate draws that lift's sets, so it asks for them rather than for whole
+/// sessions to search; the store answers with the sets [`Performance`] admits.
+/// No method here reads more than the lifts and the days asked for.
+///
+/// **Over the canonical layer** (§ 5), and only exercises a record named, for
+/// [`ExerciseHistory`]'s reasons.
+pub trait Performances {
+    /// Each performance of any of `exercises` between the two days, both
+    /// included, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn of(
+        &self,
+        exercises: &[RepsExercise],
+        from: Date,
+        to: Date,
+    ) -> impl Future<Output = Result<Vec<Performance>, StoreError>> + Send;
+}
+
 /// Whole gym sessions the record holds, as the canonical layer holds them.
 ///
 /// Separate from [`ExerciseHistory`] because it answers a different question at
@@ -1495,8 +1504,7 @@ pub trait ExerciseHistory {
 /// operate on the session entire — its items, its groupings, its ordering.
 ///
 /// **Canonical, not one source's** (§ 5). A visit is one session here however
-/// many sources recorded it, which is what makes the relative-strength report
-/// reach back past the first source still in use.
+/// many sources recorded it.
 ///
 /// **Named for what it holds rather than for Hevy's word.** This was
 /// `PerformedWorkoutReader` and returned one source's workouts; § 3.1 made the
@@ -1595,26 +1603,98 @@ pub trait PerformedSessionLog {
     ) -> impl Future<Output = Result<Vec<Occurred>, StoreError>> + Send;
 }
 
-/// One padel game, as History shows it (#772): when it started, how long it
+/// One padel match, as History shows it (#772): when it started, how long it
 /// took, and the heart rate the watch stated over it.
 ///
-/// **A projection, for [`WeighInHistory`]'s reason**: the game's landing
+/// **A projection, for [`WeighInHistory`]'s reason**: the match's landing
 /// record and provenance have no reader here.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlayedPadelGame {
+pub struct PlayedPadelMatch {
     pub started_at: domain::normalised::StartedAt,
     pub duration: PositiveDuration,
     pub heart_rate: Option<domain::measure::HeartRateSummary>,
 }
 
-/// Every padel game the normalised layer holds, which only the watch records.
-pub trait PlayedPadelGames {
-    /// Oldest first.
+/// The padel matches the normalised layer holds, which only the watch records.
+pub trait PlayedPadelMatches {
+    /// Each match played between the two days, both included, by the day it
+    /// started on in the zone it was played in, oldest first.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
-    fn all(&self) -> impl Future<Output = Result<Vec<PlayedPadelGame>, StoreError>> + Send;
+    fn between(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> impl Future<Output = Result<Vec<PlayedPadelMatch>, StoreError>> + Send;
+}
+
+/// One activity, as the list shows it: enough of it to recognise it by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Activity {
+    /// A gym session, and the lifts whose 1RM it tested.
+    ///
+    /// **No length where no source stated one**: a session only his
+    /// spreadsheets recorded is dated to a day, and nothing says when it began
+    /// or ended.
+    Gym {
+        length: Option<PositiveDuration>,
+        exercises: usize,
+        sets: usize,
+        heart_rate: Option<BeatsPerMinute>,
+        tested: Vec<RepsExercise>,
+    },
+    /// A cycling session: every ride of it, and its working ride's power.
+    Cycling {
+        length: Duration,
+        power: Watts,
+        test: bool,
+    },
+    Padel {
+        length: PositiveDuration,
+        heart_rate: Option<BeatsPerMinute>,
+    },
+}
+
+impl Activity {
+    /// Whether it was a test: an FTP test, or a gym session that tested a
+    /// lift's 1RM.
+    pub const fn is_test(&self) -> bool {
+        match self {
+            Self::Gym { tested, .. } => !tested.is_empty(),
+            Self::Cycling { test, .. } => *test,
+            Self::Padel { .. } => false,
+        }
+    }
+}
+
+/// The activities of one kind, each as History lists it (#817).
+///
+/// **What the list shows, asked for in one query**: a gym session's counts
+/// and averages rather than its sets, and a ride's length and power rather than
+/// its samples. Opening an activity reads the whole of it, through its own
+/// port, for one day.
+pub trait Activities {
+    /// Each activity between the two days, both included, by the day it
+    /// happened on in the zone it happened in, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn between(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> impl Future<Output = Result<Vec<(Occurred, Activity)>, StoreError>> + Send;
+
+    /// The day of the first activity the record holds, `None` where it holds
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn first(&self) -> impl Future<Output = Result<Option<Date>, StoreError>> + Send;
 }
 
 /// One cycling session the record holds, and the classes it was ridden to.
@@ -1726,7 +1806,7 @@ pub trait StressHistory {
 }
 
 /// Every session of training done (#517): the gym and cycling sessions the
-/// canonical layers hold and the padel games the normalised does, each as the
+/// canonical layers hold and the padel matches the normalised does, each as the
 /// day it was performed on and how long it took.
 pub trait TrainingDone {
     /// Oldest first.
@@ -2191,6 +2271,14 @@ pub trait PlanStore {
     /// [`StoreError`] if the store is unavailable or holds something unreadable.
     fn windows(&self) -> impl Future<Output = Result<Vec<PlanWindow>, StoreError>> + Send;
 
+    /// Every plan in force, oldest first, in one read (#817): what a reader
+    /// of every plan asks for, rather than each [`Self::named`] in turn.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn plans(&self) -> impl Future<Output = Result<Vec<Plan>, StoreError>> + Send;
+
     /// The plan in force under a name, if there is one.
     ///
     /// **What makes a plan authorable in pieces while still being written
@@ -2291,6 +2379,15 @@ pub trait FtpHistory {
         &self,
         date: Date,
     ) -> impl Future<Output = Result<Option<Ftp>, StoreError>> + Send;
+
+    /// Every value, oldest first, in one read (#817): for a reader that
+    /// looks up many dates, which [`Ftp::in_force_on`] then reads.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    fn series(&self) -> impl Future<Output = Result<Vec<Ftp>, StoreError>> + Send;
 }
 
 /// The classes a holding microcycle could be built from.

@@ -259,6 +259,18 @@ async fn canonicalise(pool: &SqlitePool) -> Built<Canonicalised> {
     .await?)
 }
 
+/// Every session the canonical layer holds: a window wider than any fixture's.
+async fn layer(
+    store: &SqliteCanonicalCyclingSessionStore,
+) -> Built<Vec<domain::cycling::CanonicalCyclingSession>> {
+    Ok(application::PerformedCyclingSessions::between(
+        store,
+        jiff::civil::date(1960, 1, 1),
+        jiff::civil::date(2100, 1, 1),
+    )
+    .await?)
+}
+
 async fn refusals(pool: &SqlitePool) -> Built<Vec<domain::normalised::Refusal>> {
     let reporter = Refusals::new(
         SqliteRefusalStore::new(pool.clone(), PelotonRideLandingStore::STREAM)?,
@@ -1378,12 +1390,27 @@ fn the_canonical_layer_reads_back_the_sessions_it_holds() {
                 .await
                 .expect("the normalised sessions"),
         );
-        let read = SqliteCanonicalCyclingSessionStore::new(pool.clone())
-            .all()
-            .await
-            .expect("the canonical sessions");
+        let store = SqliteCanonicalCyclingSessionStore::new(pool.clone());
+        let read = layer(&store).await.expect("the canonical sessions");
         assert_eq!(read.len(), 2, "a test and a ride");
         assert_eq!(read, built);
+
+        // What a chart reads is only the rides it compares (#817).
+        let (mut mains, mut efforts, mut tested) = (Vec::new(), Vec::new(), Vec::new());
+        for session in &read {
+            match session {
+                domain::cycling::CanonicalCyclingSession::Ride { main, .. } => {
+                    mains.push(main.clone());
+                }
+                domain::cycling::CanonicalCyclingSession::Test { effort, .. } => {
+                    efforts.push(effort.clone());
+                    tested.push(session.started_at().clone());
+                }
+            }
+        }
+        assert_eq!(store.main_rides().await.expect("the main rides"), mains);
+        assert_eq!(store.efforts().await.expect("the efforts"), efforts);
+        assert_eq!(store.tested().await.expect("the tests"), tested);
     });
 }
 
@@ -1752,12 +1779,90 @@ fn rebuilding_what_a_new_ride_reached_is_rebuilding_the_whole() {
         )
         .await
         .expect("a derivation of what was reached");
-        let within = canonical.all().await.expect("the layer");
+        let within = layer(&canonical).await.expect("the layer");
         let whole = canonicalise(&pool).await.expect("a whole canonicalising");
 
-        assert_eq!(within, canonical.all().await.expect("the layer"));
+        assert_eq!(within, layer(&canonical).await.expect("the layer"));
         assert_eq!(within.len(), 2, "both rides");
         assert_eq!(reached.written, whole.written);
         assert_eq!(reached.read.as_usize(), 1, "only the new ride was read");
+    });
+}
+
+/// **The list's read of a session says what its whole read does** (#817): its
+/// length is every ride's, its power the working ride's, and a test is one;
+/// and a day's whole read is the session that started on it.
+#[test]
+fn a_session_as_history_lists_it_is_the_whole_one_summed() {
+    use application::{Activities, PerformedCyclingSessions, history::Activity};
+    use domain::canonical::Occurred;
+
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (pool, _directory) = landed(
+            vec![
+                ("warm-up", workout("warm-up", Kind::WarmUp, 100, 400)),
+                ("effort", workout("effort", Kind::Test, 400, 1600)),
+            ],
+            vec![
+                ("warm-up", graph(&[1, 2], &[93, 132], None, "2.0", "km")),
+                (
+                    "effort",
+                    graph(
+                        &[1, 2, 3],
+                        &[180, 200, 210],
+                        Some((&[120, 140, 150], "0")),
+                        "8.0",
+                        "km",
+                    ),
+                ),
+            ],
+        )
+        .await
+        .expect("a landed corpus");
+        derive(&pool).await.expect("a derivation");
+        canonicalise(&pool).await.expect("a canonical layer");
+        let store = SqliteCanonicalCyclingSessionStore::new(pool.clone());
+
+        let whole = layer(&store).await.expect("whole");
+        let [session] = whole.as_slice() else {
+            panic!("one session: {whole:?}");
+        };
+        let day = session.started_at().wall_clock().date();
+        assert_eq!(
+            PerformedCyclingSessions::between(&store, day, day)
+                .await
+                .expect("the day's"),
+            whole
+        );
+        let other = day.tomorrow().expect("a day");
+        assert_eq!(
+            PerformedCyclingSessions::between(&store, other, other)
+                .await
+                .expect("the next day's"),
+            vec![]
+        );
+
+        let listed = Activities::between(&store, day, day)
+            .await
+            .expect("the list's");
+        assert_eq!(
+            listed,
+            vec![(
+                Occurred::At(session.started_at().clone()),
+                Activity::Cycling {
+                    length: domain::measure::Duration::from_seconds(
+                        session
+                            .rides()
+                            .iter()
+                            .map(|ride| ride.duration().value().as_seconds())
+                            .sum(),
+                    ),
+                    power: *session.working_ride().average_power().value(),
+                    test: true,
+                },
+            )]
+        );
+        assert_eq!(Activities::first(&store).await.expect("first"), Some(day));
     });
 }

@@ -1,0 +1,33 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT MIN(r.started_at_utc) AS \"started_at_utc!: String\",\n                   r.zone AS \"zone!: String\"\n              FROM canonical_cycling_session AS s\n              JOIN canonical_bike_plus_ride AS r ON r.session = s.id\n             WHERE s.kind = 'test'\n             GROUP BY s.id\n             ORDER BY MIN(r.started_at_utc)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "started_at_utc!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_bike_plus_ride",
+            "name": "zone"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "444075ac09a931a9308fa8bd19c0cf0ab813d8cd0241896bb5b472ef6b546090"
+}

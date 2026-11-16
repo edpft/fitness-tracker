@@ -290,6 +290,13 @@ where
         }
     }
 
+    /// The holidays the term was read in, where it was given one: for a
+    /// reader that needs them too, which reads them once (#817).
+    #[must_use]
+    pub fn holidays(&self) -> Option<&Holidays> {
+        self.term.as_ref().map(|term| &term.holidays)
+    }
+
     /// Where the plan stands on `now`: every microcycle since it began, and
     /// every session of the current one.
     ///
@@ -318,8 +325,27 @@ where
     /// [`StoreError`] if the store is unavailable or holds something
     /// unreadable, including a plan that will not reschedule.
     pub async fn standing(&self, now: DayPart) -> Result<Standing, StoreError> {
+        let plans = self.ports.plans.plans().await?;
         let diary = self.ports.diary.diary().await?;
-        let Some(authored) = self.plan_begun_by(now.date).await? else {
+        self.standing_among(now, &plans, &diary).await
+    }
+
+    /// Where the plan stands on `now`, as [`Self::standing`] says, among
+    /// `plans`, every plan in force as written, read against `diary`: for a
+    /// reader that reads them for more than the walk, which reads them once
+    /// (#817).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable, including a plan that will not reschedule.
+    pub async fn standing_among(
+        &self,
+        now: DayPart,
+        plans: &[Plan],
+        diary: &Diary,
+    ) -> Result<Standing, StoreError> {
+        let Some(authored) = begun_by(plans, now.date) else {
             return Ok(Standing::default());
         };
         let stored = self.ports.plans.completed(authored.name()).await?;
@@ -333,9 +359,9 @@ where
         // The tests carried past the week they were missed in (#732).
         let mut carried = Missed::none();
         loop {
-            let plan = rescheduled(&authored, &reruns, &diary)?;
+            let plan = rescheduled(&authored, &reruns, diary)?;
             let week = self
-                .week_of(&plan, &diary, monday, opens, now, &carried)
+                .week_of(&plan, diary, monday, opens, now, &carried)
                 .await?;
             missed.extend(week.missed);
             // **An open illness stops the walk at the week now has reached**
@@ -373,7 +399,7 @@ where
             };
 
             let placed = placed(&week.sessions);
-            let lost = lost_by(&plan, &diary, monday);
+            let lost = lost_by(&plan, diary, monday);
             let state = planner::microcycle_state(&placed, &lost);
             let anchoring = anchoring(&plan, monday);
             let next = monday
@@ -393,7 +419,7 @@ where
                 reruns.push(rerun);
             } else {
                 for (discipline, due) in tests_lost(&week.sessions, &placed, &lost, &carried) {
-                    if let Some(to) = self.next_slot(&diary, discipline, next) {
+                    if let Some(to) = self.next_slot(diary, discipline, next) {
                         carried.carry(discipline, due, to);
                     }
                 }
@@ -600,28 +626,6 @@ where
         })
     }
 
-    /// The plan that has begun by a date: the latest whose authored start is
-    /// on or before it.
-    ///
-    /// **Not the one whose span covers it**, because the span is the one
-    /// authored and rescheduling moves its end: a plan three weeks behind still
-    /// answers for the three weeks past where it was written to finish. Two
-    /// plans never overlap, so the latest to have started is the one in force.
-    async fn plan_begun_by(&self, date: Date) -> Result<Option<Plan>, StoreError> {
-        let Some(window) = self
-            .ports
-            .plans
-            .windows()
-            .await?
-            .into_iter()
-            .filter(|window| window.span().start() <= date)
-            .max_by_key(|window| window.span().start())
-        else {
-            return Ok(None);
-        };
-        self.ports.plans.named(window.name()).await
-    }
-
     /// Whether a session was put somewhere it could be performed (§ 12.1).
     ///
     /// **Delivered, not merely issued.** A gym prescription that was derived
@@ -753,6 +757,21 @@ fn ridden_as(week: &[planner::Planned<'_>], ridden: &crate::RiddenSession) -> Op
             .then(|| ride.role()),
         Ok(Filled::Gym { .. } | Filled::CyclingHolding { .. }) | Err(_) => None,
     })
+}
+
+/// The plan in `plans` that has begun by a date: the latest whose authored
+/// start is on or before it.
+///
+/// **Not the one whose span covers it**, because the span is the one
+/// authored and rescheduling moves its end: a plan three weeks behind still
+/// answers for the three weeks past where it was written to finish. Two
+/// plans never overlap, so the latest to have started is the one in force.
+fn begun_by(plans: &[Plan], date: Date) -> Option<Plan> {
+    plans
+        .iter()
+        .filter(|plan| plan.span().start() <= date)
+        .max_by_key(|plan| plan.span().start())
+        .cloned()
 }
 
 /// The plan as it now stands, as the store's error.

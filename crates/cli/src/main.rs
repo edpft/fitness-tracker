@@ -293,14 +293,6 @@ fn discipline_command() -> ClapCommand {
                  Defaults to <SOURCE>_API_BASE_URL, then to the built-in root",
             )),
     );
-    command = command.subcommand(
-        ClapCommand::new("strength")
-            .about(
-                "Collect and derive the gym and the scale, then report estimated \
-                 one-rep maximum over body weight for the headline lifts, per session",
-            )
-            .arg(timezone_argument()),
-    );
     command = command.subcommand(corrections_command());
     command = command.subcommand(ClapCommand::new("templates").about(
         "Create on the Hevy account the templates for exercises Hevy does not have, \
@@ -872,12 +864,20 @@ fn main() -> ExitCode {
 }
 
 fn run(matches: &ArgMatches) -> Result<(), Failure> {
+    let database = database(matches)?;
+    // **Dropped after the runtime, never before** (#817). A span closes when
+    // its last child does, and a child can be in a task the runtime holds,
+    // the store's pool among them: dropped first, the recording lost every
+    // span still open when the command returned, which under load was the
+    // whole of its work. Started before the store is opened, so the opening
+    // is recorded too (#631).
+    let _recording = configurator::telemetry::record(&database);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .map_err(|error| Failure::usage(&error))?;
 
-    runtime.block_on(dispatch(matches))
+    runtime.block_on(dispatch(matches, database))
 }
 
 /// Where this invocation keeps things.
@@ -891,14 +891,10 @@ struct Locations {
     /// What the operator stated once, read from the store. Unparsed: which of
     /// the flag, the variable and this one wins is decided in `config`.
     timezone: Option<String>,
-    /// Where the store is, for saying so and for keeping telemetry beside it.
+    /// Where the store is, for saying so.
     database: PathBuf,
     /// The store, opened once for the command (#663).
     store: Store,
-    /// Held to the end of the command, so that what it recorded is written
-    /// before it exits (#631). Started before the store is opened, so the
-    /// opening is recorded too.
-    recording: configurator::telemetry::Recording,
 }
 
 /// Resolve them, in the order a value earns precedence: what this invocation
@@ -906,10 +902,9 @@ struct Locations {
 ///
 /// # Errors
 ///
-/// [`Failure`] if the credentials file exists but will not parse, if a store
-/// path is needed and no base directory can be worked out, or if the store
-/// cannot be opened.
-async fn locations(matches: &ArgMatches) -> Result<Locations, Failure> {
+/// [`Failure`] if the credentials file exists but will not parse, or if the
+/// store at `database` cannot be opened.
+async fn locations(database: PathBuf) -> Result<Locations, Failure> {
     // **Credentials are read once, and a machine that cannot say where they live
     // simply has none.** Failing here would refuse to run for want of a file
     // that half the commands never consult — `status` and `reset` must work with
@@ -920,6 +915,33 @@ async fn locations(matches: &ArgMatches) -> Result<Locations, Failure> {
         Err(_) => configurator::Credentials::default(),
     };
 
+    // **Opened once, here, for whichever command runs** (#663), and passed to
+    // it: nothing below this takes the store's path, so nothing below it opens
+    // a second pool.
+    let store = Store::open(&database)
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+    let timezone = store
+        .timezone()
+        .await
+        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
+
+    Ok(Locations {
+        credentials,
+        timezone,
+        database,
+        store,
+    })
+}
+
+/// Where the store is: what this invocation passed, else the default.
+///
+/// # Errors
+///
+/// [`Failure`] if no store path is passed and no base directory can be
+/// worked out, or if its directory cannot be created.
+fn database(matches: &ArgMatches) -> Result<PathBuf, Failure> {
+    let environment = paths::SystemEnvironment;
     // The default store is resolved only if nothing else supplied one, so a
     // machine with no home directory still works when the path is passed.
     let database = match matches.get_one::<PathBuf>("database").cloned() {
@@ -939,26 +961,7 @@ async fn locations(matches: &ArgMatches) -> Result<Locations, Failure> {
             exit::STORE,
         )
     })?;
-
-    let recording = configurator::telemetry::record(&database);
-    // **Opened once, here, for whichever command runs** (#663), and passed to
-    // it: nothing below this takes the store's path, so nothing below it opens
-    // a second pool.
-    let store = Store::open(&database)
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-    let timezone = store
-        .timezone()
-        .await
-        .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
-
-    Ok(Locations {
-        credentials,
-        timezone,
-        database,
-        store,
-        recording,
-    })
+    Ok(database)
 }
 
 async fn schedule_command_run(sub: &ArgMatches, store: &Store) -> Result<(), Failure> {
@@ -1136,13 +1139,6 @@ async fn discipline_command_run(
             exit::USAGE,
         ));
     };
-    if let Some(("strength", strength)) = sub.subcommand() {
-        let zone = config::timezone(
-            strength.get_one::<String>("timezone").map(String::as_str),
-            stated_timezone,
-        )?;
-        return gym::strength(discipline, store, &zone, credentials).await;
-    }
     if let Some(("corrections", corrections)) = sub.subcommand() {
         return corrections_run(corrections, stated_timezone, store).await;
     }
@@ -1399,7 +1395,7 @@ async fn init_run(
     Ok(())
 }
 
-async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
+async fn dispatch(matches: &ArgMatches, database: PathBuf) -> Result<(), Failure> {
     let Some((name, sub)) = matches.subcommand() else {
         return Err(Failure::message("no command given", exit::USAGE));
     };
@@ -1409,20 +1405,23 @@ async fn dispatch(matches: &ArgMatches) -> Result<(), Failure> {
         timezone,
         database,
         store,
-        recording: _recording,
-    } = locations(matches).await?;
+    } = locations(database).await?;
     let stated_timezone = timezone.as_deref();
 
-    if name == "init" {
-        return init_run(sub, &store, &database).await;
-    }
-
-    if let Some(outcome) = authored_command(name, sub, &credentials, stated_timezone, &store).await
+    let ran = if name == "init" {
+        init_run(sub, &store, &database).await
+    } else if let Some(outcome) =
+        authored_command(name, sub, &credentials, stated_timezone, &store).await
     {
-        return outcome;
-    }
-
-    stream_command_run(name, sub, &credentials, stated_timezone, &store).await
+        outcome
+    } else {
+        stream_command_run(name, sub, &credentials, stated_timezone, &store).await
+    };
+    // **Closed before the command returns** (#817): each connection runs on
+    // a thread of its own, which can hold the span of the work it did until
+    // the pool lets it go, and a span still open at exit is never recorded.
+    store.close().await;
+    ran
 }
 
 /// The plumbing: a command over one stream, named by its catalogue entry.

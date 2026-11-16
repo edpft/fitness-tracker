@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT effect_from AS \"effect_from!: String\",\n                   watts       AS \"watts!: i64\",\n                   provenance  AS \"provenance!: String\"\n              FROM ftp\n             ORDER BY effect_from ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "effect_from!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ftp",
+            "name": "effect_from"
+          }
+        }
+      },
+      {
+        "name": "watts!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "ftp",
+            "name": "watts"
+          }
+        }
+      },
+      {
+        "name": "provenance!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ftp",
+            "name": "provenance"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e73fc9d672859987c68ec9cb70b1d91be59a9d8f8e2bd1ad4ad695cdd6ba6d8f"
+}

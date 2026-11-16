@@ -1,44 +1,42 @@
 //! The FTP tests, in watts and over body weight (#469).
 //!
 //! **Each test's reading is `domain`'s** ([`tests`]); this finds the tests,
-//! the FTP each one gave and the canonical weigh-ins, and hands them over.
+//! the FTP each one gave in the series, and hands them over with the
+//! canonical weigh-ins.
 //! Nothing is written: every point re-derives from them exactly (§ 5).
 
 use domain::{
-    analytical::ftp_test::{Test, TestHeartRate, heart_rate, tests},
-    cycling::CanonicalCyclingSession,
+    analytical::{
+        Weighed,
+        ftp_test::{Test, TestHeartRate, heart_rate, tests},
+    },
+    cycling::Ftp,
 };
 
 use crate::{
     devices::DeviceRegister,
     error::StoreError,
-    ports::{FtpHistory, PerformedCyclingSessions, RecordedDevices, WearRecord, WeighInHistory},
+    ports::{PerformedCyclingSessions, RecordedDevices, WearRecord},
 };
 
 /// The use case.
-pub struct FtpTests<S, F, W> {
+pub struct FtpTests<S> {
     sessions: S,
-    ftp: F,
-    weigh_ins: W,
 }
 
-crate::graph::through!(FtpTests<S, F, W>);
+crate::graph::through!(FtpTests<S>);
 
-impl<S, F, W> FtpTests<S, F, W>
+impl<S> FtpTests<S>
 where
     S: PerformedCyclingSessions + Sync,
-    F: FtpHistory + Sync,
-    W: WeighInHistory + Sync,
 {
-    pub const fn new(sessions: S, ftp: F, weigh_ins: W) -> Self {
-        Self {
-            sessions,
-            ftp,
-            weigh_ins,
-        }
+    pub const fn new(sessions: S) -> Self {
+        Self { sessions }
     }
 
-    /// Every test, oldest first.
+    /// Every test, oldest first, each with the FTP it gave in `ftp`, the
+    /// series oldest first, and over the canonical weigh-in `weigh_ins`
+    /// places it at.
     ///
     /// **The FTP dated to the test's own day**: one in force from an earlier
     /// day was not this test's, and a test whose effort gave none has no
@@ -47,21 +45,17 @@ where
     /// # Errors
     ///
     /// [`StoreError`] if any store is unavailable.
-    pub async fn tests(&self) -> Result<Vec<Test>, StoreError> {
+    pub async fn tests(&self, ftp: &[Ftp], weigh_ins: &[Weighed]) -> Result<Vec<Test>, StoreError> {
         let mut tested = Vec::new();
-        for session in self.sessions.all().await? {
-            if !matches!(session, CanonicalCyclingSession::Test { .. }) {
-                continue;
-            }
-            let started = session.started_at();
+        for started in self.sessions.tested().await? {
             let day = started.wall_clock().date();
-            if let Some(ftp) = self.ftp.in_force_on(day).await?
-                && ftp.from() == day
+            if let Some(given) = Ftp::in_force_on(ftp, day)
+                && given.from() == day
             {
-                tested.push((ftp, started.clone()));
+                tested.push((given, started));
             }
         }
-        Ok(tests(&tested, &self.weigh_ins.weigh_ins().await?))
+        Ok(tests(&tested, weigh_ins))
     }
 }
 
@@ -92,10 +86,10 @@ where
         let register = self.devices.register().await?;
         let mut rates: Vec<TestHeartRate> = self
             .sessions
-            .all()
+            .efforts()
             .await?
             .iter()
-            .filter_map(|session| heart_rate(session, &register))
+            .filter_map(|effort| heart_rate(effort, &register))
             .collect();
         rates.sort_by_key(|rate| rate.on);
         Ok(rates)

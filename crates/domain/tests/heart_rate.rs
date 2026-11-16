@@ -111,21 +111,10 @@ fn nobody() -> Register {
 }
 
 fn of(session: &CanonicalCyclingSession, register: &Register) -> Fallible<RideHeartRate> {
-    Ok(ride_heart_rate(session, Some(ftp()?), register).ok_or("a main ride")?)
-}
-
-#[test]
-fn a_test_is_not_a_main_ride() {
-    let beats: Vec<(u64, u32)> = (1..=300).map(|at| (at, 150)).collect();
-    let session = CanonicalCyclingSession::Test {
-        warm_up: ride(&held(1, 300, 140), Some(&beats)).expect("a ride"),
-        effort: ride(&held(1, 300, 210), Some(&beats)).expect("a ride"),
-        cool_down: None,
+    let CanonicalCyclingSession::Ride { main, .. } = session else {
+        return Err("a main ride".into());
     };
-    assert_eq!(
-        ride_heart_rate(&session, Some(ftp().expect("an FTP")), &nobody()),
-        None
-    );
+    Ok(ride_heart_rate(main, Some(ftp()?), register))
 }
 
 /// A watch recording on `on`, which broadcasts heart rate.

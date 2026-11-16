@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT started_at_utc AS \"started_at!: String\",\n                   zone AS \"zone!: String\",\n                   duration_seconds AS \"duration!: i64\"\n            FROM padel_game\n            ",
+  "query": "\n            SELECT started_at_utc AS \"started_at!: String\",\n                   zone AS \"zone!: String\",\n                   duration_seconds AS \"duration!: i64\"\n            FROM padel_match\n            ",
   "describe": {
     "columns": [
       {
@@ -9,7 +9,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "padel_game",
+            "table": "padel_match",
             "name": "started_at_utc"
           }
         }
@@ -20,7 +20,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "padel_game",
+            "table": "padel_match",
             "name": "zone"
           }
         }
@@ -31,7 +31,7 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "padel_game",
+            "table": "padel_match",
             "name": "duration_seconds"
           }
         }
@@ -46,5 +46,5 @@
       false
     ]
   },
-  "hash": "169b140a89ee4e4d529316df310186b0cf46cf8a8eabbf68a5104ac64a8531eb"
+  "hash": "bdc7efbdb4809685ed8dcb8433f3ae7b4c6406beb2819d400429bc3c2282e4ac"
 }

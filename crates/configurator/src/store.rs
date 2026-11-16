@@ -28,16 +28,16 @@ use application::{
     ExerciseHistory, FillChangeStore, FtpHistory, GenerationParameterStore, MesocycleStore,
     PerformedGymSessions, PerformedSessionLog, PlanStore, PrescribedWorkoutStore,
     PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore, RiddenSessionLog,
-    RiddenVenues, StoreError, WeighInHistory, WorkoutStore,
+    RiddenVenues, StoreError, WorkoutStore,
 };
 use domain::normalised::OperatorZone;
 use infrastructure::{
     FileRunLock, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
-    SqliteCanonicalWeighInStore, SqliteCyclingDeliveryStore, SqliteDerivationLedger,
-    SqliteDiaryStore, SqliteEquipmentStore, SqliteExerciseHistory, SqliteFtpHistory,
-    SqliteGenerationParameterStore, SqliteGymMesocycleStore, SqliteKeptDrawings,
-    SqliteOperatorSettingsStore, SqlitePelotonClassStore, SqlitePlanStore, SqlitePool,
-    SqlitePrescribedWorkoutStore, SqlitePrescriptionDeliveryStore, SqliteRevisions, connect,
+    SqliteCyclingDeliveryStore, SqliteDerivationLedger, SqliteDiaryStore, SqliteEquipmentStore,
+    SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
+    SqliteGymMesocycleStore, SqliteKeptDrawings, SqliteOperatorSettingsStore,
+    SqlitePelotonClassStore, SqlitePlanStore, SqlitePool, SqlitePrescribedWorkoutStore,
+    SqlitePrescriptionDeliveryStore, SqliteRevisions, connect,
 };
 
 /// The operator's store, opened.
@@ -52,6 +52,13 @@ pub struct Store {
 }
 
 impl Store {
+    /// Close every connection, waiting for each to finish (#817): what a
+    /// command does last, so that each span its work opened has closed while
+    /// the telemetry is still being recorded.
+    pub async fn close(&self) {
+        self.pool.close().await;
+    }
+
     /// Open the store at a path, creating it if it is not there.
     ///
     /// # Errors
@@ -230,12 +237,6 @@ impl Store {
     #[must_use]
     pub fn ftp(&self) -> impl FtpHistory + Send + Sync + use<> {
         self.adapter(SqliteFtpHistory::new)
-    }
-
-    /// Body weight, one weigh-in per weighing.
-    #[must_use]
-    pub fn weigh_ins(&self) -> impl WeighInHistory + Send + Sync + use<> {
-        self.adapter(SqliteCanonicalWeighInStore::new)
     }
 
     /// The zone the operator stated, if they stated one.
