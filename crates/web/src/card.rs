@@ -132,8 +132,8 @@ impl<'a> Showing<'a> {
         self.shown(card).instrument(span).await
     }
 
-    async fn shown<C: Card>(&self, card: &C) -> Markup {
-        let address = card.address();
+    /// Whether `C` waits on a run collecting what it reads, and whose.
+    fn waiting<C: Card>(&self) -> Waiting {
         let reads = <C::Reads as application::graph::Input>::reads();
         let waits = if C::DELIVERED {
             Scope::new(
@@ -146,7 +146,14 @@ impl<'a> Showing<'a> {
         } else {
             scope(&reads)
         };
-        let trigger = match self.runs.waiting(&waits) {
+        self.runs.waiting(&waits)
+    }
+
+    /// What `C` asks to be drawn again on: each part it still waits on and
+    /// the run ending, where this server's run collects them, and every two
+    /// seconds where the terminal's does. `None` where it waits on nothing.
+    fn trigger<C: Card>(&self) -> Option<String> {
+        match self.waiting::<C>() {
             Waiting::No => None,
             Waiting::Here(parts) => Some(
                 parts
@@ -157,8 +164,13 @@ impl<'a> Showing<'a> {
                     .join(", "),
             ),
             Waiting::Elsewhere => Some("every 2s".to_owned()),
-        };
-        if let Some(trigger) = trigger {
+        }
+    }
+
+    async fn shown<C: Card>(&self, card: &C) -> Markup {
+        let address = card.address();
+        let reads = <C::Reads as application::graph::Input>::reads();
+        if let Some(trigger) = self.trigger::<C>() {
             let kept = self.kept(&address).await;
             configurator::telemetry::served(if kept.is_some() {
                 Served::Kept
@@ -391,15 +403,28 @@ pub async fn page<P: Page>(
 
 /// `C` alone, as the request asks for it: what a card asking to be drawn
 /// again is sent.
+///
+/// **Nothing, while this server's run still collects what it reads** (#830):
+/// the card on the page keeps what it shows and goes on listening for the
+/// run. Sent again in its place, it missed an event that came while it was
+/// swapped in, and waited for good. Waiting on the terminal's run instead, it
+/// is sent again, asking every two seconds, since no event will come.
 pub async fn card<C: Card>(
     State(runs): State<Arc<Runs>>,
     Query(query): Query<HashMap<String, String>>,
-) -> Markup {
+) -> Response {
     let card = C::asked(&query);
     if let Some(over) = card.over() {
         configurator::telemetry::ranged(range::name(over));
     }
-    Showing::new(&runs, true).card(&card).await
+    let showing = Showing::new(&runs, true);
+    if matches!(showing.waiting::<C>(), Waiting::Here(_)) {
+        async { configurator::telemetry::served(Served::Waiting) }
+            .instrument(configurator::telemetry::card(C::NAME))
+            .await;
+        return axum::http::StatusCode::NO_CONTENT.into_response();
+    }
+    showing.card(&card).await.into_response()
 }
 
 /// A card over a range that reads one analysis, the plans its ranges are
@@ -627,6 +652,45 @@ mod tests {
         let (weight, _) = load();
         assert!(weight.contains("weight 1"), "{weight}");
         assert!(!weight.contains("hx-trigger"), "{weight}");
+    }
+
+    /// **A card asking to be drawn while the run still collects what it reads
+    /// is sent nothing** (#830), so the one on the page keeps listening; once
+    /// it is collected, it is drawn.
+    #[test]
+    fn a_card_asking_while_it_waits_is_sent_nothing() {
+        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let runs = std::sync::Arc::new(Runs::new(Setting {
+            store: runtime
+                .block_on(configurator::store::Store::open(
+                    &directory.path().join("fitness.db"),
+                ))
+                .expect("the store"),
+            zone: OperatorZone::try_from("Europe/London").expect("a zone"),
+            credentials: None,
+            build: Some("a build"),
+        }));
+        let asked = || {
+            runtime.block_on(super::card::<Weight>(
+                axum::extract::State(std::sync::Arc::clone(&runs)),
+                axum::extract::Query(HashMap::new()),
+            ))
+        };
+        let stream =
+            domain::landing::LandingStream::try_from("withings.measurements").expect("a stream");
+        runs.going_over(&crate::run::Asked::Everything);
+
+        assert_eq!(asked().status(), axum::http::StatusCode::NO_CONTENT);
+
+        runs.collect(&[
+            application::Part::Fetching(stream.clone()),
+            application::Part::Normalising(stream),
+        ]);
+        assert_eq!(asked().status(), axum::http::StatusCode::OK);
     }
 
     /// **A card is drawn again only when something it reads has moved**
