@@ -120,6 +120,14 @@ tokio-stream = { version = "0.1.19", features = ["sync"] }
 proptest = "1.11.0"
 wiremock = "0.6.5"
 tempfile = "3.27.0"
+# Driving headless Chromium over the DevTools protocol, so the pages are tested
+# as htmx drives them in a browser (#830): `curl` sees an event a browser drops.
+tokio-tungstenite = { version = "0.30.0", default-features = false, features = [
+  "connect",
+] }
+futures-util = { version = "0.3.34", default-features = false, features = [
+  "sink",
+] }
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }

@@ -67,7 +67,7 @@ fn laid_out(cards: [Markup; 10]) -> Markup {
         (DOCTYPE)
         html lang="en" {
             head { (page::head(Place::Progress.name(), &[])) }
-            body {
+            body hx-boost="true" {
                 main.progress {
                     h1 { (Place::Progress.name()) }
                     (none)

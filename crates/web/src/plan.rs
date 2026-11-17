@@ -23,7 +23,7 @@ pub fn page(macrocycle: &Result<Option<Macrocycle>, String>) -> Markup {
         (DOCTYPE)
         html lang="en" {
             head { (page::head(Place::Plan.name(), &[])) }
-            body {
+            body hx-boost="true" {
                 main.plan {
                     h1 { (Place::Plan.name()) }
                     @match macrocycle {
@@ -32,9 +32,12 @@ pub fn page(macrocycle: &Result<Option<Macrocycle>, String>) -> Markup {
                         Err(error) => p.failed { "The plan could not be read: " (error) },
                     }
                     h2.group { "Inputs" }
+                    // **Loaded, not swapped in** (#830): each input is a form
+                    // page with scripts of its own, which a page swapped into
+                    // this one would not run.
                     ul.pages {
                         @for page in PAGES.iter().filter(|page| page.place == Place::Plan) {
-                            li { a href=(page.path) { (page.name) } }
+                            li { a href=(page.path) hx-boost="false" { (page.name) } }
                         }
                     }
                     (page::bar(Place::Plan.path()))
@@ -253,7 +256,7 @@ mod tests {
         let inputs = shown.find("Inputs").expect("the inputs");
         assert!(card < inputs, "{shown}");
         for path in ["/workout", "/schedule", "/equipment"] {
-            assert!(shown.contains(&format!(r#"<a href="{path}">"#)), "{path}");
+            assert!(shown.contains(&format!(r#"<a href="{path}""#)), "{path}");
         }
     }
 
@@ -263,6 +266,6 @@ mod tests {
         let shown = page(&Ok(None)).into_string();
 
         assert!(shown.contains("No plan is in force today."), "{shown}");
-        assert!(shown.contains(r#"<a href="/schedule">"#), "{shown}");
+        assert!(shown.contains(r#"<a href="/schedule""#), "{shown}");
     }
 }

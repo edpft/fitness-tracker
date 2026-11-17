@@ -14,6 +14,8 @@ mod composition;
 mod curves;
 mod detail;
 mod drawn;
+#[cfg(test)]
+mod drive;
 mod equipment;
 mod ftp;
 mod history;
@@ -220,7 +222,7 @@ fn pages() -> Pages {
 async fn recorded(request: Request, next: Next) -> Response {
     let span = configurator::telemetry::request(
         request.uri().path(),
-        request.headers().contains_key("hx-request"),
+        crate::page::redrawing(request.headers()),
     );
     let response = next.run(request).instrument(span.clone()).await;
     configurator::telemetry::request_ended(&span, response.status().is_success());

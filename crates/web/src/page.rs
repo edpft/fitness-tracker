@@ -178,13 +178,8 @@ pub fn header(here: &str, title: &str) -> Markup {
 /// **Outside `main`**, which is what the redraw replaces, so the connection
 /// that asks for it outlives it. The redraw asks for the page's own address
 /// as htmx, which is how its handler knows not to start another run.
-///
-/// The scripts are here rather than in the head so that a page drawn from the
-/// store takes all of this in one line.
 pub fn following(run: &View) -> Markup {
     html! {
-        script src="/htmx.min.js" {}
-        script src="/sse.min.js" {}
         div.following hx-ext="sse" sse-connect=(format!("/run/step?since={}", run.ended())) {
             div sse-swap="step,ended" { (run.step()) }
             div hx-get="" hx-trigger="sse:ended" hx-target="main" hx-select="main" hx-swap="outerHTML" {}
@@ -196,26 +191,55 @@ pub fn following(run: &View) -> Markup {
 /// waits on a part of the run asking to be drawn again as it is collected
 /// (#830).
 ///
-/// **Connected on `body`**, so every card is inside the connection whose
+/// **Connected on all of it**, so every card is inside the connection whose
 /// events it asks on, and **no redraw of the page when the run ends**: each
 /// card asks on that for itself.
+///
+/// **Inside `body`, not on it**: a page opened from a link replaces what is
+/// inside `body` and keeps `body` itself, so the connection goes with the page
+/// it was opened for, and the next connects counting from where it was drawn.
 ///
 /// **The step the run is on is shown where `follows`**: every page but the
 /// home page, which shows none (#666).
 pub fn carded(drawn: &str, run: &View, follows: bool) -> Markup {
     let connected = html! {
-        script src="/htmx.min.js" {}
-        script src="/sse.min.js" {}
         @if follows {
             div.following sse-swap="step,ended" { (run.step()) }
         }
     };
-    let body = format!(
-        r#"<body hx-ext="sse" sse-connect="/run/step?since={}&amp;collected={}">"#,
+    let opened = format!(
+        r#"<div class="connected" hx-ext="sse" sse-connect="/run/step?since={}&amp;collected={}">{}"#,
         run.ended(),
-        run.collected()
+        run.collected(),
+        connected.0
     );
-    PreEscaped(drawn.replacen("<body>", &format!("{body}{}", connected.0), 1))
+    PreEscaped(within_body(drawn, &opened, "</div>"))
+}
+
+/// `drawn`, with `start` first inside its `body` and `end` last.
+fn within_body(drawn: &str, start: &str, end: &str) -> String {
+    let opened = drawn
+        .find("<body")
+        .and_then(|at| drawn[at..].find('>').map(|close| at + close + 1));
+    let closed = drawn.rfind("</body>");
+    match (opened, closed) {
+        (Some(opened), Some(closed)) if opened <= closed => format!(
+            "{}{start}{}{end}{}",
+            &drawn[..opened],
+            &drawn[opened..closed],
+            &drawn[closed..]
+        ),
+        _ => drawn.to_owned(),
+    }
+}
+
+/// Whether a request is a page redrawing itself, rather than one being
+/// opened: htmx asking, but not for a link followed (`HX-Boosted`) or a page
+/// gone back to (`HX-History-Restore-Request`), which open it.
+pub fn redrawing(headers: &axum::http::HeaderMap) -> bool {
+    headers.contains_key("hx-request")
+        && !headers.contains_key("hx-boosted")
+        && !headers.contains_key("hx-history-restore-request")
 }
 
 /// A page whose data a run is collecting, where it has never been drawn on
@@ -241,7 +265,7 @@ pub fn collecting(here: &str, run: &View) -> Markup {
         (DOCTYPE)
         html lang="en" {
             head { (head(title, &[])) }
-            body {
+            body hx-boost="true" {
                 (following(run))
                 main {
                     (header(here, title))
@@ -285,16 +309,28 @@ fn asking(drawn: &str, trigger: &str) -> Markup {
 /// **Not kept with the drawing**: where a run has got to is the moment's, and
 /// a drawing served again would follow a run long ended.
 pub fn followed(drawn: &str, run: &View) -> Markup {
-    PreEscaped(drawn.replacen("<body>", &format!("<body>{}", following(run).0), 1))
+    PreEscaped(within_body(drawn, &following(run).0, ""))
 }
 
-/// What every page's head holds: its title, and the one stylesheet (#614)
-/// with any rules of the page's own that are not yet in it.
+/// What every page's head holds: its title, htmx, and the one stylesheet
+/// (#614) with any rules of the page's own that are not yet in it.
+///
+/// **Links are followed by htmx** (`hx-boost` on each page's `body`, #830):
+/// the page is swapped in place rather than loaded, so a browser holds one
+/// connection to the run however many pages are opened. A page loaded afresh
+/// stayed in Chrome's back/forward cache with its connection open, and five
+/// pages on every card waited up to a minute for one of the six a browser
+/// opens to a server. So the scripts are here, loaded once, and **no page is
+/// kept for going back**: one gone back to is asked for again, as it now
+/// stands.
 pub fn head(title: &str, own: &[&str]) -> Markup {
     html! {
         meta charset="utf-8";
         meta name="viewport" content="width=device-width, initial-scale=1";
+        meta name="htmx-config" content=r#"{"historyCacheSize":0}"#;
         title { (title) }
+        script src="/htmx.min.js" {}
+        script src="/sse.min.js" {}
         link rel="stylesheet" href=(STYLESHEET);
         @if !own.is_empty() {
             style { @for rules in own { (PreEscaped(rules)) } }
@@ -365,7 +401,7 @@ mod tests {
                 assert_eq!(page.path, Place::Today.path());
             } else if page.place == Place::Plan {
                 assert!(
-                    listed.contains(&format!(r#"<a href="{}">"#, page.path)),
+                    listed.contains(&format!(r#"<a href="{}""#, page.path)),
                     "{} is on no place",
                     page.path
                 );

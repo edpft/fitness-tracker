@@ -376,6 +376,9 @@ pub enum Served {
     Placeholder,
     /// Drawn from the store.
     Drawn,
+    /// Nothing: a card asking to be drawn while a run still collects what it
+    /// reads keeps what it shows, and asks again (#830).
+    Waiting,
 }
 
 impl Served {
@@ -386,6 +389,7 @@ impl Served {
             Self::Moved => "moved",
             Self::Placeholder => "placeholder",
             Self::Drawn => "drawn",
+            Self::Waiting => "waiting",
         }
     }
 }

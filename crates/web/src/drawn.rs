@@ -95,6 +95,9 @@ pub struct Pages {
     router: Router<Arc<Runs>>,
     reads: Vec<(&'static str, Reads)>,
     cards: std::collections::BTreeMap<&'static str, Reads>,
+    /// The routes of the pages drawn as their cards.
+    #[cfg(test)]
+    carded: Vec<&'static str>,
 }
 
 impl Pages {
@@ -103,6 +106,8 @@ impl Pages {
             router: Router::new(),
             reads: Vec::new(),
             cards: std::collections::BTreeMap::new(),
+            #[cfg(test)]
+            carded: Vec::new(),
         }
     }
 
@@ -110,6 +115,8 @@ impl Pages {
     pub fn cards<P: crate::card::Page>(mut self) -> Self {
         self.router = self.router.route(P::ROUTE, get(crate::card::page::<P>));
         self.reads.push((P::ROUTE, crate::card::reads::<P>()));
+        #[cfg(test)]
+        self.carded.push(P::ROUTE);
         <P::Cards as crate::card::Cards>::routed(self)
     }
 
@@ -160,6 +167,12 @@ impl Pages {
         &self.reads
     }
 
+    /// The routes of the pages drawn as their cards.
+    #[cfg(test)]
+    pub fn carded(&self) -> &[&'static str] {
+        &self.carded
+    }
+
     /// Each card routed, by its name, and what it reads.
     #[cfg(test)]
     pub const fn cards_read(&self) -> &std::collections::BTreeMap<&'static str, Reads> {
@@ -186,7 +199,7 @@ async fn served<P: Drawn>(
     // **Not when htmx asks**, which is a page redrawing itself because a run
     // ended: starting another would redraw it again when that one ended, for
     // ever.
-    let redraw = headers.contains_key("hx-request");
+    let redraw = crate::page::redrawing(&headers);
     if P::OPENS && !redraw {
         runs.open(&Asked::Only(scope.clone())).await;
     }
@@ -464,7 +477,7 @@ mod tests {
         );
         serving.kept(&runs, "/estimated-1rm", "Front squat 92.5kg");
 
-        runs.going_over(Asked::Everything);
+        runs.going_over(&Asked::Everything);
         let page = shown("No test has been recorded.", &read);
         let shown_now = serving.drawn(&runs, &page, false);
         assert!(shown_now.contains("Front squat 92.5kg"), "{shown_now}");
@@ -475,7 +488,7 @@ mod tests {
         );
 
         let restarted = serving.fresh(None);
-        restarted.going_over(Asked::Everything);
+        restarted.going_over(&Asked::Everything);
         let shown_now = serving.drawn(&restarted, &page, false);
         assert!(shown_now.contains("Front squat 92.5kg"), "{shown_now}");
         assert!(!shown_now.contains("No test"), "{shown_now}");

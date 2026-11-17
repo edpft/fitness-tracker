@@ -487,6 +487,10 @@
               # crates. Only the tests run code that needs this.
               SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
 
+              # The pages are driven in a browser, as htmx drives them (#830):
+              # an event `curl` sees can be one a browser drops.
+              CHROMIUM = "${pkgs.chromium}/bin/chromium";
+
               # Every store a test opens is a fresh one, so each test applies
               # all the migrations, one fsync'd commit apiece. On disk that was
               # most of a test's ~6 s, four at a time (#634); on tmpfs a sync
@@ -874,6 +878,8 @@
 
         devShells.default = craneLib.devShell {
           checks = self.checks.${system};
+          # What `web`'s tests drive the pages in, as the gate does (#830).
+          CHROMIUM = "${pkgs.chromium}/bin/chromium";
           packages = with pkgs; [
             # The tools CI uses, so a failure can be reproduced locally.
             cargo-deny

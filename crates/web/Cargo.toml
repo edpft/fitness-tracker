@@ -22,7 +22,11 @@ tokio-stream.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+futures-util.workspace = true
+serde_json.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["io-util", "process"] }
+tokio-tungstenite.workspace = true
 tracing-subscriber.workspace = true
 
 [lints]
