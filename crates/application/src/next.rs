@@ -1107,32 +1107,62 @@ where
     }
 }
 
-/// What a run delivers, as the frontend holds it (#830).
+/// What of the graph a run reads, as the frontend holds it (#830): where the
+/// plan stands, and what is next.
 ///
 /// Derived by the run where nothing holds it at what the store now says, and
 /// handed over where something does, so a page and a run share one
 /// derivation.
-pub trait HeldUpcoming {
+pub trait HeldNodes {
+    /// Where the plan stands at `now`, held where it already is, and as
+    /// `read` says it otherwise.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if `read` is needed and fails.
+    fn standing<F>(
+        &self,
+        now: DayPart,
+        read: F,
+    ) -> impl Future<Output = Result<Standing, StoreError>> + Send
+    where
+        F: Future<Output = Result<Standing, StoreError>> + Send;
+
     /// What `derive` would give, held where it already is.
-    fn held<F>(&self, derive: F) -> impl Future<Output = std::sync::Arc<Upcoming>> + Send
+    fn upcoming<F>(&self, derive: F) -> impl Future<Output = std::sync::Arc<Upcoming>> + Send
     where
         F: Future<Output = Upcoming> + Send;
 }
 
-impl<H: HeldUpcoming + Sync> HeldUpcoming for &H {
-    async fn held<F>(&self, derive: F) -> std::sync::Arc<Upcoming>
+impl<H: HeldNodes + Sync> HeldNodes for &H {
+    async fn standing<F>(&self, now: DayPart, read: F) -> Result<Standing, StoreError>
+    where
+        F: Future<Output = Result<Standing, StoreError>> + Send,
+    {
+        (**self).standing(now, read).await
+    }
+
+    async fn upcoming<F>(&self, derive: F) -> std::sync::Arc<Upcoming>
     where
         F: Future<Output = Upcoming> + Send,
     {
-        (**self).held(derive).await
+        (**self).upcoming(derive).await
     }
 }
 
-/// Nothing held: every run derives for itself, as the terminal's does.
+/// Nothing held: every run reads and derives for itself, as the terminal's
+/// does.
 pub struct Unheld;
 
-impl HeldUpcoming for Unheld {
-    async fn held<F>(&self, derive: F) -> std::sync::Arc<Upcoming>
+impl HeldNodes for Unheld {
+    async fn standing<F>(&self, _now: DayPart, read: F) -> Result<Standing, StoreError>
+    where
+        F: Future<Output = Result<Standing, StoreError>> + Send,
+    {
+        read.await
+    }
+
+    async fn upcoming<F>(&self, derive: F) -> std::sync::Arc<Upcoming>
     where
         F: Future<Output = Upcoming> + Send,
     {
@@ -1350,8 +1380,9 @@ pub struct NextPorts<GW, CW, BW, WW, WD, NL, CL, DL, K, HC, D, P, M, C, GY, CY, 
     /// What each layer is derived from, so it is derived as soon as that has
     /// been fetched (#830).
     pub graph: Graph,
-    /// What is next, as the frontend holds it (#830).
-    pub upcoming: U,
+    /// Where the plan stands and what is next, as the frontend holds them
+    /// (#830).
+    pub held: U,
 }
 
 /// The use case.
@@ -1384,7 +1415,7 @@ where
     CY: CyclingSessions + Sync,
     L: NextLock + Sync,
     F: FetchLog + Clock + Sync,
-    U: HeldUpcoming + Sync,
+    U: HeldNodes + Sync,
 {
     #[expect(
         clippy::type_complexity,
@@ -1439,7 +1470,7 @@ where
         // **The standing is read again only where something changed it**
         // (#664): gathering, a mesocycle committed, a skip taken.
         let holidays = self.ports.holidays.holidays().await;
-        let mut standing = self.ports.microcycle.standing(now).await?;
+        let mut standing = self.standing(now).await?;
         // What the mesocycles that have completed settled, written once, so the
         // walk reads it from here on rather than deriving it again (#801).
         if let Some((plan, completed)) = &standing.completed
@@ -1453,7 +1484,7 @@ where
                 .await
         {
             finish(progress, &mut run, started, outcome);
-            standing = self.ports.microcycle.standing(now).await?;
+            standing = self.standing(now).await?;
         }
 
         // 3. Where the plan stands, after taking a skip if one was asked for.
@@ -1461,7 +1492,7 @@ where
             let started = start(progress, Step::Skipping);
             let found = self.skip(&standing, now, reason).await?;
             finish(progress, &mut run, started, Ok(found));
-            standing = self.ports.microcycle.standing(now).await?;
+            standing = self.standing(now).await?;
             diary = self.ports.diary.diary().await?;
         }
         let reschedule = standing.reschedule(diary.clone());
@@ -1473,8 +1504,8 @@ where
         // holds it, then issued and delivered.
         let upcoming = self
             .ports
-            .upcoming
-            .held(upcoming(
+            .held
+            .upcoming(upcoming(
                 &self.ports.gym,
                 &self.ports.cycling,
                 now,
@@ -1609,10 +1640,19 @@ where
     /// before anything is fetched, and the time now.
     async fn judge(&self, now: DayPart) -> Result<Judge, NextError> {
         Ok(Judge {
-            standing: self.ports.microcycle.standing(now).await?,
+            standing: self.standing(now).await?,
             now,
             at: self.ports.fetches.now(),
         })
+    }
+
+    /// Where the plan stands at `now`: as the frontend holds it, where it
+    /// holds it at what the store now says, and walked otherwise (#830).
+    async fn standing(&self, now: DayPart) -> Result<Standing, StoreError> {
+        self.ports
+            .held
+            .standing(now, self.ports.microcycle.standing(now))
+            .await
     }
 
     /// Why walk `at` of `walks`, landing in `stream`, is not fetched this run,

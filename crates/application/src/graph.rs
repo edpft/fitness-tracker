@@ -230,29 +230,61 @@ impl Table {
 }
 
 /// What a derivation, a page or a prescription reads.
+///
+/// **Two kinds of read** (#830). What it is versioned by moves it: it is
+/// derived or drawn again whenever one of those does. What it only consults is
+/// read as it stands whenever it is derived, and moves nothing. A test's per
+/// kilo is fixed by the weigh-in on the day of the test, so the tests consult
+/// body weight: a weigh-in today changes no test, and the tests are derived
+/// again only when they move.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Reads(BTreeSet<Node>);
+pub struct Reads {
+    versions: BTreeSet<Node>,
+    consulted: BTreeSet<Node>,
+}
 
 impl Reads {
+    /// Reads of `nodes` that version what reads them.
     #[must_use]
     pub fn of(nodes: impl IntoIterator<Item = Node>) -> Self {
-        Self(nodes.into_iter().collect())
+        Self {
+            versions: nodes.into_iter().collect(),
+            consulted: BTreeSet::new(),
+        }
+    }
+
+    /// Reads of `nodes`, consulted as they stand when what reads them is
+    /// derived, and moving nothing.
+    #[must_use]
+    pub fn consulting(nodes: impl IntoIterator<Item = Node>) -> Self {
+        Self {
+            versions: BTreeSet::new(),
+            consulted: nodes.into_iter().collect(),
+        }
     }
 
     /// What either reads.
     #[must_use]
     pub fn and(mut self, other: Self) -> Self {
-        self.0.extend(other.0);
+        self.versions.extend(other.versions);
+        self.consulted.extend(other.consulted);
         self
     }
 
+    /// What it is versioned by.
     pub fn nodes(&self) -> impl Iterator<Item = &Node> {
-        self.0.iter()
+        self.versions.iter()
     }
 
+    /// What it only consults.
+    pub fn consulted(&self) -> impl Iterator<Item = &Node> {
+        self.consulted.iter()
+    }
+
+    /// Whether it is versioned by `node`.
     #[must_use]
     pub fn has(&self, node: &Node) -> bool {
-        self.0.contains(node)
+        self.versions.contains(node)
     }
 }
 
@@ -424,16 +456,33 @@ impl Graph {
     }
 
     /// Everything `reads` reads, and everything that is derived from, to the
-    /// inputs nothing derives.
+    /// inputs nothing derives: what it consults as well as what versions it.
     #[must_use]
     pub fn upstream(&self, reads: &Reads) -> BTreeSet<Node> {
+        self.walk(reads, |reads| reads.nodes().chain(reads.consulted()))
+    }
+
+    /// What moves what `reads` reads: everything it is versioned by, and
+    /// everything those are versioned by, to the inputs nothing derives.
+    #[must_use]
+    pub fn moved_by(&self, reads: &Reads) -> BTreeSet<Node> {
+        self.walk(reads, Reads::nodes)
+    }
+
+    /// Every node reached from `reads`, following what `follow` says each
+    /// one reads.
+    fn walk<'a, I: Iterator<Item = &'a Node>>(
+        &'a self,
+        reads: &'a Reads,
+        follow: impl Fn(&'a Reads) -> I,
+    ) -> BTreeSet<Node> {
         let mut seen = BTreeSet::new();
-        let mut pending: Vec<&Node> = reads.nodes().collect();
+        let mut pending: Vec<&Node> = follow(reads).collect();
         while let Some(node) = pending.pop() {
             if seen.insert(node.clone())
                 && let Some(inputs) = self.derivations.get(node)
             {
-                pending.extend(inputs.nodes());
+                pending.extend(follow(inputs));
             }
         }
         seen
@@ -512,6 +561,27 @@ mod tests {
                 Part::Normalising(stream("peloton.rides")),
                 Part::Canonicalising(CanonicalLayer::Cycling),
             ]
+        );
+    }
+
+    /// **What a node consults is collected for it, and moves nothing**
+    /// (#830): the rides consulting the weigh-ins still wait on Withings to be
+    /// fetched, but a weigh-in does not move them.
+    #[test]
+    fn a_consulted_read_is_collected_and_moves_nothing() {
+        let weigh_ins = Node::Normalised(stream("withings.measurements"));
+        let graph = Graph::of([Derivation {
+            node: Node::Canonical(CanonicalLayer::Cycling),
+            reads: Reads::of([Node::Normalised(stream("peloton.rides"))])
+                .and(Reads::consulting([weigh_ins.clone()])),
+        }]);
+        let rides = Reads::of([Node::Canonical(CanonicalLayer::Cycling)]);
+        assert!(graph.upstream(&rides).contains(&weigh_ins));
+        assert!(!graph.moved_by(&rides).contains(&weigh_ins));
+        assert!(
+            graph
+                .moved_by(&rides)
+                .contains(&Node::Normalised(stream("peloton.rides")))
         );
     }
 

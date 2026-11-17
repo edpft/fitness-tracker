@@ -15,7 +15,7 @@ use application::{
     cycling::RidingPorts,
     microcycle::{Microcycle, MicrocyclePorts},
     next::{
-        CanonicalPorts, CyclingPorts, Done, GymPorts, GymReads, HeldUpcoming, IfGoing, Next,
+        CanonicalPorts, CyclingPorts, Done, GymPorts, GymReads, HeldNodes, IfGoing, Next,
         NextError, NextPorts, NoAccess, Progress, Refetch, Report, Scope, Unheld,
     },
 };
@@ -118,7 +118,7 @@ pub async fn run(
 
 /// The store a run of `next` reads and writes, and what of it the frontend
 /// holds (#830).
-pub trait Holds: HeldUpcoming + Sync {
+pub trait Holds: HeldNodes + Sync {
     fn store(&self) -> &Store;
     fn zone(&self) -> &OperatorZone;
 }
@@ -130,12 +130,23 @@ pub struct Afresh<'a> {
     pub zone: &'a OperatorZone,
 }
 
-impl HeldUpcoming for Afresh<'_> {
-    async fn held<F>(&self, derive: F) -> std::sync::Arc<application::next::Upcoming>
+impl HeldNodes for Afresh<'_> {
+    async fn standing<F>(
+        &self,
+        now: DayPart,
+        read: F,
+    ) -> Result<application::microcycle::Standing, StoreError>
+    where
+        F: Future<Output = Result<application::microcycle::Standing, StoreError>> + Send,
+    {
+        Unheld.standing(now, read).await
+    }
+
+    async fn upcoming<F>(&self, derive: F) -> std::sync::Arc<application::next::Upcoming>
     where
         F: Future<Output = application::next::Upcoming> + Send,
     {
-        Unheld.held(derive).await
+        Unheld.upcoming(derive).await
     }
 }
 
@@ -157,14 +168,14 @@ impl Holds for Afresh<'_> {
 /// [`NextFailure`] if the store or a lock is unavailable. A source that cannot
 /// be reached is a failed step and nothing more (§ 36).
 pub async fn collect(
-    store: &Store,
-    zone: &OperatorZone,
+    held: &impl Holds,
     credentials: &infrastructure::Credentials,
     now: DayPart,
     scope: &Scope,
     run: Run,
     progress: &(impl Progress + Sync),
 ) -> Result<Vec<Done>, NextFailure> {
+    let (store, zone) = (held.store(), held.zone());
     let refetch = run.refetch();
     let spanned = telemetry::Spanned::new(progress, run.span);
     let answered = Box::pin(
@@ -174,7 +185,7 @@ pub async fn collect(
             credentials,
             refetch,
             Asked::Collect { scope, now },
-            &Unheld,
+            held,
             &spanned,
         )
         .instrument(spanned.run.clone()),
@@ -195,14 +206,14 @@ pub async fn collect(
 ///
 /// [`NextFailure`] if the store is unavailable.
 pub async fn wanted(
-    store: &Store,
-    zone: &OperatorZone,
+    held: &impl Holds,
     credentials: &infrastructure::Credentials,
     now: DayPart,
     scope: &Scope,
     frontend: telemetry::Frontend,
 ) -> Result<bool, NextFailure> {
     use tracing::Instrument as _;
+    let (store, zone) = (held.store(), held.zone());
     match Box::pin(
         over(
             store,
@@ -210,7 +221,7 @@ pub async fn wanted(
             credentials,
             frontend.refetch(),
             Asked::Wanted { scope, now },
-            &Unheld,
+            held,
             &Unheard,
         )
         .instrument(telemetry::checking()),
@@ -289,7 +300,7 @@ async fn over(
     credentials: &infrastructure::Credentials,
     refetch: Refetch,
     asked: Asked<'_>,
-    held: &(impl HeldUpcoming + Sync),
+    held: &(impl HeldNodes + Sync),
     progress: &(impl Progress + Sync),
 ) -> Result<Answered, NextFailure> {
     // **This build collects the gym from Hevy and cycling from Peloton**, and
@@ -374,7 +385,7 @@ async fn over(
         fetches: Fetches(store.adapter(SqliteExtractionRunLog::new)),
         zone: zone.clone(),
         refetch,
-        upcoming: held,
+        held,
     });
 
     // **Boxed, because it holds every source's fetch at once** (#468).
