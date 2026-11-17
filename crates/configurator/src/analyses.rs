@@ -112,23 +112,26 @@ impl Analysed for Composition {
     }
 }
 
-/// The plans, as written and as they now stand, and the holidays their term
-/// was read in.
+/// The walk through the plan at this part of the day: the plans, as written
+/// and as they now stand, the holidays their term was read in, the diary, and
+/// where the microcycle stands.
+///
+/// **The one walk** (#830): the charts' ranges and aims, and where the home
+/// page says the plan stands, all read it, so the plan is walked once.
 pub struct Plans;
 
 impl Analysed for Plans {
     const ANALYSIS: Analysis = Analysis::Plans;
-    type Ports = rescheduling::Plans;
-    type Reads = ();
-    type Value = rescheduling::Plans;
+    type Ports = rescheduling::Walk;
+    type Reads = Now;
+    type Value = rescheduling::Walked;
 
-    /// **The walk is the read**: opening the plans walks them.
     async fn open(store: &Store, zone: &OperatorZone) -> Result<Self::Ports, NextFailure> {
-        rescheduling::plans(store, zone).await
+        rescheduling::Walk::over(store, zone).await
     }
 
-    async fn derive(ports: Self::Ports, (): ()) -> Result<Self::Value, NextFailure> {
-        Ok(ports)
+    async fn derive(walk: Self::Ports, now: DayPart) -> Result<Self::Value, NextFailure> {
+        Ok(walk.walked_on(now).await?)
     }
 }
 
@@ -281,10 +284,15 @@ impl Analysed for Strength {
 
     async fn derive(
         ports: Self::Ports,
-        (plans, weight, today): (Arc<rescheduling::Plans>, Arc<body_weight::Series>, Date),
+        (walked, weight, today): (Arc<rescheduling::Walked>, Arc<body_weight::Series>, Date),
     ) -> Result<Self::Value, NextFailure> {
         Ok(ports
-            .read(today, plans.written(), plans.now(), &weight.weigh_ins)
+            .read(
+                today,
+                walked.plans.written(),
+                walked.plans.now(),
+                &weight.weigh_ins,
+            )
             .await?)
     }
 }
@@ -515,8 +523,8 @@ macro_rules! composed {
 
 composed!(
     /// The macrocycle in force today: `None` on a day no plan is in force.
-    Macrocycle: Option<Frame> = |(plans, today): (Arc<rescheduling::Plans>, Date)| {
-        Frame::on(today, plans.now())
+    Macrocycle: Option<Frame> = |(walked, today): (Arc<rescheduling::Walked>, Date)| {
+        Frame::on(today, walked.plans.now())
     },
     from (Of<Plans>, Today)
 );
@@ -524,16 +532,16 @@ composed!(
 composed!(
     /// The ranges a chart can be read over today, which every chart offering
     /// a range reads.
-    Ranges: range::Ranges = |(plans, today): (Arc<rescheduling::Plans>, Date)| {
-        application::ranges::of(today, plans.now())
+    Ranges: range::Ranges = |(walked, today): (Arc<rescheduling::Walked>, Date)| {
+        application::ranges::of(today, walked.plans.now())
     },
     from (Of<Plans>, Today)
 );
 
 composed!(
     /// The plan's aims for body weight, as they stand today.
-    Aims: Vec<Aim> = |(plans, today): (Arc<rescheduling::Plans>, Date)| {
-        application::body_weight::aims_on(today, plans.now(), plans.holidays())
+    Aims: Vec<Aim> = |(walked, today): (Arc<rescheduling::Walked>, Date)| {
+        application::body_weight::aims_on(today, walked.plans.now(), walked.plans.holidays())
     },
     from (Of<Plans>, Today)
 );
@@ -735,31 +743,34 @@ impl<I: application::graph::Input> application::graph::Input for Over<I> {
     }
 }
 
-/// What Plan reads, as a type.
-pub struct PlanReads;
+/// What planning the macrocycle reads, besides the walk, as a type.
+pub struct Planning;
 
-impl application::graph::Input for PlanReads {
+impl application::graph::Input for Planning {
     fn reads() -> application::graph::Reads {
-        crate::macrocycle::reads()
+        crate::macrocycle::planning()
     }
 }
 
-/// Where the plan stands now: the macrocycle's week and its curves, the
-/// microcycle's sessions, and what the walk read to say so.
+/// Where the plan stands now: the macrocycle's week and its curves, and the
+/// microcycle's sessions, as the one walk says.
 pub struct Standing;
 
 impl Analysed for Standing {
     const ANALYSIS: Analysis = Analysis::Standing;
-    type Ports = Over<PlanReads>;
-    type Reads = Now;
+    type Ports = Over<Planning>;
+    type Reads = Of<Plans>;
     type Value = Stood;
 
     async fn open(store: &Store, zone: &OperatorZone) -> Result<Self::Ports, NextFailure> {
         Ok(Over::new(store, zone))
     }
 
-    async fn derive(ports: Self::Ports, now: DayPart) -> Result<Self::Value, NextFailure> {
-        crate::macrocycle::stood(&ports.store, &ports.zone, now).await
+    async fn derive(
+        ports: Self::Ports,
+        walked: Arc<rescheduling::Walked>,
+    ) -> Result<Self::Value, NextFailure> {
+        crate::macrocycle::stood(&ports.store, &ports.zone, walked).await
     }
 }
 
@@ -775,20 +786,26 @@ impl application::graph::Input for Prescribers {
 
 /// What is next, and the session derived for it, written nowhere: what the
 /// home page shows, and what a run issues and delivers.
+///
+/// **From the walk, not from where the macrocycle stands**: what is next
+/// reads no curve.
 pub struct Prescription;
 
 impl Analysed for Prescription {
     const ANALYSIS: Analysis = Analysis::Prescription;
     type Ports = Over<Prescribers>;
-    type Reads = Of<Standing>;
+    type Reads = Of<Plans>;
     type Value = Upcoming;
 
     async fn open(store: &Store, zone: &OperatorZone) -> Result<Self::Ports, NextFailure> {
         Ok(Over::new(store, zone))
     }
 
-    async fn derive(ports: Self::Ports, stood: Arc<Stood>) -> Result<Self::Value, NextFailure> {
-        crate::next::upcoming(&ports.store, &ports.zone, &stood).await
+    async fn derive(
+        ports: Self::Ports,
+        walked: Arc<rescheduling::Walked>,
+    ) -> Result<Self::Value, NextFailure> {
+        crate::next::upcoming(&ports.store, &ports.zone, &walked).await
     }
 }
 

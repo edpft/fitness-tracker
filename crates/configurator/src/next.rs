@@ -444,8 +444,8 @@ pub(crate) fn gym_reads(
     })
 }
 
-/// What is next, as the store says it where the plan stood at `stood`, and
-/// the session derived for it, written nowhere (#830).
+/// What is next, as the store says it where `walked` says the plan stands,
+/// and the session derived for it, written nowhere (#830).
 ///
 /// **Without a login**, as the plan reads it: the classes a ride is chosen
 /// from are the ones stored.
@@ -456,7 +456,7 @@ pub(crate) fn gym_reads(
 pub(crate) async fn upcoming(
     store: &Store,
     zone: &OperatorZone,
-    stood: &crate::macrocycle::Stood,
+    walked: &crate::rescheduling::Walked,
 ) -> Result<application::next::Upcoming, NextFailure> {
     let classes = store.peloton_classes();
     let riding = riding(store, zone, ClassCatalogue::over(&classes, None))?;
@@ -470,10 +470,10 @@ pub(crate) async fn upcoming(
     Ok(application::next::upcoming(
         &gym,
         &riding,
-        stood.now,
-        &stood.standing,
-        &stood.diary,
-        &stood.reschedule,
+        walked.now,
+        &walked.standing,
+        &walked.diary,
+        &walked.reschedule,
     )
     .await)
 }

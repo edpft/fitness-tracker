@@ -700,6 +700,7 @@ impl MesocycleCommitter for Committer {
         _holidays: &Holidays,
         _standing: &Standing,
         _diary: &Diary,
+        _plans: &[Plan],
     ) -> Result<Option<domain::macrocycle::PlannedMacrocycle>, CommitError> {
         Ok(None)
     }

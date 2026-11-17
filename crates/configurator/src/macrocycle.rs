@@ -1,19 +1,16 @@
 //! The macrocycle as planned, over this build's store: what Plan opens with
 //! (#770, #789).
 
+use std::sync::Arc;
+
 use application::graph::{Input, Reads};
+use application::next::PlanStanding;
 use application::{
     HolidayCalendar as _,
     commit::{CommitError, CommitPorts, Committing},
     next::Scope,
-    reschedule::WalkedPlans,
 };
-use application::{microcycle::Standing, next::PlanStanding, reschedule::Reschedule};
-use domain::{
-    macrocycle::PlannedMacrocycle,
-    normalised::OperatorZone,
-    schedule::{DayPart, Diary},
-};
+use domain::{macrocycle::PlannedMacrocycle, normalised::OperatorZone};
 use infrastructure::{
     SqliteCanonicalCyclingSessionStore, SqliteGenerationParameterStore, SqlitePlanStore,
     peloton::{PelotonHoldingRides, PelotonProgrammes, catalogue::ClassCatalogue},
@@ -63,6 +60,13 @@ pub fn reads() -> Reads {
         .and(Now::reads())
 }
 
+/// What planning the macrocycle among the walk's plans reads: what the
+/// committer does, and the calendars where the walk could not read them.
+#[must_use]
+pub fn planning() -> Reads {
+    <Committer<'static> as Input>::reads().and(Calendars::reads())
+}
+
 /// The parts a run collecting what Plan reads takes (#809).
 #[must_use]
 pub fn collects() -> Scope {
@@ -108,22 +112,20 @@ pub async fn planned(
             .map_err(CommitError::from)?;
         // The calendars are read again only where the walk could not read
         // them, so that their failure is said as it always was.
-        let holidays = match walk.holidays() {
+        let holidays = match walked.plans.holidays() {
             Some(holidays) => holidays.clone(),
             None => holidays::calendars(store)
                 .holidays()
                 .await
                 .map_err(CommitError::from)?,
         };
-        let plans = WalkedPlans::new(walked.written, &walked.reschedule, None, &walk)
-            .map_err(CommitError::from)?;
         committer
             .planned_among(
                 now.day_part(),
                 &holidays,
                 &walked.standing,
                 &walked.diary,
-                plans.now(),
+                walked.plans.now(),
             )
             .await
     }
@@ -132,21 +134,18 @@ pub async fn planned(
     .map_err(PlannedFailure::from)
 }
 
-/// Where the plan stands at a part of the day, and what the walk read to say
-/// so (#830): what the home page's microcycle and curves are drawn from, and
+/// Where the plan stands at a part of the day, and the walk that says so
+/// (#830): what the home page's microcycle and curves are drawn from, and
 /// what is next is derived from.
 pub struct Stood {
-    pub now: DayPart,
-    pub standing: Standing,
-    pub diary: Diary,
-    pub reschedule: Reschedule,
+    pub walked: Arc<Walked>,
     pub plan: PlanStanding,
 }
 
-/// Where the plan stands at `now`, as a run says it.
+/// Where the plan stands, as `walked` says, as a run says it.
 ///
-/// **The walk is read once**, and what it read is held with it, so deriving
-/// what is next walks nothing again.
+/// **The walk is not walked again**, nor the plans read again: what it read
+/// is what the macrocycle is planned among.
 ///
 /// # Errors
 ///
@@ -154,7 +153,7 @@ pub struct Stood {
 pub(crate) async fn stood(
     store: &Store,
     zone: &OperatorZone,
-    now: DayPart,
+    walked: Arc<Walked>,
 ) -> Result<Stood, NextFailure> {
     let classes = store.peloton_classes();
     let catalogue = ClassCatalogue::over(&classes, None);
@@ -168,32 +167,18 @@ pub(crate) async fn stood(
         },
         zone.clone(),
     );
-    let walk = Walk::over(store, zone).await?;
-    let Walked {
-        diary,
-        standing,
-        reschedule,
-        ..
-    } = walk.walked_on(now).await?;
-    let holidays = match walk.holidays() {
+    let holidays = match walked.plans.holidays() {
         Some(holidays) => Ok(holidays.clone()),
         None => holidays::calendars(store).holidays().await,
     };
     let plan = application::next::plan_standing(
         &committer,
-        &store.adapter_with(SqlitePlanStore::new, zone.clone()),
-        now,
+        walked.plans.now(),
+        walked.now,
         holidays,
-        &standing,
-        &diary,
-        &reschedule,
+        &walked.standing,
+        &walked.diary,
     )
     .await?;
-    Ok(Stood {
-        now,
-        standing,
-        diary,
-        reschedule,
-        plan,
-    })
+    Ok(Stood { walked, plan })
 }
