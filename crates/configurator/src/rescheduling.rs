@@ -19,7 +19,6 @@ use application::{
 };
 use domain::{
     normalised::OperatorZone,
-    plan::Plan,
     schedule::{DayPart, Diary, Holidays},
 };
 use infrastructure::{
@@ -57,12 +56,18 @@ reads! {
 
 /// What a walk read, and where it says the plan stands: each read once, for
 /// whatever reads them after (#817).
-pub(crate) struct Walked {
-    /// Every plan in force, as written.
-    pub(crate) written: Vec<Plan>,
-    pub(crate) diary: Diary,
-    pub(crate) standing: Standing,
-    pub(crate) reschedule: Reschedule,
+///
+/// **One walk for everything that reads the plan** (#830): what a chart's
+/// ranges and aims are drawn across, and where the home page says the plan
+/// stands, are read from this one walk.
+pub struct Walked {
+    /// The part of the day it was walked at.
+    pub now: DayPart,
+    /// The plans, as written and as they now stand.
+    pub plans: Plans,
+    pub diary: Diary,
+    pub standing: Standing,
+    pub reschedule: Reschedule,
 }
 
 /// The plans, as written and as they now stand: what Plan reads, so every
@@ -152,9 +157,11 @@ impl Walk {
             .microcycle
             .standing_among(now, &written, &diary)
             .await?;
+        let reschedule = standing.reschedule(diary.clone());
         Ok(Walked {
-            written,
-            reschedule: standing.reschedule(diary.clone()),
+            now,
+            plans: Plans::new(written, &reschedule, self.holidays().cloned(), self)?,
+            reschedule,
             standing,
             diary,
         })
@@ -171,23 +178,6 @@ impl StandingReader for Walk {
     async fn standing(&self, now: DayPart) -> Result<Standing, StoreError> {
         self.microcycle.standing(now).await
     }
-}
-
-/// The plans as they now stand, walked over `store`.
-///
-/// # Errors
-///
-/// [`NextFailure`] if the store cannot be read.
-pub async fn plans(store: &Store, zone: &OperatorZone) -> Result<Plans, NextFailure> {
-    let walk = Walk::over(store, zone).await?;
-    let walked = walk.walked(zone).await?;
-    let holidays = walk.holidays().cloned();
-    Ok(Plans::new(
-        walked.written,
-        &walked.reschedule,
-        holidays,
-        &walk,
-    )?)
 }
 
 /// The gym's mesocycles as the plan now stands, walked over `store`.

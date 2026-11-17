@@ -419,8 +419,8 @@ impl application::next::HeldNodes for HeldNext<'_> {
             now,
             ..self.holding()
         };
-        match holding.held::<crate::analyses::Standing>().await {
-            Ok(stood) => Ok(stood.standing.clone()),
+        match holding.held::<crate::analyses::Plans>().await {
+            Ok(walked) => Ok(walked.standing.clone()),
             Err(_) => read.await,
         }
     }

@@ -772,13 +772,19 @@ pub trait MesocycleCommitter {
     ///
     /// # Errors
     ///
-    /// [`CommitError`] if the plan cannot be read or the rest will not build.
+    /// Planned among `plans`, every plan in force as it now stands, as the
+    /// walk read them: the plan is not read again (#830).
+    ///
+    /// # Errors
+    ///
+    /// [`CommitError`] if the rest will not build.
     fn planned(
         &self,
         now: DayPart,
         holidays: &Holidays,
         standing: &Standing,
         diary: &Diary,
+        plans: &[Plan],
     ) -> impl Future<Output = Result<Option<PlannedMacrocycle>, CommitError>> + Send;
 }
 
@@ -811,8 +817,10 @@ where
         holidays: &Holidays,
         standing: &Standing,
         diary: &Diary,
+        plans: &[Plan],
     ) -> Result<Option<PlannedMacrocycle>, CommitError> {
-        Self::planned(self, now, holidays, standing, diary).await
+        self.planned_among(now, holidays, standing, diary, plans)
+            .await
     }
 }
 
@@ -2319,14 +2327,16 @@ where
         diary: &Diary,
         reschedule: &Reschedule,
     ) -> Result<PlanStanding, NextError> {
+        let plans = ReschedulingPlans::new(self.ports.plans.clone(), reschedule.clone())
+            .plans()
+            .await?;
         plan_standing(
             &self.ports.committing,
-            &self.ports.plans,
+            &plans,
             now,
             holidays,
             standing,
             diary,
-            reschedule,
         )
         .await
     }
@@ -2361,21 +2371,23 @@ where
 /// Where the plan stands at `now`: the macrocycle's week, its curves, where
 /// each discipline's mesocycle is, and the microcycle's sessions (#830).
 ///
+/// **Among `plans`**, every plan in force as it now stands: read by whatever
+/// walked to `standing`, and not read again here.
+///
 /// # Errors
 ///
-/// [`NextError`] if the plans cannot be read.
-pub async fn plan_standing<P: PlanStore + Clone + Send + Sync>(
+/// [`NextError`] if a mesocycle the macrocycle would choose will not build.
+pub async fn plan_standing(
     committing: &(impl MesocycleCommitter + Sync),
-    plans: &P,
+    plans: &[Plan],
     now: DayPart,
     holidays: Result<Holidays, SourceError>,
     standing: &Standing,
     diary: &Diary,
-    reschedule: &Reschedule,
 ) -> Result<PlanStanding, NextError> {
     let curves = match &holidays {
         Ok(holidays) => committing
-            .planned(now, holidays, standing, diary)
+            .planned(now, holidays, standing, diary, plans)
             .await
             .map(|planned| planned.map(|planned| curves_of(&planned, standing))),
         Err(_) => Ok(None),
@@ -2394,15 +2406,13 @@ pub async fn plan_standing<P: PlanStore + Clone + Send + Sync>(
         ),
     };
 
-    let plans = ReschedulingPlans::new(plans.clone(), reschedule.clone());
-    let plan = match standing.commencing {
-        Some(monday) => covering(&plans, monday).await?,
-        None => None,
-    };
+    let plan = standing
+        .commencing
+        .and_then(|monday| plans.iter().find(|plan| plan.span().covers(monday)));
     let disciplines = [Discipline::Gym, Discipline::Cycling]
         .into_iter()
         .map(|discipline| {
-            let position = plan.as_ref().and_then(|plan| {
+            let position = plan.and_then(|plan| {
                 let date = standing
                     .sessions
                     .iter()
@@ -2690,18 +2700,6 @@ async fn all<A: Future, B: Future, C: Future, D: Future>(
         }
     })
     .await
-}
-
-/// The plan covering a date, as it now stands.
-async fn covering<P: PlanStore + Sync>(
-    plans: &ReschedulingPlans<P>,
-    date: Date,
-) -> Result<Option<Plan>, StoreError> {
-    Ok(plans
-        .plans()
-        .await?
-        .into_iter()
-        .find(|plan| plan.span().covers(date)))
 }
 
 /// Which mesocycle of the plan a discipline is in on a date, and which week of

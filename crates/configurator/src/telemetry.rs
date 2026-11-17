@@ -19,6 +19,7 @@ use application::{
 };
 use domain::{
     macrocycle::PlannedMacrocycle,
+    plan::Plan,
     planner::Discipline,
     schedule::{DayPart, Diary, Holidays},
 };
@@ -167,9 +168,10 @@ impl<C: MesocycleCommitter + Sync> MesocycleCommitter for Staged<C> {
         holidays: &Holidays,
         standing: &Standing,
         diary: &Diary,
+        plans: &[Plan],
     ) -> Result<Option<PlannedMacrocycle>, CommitError> {
         self.0
-            .planned(now, holidays, standing, diary)
+            .planned(now, holidays, standing, diary, plans)
             .instrument(stage("planning", "asked", "planned"))
             .await
     }
