@@ -86,6 +86,7 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
             SELECT d.prescription AS "prescription!: i64",
                    d.reference    AS "reference!: String",
                    d.rendering    AS "rendering: Vec<u8>",
+                   d.delivered_at AS "delivered_at!: String",
                    EXISTS (
                        SELECT 1 FROM gym_workout AS w
                        WHERE w.performed_against = d.reference
@@ -129,6 +130,9 @@ impl PrescriptionDeliveryStore for SqlitePrescriptionDeliveryStore {
             reference,
             rendering,
             performed: row.performed != 0,
+            delivered_at: row.delivered_at.parse().map_err(|_| StoreError::Corrupt {
+                detail: format!("{:?} does not time a delivery", row.delivered_at),
+            })?,
         }))
     }
 

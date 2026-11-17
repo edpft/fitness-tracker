@@ -3272,6 +3272,8 @@ pub struct Occupant {
     /// renderings makes it reachable, and the answer is the one 0022 assumed:
     /// a session the operator has done is not rewritten under them.
     pub performed: bool,
+    /// When what is in the place was put there.
+    pub delivered_at: Timestamp,
 }
 
 /// What has already been delivered, and where.

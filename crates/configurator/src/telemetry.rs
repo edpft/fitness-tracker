@@ -199,6 +199,9 @@ impl<G: GymSessions + Sync> GymSessions for Staged<G> {
             .instrument(stage("issuing", "discipline", Discipline::Gym.as_str()))
             .await
     }
+    fn reachable(&self) -> bool {
+        self.0.reachable()
+    }
 }
 
 impl<Y: CyclingDeriving + Sync> CyclingDeriving for Staged<Y> {
@@ -225,6 +228,9 @@ impl<Y: CyclingSessions + Sync> CyclingSessions for Staged<Y> {
             .prescribed(derived)
             .instrument(stage("issuing", "discipline", Discipline::Cycling.as_str()))
             .await
+    }
+    fn reachable(&self) -> bool {
+        self.0.reachable()
     }
 }
 
