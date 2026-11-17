@@ -13,19 +13,13 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use configurator::{
-    analyses::{BodyWeight, Composition, Plans},
-    clock::Today,
-    held::Of,
-    rescheduling,
-};
+use configurator::{analyses::WeightAndComposition, held::Ranged};
 use domain::analytical::{
     body_weight::{Aim, METHOD, Series},
     composition::{ComponentSeries, TREND},
     confidence::BAND,
     range::{Over, Range, Ranges},
 };
-use jiff::civil::Date;
 use maud::{Markup, html};
 
 use crate::{card::Card, composition, detail, page::Group, weight};
@@ -38,17 +32,12 @@ pub const TITLE: &str = Group::Body.heading();
 /// The pages this one replaced, which now open it.
 pub const REPLACED: [&str; 2] = ["/body-weight", "/body-composition"];
 
-/// What every card on the page reads: the weigh-ins and the composition,
-/// whose recorded days together are the range each is drawn over, and the
-/// plans the aims and the ranges are drawn from.
-type Reads = (Of<BodyWeight>, Of<Composition>, Of<Plans>, Today);
+/// What every chart on the page reads: the weigh-ins and the composition,
+/// whose recorded days together are the range each is drawn over, the aims,
+/// and the ranges.
+type Reads = Ranged<configurator::analyses::Body>;
 
-type Read = (
-    Arc<Series>,
-    Arc<Vec<ComponentSeries>>,
-    Arc<rescheduling::Plans>,
-    Date,
-);
+type Read = (Arc<WeightAndComposition>, Arc<Ranges>);
 
 /// What the page's cards are drawn from, over a range.
 pub struct Body<'a> {
@@ -61,15 +50,12 @@ pub struct Body<'a> {
 
 impl Body<'_> {
     /// Draw `card` from `read`, over `over`.
-    fn drawn(read: &Read, over: Over, card: impl FnOnce(&Body<'_>) -> Markup) -> Markup {
-        let (series, components, plans, today) = read;
-        let aims = application::body_weight::aims_on(*today, plans.now(), plans.holidays());
-        let ranges = application::ranges::of(*today, plans.now());
+    fn drawn((read, ranges): &Read, over: Over, card: impl FnOnce(&Body<'_>) -> Markup) -> Markup {
         card(&Body {
-            series,
-            components,
-            aims: &aims,
-            ranges: &ranges,
+            series: &read.series,
+            components: &read.components,
+            aims: &read.aims,
+            ranges,
             over,
         })
     }

@@ -45,6 +45,24 @@ impl DerivationLedger for SqliteDerivationLedger {
         Ok(row.and_then(|row| row.derived_from).map(DerivedFrom::from))
     }
 
+    /// **Any success, recorded or not**: a failed derivation writes nothing,
+    /// so a stream with none has an empty layer.
+    async fn ever_normalised(&self, stream: &LandingStream) -> Result<bool, StoreError> {
+        let stream = stream.to_string();
+        let ever = sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS (
+                SELECT 1 FROM normalisation_run WHERE stream = ? AND outcome = 'succeeded'
+            ) AS "ever: bool"
+            "#,
+            stream
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+        Ok(ever)
+    }
+
     async fn record_normalised(
         &self,
         run: NormalisationRunId,

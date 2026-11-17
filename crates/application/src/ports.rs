@@ -3741,6 +3741,17 @@ pub trait DerivationLedger {
         stream: &LandingStream,
     ) -> impl Future<Output = Result<Option<DerivedFrom>, StoreError>> + Send;
 
+    /// Whether the stream's normalised layer has ever been derived, by a run
+    /// or by hand: one never derived is empty, which is a version (#830).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn ever_normalised(
+        &self,
+        stream: &LandingStream,
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
+
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.

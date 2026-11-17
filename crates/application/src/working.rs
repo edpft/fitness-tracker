@@ -48,7 +48,8 @@ use jiff::civil::Date;
 use crate::one_rep_max::{Lift, Tests};
 
 /// The macrocycle in force on a day, as every card measured against it reads
-/// it: when it began and the days of its mesocycles (#830).
+/// it: when it began, the days of its mesocycles, and the day it is read on
+/// (#830).
 ///
 /// **The macrocycle is the plan in force**, as the pages' ranges read it
 /// (#443), and its start is the plan's first day whatever was performed in its
@@ -57,6 +58,8 @@ use crate::one_rep_max::{Lift, Tests};
 pub struct Frame {
     /// Its intended start: the first day of the plan.
     pub began: Date,
+    /// The day it is read on, which every reading over it runs to.
+    pub today: Date,
     /// The days of each of its mesocycles, oldest first.
     pub mesocycles: Vec<Span>,
     /// The first day of the macrocycle before it, where there was one.
@@ -72,6 +75,7 @@ impl Frame {
         let began = plan.span().start();
         Some(Self {
             began,
+            today,
             mesocycles: plan.mesocycle_spans(),
             last_began: plans
                 .iter()
@@ -80,6 +84,22 @@ impl Frame {
                 .max(),
         })
     }
+}
+
+/// A reading over the macrocycle in force, and the macrocycle it is read
+/// over, which a summary is drawn across.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Framed<T> {
+    pub frame: Frame,
+    pub read: T,
+}
+
+/// Has this macrocycle improved my fitness so far? Every test, with the
+/// estimate beside it, and every response reading.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SoFar {
+    pub performance: Vec<Performance>,
+    pub responses: Vec<Responding>,
 }
 
 /// What a test measures.
@@ -210,22 +230,6 @@ fn responding<'a, T: Copy + 'a>(
                 .collect();
             response(&days, carried, began, today)
         }),
-    }
-}
-
-/// The FTP test's reading over the macrocycle that `began`, with heart rate
-/// at 140 W, one series per device, read beside it.
-#[must_use]
-pub fn cycling(
-    ftp_tests: &[ftp_test::Test],
-    at_power: &[heart_rate_at_power::Trended],
-    began: Date,
-    today: Date,
-) -> Performance {
-    Performance {
-        tested: Tested::Ftp,
-        since: ftp(ftp_tests, began, today),
-        estimated: self::at_power(at_power, began, today),
     }
 }
 

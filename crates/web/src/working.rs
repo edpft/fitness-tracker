@@ -26,17 +26,12 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use application::working::{self, Answering, Frame, Performance, Responding, Tested};
+use application::working::{self, Answering, Frame, Framed, Performance, Responding, Tested};
 use configurator::{
-    analyses::{
-        FtpTests, HeartRateAtPower, OvernightHrvResponse, Plans, RestingHeartRateResponse,
-        Strength, StressResponse,
-    },
-    clock::Today,
+    analyses::{FitnessSoFar, Macrocycle, Responses},
     held::Of,
-    rescheduling,
 };
-use domain::analytical::{ftp_test, heart_rate_at_power, range::Range, response::Week};
+use domain::analytical::{range::Range, response::Week};
 use jiff::civil::Date;
 use maud::{Markup, html};
 
@@ -66,51 +61,24 @@ pub struct SoFar;
 
 impl Card for SoFar {
     const NAME: &'static str = "working-so-far";
-    type Reads = (
-        Of<Plans>,
-        Of<FtpTests>,
-        Of<HeartRateAtPower>,
-        Of<Strength>,
-        Of<RestingHeartRateResponse>,
-        Of<OvernightHrvResponse>,
-        Of<StressResponse>,
-        Today,
-    );
+    type Reads = Of<FitnessSoFar>;
 
     fn asked(_: &HashMap<String, String>) -> Self {
         Self
     }
 
-    fn render(
-        &self,
-        (plans, tests, rides, strength, resting, hrv, stress, today): (
-            Arc<rescheduling::Plans>,
-            Arc<Vec<ftp_test::Test>>,
-            Arc<Vec<heart_rate_at_power::Trended>>,
-            Arc<(
-                Vec<application::one_rep_max::Tests>,
-                application::one_rep_max::View,
-            )>,
-            Arc<Option<Responding>>,
-            Arc<Option<Responding>>,
-            Arc<Option<Responding>>,
-            Date,
-        ),
-    ) -> Markup {
-        let Some(frame) = Frame::on(today, plans.now()) else {
-            return html! {};
-        };
-        let performance: Vec<Performance> =
-            std::iter::once(working::cycling(&tests, &rides, frame.began, today))
-                .chain(working::gym(
-                    &strength.0,
-                    &strength.1.lifts,
-                    frame.began,
-                    today,
-                ))
-                .collect();
-        let responses = responses(&[resting, hrv, stress]);
-        so_far(&performance, &responses, frame.began, today)
+    fn render(&self, read: Arc<Option<Framed<working::SoFar>>>) -> Markup {
+        read.as_ref().as_ref().map_or_else(
+            || html! {},
+            |read| {
+                so_far(
+                    &read.read.performance,
+                    &read.read.responses,
+                    read.frame.began,
+                    read.frame.today,
+                )
+            },
+        )
     }
 }
 
@@ -119,38 +87,18 @@ pub struct EachWeek;
 
 impl Card for EachWeek {
     const NAME: &'static str = "working-each-week";
-    type Reads = (
-        Of<Plans>,
-        Of<RestingHeartRateResponse>,
-        Of<OvernightHrvResponse>,
-        Of<StressResponse>,
-        Today,
-    );
+    type Reads = Of<Responses>;
 
     fn asked(_: &HashMap<String, String>) -> Self {
         Self
     }
 
-    fn render(
-        &self,
-        (plans, resting, hrv, stress, today): (
-            Arc<rescheduling::Plans>,
-            Arc<Option<Responding>>,
-            Arc<Option<Responding>>,
-            Arc<Option<Responding>>,
-            Date,
-        ),
-    ) -> Markup {
-        let Some(frame) = Frame::on(today, plans.now()) else {
-            return html! {};
-        };
-        each_week(&responses(&[resting, hrv, stress]), &frame, today)
+    fn render(&self, read: Arc<Option<Framed<Vec<Responding>>>>) -> Markup {
+        read.as_ref().as_ref().map_or_else(
+            || html! {},
+            |read| each_week(&read.read, &read.frame, read.frame.today),
+        )
     }
-}
-
-/// Each response reading there is, in order.
-fn responses(read: &[Arc<Option<Responding>>]) -> Vec<Responding> {
-    read.iter().filter_map(|one| one.as_ref().clone()).collect()
 }
 
 /// How a test's figures are written.
@@ -166,15 +114,17 @@ pub struct OnTheLast;
 
 impl Card for OnTheLast {
     const NAME: &'static str = "working-on-the-last";
-    type Reads = (Of<Plans>, Today);
+    type Reads = Of<Macrocycle>;
 
     fn asked(_: &HashMap<String, String>) -> Self {
         Self
     }
 
-    fn render(&self, (plans, today): (Arc<rescheduling::Plans>, Date)) -> Markup {
-        Frame::on(today, plans.now())
-            .map_or_else(|| html! {}, |frame| on_the_last(frame.last_began, today))
+    fn render(&self, frame: Arc<Option<Frame>>) -> Markup {
+        frame.as_ref().as_ref().map_or_else(
+            || html! {},
+            |frame| on_the_last(frame.last_began, frame.today),
+        )
     }
 }
 
@@ -522,6 +472,7 @@ mod tests {
         Shown {
             frame: Some(Frame {
                 began: BEGAN,
+                today: TODAY,
                 mesocycles: vec![
                     Span::new(BEGAN, 2),
                     Span::new(date(2026, 9, 28), 4),

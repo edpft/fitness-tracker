@@ -27,14 +27,11 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use application::working::{self, Frame, Performance, Tested};
+use application::working::{Frame, Performance, Tested};
 use configurator::{
-    analyses::{Plans, Strength},
-    clock::Today,
+    analyses::{GymPerformance, Macrocycle},
     held::Of,
-    rescheduling,
 };
-use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
 use crate::{
@@ -110,14 +107,14 @@ pub struct NoMacrocycle;
 
 impl Card for NoMacrocycle {
     const NAME: &'static str = "no-macrocycle";
-    type Reads = (Of<Plans>, Today);
+    type Reads = Of<Macrocycle>;
 
     fn asked(_: &HashMap<String, String>) -> Self {
         Self
     }
 
-    fn render(&self, (plans, today): (Arc<rescheduling::Plans>, Date)) -> Markup {
-        no_macrocycle(Frame::on(today, plans.now()).as_ref())
+    fn render(&self, frame: Arc<Option<Frame>>) -> Markup {
+        no_macrocycle(frame.as_ref().as_ref())
     }
 }
 
@@ -134,34 +131,14 @@ pub struct Gym;
 
 impl Card for Gym {
     const NAME: &'static str = "progress-gym";
-    type Reads = (Of<Plans>, Of<Strength>, Today);
+    type Reads = Of<GymPerformance>;
 
     fn asked(_: &HashMap<String, String>) -> Self {
         Self
     }
 
-    fn render(
-        &self,
-        (plans, strength, today): (
-            Arc<rescheduling::Plans>,
-            Arc<(
-                Vec<application::one_rep_max::Tests>,
-                application::one_rep_max::View,
-            )>,
-            Date,
-        ),
-    ) -> Markup {
-        Frame::on(today, plans.now()).map_or_else(
-            || html! {},
-            |frame| {
-                gym(&working::gym(
-                    &strength.0,
-                    &strength.1.lifts,
-                    frame.began,
-                    today,
-                ))
-            },
-        )
+    fn render(&self, performance: Arc<Vec<Performance>>) -> Markup {
+        gym(&performance)
     }
 }
 
@@ -380,6 +357,7 @@ mod tests {
         Shown {
             frame: Some(Frame {
                 began: BEGAN,
+                today: TODAY,
                 mesocycles: vec![
                     Span::new(BEGAN, 2),
                     Span::new(date(2026, 9, 28), 4),

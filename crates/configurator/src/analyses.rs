@@ -17,19 +17,23 @@ use application::{
     per_device::PerDevice,
     pulse_wave_velocity::PulseWaveVelocities,
     sleep::Sleeping,
-    working::{self, Frame, Responding},
+    working::{self, Frame, Framed, Performance, Responding, SoFar, Tested},
 };
 use domain::{
     analytical::{
-        body_weight,
+        body_weight::{self, Aim},
         composition::ComponentSeries,
         ftp_test,
         heart_rate::RideHeartRate,
         heart_rate_at_power, hrv,
         per_device::{DeviceSeries, per_device},
-        pulse_wave_velocity, resting, sleep, stress,
+        pulse_wave_velocity, range, resting,
+        since_entry::SinceEntry,
+        since_start::SinceStart,
+        sleep, stress,
         training_done::Carried,
     },
+    body::Component,
     cycling::Ftp,
     device::{self, Measurand},
     normalised::OperatorZone,
@@ -52,6 +56,25 @@ use crate::{
     one_rep_max, rescheduling,
     store::{Spanned, Store},
 };
+
+/// Each lift's 1RM tests, and its estimates over the macrocycle.
+pub type Lifts = (Vec<Tests>, View);
+
+/// A response reading over the macrocycle in force: `None` on a day no plan
+/// is in force.
+pub type Response = Option<Framed<Responding>>;
+
+/// Every response reading over the macrocycle in force.
+pub type ResponsesRead = Option<Framed<Vec<Responding>>>;
+
+/// Every test since its entry test, each estimate since the start, and every
+/// response reading: what fitness so far is read from.
+type Performed = (
+    Arc<Option<SinceEntry>>,
+    Arc<Option<SinceStart>>,
+    Arc<Vec<Performance>>,
+    Arc<ResponsesRead>,
+);
 
 /// Every canonical weigh-in, and the trend through them.
 pub struct BodyWeight;
@@ -247,7 +270,7 @@ impl Analysed for Strength {
     type Ports = one_rep_max::Strength;
     /// **Body weight consulted**, as the FTP tests consult it.
     type Reads = (Of<Plans>, Consulted<BodyWeight>, Today);
-    type Value = (Vec<Tests>, View);
+    type Value = Lifts;
 
     async fn open(store: &Store, zone: &OperatorZone) -> Result<Self::Ports, NextFailure> {
         Ok(application::one_rep_max::Strength::new(
@@ -319,8 +342,8 @@ macro_rules! response {
         impl Analysed for $node {
             const ANALYSIS: Analysis = Analysis::$node;
             type Ports = ();
-            type Reads = (Of<Plans>, Of<$series>, Of<Training>, Today);
-            type Value = Option<Responding>;
+            type Reads = (Of<Macrocycle>, Of<$series>, Of<Training>);
+            type Value = Response;
 
             async fn open(_: &Store, _: &OperatorZone) -> Result<Self::Ports, NextFailure> {
                 Ok(())
@@ -328,15 +351,16 @@ macro_rules! response {
 
             async fn derive(
                 (): Self::Ports,
-                (plans, series, carried, today): (
-                    Arc<rescheduling::Plans>,
+                (frame, series, carried): (
+                    Arc<Option<Frame>>,
                     Arc<<$series as Analysed>::Value>,
                     Arc<Carried>,
-                    Date,
                 ),
             ) -> Result<Self::Value, NextFailure> {
-                Ok(Frame::on(today, plans.now())
-                    .map(|frame| $read(&series, &carried, frame.began, today)))
+                Ok(frame.as_ref().as_ref().map(|frame| Framed {
+                    frame: frame.clone(),
+                    read: $read(&series, &carried, frame.began, frame.today),
+                }))
             }
         }
     };
@@ -459,6 +483,234 @@ impl Analysed for PulseWaveVelocity {
     }
 }
 
+/// An analysis worked out from other analyses alone, reading no port: `$value`
+/// is `$derive` of what `$reads` fetches.
+macro_rules! composed {
+    (
+        $(#[$meta:meta])*
+        $node:ident: $value:ty = $derive:expr, from $reads:ty $(,)?
+    ) => {
+        $(#[$meta])*
+        pub struct $node;
+
+        impl Analysed for $node {
+            const ANALYSIS: Analysis = Analysis::$node;
+            type Ports = ();
+            type Reads = $reads;
+            type Value = $value;
+
+            async fn open(_: &Store, _: &OperatorZone) -> Result<Self::Ports, NextFailure> {
+                Ok(())
+            }
+
+            async fn derive(
+                (): Self::Ports,
+                read: <$reads as crate::held::Fetch>::Fetched,
+            ) -> Result<Self::Value, NextFailure> {
+                Ok($derive(read))
+            }
+        }
+    };
+}
+
+composed!(
+    /// The macrocycle in force today: `None` on a day no plan is in force.
+    Macrocycle: Option<Frame> = |(plans, today): (Arc<rescheduling::Plans>, Date)| {
+        Frame::on(today, plans.now())
+    },
+    from (Of<Plans>, Today)
+);
+
+composed!(
+    /// The ranges a chart can be read over today, which every chart offering
+    /// a range reads.
+    Ranges: range::Ranges = |(plans, today): (Arc<rescheduling::Plans>, Date)| {
+        application::ranges::of(today, plans.now())
+    },
+    from (Of<Plans>, Today)
+);
+
+composed!(
+    /// The plan's aims for body weight, as they stand today.
+    Aims: Vec<Aim> = |(plans, today): (Arc<rescheduling::Plans>, Date)| {
+        application::body_weight::aims_on(today, plans.now(), plans.holidays())
+    },
+    from (Of<Plans>, Today)
+);
+
+composed!(
+    /// The latest FTP test against the macrocycle's entry test: `None` where
+    /// no plan is in force or it holds no test.
+    FtpSinceEntry: Option<SinceEntry> =
+        |(frame, tests): (Arc<Option<Frame>>, Arc<Vec<ftp_test::Test>>)| {
+            frame
+                .as_ref()
+                .as_ref()
+                .and_then(|frame| working::ftp(&tests, frame.began, frame.today))
+        },
+    from (Of<Macrocycle>, Of<FtpTests>)
+);
+
+composed!(
+    /// Heart rate at 140 W since the macrocycle's start, on the line of the
+    /// device that rode last.
+    AtPowerSinceStart: Option<SinceStart> =
+        |(frame, rides): (Arc<Option<Frame>>, Arc<Vec<heart_rate_at_power::Trended>>)| {
+            frame
+                .as_ref()
+                .as_ref()
+                .and_then(|frame| working::at_power(&rides, frame.began, frame.today))
+        },
+    from (Of<Macrocycle>, Of<HeartRateAtPower>)
+);
+
+composed!(
+    /// Body weight's trend since the macrocycle's start, against where the
+    /// plan's aims would have taken it.
+    BodyWeightAgainstAims: Option<Framed<body_weight::Weight>> =
+        |(frame, aims, series): (Arc<Option<Frame>>, Arc<Vec<Aim>>, Arc<body_weight::Series>)| {
+            let frame = frame.as_ref().as_ref()?;
+            body_weight::against_aims(&series.trend, &aims, frame.began, frame.today).map(|read| {
+                Framed {
+                    frame: frame.clone(),
+                    read,
+                }
+            })
+        },
+    from (Of<Macrocycle>, Of<Aims>, Of<BodyWeight>)
+);
+
+/// A component's mass since the macrocycle's start, by the method whose
+/// trend is the latest.
+fn since_start(
+    (frame, components): (Arc<Option<Frame>>, Arc<Vec<ComponentSeries>>),
+    component: Component,
+) -> Option<SinceStart> {
+    let frame = frame.as_ref().as_ref()?;
+    working::component(&components, component, frame.began, frame.today)
+}
+
+composed!(
+    /// Fat mass since the macrocycle's start.
+    FatSinceStart: Option<SinceStart> = |read| since_start(read, Component::Fat),
+    from (Of<Macrocycle>, Of<Composition>)
+);
+
+composed!(
+    /// Fat-free mass since the macrocycle's start.
+    FatFreeSinceStart: Option<SinceStart> = |read| since_start(read, Component::FatFree),
+    from (Of<Macrocycle>, Of<Composition>)
+);
+
+composed!(
+    /// Each lift's 1RM test against its entry test, with its estimate since
+    /// the start beside it, and each lift estimated but never tested: none
+    /// where no plan is in force.
+    GymPerformance: Vec<Performance> =
+        |(frame, strength): (Arc<Option<Frame>>, Arc<Lifts>)| {
+            frame.as_ref().as_ref().map_or_else(Vec::new, |frame| {
+                working::gym(&strength.0, &strength.1.lifts, frame.began, frame.today)
+            })
+        },
+    from (Of<Macrocycle>, Of<Strength>)
+);
+
+composed!(
+    /// Each response reading over the macrocycle there is, in order.
+    Responses: ResponsesRead = |(frame, resting, hrv, stress): (
+        Arc<Option<Frame>>,
+        Arc<Response>,
+        Arc<Response>,
+        Arc<Response>,
+    )| {
+        frame.as_ref().as_ref().map(|frame| Framed {
+            frame: frame.clone(),
+            read: [resting, hrv, stress]
+                .iter()
+                .filter_map(|one| Some(one.as_ref().as_ref()?.read.clone()))
+                .collect(),
+        })
+    },
+    from (
+        Of<Macrocycle>,
+        Of<RestingHeartRateResponse>,
+        Of<OvernightHrvResponse>,
+        Of<StressResponse>,
+    )
+);
+
+composed!(
+    /// Has this macrocycle improved my fitness so far? The FTP test with heart
+    /// rate at 140 W beside it, each lift, and each response reading.
+    FitnessSoFar: Option<Framed<SoFar>> = |(ftp, at_power, gym, responses): Performed| {
+        let responses = responses.as_ref().as_ref()?;
+        let cycling = Performance {
+            tested: Tested::Ftp,
+            since: *ftp,
+            estimated: *at_power,
+        };
+        Some(Framed {
+            frame: responses.frame.clone(),
+            read: SoFar {
+                performance: std::iter::once(cycling).chain(gym.iter().copied()).collect(),
+                responses: responses.read.clone(),
+            },
+        })
+    },
+    from (
+        Of<FtpSinceEntry>,
+        Of<AtPowerSinceStart>,
+        Of<GymPerformance>,
+        Of<Responses>,
+    )
+);
+
+/// The heart rate each FTP test was ridden at, and the days the tests span,
+/// which its chart is drawn over so it lines up with the tests'.
+pub struct TestsRidden {
+    pub tests: Option<range::Range>,
+    pub heart_rates: Arc<Vec<ftp_test::TestHeartRate>>,
+}
+
+composed!(
+    /// The heart rate each FTP test was ridden at, over the days the tests
+    /// span.
+    HeartRatesOverTests: TestsRidden = |(tests, heart_rates): (
+        Arc<Vec<ftp_test::Test>>,
+        Arc<Vec<ftp_test::TestHeartRate>>,
+    )| {
+        TestsRidden {
+            tests: range::Range::spanning(tests.iter().map(ftp_test::Test::on)),
+            heart_rates,
+        }
+    },
+    from (Of<FtpTests>, Of<TestHeartRates>)
+);
+
+/// The weigh-ins, the composition and the aims, as `/body` reads them
+/// together.
+pub struct WeightAndComposition {
+    pub series: Arc<body_weight::Series>,
+    pub components: Arc<Vec<ComponentSeries>>,
+    pub aims: Arc<Vec<Aim>>,
+}
+
+composed!(
+    /// The weigh-ins, the composition and the aims, read together.
+    Body: WeightAndComposition = |(series, components, aims): (
+        Arc<body_weight::Series>,
+        Arc<Vec<ComponentSeries>>,
+        Arc<Vec<Aim>>,
+    )| {
+        WeightAndComposition {
+            series,
+            components,
+            aims,
+        }
+    },
+    from (Of<BodyWeight>, Of<Composition>, Of<Aims>)
+);
+
 /// The store, read through what `I` declares: what an analysis that builds
 /// its ports as it derives reads (#830).
 pub struct Over<I> {
@@ -565,5 +817,18 @@ pub(crate) fn derivations() -> [application::graph::Derivation; Analysis::ALL.le
         derivation::<PulseWaveVelocity>(),
         derivation::<Standing>(),
         derivation::<Prescription>(),
+        derivation::<Macrocycle>(),
+        derivation::<Ranges>(),
+        derivation::<Aims>(),
+        derivation::<FtpSinceEntry>(),
+        derivation::<AtPowerSinceStart>(),
+        derivation::<BodyWeightAgainstAims>(),
+        derivation::<FatSinceStart>(),
+        derivation::<FatFreeSinceStart>(),
+        derivation::<GymPerformance>(),
+        derivation::<Responses>(),
+        derivation::<FitnessSoFar>(),
+        derivation::<HeartRatesOverTests>(),
+        derivation::<Body>(),
     ]
 }

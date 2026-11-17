@@ -28,12 +28,8 @@ use domain::analytical::{
 };
 use jiff::civil::Date;
 use maud::{Markup, html};
-use std::sync::Arc;
 
-use configurator::{
-    analyses::{FtpTests, Plans, TestHeartRates},
-    held::Of,
-};
+use configurator::analyses::TestsRidden;
 
 use crate::detail::{self, Axis, Chart, Layer, Metric};
 
@@ -65,17 +61,15 @@ fn tests_card(tests: &[Test], ranges: &Ranges, over: Over) -> Markup {
     )
 }
 
-/// The heart rate each test over the range chosen was ridden at.
-fn heart_rate_card(
-    tests: &[Test],
-    heart_rates: &[TestHeartRate],
-    ranges: &Ranges,
-    over: Over,
-) -> Markup {
-    let Ok(range) = range(tests, ranges, over) else {
+/// The heart rate each test over the range chosen was ridden at, over the
+/// tests' days so it lines up with their chart.
+fn heart_rate_card(ridden: &TestsRidden, ranges: &Ranges, over: Over) -> Markup {
+    let Ok(range) =
+        crate::range::chosen(ranges, over, ridden.tests, "No FTP test has been recorded.")
+    else {
         return html! {};
     };
-    heart_rate(heart_rates, range, range.to)
+    heart_rate(&ridden.heart_rates, range, range.to)
 }
 
 /// The latest tests, and what the dots are.
@@ -107,7 +101,14 @@ pub fn page(tests: &[Test], heart_rates: &[TestHeartRate], ranges: &Ranges, over
         over,
         &[
             tests_card(tests, ranges, over),
-            heart_rate_card(tests, heart_rates, ranges, over),
+            heart_rate_card(
+                &TestsRidden {
+                    tests: Range::spanning(tests.iter().map(Test::on)),
+                    heart_rates: std::sync::Arc::new(heart_rates.to_vec()),
+                },
+                ranges,
+                over,
+            ),
             latest_card(tests, ranges, over),
         ],
     )
@@ -130,48 +131,14 @@ crate::card::ranged_card!(
     over = crate::drawn::tests_over
 );
 
-/// The heart rate each test was ridden at (#548): over the tests' range, so
-/// it reads the tests as well.
-pub struct HeartRates {
-    over: Over,
-}
-
-impl crate::card::Card for HeartRates {
-    const NAME: &'static str = "ftp-heart-rates";
-    type Reads = (
-        Of<FtpTests>,
-        Of<TestHeartRates>,
-        Of<Plans>,
-        configurator::clock::Today,
-    );
-
-    fn asked(query: &std::collections::HashMap<String, String>) -> Self {
-        Self {
-            over: crate::drawn::tests_over(query),
-        }
-    }
-
-    fn over(&self) -> Option<Over> {
-        Some(self.over)
-    }
-
-    fn render(
-        &self,
-        (tests, heart_rates, plans, today): (
-            Arc<Vec<Test>>,
-            Arc<Vec<TestHeartRate>>,
-            Arc<configurator::rescheduling::Plans>,
-            Date,
-        ),
-    ) -> Markup {
-        heart_rate_card(
-            &tests,
-            &heart_rates,
-            &application::ranges::of(today, plans.now()),
-            self.over,
-        )
-    }
-}
+crate::card::ranged_card!(
+    /// The heart rate each test was ridden at (#548), over the tests' range.
+    HeartRates,
+    "ftp-heart-rates",
+    configurator::analyses::HeartRatesOverTests,
+    heart_rate_card,
+    over = crate::drawn::tests_over
+);
 
 #[derive(Debug, Clone, Copy)]
 enum Unit {

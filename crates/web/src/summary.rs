@@ -16,26 +16,16 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use application::working::{self, Answering, Frame, Responding};
+use application::working::{Answering, Framed, Responding};
 use configurator::{
     analyses::{
-        BodyWeight, Composition, FtpTests, HeartRateAtPower, OvernightHrvResponse, Plans,
-        RestingHeartRateResponse, StressResponse,
+        AtPowerSinceStart, BodyWeightAgainstAims, FatFreeSinceStart, FatSinceStart, FtpSinceEntry,
+        OvernightHrvResponse, RestingHeartRateResponse, StressResponse,
     },
-    clock::Today,
     held::Of,
-    rescheduling,
 };
-use domain::{
-    analytical::{
-        body_weight::{self, Weight, against_aims},
-        composition::ComponentSeries,
-        ftp_test, heart_rate_at_power,
-        range::Range,
-        since_entry::SinceEntry,
-        since_start::SinceStart,
-    },
-    body::Component,
+use domain::analytical::{
+    body_weight::Weight, range::Range, since_entry::SinceEntry, since_start::SinceStart,
 };
 use jiff::civil::Date;
 use maud::{Markup, html};
@@ -360,16 +350,9 @@ fn trace(runs: &[Vec<Traced>], expected: &[Vec<(Date, f64)>], began: Date, today
     }
 }
 
-/// The macrocycle in force on `today`, and `draw` drawn over it; nothing on
-/// a day none is.
-fn over_the_macrocycle(
-    plans: &rescheduling::Plans,
-    today: Date,
-    draw: impl FnOnce(&Frame) -> Option<Markup>,
-) -> Markup {
-    Frame::on(today, plans.now())
-        .and_then(|frame| draw(&frame))
-        .unwrap_or_default()
+/// A summary drawn from what its analysis holds; nothing where it holds none.
+fn shown<T>(read: Option<&T>, draw: impl FnOnce(&T) -> Option<Markup>) -> Markup {
+    read.and_then(draw).unwrap_or_default()
 }
 
 /// The FTP test since the entry test.
@@ -377,19 +360,14 @@ pub struct FtpTest;
 
 impl Card for FtpTest {
     const NAME: &'static str = "summary-ftp-test";
-    type Reads = (Of<Plans>, Of<FtpTests>, Today);
+    type Reads = Of<FtpSinceEntry>;
 
     fn asked(_: &HashMap<String, String>) -> Self {
         Self
     }
 
-    fn render(
-        &self,
-        (plans, tests, today): (Arc<rescheduling::Plans>, Arc<Vec<ftp_test::Test>>, Date),
-    ) -> Markup {
-        over_the_macrocycle(&plans, today, |frame| {
-            test(FTP, "FTP test", working::ftp(&tests, frame.began, today))
-        })
+    fn render(&self, since: Arc<Option<SinceEntry>>) -> Markup {
+        test(FTP, "FTP test", *since).unwrap_or_default()
     }
 }
 
@@ -398,23 +376,15 @@ pub struct AtPower;
 
 impl Card for AtPower {
     const NAME: &'static str = "summary-heart-rate-at-power";
-    type Reads = (Of<Plans>, Of<HeartRateAtPower>, Today);
+    type Reads = Of<AtPowerSinceStart>;
 
     fn asked(_: &HashMap<String, String>) -> Self {
         Self
     }
 
-    fn render(
-        &self,
-        (plans, rides, today): (
-            Arc<rescheduling::Plans>,
-            Arc<Vec<heart_rate_at_power::Trended>>,
-            Date,
-        ),
-    ) -> Markup {
-        over_the_macrocycle(&plans, today, |frame| {
-            working::at_power(&rides, frame.began, today)
-                .map(|since| since_start(AT_POWER, "Heart rate at 140 W", since))
+    fn render(&self, since: Arc<Option<SinceStart>>) -> Markup {
+        shown(since.as_ref().as_ref(), |since| {
+            Some(since_start(AT_POWER, "Heart rate at 140 W", *since))
         })
     }
 }
@@ -424,20 +394,15 @@ pub struct BodyWeightSince;
 
 impl Card for BodyWeightSince {
     const NAME: &'static str = "summary-body-weight";
-    type Reads = (Of<Plans>, Of<BodyWeight>, Today);
+    type Reads = Of<BodyWeightAgainstAims>;
 
     fn asked(_: &HashMap<String, String>) -> Self {
         Self
     }
 
-    fn render(
-        &self,
-        (plans, series, today): (Arc<rescheduling::Plans>, Arc<body_weight::Series>, Date),
-    ) -> Markup {
-        over_the_macrocycle(&plans, today, |frame| {
-            let aims = application::body_weight::aims_on(today, plans.now(), plans.holidays());
-            against_aims(&series.trend, &aims, frame.began, today)
-                .map(|since| weight(&since, frame.began, today))
+    fn render(&self, since: Arc<Option<Framed<Weight>>>) -> Markup {
+        shown(since.as_ref().as_ref(), |since| {
+            Some(weight(&since.read, since.frame.began, since.frame.today))
         })
     }
 }
@@ -445,30 +410,22 @@ impl Card for BodyWeightSince {
 macro_rules! component_card {
     (
         $(#[$meta:meta])*
-        $card:ident, $name:literal, $component:expr, $metric:expr, $label:literal
+        $card:ident, $name:literal, $node:ty, $metric:expr, $label:literal
     ) => {
         $(#[$meta])*
         pub struct $card;
 
         impl Card for $card {
             const NAME: &'static str = $name;
-            type Reads = (Of<Plans>, Of<Composition>, Today);
+            type Reads = Of<$node>;
 
             fn asked(_: &HashMap<String, String>) -> Self {
                 Self
             }
 
-            fn render(
-                &self,
-                (plans, composition, today): (
-                    Arc<rescheduling::Plans>,
-                    Arc<Vec<ComponentSeries>>,
-                    Date,
-                ),
-            ) -> Markup {
-                over_the_macrocycle(&plans, today, |frame| {
-                    working::component(&composition, $component, frame.began, today)
-                        .map(|since| since_start(Written { metric: $metric, ..KG }, $label, since))
+            fn render(&self, since: Arc<Option<SinceStart>>) -> Markup {
+                shown(since.as_ref().as_ref(), |since| {
+                    Some(since_start(Written { metric: $metric, ..KG }, $label, *since))
                 })
             }
         }
@@ -479,7 +436,7 @@ component_card!(
     /// Fat mass since the start.
     Fat,
     "summary-fat",
-    Component::Fat,
+    FatSinceStart,
     Metric::Fat,
     "Fat"
 );
@@ -487,7 +444,7 @@ component_card!(
     /// Fat-free mass since the start.
     FatFree,
     "summary-fat-free",
-    Component::FatFree,
+    FatFreeSinceStart,
     Metric::FatFree,
     "Fat-free"
 );
@@ -499,22 +456,15 @@ macro_rules! response_card {
 
         impl Card for $card {
             const NAME: &'static str = $name;
-            type Reads = (Of<Plans>, Of<$node>, Today);
+            type Reads = Of<$node>;
 
             fn asked(_: &HashMap<String, String>) -> Self {
                 Self
             }
 
-            fn render(
-                &self,
-                (plans, read, today): (
-                    Arc<rescheduling::Plans>,
-                    Arc<Option<Responding>>,
-                    Date,
-                ),
-            ) -> Markup {
-                over_the_macrocycle(&plans, today, |frame| {
-                    responding(read.as_ref().as_ref()?, frame.began, today)
+            fn render(&self, read: Arc<Option<Framed<Responding>>>) -> Markup {
+                shown(read.as_ref().as_ref(), |read| {
+                    responding(&read.read, read.frame.began, read.frame.today)
                 })
             }
         }
