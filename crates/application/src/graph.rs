@@ -91,10 +91,39 @@ pub enum Analysis {
     Standing,
     /// What is next, and the session derived for it, issued or not.
     Prescription,
+    /// The macrocycle in force today, where one is.
+    Macrocycle,
+    /// The ranges a chart can be read over today.
+    Ranges,
+    /// The plan's aims for body weight, as they stand today.
+    Aims,
+    /// The latest FTP test against the macrocycle's entry test.
+    FtpSinceEntry,
+    /// Heart rate at 140 W since the macrocycle's start.
+    AtPowerSinceStart,
+    /// Body weight's trend since the macrocycle's start, against the aims.
+    BodyWeightAgainstAims,
+    /// Fat mass since the macrocycle's start.
+    FatSinceStart,
+    /// Fat-free mass since the macrocycle's start.
+    FatFreeSinceStart,
+    /// Each lift's 1RM test against its entry test, and its estimate since
+    /// the start.
+    GymPerformance,
+    /// Each response reading over the macrocycle, read together.
+    Responses,
+    /// Whether the macrocycle has improved his fitness so far: every test
+    /// and every response reading.
+    FitnessSoFar,
+    /// The heart rate each FTP test was ridden at, over the days the tests
+    /// span.
+    HeartRatesOverTests,
+    /// The weigh-ins, the composition and the aims, read together.
+    Body,
 }
 
 impl Analysis {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 34] = [
         Self::BodyWeight,
         Self::Composition,
         Self::Plans,
@@ -116,6 +145,19 @@ impl Analysis {
         Self::PulseWaveVelocity,
         Self::Standing,
         Self::Prescription,
+        Self::Macrocycle,
+        Self::Ranges,
+        Self::Aims,
+        Self::FtpSinceEntry,
+        Self::AtPowerSinceStart,
+        Self::BodyWeightAgainstAims,
+        Self::FatSinceStart,
+        Self::FatFreeSinceStart,
+        Self::GymPerformance,
+        Self::Responses,
+        Self::FitnessSoFar,
+        Self::HeartRatesOverTests,
+        Self::Body,
     ];
 
     /// Its name, as telemetry records it.
@@ -142,6 +184,19 @@ impl Analysis {
             Self::PulseWaveVelocity => "pulse wave velocity",
             Self::Standing => "standing",
             Self::Prescription => "prescription",
+            Self::Macrocycle => "macrocycle",
+            Self::Ranges => "ranges",
+            Self::Aims => "aims",
+            Self::FtpSinceEntry => "ftp since entry",
+            Self::AtPowerSinceStart => "heart rate at power since start",
+            Self::BodyWeightAgainstAims => "body weight against aims",
+            Self::FatSinceStart => "fat since start",
+            Self::FatFreeSinceStart => "fat-free since start",
+            Self::GymPerformance => "gym performance",
+            Self::Responses => "responses",
+            Self::FitnessSoFar => "fitness so far",
+            Self::HeartRatesOverTests => "heart rates over tests",
+            Self::Body => "body",
         }
     }
 }

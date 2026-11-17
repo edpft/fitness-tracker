@@ -120,6 +120,51 @@ impl<A: Analysed> Fetch for Consulted<A> {
     }
 }
 
+/// What a card reads (#830): one analysis, and the ranges where it offers a
+/// choice of one.
+///
+/// The operator, 2026-11-17: one metric is one analysis,
+/// *"which itself takes n analyses as inputs"*. So a card that would read two
+/// analyses, the store or the date is a compile error, and a reading shown on
+/// two pages is worked out once, by the analysis both read.
+///
+/// **Sealed**: nothing outside this module can widen it.
+pub trait Shown: Fetch + sealed::Sealed {}
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+impl<A: Analysed> sealed::Sealed for Of<A> {}
+impl<A: Analysed> Shown for Of<A> {}
+
+/// Reading the analysis `A` and the ranges a chart can be read over: what a
+/// card offering a choice of range reads.
+///
+/// **The ranges choose the days shown and are no reading**, so every chart
+/// reads the one node saying what "this macrocycle" is.
+pub struct Ranged<A>(PhantomData<fn() -> A>);
+
+impl<A: Analysed> Input for Ranged<A> {
+    fn reads() -> Reads {
+        <(Of<A>, Of<crate::analyses::Ranges>) as Input>::reads()
+    }
+}
+
+impl<A: Analysed> Fetch for Ranged<A> {
+    type Fetched = (
+        Arc<A::Value>,
+        Arc<<crate::analyses::Ranges as Analysed>::Value>,
+    );
+
+    fn fetch<'a>(holding: &'a Holding<'a>) -> FetchFuture<'a, Self::Fetched> {
+        <(Of<A>, Of<crate::analyses::Ranges>) as Fetch>::fetch(holding)
+    }
+}
+
+impl<A: Analysed> sealed::Sealed for Ranged<A> {}
+impl<A: Analysed> Shown for Ranged<A> {}
+
 impl Fetch for Today {
     type Fetched = Date;
 

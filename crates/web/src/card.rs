@@ -7,8 +7,10 @@
 //! restart still opens at once (#605). **A page has no state of its own**: it
 //! is its cards, laid out among words that read nothing.
 //!
-//! **What a card reads is a type** ([`Fetch`]), and its drawing is handed the
-//! values and nothing else, so it cannot read what it does not declare.
+//! **What a card reads is a type** ([`Shown`]): one analysis, and the ranges
+//! where it offers a choice of one. Its drawing is handed the values and
+//! nothing else, so it cannot read what it does not declare, and a reading
+//! shown on two pages is worked out once, by the analysis both cards read.
 
 use std::{
     collections::HashMap,
@@ -22,7 +24,7 @@ use axum::{
     response::{IntoResponse as _, Redirect, Response},
 };
 use configurator::{
-    held::{Fetch, Holding},
+    held::{Fetch, Holding, Shown},
     telemetry::Served,
 };
 use domain::analytical::range::Over;
@@ -44,8 +46,9 @@ pub trait Card: Send + Sync + Sized + 'static {
     /// delivering as it waits on what it reads.
     const DELIVERED: bool = false;
 
-    /// What it reads.
-    type Reads: Fetch;
+    /// What it reads: one analysis, and the ranges where it offers a choice
+    /// of one ([`Shown`]).
+    type Reads: Shown;
 
     /// The card a request asks for: its range, where it has one.
     fn asked(query: &HashMap<String, String>) -> Self;
@@ -427,9 +430,8 @@ pub async fn card<C: Card>(
     showing.card(&card).await.into_response()
 }
 
-/// A card over a range that reads one analysis, the plans its ranges are
-/// drawn from, and today: `$draw` draws it from the analysis's value, the
-/// ranges and the range chosen.
+/// A card over a range that reads one analysis and the ranges: `$draw` draws
+/// it from the analysis's value, the ranges and the range chosen.
 ///
 /// `over = $over` names how a request with no range is read, where it is not
 /// the macrocycle.
@@ -445,11 +447,7 @@ macro_rules! ranged_card {
 
         impl crate::card::Card for $card {
             const NAME: &'static str = $name;
-            type Reads = (
-                configurator::held::Of<$analysis>,
-                configurator::held::Of<configurator::analyses::Plans>,
-                configurator::clock::Today,
-            );
+            type Reads = configurator::held::Ranged<$analysis>;
 
             fn asked(query: &std::collections::HashMap<String, String>) -> Self {
                 Self {
@@ -463,17 +461,12 @@ macro_rules! ranged_card {
 
             fn render(
                 &self,
-                (read, plans, today): (
+                (read, ranges): (
                     std::sync::Arc<<$analysis as configurator::held::Analysed>::Value>,
-                    std::sync::Arc<configurator::rescheduling::Plans>,
-                    jiff::civil::Date,
+                    std::sync::Arc<domain::analytical::range::Ranges>,
                 ),
             ) -> maud::Markup {
-                $draw(
-                    &read,
-                    &application::ranges::of(today, plans.now()),
-                    self.over,
-                )
+                $draw(&read, &ranges, self.over)
             }
         }
     };
@@ -486,111 +479,109 @@ pub(crate) use ranged_card;
 mod tests {
     use std::{
         collections::HashMap,
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
     };
 
-    use application::graph::{Input, Node, Reads};
+    use application::{Part, graph::Input as _};
     use configurator::{
-        clock::Today,
-        held::{Fetch, FetchFuture, Holding},
+        analyses::{BodyWeight, Plans, Sleep},
+        held::{Analysed, Of},
     };
     use domain::normalised::OperatorZone;
     use maud::{Markup, html};
 
-    use super::{Card, Showing};
-    use crate::run::{Runs, Setting};
+    use super::{Card, Showing, scope};
+    use crate::run::{Asked, Runs, Setting};
 
-    /// The diary, read for its version and nothing else.
-    struct Diary;
-
-    impl Input for Diary {
-        fn reads() -> Reads {
-            Reads::of([Node::DIARY])
-        }
-    }
-
-    impl Fetch for Diary {
-        type Fetched = ();
-
-        fn fetch<'a>(_: &'a Holding<'a>) -> FetchFuture<'a, ()> {
-            Box::pin(std::future::ready(Ok(())))
-        }
-    }
-
-    static DIARIED: AtomicUsize = AtomicUsize::new(0);
-    static DATED: AtomicUsize = AtomicUsize::new(0);
-
-    /// A card reading the diary and the date, counting its drawings.
-    struct Diaried;
-
-    impl Card for Diaried {
-        const NAME: &'static str = "test-diaried";
-        type Reads = (Diary, Today);
-
-        fn asked(_: &HashMap<String, String>) -> Self {
-            Self
-        }
-
-        fn render(&self, _: ((), jiff::civil::Date)) -> Markup {
-            let drawn = DIARIED.fetch_add(1, Ordering::SeqCst) + 1;
-            html! { section.card { p { "diaried " (drawn) } } }
-        }
-    }
-
-    /// A card reading the date alone, counting its drawings.
-    struct Dated;
-
-    impl Card for Dated {
-        const NAME: &'static str = "test-dated";
-        type Reads = Today;
-
-        fn asked(_: &HashMap<String, String>) -> Self {
-            Self
-        }
-
-        fn render(&self, _: jiff::civil::Date) -> Markup {
-            let drawn = DATED.fetch_add(1, Ordering::SeqCst) + 1;
-            html! { section.card { p { "dated " (drawn) } } }
-        }
-    }
-
-    /// The weigh-ins, normalised, read for their version and nothing else.
-    struct Weighed;
-
-    impl Input for Weighed {
-        fn reads() -> Reads {
-            Reads::of([Node::Normalised(
-                domain::landing::LandingStream::try_from("withings.measurements")
-                    .expect("a stream"),
-            )])
-        }
-    }
-
-    impl Fetch for Weighed {
-        type Fetched = ();
-
-        fn fetch<'a>(_: &'a Holding<'a>) -> FetchFuture<'a, ()> {
-            Box::pin(std::future::ready(Ok(())))
-        }
-    }
-
+    static PLANNED: AtomicUsize = AtomicUsize::new(0);
+    static SLEPT: AtomicUsize = AtomicUsize::new(0);
     static WEIGHT: AtomicUsize = AtomicUsize::new(0);
 
-    /// A card reading the weigh-ins, counting its drawings.
+    /// A card reading the plans, counting its drawings.
+    struct Planned;
+
+    impl Card for Planned {
+        const NAME: &'static str = "test-planned";
+        type Reads = Of<Plans>;
+
+        fn asked(_: &HashMap<String, String>) -> Self {
+            Self
+        }
+
+        fn render(&self, _: Arc<<Plans as Analysed>::Value>) -> Markup {
+            let drawn = PLANNED.fetch_add(1, Ordering::SeqCst) + 1;
+            html! { section.card { p { "planned " (drawn) } } }
+        }
+    }
+
+    /// A card reading the nights' sleep, counting its drawings.
+    struct Slept;
+
+    impl Card for Slept {
+        const NAME: &'static str = "test-slept";
+        type Reads = Of<Sleep>;
+
+        fn asked(_: &HashMap<String, String>) -> Self {
+            Self
+        }
+
+        fn render(&self, _: Arc<<Sleep as Analysed>::Value>) -> Markup {
+            let drawn = SLEPT.fetch_add(1, Ordering::SeqCst) + 1;
+            html! { section.card { p { "slept " (drawn) } } }
+        }
+    }
+
+    /// A card reading body weight, counting its drawings.
     struct Weight;
 
     impl Card for Weight {
         const NAME: &'static str = "test-weight";
-        type Reads = Weighed;
+        type Reads = Of<BodyWeight>;
 
         fn asked(_: &HashMap<String, String>) -> Self {
             Self
         }
 
-        fn render(&self, (): ()) -> Markup {
+        fn render(&self, _: Arc<<BodyWeight as Analysed>::Value>) -> Markup {
             let drawn = WEIGHT.fetch_add(1, Ordering::SeqCst) + 1;
             html! { section.card { p { "weight " (drawn) } } }
         }
+    }
+
+    /// The server over a new store in `directory`.
+    fn runs(runtime: &tokio::runtime::Runtime, directory: &tempfile::TempDir) -> Runs {
+        Runs::new(Setting {
+            store: runtime
+                .block_on(configurator::store::Store::open(
+                    &directory.path().join("fitness.db"),
+                ))
+                .expect("the store"),
+            zone: OperatorZone::try_from("Europe/London").expect("a zone"),
+            credentials: None,
+            build: Some("a build"),
+        })
+    }
+
+    /// The parts a run collecting body weight takes, in order.
+    fn weighed() -> Vec<Part> {
+        scope(&<Of<BodyWeight>>::reads())
+            .parts()
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    /// What a card waiting on `parts` asks to be drawn again on.
+    fn trigger(parts: &[Part]) -> String {
+        let events: Vec<String> = parts
+            .iter()
+            .map(|part| format!("sse:{}", crate::run::event(part)))
+            .chain(["sse:ended".to_owned()])
+            .collect();
+        format!(r#"hx-trigger="{}""#, events.join(", "))
     }
 
     /// **A card is drawn as soon as what it reads is collected** (#830),
@@ -604,51 +595,44 @@ mod tests {
             .enable_all()
             .build()
             .expect("a runtime");
-        let runs = Runs::new(Setting {
-            store: runtime
-                .block_on(configurator::store::Store::open(
-                    &directory.path().join("fitness.db"),
-                ))
-                .expect("the store"),
-            zone: OperatorZone::try_from("Europe/London").expect("a zone"),
-            credentials: None,
-            build: Some("a build"),
-        });
+        let runs = runs(&runtime, &directory);
         let load = || -> (String, String) {
             runtime.block_on(async {
                 let showing = Showing::new(&runs, true);
                 (
                     showing.card(&Weight).await.into_string(),
-                    showing.card(&Dated).await.into_string(),
+                    showing.card(&Slept).await.into_string(),
                 )
             })
         };
-        let stream =
-            domain::landing::LandingStream::try_from("withings.measurements").expect("a stream");
-        runs.going_over(&crate::run::Asked::Everything);
+        let parts = weighed();
+        let (last, before) = parts.split_last().expect("body weight is collected");
+        assert!(
+            scope(&<Of<Sleep>>::reads())
+                .parts()
+                .iter()
+                .all(|part| !parts.contains(part)),
+            "sleep reads nothing body weight's run collects"
+        );
+        runs.going_over(&Asked::Only(scope(&<Of<BodyWeight>>::reads())));
 
-        let (weight, dated) = load();
+        let (weight, slept) = load();
         assert!(
             weight.contains("Collecting what this card shows"),
             "{weight}"
         );
-        assert!(
-            weight.contains(
-                r#"hx-trigger="sse:fetched-withings.measurements, sse:normalised-withings.measurements, sse:ended""#
-            ),
-            "{weight}"
-        );
-        assert!(!dated.contains("hx-trigger"), "{dated}");
+        assert!(weight.contains(&trigger(&parts)), "{weight}");
+        assert!(!slept.contains("hx-trigger"), "{slept}");
 
-        runs.collect(&[application::Part::Fetching(stream.clone())]);
+        runs.collect(before);
         let (weight, _) = load();
         assert!(
-            weight.contains(r#"hx-trigger="sse:normalised-withings.measurements, sse:ended""#),
+            weight.contains(&trigger(std::slice::from_ref(last))),
             "{weight}"
         );
         assert_eq!(WEIGHT.load(Ordering::SeqCst), 0, "not drawn while it waits");
 
-        runs.collect(&[application::Part::Normalising(stream)]);
+        runs.collect(std::slice::from_ref(last));
         let (weight, _) = load();
         assert!(weight.contains("weight 1"), "{weight}");
         assert!(!weight.contains("hx-trigger"), "{weight}");
@@ -664,40 +648,26 @@ mod tests {
             .enable_all()
             .build()
             .expect("a runtime");
-        let runs = std::sync::Arc::new(Runs::new(Setting {
-            store: runtime
-                .block_on(configurator::store::Store::open(
-                    &directory.path().join("fitness.db"),
-                ))
-                .expect("the store"),
-            zone: OperatorZone::try_from("Europe/London").expect("a zone"),
-            credentials: None,
-            build: Some("a build"),
-        }));
+        let runs = Arc::new(runs(&runtime, &directory));
         let asked = || {
             runtime.block_on(super::card::<Weight>(
-                axum::extract::State(std::sync::Arc::clone(&runs)),
+                axum::extract::State(Arc::clone(&runs)),
                 axum::extract::Query(HashMap::new()),
             ))
         };
-        let stream =
-            domain::landing::LandingStream::try_from("withings.measurements").expect("a stream");
-        runs.going_over(&crate::run::Asked::Everything);
+        runs.going_over(&Asked::Everything);
 
         assert_eq!(asked().status(), axum::http::StatusCode::NO_CONTENT);
 
-        runs.collect(&[
-            application::Part::Fetching(stream.clone()),
-            application::Part::Normalising(stream),
-        ]);
+        runs.collect(&weighed());
         assert_eq!(asked().status(), axum::http::StatusCode::OK);
     }
 
     /// **A card is drawn again only when something it reads has moved**
-    /// (#830): after the diary is written, the card reading it is served as
-    /// it was, asking to be drawn again, and drawn when it asks; the card
-    /// beside it, which reads only the date, is served as it was with no
-    /// drawing at all.
+    /// (#830): after the diary is written, the card reading the plans, which
+    /// read it, is served as it was, asking to be drawn again, and drawn when
+    /// it asks; the card beside it, which reads the nights' sleep, is served
+    /// as it was with no drawing at all.
     #[test]
     fn a_write_redraws_only_the_card_reading_what_it_wrote() {
         let directory = tempfile::TempDir::new().expect("a temporary directory");
@@ -705,35 +675,26 @@ mod tests {
             .enable_all()
             .build()
             .expect("a runtime");
-        let runs = Runs::new(Setting {
-            store: runtime
-                .block_on(configurator::store::Store::open(
-                    &directory.path().join("fitness.db"),
-                ))
-                .expect("the store"),
-            zone: OperatorZone::try_from("Europe/London").expect("a zone"),
-            credentials: None,
-            build: Some("a build"),
-        });
+        let runs = runs(&runtime, &directory);
         let load = |redraw: bool| -> (String, String) {
             runtime.block_on(async {
                 let showing = Showing::new(&runs, redraw);
                 (
-                    showing.card(&Diaried).await.into_string(),
-                    showing.card(&Dated).await.into_string(),
+                    showing.card(&Planned).await.into_string(),
+                    showing.card(&Slept).await.into_string(),
                 )
             })
         };
 
-        let (diaried, dated) = load(false);
-        assert!(diaried.contains("diaried 1"), "{diaried}");
-        assert!(dated.contains("dated 1"), "{dated}");
+        let (planned, slept) = load(false);
+        assert!(planned.contains("planned 1"), "{planned}");
+        assert!(slept.contains("slept 1"), "{slept}");
 
-        let (diaried, dated) = load(false);
-        assert!(diaried.contains("diaried 1"), "{diaried}");
-        assert!(!diaried.contains("hx-trigger"), "{diaried}");
-        assert!(dated.contains("dated 1"), "{dated}");
-        assert_eq!(DIARIED.load(Ordering::SeqCst), 1, "nothing it reads moved");
+        let (planned, slept) = load(false);
+        assert!(planned.contains("planned 1"), "{planned}");
+        assert!(!planned.contains("hx-trigger"), "{planned}");
+        assert!(slept.contains("slept 1"), "{slept}");
+        assert_eq!(PLANNED.load(Ordering::SeqCst), 1, "nothing it reads moved");
 
         runtime
             .block_on(configurator::scheduling::ill(
@@ -741,15 +702,15 @@ mod tests {
                 jiff::civil::date(2026, 11, 16),
             ))
             .expect("the diary written");
-        let (diaried, dated) = load(false);
-        assert!(diaried.contains("diaried 1"), "{diaried}");
-        assert!(diaried.contains(r#"hx-trigger="load""#), "{diaried}");
-        assert!(dated.contains("dated 1"), "{dated}");
-        assert!(!dated.contains("hx-trigger"), "{dated}");
+        let (planned, slept) = load(false);
+        assert!(planned.contains("planned 1"), "{planned}");
+        assert!(planned.contains(r#"hx-trigger="load""#), "{planned}");
+        assert!(slept.contains("slept 1"), "{slept}");
+        assert!(!slept.contains("hx-trigger"), "{slept}");
 
-        let (diaried, dated) = load(true);
-        assert!(diaried.contains("diaried 2"), "{diaried}");
-        assert!(dated.contains("dated 1"), "{dated}");
-        assert_eq!(DATED.load(Ordering::SeqCst), 1, "the date never moved");
+        let (planned, slept) = load(true);
+        assert!(planned.contains("planned 2"), "{planned}");
+        assert!(slept.contains("slept 1"), "{slept}");
+        assert_eq!(SLEPT.load(Ordering::SeqCst), 1, "sleep never moved");
     }
 }
