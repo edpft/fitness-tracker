@@ -166,9 +166,11 @@ pub enum Refetch {
     After(Duration),
 }
 
-/// The shortest visit there can be: the operator, 2026-10-30, *"The shortest
-/// session I could do is a 30 Peloton class, followed by a 5 minute cool down
-/// ride, with, say, 5 minutes each way to get to the bike."*
+/// The shortest visit there can be.
+///
+/// The operator, 2026-10-30: *"The shortest session I could do is a 30
+/// Peloton class, followed by a 5 minute cool down ride, with, say, 5 minutes
+/// each way to get to the bike."*
 ///
 /// **What a run waits for twice**: a page fetches nothing fetched within it,
 /// and a session delivered within it is not due, since it cannot have been

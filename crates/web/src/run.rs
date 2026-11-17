@@ -308,14 +308,16 @@ impl Runs {
     /// Start a run of what a page asks for, as [`Self::start`] does, unless
     /// nothing it reads could hold anything new (#612).
     ///
-    /// **Only a chart's page asks**: the front page delivers, and its report
-    /// is what it shows. A run going that covers the page is joined whatever
-    /// the store says, and a store that cannot say starts the run as before.
+    /// **The home page asks too** (#830), and its run is wanted only where it
+    /// would also deliver something: on 2026-11-17 each open of it started a
+    /// run. A run going that covers the page is joined whatever the store
+    /// says, and a store that cannot say starts the run as before.
     pub async fn open(self: &Arc<Self>, asked: &Asked) {
-        if let Asked::Only(scope) = asked
-            && !self.covered(asked)
-            && !Box::pin(self.wanted(scope)).await
-        {
+        let scope = match asked {
+            Asked::Everything => None,
+            Asked::Only(scope) => Some(scope),
+        };
+        if !self.covered(asked) && !Box::pin(self.wanted(scope)).await {
             configurator::telemetry::not_due();
             return;
         }
@@ -331,8 +333,9 @@ impl Runs {
             .any(|run| run.covers(asked))
     }
 
-    /// Whether a run over `scope` would fetch or derive anything now.
-    async fn wanted(&self, scope: &Scope) -> bool {
+    /// Whether a run over `scope`, or the whole of `next` where it is `None`,
+    /// would fetch, derive or deliver anything now.
+    async fn wanted(&self, scope: Option<&Scope>) -> bool {
         let setting = &self.setting;
         let Ok(credentials) = configurator::config::credentials_at(setting.credentials.as_deref())
         else {

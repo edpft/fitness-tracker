@@ -199,8 +199,10 @@ pub async fn collect(
 }
 
 /// Whether a page's run over `scope` would do anything (#612): fetch a
-/// stream that could hold something new, or bring a layer current. A page
-/// that would do nothing starts no run.
+/// stream that could hold something new, bring a layer current, or deliver.
+/// A page that would do nothing starts no run.
+///
+/// `None` is the whole of `next`, as the home page runs it (#830).
 ///
 /// # Errors
 ///
@@ -209,7 +211,7 @@ pub async fn wanted(
     held: &impl Holds,
     credentials: &infrastructure::Credentials,
     now: DayPart,
-    scope: &Scope,
+    scope: Option<&Scope>,
     frontend: telemetry::Frontend,
 ) -> Result<bool, NextFailure> {
     use tracing::Instrument as _;
@@ -275,7 +277,7 @@ enum Asked<'a> {
         now: DayPart,
     },
     Wanted {
-        scope: &'a Scope,
+        scope: Option<&'a Scope>,
         now: DayPart,
     },
 }
@@ -400,7 +402,10 @@ async fn over(
         Asked::Collect { scope, now } => {
             Answered::Collected(Box::pin(next.collect(scope, now, progress)).await?)
         }
-        Asked::Wanted { scope, now } => Answered::Wanted(next.wanted(scope, now).await?),
+        Asked::Wanted { scope, now } => {
+            let everything = next.everything();
+            Answered::Wanted(next.wanted(scope.unwrap_or(&everything), now).await?)
+        }
     })
 }
 
