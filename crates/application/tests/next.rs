@@ -346,6 +346,11 @@ impl DerivationLedger for Ledger {
         })
     }
 
+    async fn ever_normalised(&self, stream: &LandingStream) -> Result<bool, StoreError> {
+        self.0
+            .with(|layered| layered.runs.contains_key(&stream.to_string()))
+    }
+
     async fn record_normalised(
         &self,
         run: NormalisationRunId,

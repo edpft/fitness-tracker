@@ -566,6 +566,7 @@ spanned! {
 spanned! {
     DerivationLedger {
         fn normalised(&self, stream: &LandingStream) -> Result<Option<DerivedFrom>, StoreError>;
+        fn ever_normalised(&self, stream: &LandingStream) -> Result<bool, StoreError>;
         fn record_normalised(&self, run: NormalisationRunId, from: &DerivedFrom) -> Result<(), StoreError>;
         fn canonical(&self, layer: CanonicalLayer) -> Result<Option<DerivedFrom>, StoreError>;
         fn record_canonical(&self, layer: CanonicalLayer, from: &DerivedFrom) -> Result<(), StoreError>;

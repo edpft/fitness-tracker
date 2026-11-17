@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT EXISTS (\n                SELECT 1 FROM normalisation_run WHERE stream = ? AND outcome = 'succeeded'\n            ) AS \"ever: bool\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "ever: bool",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "432ee41f964eb5417f8c6c2363ded401eb93d3bb5c3d7f13fc4fc48fec7dc1b6"
+}

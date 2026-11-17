@@ -18,7 +18,7 @@ use sha2::{Digest as _, Sha256};
 use crate::{
     StoreError,
     graph::{Graph, Node, Reads},
-    ports::{DerivationLedger, Revisions},
+    ports::{DerivationLedger, Part, Revisions},
 };
 
 /// What a drawing was drawn from, fingerprinted: the build that drew it, and
@@ -156,26 +156,24 @@ where
                 }
                 Some(stated)
             }
-            Node::Normalised(stream) => self
-                .ledger
-                .normalised(stream)
-                .await?
-                .map(|from| from.as_str().to_owned()),
-            Node::Canonical(layer) => self
-                .ledger
-                .canonical(*layer)
-                .await?
-                .map(|from| from.as_str().to_owned()),
+            Node::Normalised(stream) => match self.ledger.normalised(stream).await? {
+                Some(from) => Some(from.as_str().to_owned()),
+                None => self.unrecorded(graph, node).await?,
+            },
+            Node::Canonical(layer) => match self.ledger.canonical(*layer).await? {
+                Some(from) => Some(from.as_str().to_owned()),
+                None => self.unrecorded(graph, node).await?,
+            },
             Node::Table(_) => {
                 let mut stated = String::new();
                 for writer in graph.reads(node).into_iter().flat_map(Reads::nodes) {
-                    let Node::Normalised(stream) = writer else {
+                    let Node::Normalised(_) = writer else {
                         continue;
                     };
-                    let Some(from) = self.ledger.normalised(stream).await? else {
+                    let Some(stands) = self.stands(graph, writer, now).await? else {
                         return Ok(None);
                     };
-                    let _infallible = write!(stated, "{stream}: {}; ", from.as_str());
+                    let _infallible = write!(stated, "{writer:?}: {stands}; ");
                 }
                 Some(stated)
             }
@@ -188,6 +186,33 @@ where
         })
     }
 }
+
+impl<L, R> Drawing<L, R>
+where
+    L: DerivationLedger + Sync,
+    R: Revisions + Sync,
+{
+    /// Where a derived layer that recorded no derivation stands: never
+    /// derived, where no stream it is derived from ever was normalised, and
+    /// with no version otherwise (#830).
+    ///
+    /// **A layer never derived is empty**, and any derivation of it, by a run
+    /// or by hand, leaves a run behind that moves it. One derived by hand,
+    /// which records nothing, still has no version.
+    async fn unrecorded(&self, graph: &Graph, node: &Node) -> Result<Option<String>, StoreError> {
+        for part in graph.parts(&Reads::of([node.clone()])) {
+            if let Part::Normalising(stream) = part
+                && self.ledger.ever_normalised(&stream).await?
+            {
+                return Ok(None);
+            }
+        }
+        Ok(Some(NEVER.to_owned()))
+    }
+}
+
+/// Where a layer never derived stands.
+const NEVER: &str = "never derived";
 
 /// Whether `node` has no version whatever the ledger says.
 ///
@@ -241,6 +266,14 @@ mod tests {
     struct Ledger {
         normalised: Arc<Mutex<BTreeMap<LandingStream, String>>>,
         canonical: Arc<Mutex<BTreeMap<CanonicalLayer, String>>>,
+        /// Each stream normalised by hand, which records nothing.
+        by_hand: Arc<Mutex<std::collections::BTreeSet<LandingStream>>>,
+    }
+
+    impl Ledger {
+        fn by_hand(&self, stream: LandingStream) {
+            self.by_hand.lock().expect("the ledger").insert(stream);
+        }
     }
 
     impl DerivationLedger for Ledger {
@@ -255,6 +288,15 @@ mod tests {
                 .get(stream)
                 .cloned()
                 .map(DerivedFrom::from))
+        }
+
+        async fn ever_normalised(&self, stream: &LandingStream) -> Result<bool, StoreError> {
+            Ok(self
+                .normalised
+                .lock()
+                .expect("the ledger")
+                .contains_key(stream)
+                || self.by_hand.lock().expect("the ledger").contains(stream))
         }
 
         async fn record_normalised(
@@ -430,7 +472,8 @@ mod tests {
     }
 
     /// **A table stands where every stream writing it does**, and has no
-    /// version while one of them has none.
+    /// version while one of them has none: one normalised by hand, which
+    /// records nothing. One never normalised is empty, which is a version.
     #[test]
     fn a_table_stands_where_its_writers_do() {
         let stored = Stored::default();
@@ -460,8 +503,11 @@ mod tests {
             "a table nothing writes has no version"
         );
         ledger("hevy.workouts", "1");
-        assert_eq!(from(), None, "BTWB's layer has no version");
+        let never = from().expect("BTWB's layer was never derived");
+        stored.ledger.by_hand(stream("btwb.exports"));
+        assert_eq!(from(), None, "BTWB's layer was derived by hand");
         ledger("btwb.exports", "1");
+        assert_ne!(from(), Some(never), "BTWB's layer was derived");
         let before = from().expect("versioned");
         ledger("btwb.exports", "2");
         assert_ne!(from(), Some(before), "BTWB's layer was derived again");
@@ -493,8 +539,9 @@ mod tests {
     }
 
     /// **An analysis stands where everything it reads does** (#830): a card
-    /// reading it moves when a layer under it is derived again, and a node
-    /// asked once in a load is not asked again in it.
+    /// reading it moves when a layer under it is derived, and again when it
+    /// is derived again, and a node asked once in a load is not asked again
+    /// in it.
     #[test]
     fn an_analysis_stands_where_what_it_reads_does() {
         use crate::graph::Analysis;
@@ -511,16 +558,15 @@ mod tests {
             ))
             .expect("recorded");
         };
-        assert_eq!(
-            run(stored.drawing().drawn_from(&graph, &reads, "build", now)).expect("read"),
-            None,
-            "the weigh-ins were never derived"
-        );
+        let never = run(stored.drawing().drawn_from(&graph, &reads, "build", now))
+            .expect("read")
+            .expect("the weigh-ins were never derived, which is a version");
         record("1");
         let load = stored.drawing();
         let before = run(load.drawn_from(&graph, &reads, "build", now))
             .expect("read")
             .expect("versioned");
+        assert_ne!(before, never, "the weigh-ins were derived");
         record("2");
         assert_eq!(
             run(load.drawn_from(&graph, &reads, "build", now)).expect("read"),
