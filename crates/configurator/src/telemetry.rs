@@ -142,6 +142,18 @@ impl<M: StandingReader + Sync> StandingReader for Staged<M> {
             .instrument(stage("reading", "read", "standing"))
             .await
     }
+
+    async fn standing_among(
+        &self,
+        now: DayPart,
+        plans: &[Plan],
+        diary: &Diary,
+    ) -> Result<Standing, StoreError> {
+        self.0
+            .standing_among(now, plans, diary)
+            .instrument(stage("reading", "read", "standing"))
+            .await
+    }
 }
 
 impl<C: MesocycleCommitter + Sync> MesocycleCommitter for Staged<C> {
@@ -151,9 +163,10 @@ impl<C: MesocycleCommitter + Sync> MesocycleCommitter for Staged<C> {
         holidays: &Holidays,
         standing: &Standing,
         diary: &Diary,
+        plans: &[Plan],
     ) -> Result<Option<Due>, CommitError> {
         self.0
-            .due(now, holidays, standing, diary)
+            .due(now, holidays, standing, diary, plans)
             .instrument(stage("planning", "asked", "due"))
             .await
     }

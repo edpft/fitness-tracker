@@ -131,15 +131,15 @@ pub struct Afresh<'a> {
 }
 
 impl HeldNodes for Afresh<'_> {
-    async fn standing<F>(
+    async fn walked<F>(
         &self,
         now: DayPart,
-        read: F,
-    ) -> Result<application::microcycle::Standing, StoreError>
+        walk: F,
+    ) -> Result<application::next::Walked, StoreError>
     where
-        F: Future<Output = Result<application::microcycle::Standing, StoreError>> + Send,
+        F: Future<Output = Result<application::next::Walked, StoreError>> + Send,
     {
-        Unheld.standing(now, read).await
+        Unheld.walked(now, walk).await
     }
 
     async fn upcoming<F>(&self, derive: F) -> std::sync::Arc<application::next::Upcoming>
@@ -357,12 +357,11 @@ async fn over(
         holidays: crate::holidays::calendars(store),
         diary: store.adapter(SqliteDiaryStore::new),
         plans: plans.clone(),
-        microcycle: Staged(microcycle(
+        microcycle: Staged(Termed {
             store,
-            &plans,
-            &deliveries,
-            crate::holidays::term(store).await,
-        )?),
+            plans: plans.clone(),
+            deliveries: deliveries.clone(),
+        }),
         committing: Staged(Committing::new(
             CommitPorts {
                 plans: plans.clone(),
@@ -538,6 +537,50 @@ pub(crate) fn microcycle(
         Some(term) => walk.within(term),
         None => walk,
     })
+}
+
+/// The walk through the plan, within the term the calendars give it, read
+/// only when the plan is walked rather than held (#830): asking whether a
+/// run is wanted reads nothing of the calendars.
+struct Termed<'a> {
+    store: &'a Store,
+    plans: Spanned<SqlitePlanStore>,
+    deliveries: Spanned<SqlitePrescriptionDeliveryStore>,
+}
+
+impl Termed<'_> {
+    async fn microcycle(&self) -> Result<crate::rescheduling::Microcycle, StoreError> {
+        microcycle(
+            self.store,
+            &self.plans,
+            &self.deliveries,
+            crate::holidays::term(self.store).await,
+        )
+        .map_err(|error| StoreError::Unavailable {
+            detail: error.to_string(),
+        })
+    }
+}
+
+impl application::next::StandingReader for Termed<'_> {
+    async fn standing(
+        &self,
+        now: DayPart,
+    ) -> Result<application::microcycle::Standing, StoreError> {
+        self.microcycle().await?.standing(now).await
+    }
+
+    async fn standing_among(
+        &self,
+        now: DayPart,
+        plans: &[domain::plan::Plan],
+        diary: &domain::schedule::Diary,
+    ) -> Result<application::microcycle::Standing, StoreError> {
+        self.microcycle()
+            .await?
+            .standing_among(now, plans, diary)
+            .await
+    }
 }
 
 /// The extraction run log, read for when each stream was last fetched, and

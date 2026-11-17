@@ -82,7 +82,7 @@ use crate::{
         Rederivation,
     },
     prescribe::{NextSession, Prescribing, PrescriptionPorts, Proposal},
-    reschedule::{Reschedule, Rescheduled, ReschedulingPlans},
+    reschedule::{Reschedule, Rescheduled},
 };
 
 /// Why a source could not even be asked: no credential, or the wrong kind.
@@ -732,6 +732,19 @@ pub trait StandingReader {
     ///
     /// [`StoreError`] if the store cannot be read.
     fn standing(&self, now: DayPart) -> impl Future<Output = Result<Standing, StoreError>> + Send;
+
+    /// Where the plan stands at `now` among `plans`, every plan in force as
+    /// written, read against `diary`: for a reader that read them already.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    fn standing_among(
+        &self,
+        now: DayPart,
+        plans: &[Plan],
+        diary: &Diary,
+    ) -> impl Future<Output = Result<Standing, StoreError>> + Send;
 }
 
 impl<D, P, G, C, Y, L> StandingReader for crate::microcycle::Microcycle<D, P, G, C, Y, L>
@@ -747,19 +760,32 @@ where
     async fn standing(&self, now: DayPart) -> Result<Standing, StoreError> {
         Self::standing(self, now).await
     }
+
+    async fn standing_among(
+        &self,
+        now: DayPart,
+        plans: &[Plan],
+        diary: &Diary,
+    ) -> Result<Standing, StoreError> {
+        Self::standing_among(self, now, plans, diary).await
+    }
 }
 
 /// Committing the next concurrent mesocycle.
 pub trait MesocycleCommitter {
+    /// What is due among `plans`, every plan in force as it now stands, as
+    /// the walk read them: the plan is not read again (#830).
+    ///
     /// # Errors
     ///
-    /// [`CommitError`] if the plan cannot be read.
+    /// [`CommitError`] if the store cannot be read.
     fn due(
         &self,
         now: DayPart,
         holidays: &Holidays,
         standing: &Standing,
         diary: &Diary,
+        plans: &[Plan],
     ) -> impl Future<Output = Result<Option<Due>, CommitError>> + Send;
 
     /// # Errors
@@ -803,8 +829,9 @@ where
         holidays: &Holidays,
         standing: &Standing,
         diary: &Diary,
+        plans: &[Plan],
     ) -> Result<Option<Due>, CommitError> {
-        Self::due(self, now, holidays, standing, diary).await
+        Ok(Self::due(self, now, holidays, standing, diary, plans))
     }
 
     async fn commit(&self, due: &Due) -> Result<(), CommitError> {
@@ -1135,6 +1162,18 @@ where
     }
 }
 
+/// Where the plan stands, and what was read to say so (#830): what a run
+/// reads of the plan, the diary and the calendars, read once by the walk.
+#[derive(Debug, Clone, Default)]
+pub struct Walked {
+    pub standing: Standing,
+    pub diary: Diary,
+    /// Every plan in force, as it now stands.
+    pub plans: Vec<Plan>,
+    /// The school and public holidays, where the calendars could be read.
+    pub holidays: Option<Holidays>,
+}
+
 /// What of the graph a run reads, as the frontend holds it (#830): where the
 /// plan stands, and what is next.
 ///
@@ -1143,18 +1182,18 @@ where
 /// derivation.
 pub trait HeldNodes {
     /// Where the plan stands at `now`, held where it already is, and as
-    /// `read` says it otherwise.
+    /// `walk` walks it otherwise.
     ///
     /// # Errors
     ///
-    /// [`StoreError`] if `read` is needed and fails.
-    fn standing<F>(
+    /// [`StoreError`] if `walk` is needed and fails.
+    fn walked<F>(
         &self,
         now: DayPart,
-        read: F,
-    ) -> impl Future<Output = Result<Standing, StoreError>> + Send
+        walk: F,
+    ) -> impl Future<Output = Result<Walked, StoreError>> + Send
     where
-        F: Future<Output = Result<Standing, StoreError>> + Send;
+        F: Future<Output = Result<Walked, StoreError>> + Send;
 
     /// What `derive` would give, held where it already is.
     fn upcoming<F>(&self, derive: F) -> impl Future<Output = std::sync::Arc<Upcoming>> + Send
@@ -1163,11 +1202,11 @@ pub trait HeldNodes {
 }
 
 impl<H: HeldNodes + Sync> HeldNodes for &H {
-    async fn standing<F>(&self, now: DayPart, read: F) -> Result<Standing, StoreError>
+    async fn walked<F>(&self, now: DayPart, walk: F) -> Result<Walked, StoreError>
     where
-        F: Future<Output = Result<Standing, StoreError>> + Send,
+        F: Future<Output = Result<Walked, StoreError>> + Send,
     {
-        (**self).standing(now, read).await
+        (**self).walked(now, walk).await
     }
 
     async fn upcoming<F>(&self, derive: F) -> std::sync::Arc<Upcoming>
@@ -1183,11 +1222,11 @@ impl<H: HeldNodes + Sync> HeldNodes for &H {
 pub struct Unheld;
 
 impl HeldNodes for Unheld {
-    async fn standing<F>(&self, _now: DayPart, read: F) -> Result<Standing, StoreError>
+    async fn walked<F>(&self, _now: DayPart, walk: F) -> Result<Walked, StoreError>
     where
-        F: Future<Output = Result<Standing, StoreError>> + Send,
+        F: Future<Output = Result<Walked, StoreError>> + Send,
     {
-        read.await
+        walk.await
     }
 
     async fn upcoming<F>(&self, derive: F) -> std::sync::Arc<Upcoming>
@@ -1480,53 +1519,60 @@ where
         if joined.contains(&Part::Delivering) {
             return Err(NextError::Joined);
         }
-        // **The diary is read once**: nothing a run does writes it but a skip,
-        // which reads it again (#664).
-        let mut diary = self.ports.diary.diary().await?;
-        if diary.patterns().is_empty() {
-            return Err(NextError::NoWeek);
-        }
-
         // 1. Every source at once, before anything is judged, and every layer
         // brought current.
+        //
+        // **The plan, the diary and the calendars are read by the walk**, and
+        // held where the frontend holds it (#830).
         let judge = self.judge(now).await?;
+        if judge.walked.diary.patterns().is_empty() {
+            return Err(NextError::NoWeek);
+        }
         self.gather(&everything.without(&joined), &judge, progress, &mut run)
             .await?;
 
         // 2. The next concurrent mesocycle, if the one before it has ended.
         //
-        // **The standing is read again only where something changed it**
-        // (#664): gathering, a mesocycle committed, a skip taken.
-        let holidays = self.ports.holidays.holidays().await;
-        let mut standing = self.standing(now).await?;
+        // **The walk is read again only where something changed it** (#664):
+        // gathering, a mesocycle committed, a skip taken. Where nothing did,
+        // it is the one held.
+        let mut walked = self.walked(now).await?;
         // What the mesocycles that have completed settled, written once, so the
         // walk reads it from here on rather than deriving it again (#801).
-        if let Some((plan, completed)) = &standing.completed
-            && self.ports.plans.completed(plan).await?.as_ref() != Some(completed)
-        {
+        if let Some((plan, completed)) = &walked.standing.completed {
             self.ports.plans.complete(plan, completed).await?;
         }
+        let holidays = self.holidays(&walked).await;
         if let Ok(holidays) = &holidays
-            && let Some((started, outcome)) = self
-                .commit(now, holidays, &standing, &diary, progress)
-                .await
+            && let Some((started, outcome)) = self.commit(now, holidays, &walked, progress).await
         {
             finish(progress, &mut run, started, outcome);
-            standing = self.standing(now).await?;
+            walked = self.walked(now).await?;
         }
 
         // 3. Where the plan stands, after taking a skip if one was asked for.
         if let Some(reason) = skip {
             let started = start(progress, Step::Skipping);
-            let found = self.skip(&standing, now, reason).await?;
+            let found = self.skip(&walked.standing, now, reason).await?;
             finish(progress, &mut run, started, Ok(found));
-            standing = self.standing(now).await?;
-            diary = self.ports.diary.diary().await?;
+            walked = self.walked(now).await?;
         }
+        let Walked {
+            standing,
+            diary,
+            plans,
+            ..
+        } = &walked;
         let reschedule = standing.reschedule(diary.clone());
-        let plan = self
-            .plan(now, holidays, &standing, &diary, &reschedule)
-            .await?;
+        let plan = plan_standing(
+            &self.ports.committing,
+            plans,
+            now,
+            holidays,
+            standing,
+            diary,
+        )
+        .await?;
 
         // 4. The first session that can still be performed, derived as a page
         // holds it, then issued and delivered.
@@ -1537,8 +1583,8 @@ where
                 &self.ports.gym,
                 &self.ports.cycling,
                 now,
-                &standing,
-                &diary,
+                standing,
+                diary,
                 &reschedule,
             ))
             .await;
@@ -1620,19 +1666,24 @@ where
     /// **Read from what is held**, as the run delivers it, so asking derives
     /// nothing a page has not already derived.
     async fn delivers(&self, judge: &Judge) -> Result<bool, NextError> {
-        let diary = self.ports.diary.diary().await?;
-        if let Ok(holidays) = self.ports.holidays.holidays().await
+        let Walked {
+            standing,
+            diary,
+            plans,
+            holidays,
+        } = &judge.walked;
+        if let Some(holidays) = holidays
             && matches!(
                 self.ports
                     .committing
-                    .due(judge.now, &holidays, &judge.standing, &diary)
+                    .due(judge.now, holidays, standing, diary, plans)
                     .await,
                 Ok(Some(_))
             )
         {
             return Ok(true);
         }
-        let reschedule = judge.standing.reschedule(diary.clone());
+        let reschedule = standing.reschedule(diary.clone());
         let upcoming = self
             .ports
             .held
@@ -1640,8 +1691,8 @@ where
                 &self.ports.gym,
                 &self.ports.cycling,
                 judge.now,
-                &judge.standing,
-                &diary,
+                standing,
+                diary,
                 &reschedule,
             ))
             .await;
@@ -1712,19 +1763,47 @@ where
     /// before anything is fetched, and the time now.
     async fn judge(&self, now: DayPart) -> Result<Judge, NextError> {
         Ok(Judge {
-            standing: self.standing(now).await?,
+            walked: self.walked(now).await?,
             now,
             at: self.ports.fetches.now(),
         })
     }
 
-    /// Where the plan stands at `now`: as the frontend holds it, where it
-    /// holds it at what the store now says, and walked otherwise (#830).
-    async fn standing(&self, now: DayPart) -> Result<Standing, StoreError> {
+    /// Where the plan stands at `now`, and what was read to say so: as the
+    /// frontend holds it, where it holds it at what the store now says, and
+    /// walked otherwise (#830).
+    async fn walked(&self, now: DayPart) -> Result<Walked, StoreError> {
         self.ports
             .held
-            .standing(now, self.ports.microcycle.standing(now))
+            .walked(now, async {
+                let written = self.ports.plans.plans().await?;
+                let diary = self.ports.diary.diary().await?;
+                let standing = self
+                    .ports
+                    .microcycle
+                    .standing_among(now, &written, &diary)
+                    .await?;
+                let reschedule = standing.reschedule(diary.clone());
+                Ok(Walked {
+                    plans: written
+                        .iter()
+                        .map(|plan| reschedule.apply(plan))
+                        .collect::<Result<_, _>>()?,
+                    holidays: self.ports.holidays.holidays().await.ok(),
+                    standing,
+                    diary,
+                })
+            })
             .await
+    }
+
+    /// The holidays `walked` was read in, and the calendars' own failure
+    /// where it could not read them, so that it is said as it always was.
+    async fn holidays(&self, walked: &Walked) -> Result<Holidays, SourceError> {
+        match &walked.holidays {
+            Some(holidays) => Ok(holidays.clone()),
+            None => self.ports.holidays.holidays().await,
+        }
     }
 
     /// Why walk `at` of `walks`, landing in `stream`, is not fetched this run,
@@ -1769,7 +1848,7 @@ where
                 .filter(|succeeded| self.part(*succeeded).date >= judge.now.date)
                 .map(|_| NotDue::UntilTomorrow),
             Expects::Sessions(discipline) => (!could_have_performed(
-                &judge.standing,
+                &judge.walked.standing,
                 discipline,
                 fetched.succeeded.map(|succeeded| self.part(succeeded)),
                 judge.at.as_timestamp(),
@@ -2259,14 +2338,19 @@ where
         &self,
         now: DayPart,
         holidays: &Holidays,
-        standing: &Standing,
-        diary: &Diary,
+        walked: &Walked,
         progress: &(impl Progress + Sync),
     ) -> Option<(Started, Result<Found, StepFailure>)> {
         let due = match self
             .ports
             .committing
-            .due(now, holidays, standing, diary)
+            .due(
+                now,
+                holidays,
+                &walked.standing,
+                &walked.diary,
+                &walked.plans,
+            )
             .await
         {
             Ok(Some(due)) => due,
@@ -2315,30 +2399,6 @@ where
             session: Box::new(current.clone()),
             skip,
         })
-    }
-
-    /// Where the plan stands: the macrocycle's week, each discipline's
-    /// mesocycle, and the microcycle's sessions.
-    async fn plan(
-        &self,
-        now: DayPart,
-        holidays: Result<Holidays, SourceError>,
-        standing: &Standing,
-        diary: &Diary,
-        reschedule: &Reschedule,
-    ) -> Result<PlanStanding, NextError> {
-        let plans = ReschedulingPlans::new(self.ports.plans.clone(), reschedule.clone())
-            .plans()
-            .await?;
-        plan_standing(
-            &self.ports.committing,
-            &plans,
-            now,
-            holidays,
-            standing,
-            diary,
-        )
-        .await
     }
 
     /// Issue and deliver what is next, as `upcoming` derived it.
@@ -2438,8 +2498,9 @@ pub async fn plan_standing(
 /// Every canonical layer, in the order they are derived.
 /// What every stream is judged against in one run (#612).
 struct Judge {
-    /// Where the plan stood before anything was fetched.
-    standing: Standing,
+    /// Where the plan stood before anything was fetched, and what was read
+    /// to say so.
+    walked: Walked,
     now: DayPart,
     at: FetchedAt,
 }

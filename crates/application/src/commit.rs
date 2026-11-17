@@ -162,29 +162,20 @@ where
     /// this macrocycle, where the plan states no chain, or where the term has
     /// nothing left.
     ///
-    /// # Errors
-    ///
-    /// [`CommitError::Store`] if the plan cannot be read.
-    pub async fn due(
+    /// Among `plans`, every plan in force as it now stands, as the walk read
+    /// them: the plan is not read again (#830).
+    #[must_use]
+    pub fn due(
         &self,
         now: DayPart,
         holidays: &Holidays,
         standing: &Standing,
         diary: &Diary,
-    ) -> Result<Option<Due>, CommitError> {
-        let Some(macrocycle) = Macrocycle::on(now.date, holidays) else {
-            return Ok(None);
-        };
-        let plans =
-            ReschedulingPlans::new(self.ports.plans.clone(), standing.reschedule(diary.clone()))
-                .plans()
-                .await?;
-        let Some(plan) = in_force(&plans, &macrocycle) else {
-            return Ok(None);
-        };
-        let Some(chain) = plan.chain() else {
-            return Ok(None);
-        };
+        plans: &[Plan],
+    ) -> Option<Due> {
+        let macrocycle = Macrocycle::on(now.date, holidays)?;
+        let plan = in_force(plans, &macrocycle)?;
+        let chain = plan.chain()?;
 
         // **Due once the plan has run out**, and from the current microcycle if it
         // ran out earlier: a week nothing was committed for is not given back.
@@ -195,7 +186,7 @@ where
             .unwrap_or_else(|| planner::commencing(now.date));
         let end = plan.span().end();
         if end > monday {
-            return Ok(None);
+            return None;
         }
         let start = end.max(monday);
 
@@ -204,14 +195,14 @@ where
             .and_then(|side| side.mesocycles().last())
             .filter(|last| last.start() >= macrocycle.start())
             .and_then(|last| self.cycling_of(last));
-        Ok(macrocycle
+        macrocycle
             .next(chain, previous, start)
             .map(|concurrent| Due {
                 plan,
                 diary: diary.clone(),
                 concurrent,
                 span: Span::new(start, concurrent.weeks()),
-            }))
+            })
     }
 
     /// Build what is due and add it to the plan.

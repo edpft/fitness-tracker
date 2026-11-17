@@ -74,7 +74,8 @@ impl Reschedule {
         &self.reruns
     }
 
-    fn apply(&self, plan: &Plan) -> Result<Plan, StoreError> {
+    /// `plan` as it now stands.
+    pub(crate) fn apply(&self, plan: &Plan) -> Result<Plan, StoreError> {
         planner::rescheduled(plan, &self.reruns, &self.diary).map_err(|error| StoreError::Corrupt {
             detail: format!("{} will not reschedule: {error}", plan.name()),
         })
