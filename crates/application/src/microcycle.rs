@@ -24,7 +24,10 @@ use domain::{
     provider::ExternalProgramme,
     schedule::{DayPart, Diary, Holidays, PartOfDay},
 };
-use jiff::civil::{Date, DateTime};
+use jiff::{
+    Timestamp,
+    civil::{Date, DateTime},
+};
 
 use crate::{
     CyclingDeliveryStore, DestinationName, DiaryStore, PerformedSessionLog, PlanStore,
@@ -46,6 +49,8 @@ pub struct Session {
     /// Whether the plan has a test in the slot: the 1RM test or the FTP test.
     pub test: bool,
     pub state: SessionState,
+    /// When it was put where it can be performed, `None` where it was not.
+    pub delivered: Option<Timestamp>,
     /// Where its window closes: the end of its slot's day, or the start of
     /// the next slot of either discipline if that comes first (#463).
     ///
@@ -571,8 +576,9 @@ where
                     .map_or(after, |next| Some(DayPart::new(next.date, next.slot.part))),
             );
 
+            let delivered = self.delivered(slot).await?;
             let recorded = Recorded {
-                prescribed: self.prescribed(slot).await?,
+                prescribed: delivered.is_some(),
                 performed: answered.get(at).copied().unwrap_or(false),
             };
             let state = planner::state_of(begins, closes, now, diary, recorded);
@@ -608,6 +614,7 @@ where
                 programmed: planned.session.is_ok(),
                 test: planned.session.as_ref().is_ok_and(Filled::is_test),
                 state,
+                delivered,
                 closes,
             });
         }
@@ -632,20 +639,22 @@ where
     /// and never sent is not a session the operator can train from, and
     /// reporting it as prescribed would say the tool had done something it had
     /// not.
-    async fn prescribed(&self, slot: ScheduledSlot) -> Result<bool, StoreError> {
+    ///
+    /// When it was, `None` where it was not.
+    async fn delivered(&self, slot: ScheduledSlot) -> Result<Option<Timestamp>, StoreError> {
         match slot.discipline {
             Discipline::Gym => Ok(self
                 .ports
                 .gym_deliveries
                 .occupying(slot.date, &self.gym_destination)
                 .await?
-                .is_some()),
+                .map(|occupant| occupant.delivered_at)),
             Discipline::Cycling => Ok(self
                 .ports
                 .cycling_deliveries
                 .delivered_for(slot.date, &self.cycling_destination)
                 .await?
-                .is_some()),
+                .map(|ride| ride.delivered_at)),
         }
     }
 

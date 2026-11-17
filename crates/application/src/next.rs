@@ -59,7 +59,7 @@ use domain::{
     },
     schedule::{DayPart, Diary, Holidays, Skip},
 };
-use jiff::civil::Date;
+use jiff::{Timestamp, civil::Date};
 
 use crate::{
     CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalWeighInStore, ClassSource,
@@ -166,12 +166,20 @@ pub enum Refetch {
     After(Duration),
 }
 
+/// The shortest visit there can be.
+///
+/// The operator, 2026-10-30: *"The shortest session I could do is a 30
+/// Peloton class, followed by a 5 minute cool down ride, with, say, 5 minutes
+/// each way to get to the bike."*
+///
+/// **What a run waits for twice**: a page fetches nothing fetched within it,
+/// and a session delivered within it is not due, since it cannot have been
+/// performed yet (#830).
+pub const SHORTEST_VISIT: Duration = Duration::from_mins(45);
+
 impl Refetch {
-    /// The shortest visit there can be: the operator, 2026-10-30, *"The
-    /// shortest session I could do is a 30 Peloton class, followed by a 5
-    /// minute cool down ride, with, say, 5 minutes each way to get to the
-    /// bike."*
-    pub const SHORTEST_VISIT: Self = Self::After(Duration::from_mins(45));
+    /// Not within [`SHORTEST_VISIT`] of the last fetch.
+    pub const SHORTEST_VISIT: Self = Self::After(SHORTEST_VISIT);
 }
 
 /// The walks behind one catalogue entry, run in order.
@@ -827,6 +835,9 @@ pub trait GymSessions: GymDeriving {
         derived: GymDerived,
         reschedule: &Reschedule,
     ) -> impl Future<Output = Result<GymPrescribed, PrescriptionError>> + Send;
+
+    /// Whether there is access to where its sessions go.
+    fn reachable(&self) -> bool;
 }
 
 /// Everything the gym's next session is derived from.
@@ -1017,6 +1028,9 @@ where
             delivery,
         })
     }
+    fn reachable(&self) -> bool {
+        self.destination.is_ok()
+    }
 }
 
 /// Cycling's next ride, derived from the store and written nowhere.
@@ -1035,6 +1049,9 @@ pub trait CyclingSessions: CyclingDeriving {
     /// Deliver what `derived` holds.
     fn prescribed(&self, derived: CyclingDerived)
     -> impl Future<Output = CyclingPrescribed> + Send;
+
+    /// Whether there is access to where its rides go.
+    fn reachable(&self) -> bool;
 }
 
 /// The cycling use case and where its rides go.
@@ -1104,6 +1121,9 @@ where
             ride: derived.ride,
             delivery,
         }
+    }
+    fn reachable(&self) -> bool {
+        self.destination.is_ok()
     }
 }
 
@@ -1569,7 +1589,7 @@ where
                 return Ok(true);
             }
         }
-        if scope.has(&Part::Delivering) {
+        if scope.has(&Part::Delivering) && self.delivers(&judge).await? {
             return Ok(true);
         }
         for calendar in Calendar::ALL {
@@ -1584,6 +1604,50 @@ where
             }
         }
         self.stale(scope).await
+    }
+
+    /// Whether delivering would do anything: commit a mesocycle that is due,
+    /// or send a session that is not already where it is performed (#830).
+    ///
+    /// **Read from what is held**, as the run delivers it, so asking derives
+    /// nothing a page has not already derived.
+    async fn delivers(&self, judge: &Judge) -> Result<bool, NextError> {
+        let diary = self.ports.diary.diary().await?;
+        if let Ok(holidays) = self.ports.holidays.holidays().await
+            && matches!(
+                self.ports
+                    .committing
+                    .due(judge.now, &holidays, &judge.standing, &diary)
+                    .await,
+                Ok(Some(_))
+            )
+        {
+            return Ok(true);
+        }
+        let reschedule = judge.standing.reschedule(diary.clone());
+        let upcoming = self
+            .ports
+            .held
+            .upcoming(upcoming(
+                &self.ports.gym,
+                &self.ports.cycling,
+                judge.now,
+                &judge.standing,
+                &diary,
+                &reschedule,
+            ))
+            .await;
+        Ok(match upcoming.as_ref() {
+            WhatIsNext::Session {
+                prescribed: Derived::Gym(Ok(GymDerived::Session { in_place, .. })),
+                ..
+            } => in_place.is_none() && self.ports.gym.reachable(),
+            WhatIsNext::Session {
+                prescribed: Derived::Cycling(Ok(derived)),
+                ..
+            } => !derived.in_place && self.ports.cycling.reachable(),
+            _ => false,
+        })
     }
 
     /// Whether any walk of one entry in `scope` is due.
@@ -1700,6 +1764,7 @@ where
                 &judge.standing,
                 discipline,
                 fetched.succeeded.map(|succeeded| self.part(succeeded)),
+                judge.at.as_timestamp(),
             ))
             .then_some(NotDue::NoSession(discipline)),
         })
@@ -2393,12 +2458,17 @@ fn wanted<W: Walks>(walks: &W, scope: &Scope) -> Vec<usize> {
 /// **And anything before this microcycle began**, for the last session of the
 /// week before, which the standing no longer shows.
 ///
+/// **Not a session delivered within [`SHORTEST_VISIT`] of `now`** (#830): on
+/// 2026-11-17 a ride delivered at 06:59 had every page opened in the next four
+/// minutes fetch Peloton, for a ride that could not yet have been ridden.
+///
 /// Where there is no microcycle to read, or the stream was never fetched,
 /// nothing says it could not have been.
 fn could_have_performed(
     standing: &Standing,
     discipline: Discipline,
     since: Option<DayPart>,
+    now: Timestamp,
 ) -> bool {
     let (Some(commencing), Some(since)) = (standing.commencing, since) else {
         return true;
@@ -2409,7 +2479,11 @@ fn could_have_performed(
             .iter()
             .filter(|session| session.slot.discipline == discipline)
             .any(|session| match session.state {
-                SessionState::Prescribed => true,
+                SessionState::Prescribed => session.delivered.is_none_or(|delivered| {
+                    delivered
+                        .checked_add(SHORTEST_VISIT)
+                        .is_ok_and(|performable| now >= performable)
+                }),
                 SessionState::NotPerformed { .. } | SessionState::NotPrescribed => {
                     session.closes.is_none_or(|closes| since < closes)
                 }

@@ -631,8 +631,9 @@ impl PlanStore for NoPlans {
 }
 
 /// The week of Monday 12 October 2026: the gym on the Monday evening and a ride
-/// on the Wednesday evening, each in the state given.
-struct Week(Vec<SessionState>);
+/// on the Wednesday evening, each in the state given, and when the gym's was
+/// delivered.
+struct Week(Vec<SessionState>, Option<jiff::Timestamp>);
 
 fn slot(date: Date, discipline: Discipline) -> ScheduledSlot {
     ScheduledSlot {
@@ -659,12 +660,14 @@ impl StandingReader for Week {
             sessions: slots
                 .into_iter()
                 .zip(self.0.iter())
-                .map(|((slot, closes), state)| Session {
+                .enumerate()
+                .map(|(at, ((slot, closes), state))| Session {
                     slot,
                     number: 1,
                     programmed: true,
                     test: false,
                     state: state.clone(),
+                    delivered: self.1.filter(|_| at == 0),
                     closes,
                 })
                 .collect(),
@@ -728,6 +731,9 @@ impl GymSessions for Unplanned {
             GymDerived::Session { date, .. } => Err(PrescriptionError::NoPlan { date }),
         }
     }
+    fn reachable(&self) -> bool {
+        true
+    }
 }
 
 /// Cycling with no day to ride on.
@@ -752,6 +758,9 @@ impl CyclingSessions for Dayless {
                 detail: "no peloton credential".to_owned(),
             })),
         }
+    }
+    fn reachable(&self) -> bool {
+        false
     }
 }
 
@@ -1000,10 +1009,10 @@ impl HeldNodes for Held {
 #[test]
 fn a_run_reads_where_the_plan_stands_from_what_is_held() {
     let states = || {
-        Week(vec![
-            SessionState::ToBePrescribed,
-            SessionState::ToBePrescribed,
-        ])
+        Week(
+            vec![SessionState::ToBePrescribed, SessionState::ToBePrescribed],
+            None,
+        )
     };
     let held = Held {
         week: states(),
@@ -1035,10 +1044,10 @@ fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
 fn a_source_that_cannot_be_fetched_is_a_failed_step_and_the_run_carries_on() {
     let ports = ports(
         Recorded::week().expect("a week"),
-        Week(vec![
-            SessionState::ToBePrescribed,
-            SessionState::ToBePrescribed,
-        ]),
+        Week(
+            vec![SessionState::ToBePrescribed, SessionState::ToBePrescribed],
+            None,
+        ),
         Committer(None),
     )
     .expect("the ports build");
@@ -1103,10 +1112,10 @@ fn a_source_that_cannot_be_fetched_is_a_failed_step_and_the_run_carries_on() {
 fn each_walk_behind_an_entry_reports_its_own_outcome() {
     let mut ports = ports(
         Recorded::week().expect("a week"),
-        Week(vec![
-            SessionState::ToBePrescribed,
-            SessionState::ToBePrescribed,
-        ]),
+        Week(
+            vec![SessionState::ToBePrescribed, SessionState::ToBePrescribed],
+            None,
+        ),
         Committer(None),
     )
     .expect("the ports build");
@@ -1169,10 +1178,10 @@ fn each_walk_behind_an_entry_reports_its_own_outcome() {
 fn with_no_garmin_credential_the_watch_is_not_collected_and_the_run_carries_on() {
     let mut ports = ports(
         Recorded::week().expect("a week"),
-        Week(vec![
-            SessionState::ToBePrescribed,
-            SessionState::ToBePrescribed,
-        ]),
+        Week(
+            vec![SessionState::ToBePrescribed, SessionState::ToBePrescribed],
+            None,
+        ),
         Committer(None),
     )
     .expect("the ports build");
@@ -1223,10 +1232,10 @@ fn with_no_garmin_credential_the_watch_is_not_collected_and_the_run_carries_on()
 fn every_step_is_reported_as_it_ends_in_the_order_the_report_keeps() {
     let ports = ports(
         Recorded::week().expect("a week"),
-        Week(vec![
-            SessionState::ToBePrescribed,
-            SessionState::ToBePrescribed,
-        ]),
+        Week(
+            vec![SessionState::ToBePrescribed, SessionState::ToBePrescribed],
+            None,
+        ),
         Committer(None),
     )
     .expect("the ports build");
@@ -1256,10 +1265,10 @@ fn a_mesocycle_that_cannot_be_committed_is_a_failed_step() {
     // Committing reads the calendar, so this one answers.
     let ports = calendar(
         Recorded::week().expect("a week"),
-        Week(vec![
-            SessionState::ToBePrescribed,
-            SessionState::ToBePrescribed,
-        ]),
+        Week(
+            vec![SessionState::ToBePrescribed, SessionState::ToBePrescribed],
+            None,
+        ),
         Committer(Some(CommitError::NotDesigned {
             planned_at: jiff::Timestamp::UNIX_EPOCH,
         })),
@@ -1286,10 +1295,10 @@ fn a_mesocycle_that_cannot_be_committed_is_a_failed_step() {
 fn a_skip_takes_the_rest_of_the_current_window() {
     let ports = ports(
         Recorded::week().expect("a week"),
-        Week(vec![
-            SessionState::ToBePrescribed,
-            SessionState::ToBePrescribed,
-        ]),
+        Week(
+            vec![SessionState::ToBePrescribed, SessionState::ToBePrescribed],
+            None,
+        ),
         Committer(None),
     )
     .expect("the ports build");
@@ -1317,7 +1326,7 @@ fn a_skip_takes_the_rest_of_the_current_window() {
 fn a_skip_with_nothing_to_skip_is_refused() {
     let ports = ports(
         Recorded::week().expect("a week"),
-        Week(vec![SessionState::Performed, SessionState::Performed]),
+        Week(vec![SessionState::Performed, SessionState::Performed], None),
         Committer(None),
     )
     .expect("the ports build");
@@ -1335,8 +1344,8 @@ fn a_skip_with_nothing_to_skip_is_refused() {
 /// what is next.
 #[test]
 fn no_recorded_week_is_refused_before_anything_runs() {
-    let ports =
-        ports(Recorded::nothing(), Week(Vec::new()), Committer(None)).expect("the ports build");
+    let ports = ports(Recorded::nothing(), Week(Vec::new(), None), Committer(None))
+        .expect("the ports build");
     let heard = Heard::default();
     let refused = runtime()
         .expect("a current-thread runtime builds")
@@ -1352,7 +1361,7 @@ fn no_recorded_week_is_refused_before_anything_runs() {
 fn a_settled_microcycle_prescribes_nothing() {
     let ports = ports(
         Recorded::week().expect("a week"),
-        Week(vec![SessionState::Performed, SessionState::Performed]),
+        Week(vec![SessionState::Performed, SessionState::Performed], None),
         Committer(None),
     )
     .expect("the ports build");
@@ -1374,12 +1383,15 @@ fn an_open_illness_prescribes_nothing_and_says_so() {
         .with_illnesses(vec![domain::schedule::Illness::new(now().date)]);
     let ports = ports(
         recorded,
-        Week(vec![
-            SessionState::Performed,
-            SessionState::Skipped {
-                absence: domain::schedule::AbsenceKind::Illness,
-            },
-        ]),
+        Week(
+            vec![
+                SessionState::Performed,
+                SessionState::Skipped {
+                    absence: domain::schedule::AbsenceKind::Illness,
+                },
+            ],
+            None,
+        ),
         Committer(None),
     )
     .expect("the ports build");
@@ -1400,7 +1412,7 @@ fn an_open_illness_prescribes_nothing_and_says_so() {
 fn a_run_while_another_is_going_is_refused_before_anything_runs() {
     let mut ports = ports(
         Recorded::week().expect("a week"),
-        Week(vec![SessionState::ToBePrescribed]),
+        Week(vec![SessionState::ToBePrescribed], None),
         Committer(None),
     )
     .expect("the ports build");
@@ -1420,7 +1432,7 @@ fn a_run_while_another_is_going_is_refused_before_anything_runs() {
 fn a_whole_run_asked_to_join_waits_and_delivers_nothing() {
     let mut ports = ports(
         Recorded::week().expect("a week"),
-        Week(vec![SessionState::ToBePrescribed]),
+        Week(vec![SessionState::ToBePrescribed], None),
         Committer(None),
     )
     .expect("the ports build");
@@ -1446,7 +1458,7 @@ fn a_whole_run_asked_to_join_waits_and_delivers_nothing() {
 fn a_collection_fetches_and_derives_only_its_scope() {
     let ports = ports(
         Recorded::week().expect("a week"),
-        Week(vec![SessionState::ToBePrescribed]),
+        Week(vec![SessionState::ToBePrescribed], None),
         Committer(None),
     )
     .expect("the ports build");
@@ -1479,7 +1491,7 @@ fn a_collection_fetches_and_derives_only_its_scope() {
 fn a_part_another_run_holds_is_joined_and_the_rest_collected() {
     let mut ports = ports(
         Recorded::week().expect("a week"),
-        Week(vec![SessionState::ToBePrescribed]),
+        Week(vec![SessionState::ToBePrescribed], None),
         Committer(None),
     )
     .expect("the ports build");
@@ -1514,10 +1526,10 @@ fn run_over(graph: &Arc<Graph>) -> Result<Report, Box<dyn std::error::Error>> {
     let ports = over(
         Arc::clone(graph),
         Recorded::week()?,
-        Week(vec![
-            SessionState::ToBePrescribed,
-            SessionState::ToBePrescribed,
-        ]),
+        Week(
+            vec![SessionState::ToBePrescribed, SessionState::ToBePrescribed],
+            None,
+        ),
         Committer(None),
         Unreachable,
     )?;
@@ -1669,10 +1681,10 @@ type Outcomes = Vec<(Step, Result<Found, StepFailure>)>;
 fn withings_on(newest: Option<Date>) -> Result<Outcomes, Box<dyn std::error::Error>> {
     let mut ports = ports(
         Recorded::week()?,
-        Week(vec![
-            SessionState::ToBePrescribed,
-            SessionState::ToBePrescribed,
-        ]),
+        Week(
+            vec![SessionState::ToBePrescribed, SessionState::ToBePrescribed],
+            None,
+        ),
         Committer(None),
     )?;
     if let Ok(daily) = &mut ports.weigh_in_records.walks {
@@ -1715,10 +1727,10 @@ fn a_daily_stream_holding_today_is_not_fetched_until_tomorrow() {
 fn the_streams_are_fetched_at_once() {
     let mut ports = ports(
         Recorded::week().expect("a week"),
-        Week(vec![
-            SessionState::ToBePrescribed,
-            SessionState::ToBePrescribed,
-        ]),
+        Week(
+            vec![SessionState::ToBePrescribed, SessionState::ToBePrescribed],
+            None,
+        ),
         Committer(None),
     )
     .expect("the ports build");
@@ -1762,10 +1774,10 @@ fn the_streams_are_fetched_at_once() {
 fn a_layer_is_derived_while_what_it_does_not_read_is_still_fetched() {
     let mut ports = ports(
         Recorded::week().expect("a week"),
-        Week(vec![
-            SessionState::ToBePrescribed,
-            SessionState::ToBePrescribed,
-        ]),
+        Week(
+            vec![SessionState::ToBePrescribed, SessionState::ToBePrescribed],
+            None,
+        ),
         Committer(None),
     )
     .expect("the ports build");
@@ -1847,10 +1859,10 @@ fn a_layer_is_derived_while_what_it_does_not_read_is_still_fetched() {
 fn watch_on(whole: Option<Date>) -> Result<Outcomes, Box<dyn std::error::Error>> {
     let mut ports = ports(
         Recorded::week()?,
-        Week(vec![
-            SessionState::ToBePrescribed,
-            SessionState::ToBePrescribed,
-        ]),
+        Week(
+            vec![SessionState::ToBePrescribed, SessionState::ToBePrescribed],
+            None,
+        ),
         Committer(None),
     )?;
     if let Ok(daily) = &mut ports.watch_days.walks {
@@ -1923,9 +1935,23 @@ fn hevy_fetched(
     ago: i64,
     refetch: Refetch,
 ) -> Result<Outcomes, Box<dyn std::error::Error>> {
+    hevy_fetched_delivered(state, None, ago, refetch)
+}
+
+/// As [`hevy_fetched`], with the gym's session delivered `delivered` minutes
+/// before [`AT`].
+fn hevy_fetched_delivered(
+    state: SessionState,
+    delivered: Option<i64>,
+    ago: i64,
+    refetch: Refetch,
+) -> Result<Outcomes, Box<dyn std::error::Error>> {
+    let delivered = delivered
+        .map(|minutes| AT.checked_sub(jiff::SignedDuration::from_mins(minutes)))
+        .transpose()?;
     let mut ports = ports(
         Recorded::week()?,
-        Week(vec![state, SessionState::ToBePrescribed]),
+        Week(vec![state, SessionState::ToBePrescribed], delivered),
         Committer(None),
     )?;
     let hevy = stream("hevy.workouts")?;
@@ -2025,6 +2051,60 @@ fn a_page_fetches_nothing_fetched_within_the_shortest_visit() {
     assert_eq!(fetched(10, Refetch::WhenDue), vec![(hevy, landed)]);
 }
 
+/// **A session delivered under the shortest visit ago is not due** (#830),
+/// from either frontend: it cannot have been performed yet. On 2026-11-17 a
+/// ride delivered at 06:59 had the pages opened at 07:01 and 07:03 fetch
+/// Peloton.
+#[test]
+fn a_session_delivered_within_the_shortest_visit_is_not_due() {
+    let hevy = Step::Fetching(stream("hevy.workouts").expect("a stream"));
+    let fetched = |delivered| {
+        hevy_fetched_delivered(
+            SessionState::Prescribed,
+            Some(delivered),
+            120,
+            Refetch::WhenDue,
+        )
+        .expect("the run collects")
+    };
+
+    assert_eq!(
+        fetched(2),
+        vec![(
+            hevy.clone(),
+            Ok(Found::NotDue(NotDue::NoSession(Discipline::Gym))),
+        )],
+        "delivered two minutes ago",
+    );
+    assert_eq!(
+        fetched(45),
+        vec![(hevy, Ok(Found::Landed(RecordCount::from(1))))],
+        "delivered the shortest visit ago",
+    );
+}
+
+/// **A page wants no run for delivering where there is nothing to send**
+/// (#830): every open of the home page used to start one.
+#[test]
+fn a_page_wants_no_run_to_deliver_nothing() {
+    let ports = ports(
+        Recorded::week().expect("a week"),
+        Week(
+            vec![SessionState::ToBePrescribed, SessionState::ToBePrescribed],
+            None,
+        ),
+        Committer(None),
+    )
+    .expect("the ports build");
+
+    assert!(
+        !runtime()
+            .expect("a current-thread runtime builds")
+            .block_on(Next::new(ports).wanted(&Scope::new([Part::Delivering]), now()))
+            .expect("the store answers")
+    );
+}
+
 /// **A ride's samples are fetched only once the ride list has landed
 /// something since they last were**, and Peloton's account once a day.
 #[test]
@@ -2032,7 +2112,10 @@ fn a_stream_that_follows_another_waits_for_it_and_an_account_for_tomorrow() {
     let fetched = |samples: i64, account: i64| -> Outcomes {
         let mut ports = ports(
             Recorded::week().expect("a week"),
-            Week(vec![SessionState::Prescribed, SessionState::Prescribed]),
+            Week(
+                vec![SessionState::Prescribed, SessionState::Prescribed],
+                None,
+            ),
             Committer(None),
         )
         .expect("the ports build");
@@ -2096,10 +2179,10 @@ fn the_classes_are_refreshed_once_a_day_unless_some_are_unread() {
     let refreshed = |listed_ago: i64, outstanding: u64| -> Result<Found, StepFailure> {
         let mut ports = ports(
             Recorded::week().expect("a week"),
-            Week(vec![
-                SessionState::ToBePrescribed,
-                SessionState::ToBePrescribed,
-            ]),
+            Week(
+                vec![SessionState::ToBePrescribed, SessionState::ToBePrescribed],
+                None,
+            ),
             Committer(None),
         )
         .expect("the ports build");
@@ -2151,7 +2234,10 @@ fn a_chart_page_opened_just_after_a_run_over_its_streams_wants_no_run() {
         let mut ports = over(
             Arc::clone(&graph),
             Recorded::week().expect("a week"),
-            Week(vec![SessionState::Prescribed, SessionState::ToBePrescribed]),
+            Week(
+                vec![SessionState::Prescribed, SessionState::ToBePrescribed],
+                None,
+            ),
             Committer(None),
             Unreachable,
         )
