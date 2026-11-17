@@ -102,6 +102,24 @@ impl<A: Analysed> Fetch for Of<A> {
     }
 }
 
+/// Consulting the analysis `A`: read as it stands whenever what reads it is
+/// derived, and moving nothing (#830).
+pub struct Consulted<A>(PhantomData<fn() -> A>);
+
+impl<A: Analysed> Input for Consulted<A> {
+    fn reads() -> Reads {
+        Reads::consulting([Node::Analysis(A::ANALYSIS)])
+    }
+}
+
+impl<A: Analysed> Fetch for Consulted<A> {
+    type Fetched = Arc<A::Value>;
+
+    fn fetch<'a>(holding: &'a Holding<'a>) -> FetchFuture<'a, Self::Fetched> {
+        Box::pin(holding.held::<A>())
+    }
+}
+
 impl Fetch for Today {
     type Fetched = Date;
 
@@ -306,22 +324,67 @@ impl<'a> Holding<'a> {
     }
 }
 
-/// What is next as this server holds it, for a run to deliver (#830).
-pub struct HeldNext<'a>(Holding<'a>);
+/// Where the plan stands and what is next, as this server holds them, for a
+/// run to read and deliver (#830).
+///
+/// **A load of its own for each read**: a run writes the store between its
+/// reads, and a version asked before it gathered would hand back what was
+/// held before the gathering moved it.
+pub struct HeldNext<'a> {
+    held: &'a Held,
+    store: &'a Store,
+    zone: &'a OperatorZone,
+    build: Option<&'a str>,
+}
 
 impl<'a> HeldNext<'a> {
     #[must_use]
-    pub const fn new(holding: Holding<'a>) -> Self {
-        Self(holding)
+    pub const fn new(
+        held: &'a Held,
+        store: &'a Store,
+        zone: &'a OperatorZone,
+        build: Option<&'a str>,
+    ) -> Self {
+        Self {
+            held,
+            store,
+            zone,
+            build,
+        }
+    }
+
+    /// A load of what is held, as the store now stands.
+    fn holding(&self) -> Holding<'a> {
+        Holding::new(self.held, self.store, self.zone, self.build)
     }
 }
 
-impl application::next::HeldUpcoming for HeldNext<'_> {
-    async fn held<F>(&self, derive: F) -> Arc<application::next::Upcoming>
+impl application::next::HeldNodes for HeldNext<'_> {
+    /// **Walked as `read` walks it where it cannot be held**, so a failure
+    /// is the walk's to say.
+    async fn standing<F>(
+        &self,
+        now: DayPart,
+        read: F,
+    ) -> Result<application::microcycle::Standing, StoreError>
+    where
+        F: Future<Output = Result<application::microcycle::Standing, StoreError>> + Send,
+    {
+        let holding = Holding {
+            now,
+            ..self.holding()
+        };
+        match holding.held::<crate::analyses::Standing>().await {
+            Ok(stood) => Ok(stood.standing.clone()),
+            Err(_) => read.await,
+        }
+    }
+
+    async fn upcoming<F>(&self, derive: F) -> Arc<application::next::Upcoming>
     where
         F: Future<Output = application::next::Upcoming> + Send,
     {
-        self.0
+        self.holding()
             .held_or::<crate::analyses::Prescription>(derive)
             .await
     }
@@ -329,10 +392,10 @@ impl application::next::HeldUpcoming for HeldNext<'_> {
 
 impl crate::next::Holds for HeldNext<'_> {
     fn store(&self) -> &Store {
-        self.0.store
+        self.store
     }
 
     fn zone(&self) -> &OperatorZone {
-        self.0.zone
+        self.zone
     }
 }

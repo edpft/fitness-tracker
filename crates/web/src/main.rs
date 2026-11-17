@@ -625,9 +625,10 @@ mod tests {
     /// only when a node upstream of what it reads has moved, and a weigh-in
     /// moves Withings's normalised layer and everything derived from it.
     ///
-    /// Body weight is read further than its own cards: the FTP tests are per
-    /// kilo, the 1RM estimates are over body weight, and pulse wave velocity is
-    /// a part of the Body Scan's weigh-in.
+    /// Pulse wave velocity is a part of the Body Scan's weigh-in, so its cards
+    /// are among them. The FTP tests and the 1RM estimates only consult body
+    /// weight, since each test is read against the weigh-in on its own day:
+    /// their cards are not.
     #[test]
     fn a_weigh_in_redraws_only_the_cards_reading_body_weight() {
         let graph = configurator::graph::graph();
@@ -637,7 +638,7 @@ mod tests {
         let redrawn: Vec<&str> = super::pages()
             .cards_read()
             .iter()
-            .filter(|(_, reads)| graph.upstream(reads).contains(&weighed))
+            .filter(|(_, reads)| graph.moved_by(reads).contains(&weighed))
             .map(|(name, _)| *name)
             .collect();
         assert_eq!(
@@ -646,19 +647,12 @@ mod tests {
                 "body-composition-charts",
                 "body-weigh-ins",
                 "body-weight-charts",
-                "ftp-heart-rates",
-                "ftp-latest",
-                "ftp-tests",
-                "one-rep-max-lifts",
-                "progress-gym",
                 "pulse-wave-velocity-latest",
                 "pulse-wave-velocity-readings",
                 "pulse-wave-velocity-summary",
                 "summary-body-weight",
                 "summary-fat",
                 "summary-fat-free",
-                "summary-ftp-test",
-                "working-so-far",
             ]
         );
     }
@@ -675,7 +669,7 @@ mod tests {
         let redrawn: Vec<&str> = super::pages()
             .cards_read()
             .iter()
-            .filter(|(_, reads)| graph.upstream(reads).contains(&night))
+            .filter(|(_, reads)| graph.moved_by(reads).contains(&night))
             .map(|(name, _)| *name)
             .collect();
         assert_eq!(
@@ -702,7 +696,7 @@ mod tests {
             .cards_read()
             .iter()
             .filter(|(name, reads)| {
-                name.starts_with("home-") && graph.upstream(reads).contains(&performed)
+                name.starts_with("home-") && graph.moved_by(reads).contains(&performed)
             })
             .map(|(name, _)| *name)
             .collect();

@@ -29,9 +29,9 @@ use application::{
     next::{
         Awaits, Canonicalising, CyclingDerived, CyclingDeriving, CyclingPrescribed,
         CyclingSessions, Daily, Done, Expects, Found, GymDerived, GymDeriving, GymPrescribed,
-        GymSessions, IfGoing, MesocycleCommitter, Next, NextError, NextPorts, NoAccess, NotDue,
-        Prescribed, Progress, Records, Refetch, Report, Scope, SkipRefused, StandingReader, Step,
-        StepFailure, Unheld, Walks, WhatIsNext,
+        GymSessions, HeldNodes, IfGoing, MesocycleCommitter, Next, NextError, NextPorts, NoAccess,
+        NotDue, Prescribed, Progress, Records, Refetch, Report, Scope, SkipRefused, StandingReader,
+        Step, StepFailure, Unheld, Walks, WhatIsNext,
     },
     reschedule::Reschedule,
 };
@@ -793,7 +793,7 @@ impl Progress for Heard {
     }
 }
 
-type Ports<H = Unreachable> = NextPorts<
+type Ports<H = Unreachable, U = Unheld> = NextPorts<
     Walking,
     Walking,
     Daily<Walking, Newest>,
@@ -812,7 +812,7 @@ type Ports<H = Unreachable> = NextPorts<
     Dayless,
     Lock,
     Fetches,
-    Unheld,
+    U,
 >;
 
 /// The parts other runs of `next` hold, each let go once waited on.
@@ -928,13 +928,92 @@ fn over<H>(
         committing: committer,
         gym: Unplanned,
         cycling: Dayless,
-        upcoming: Unheld,
+        held: Unheld,
         lock: Lock::default(),
         fetches: Fetches::default(),
         zone: OperatorZone::try_from("Europe/London")?,
         refetch: Refetch::WhenDue,
         graph: application::graph::Graph::default(),
     })
+}
+
+/// `ports`, reading what is held through `held`.
+fn holding<H, U>(ports: Ports<H>, held: U) -> Ports<H, U> {
+    NextPorts {
+        gym_records: ports.gym_records,
+        cycling_records: ports.cycling_records,
+        weigh_in_records: ports.weigh_in_records,
+        watch_records: ports.watch_records,
+        watch_days: ports.watch_days,
+        normalised: ports.normalised,
+        canonical: ports.canonical,
+        ledger: ports.ledger,
+        classes: ports.classes,
+        holidays: ports.holidays,
+        diary: ports.diary,
+        plans: ports.plans,
+        microcycle: ports.microcycle,
+        committing: ports.committing,
+        gym: ports.gym,
+        cycling: ports.cycling,
+        held,
+        lock: ports.lock,
+        fetches: ports.fetches,
+        zone: ports.zone,
+        refetch: ports.refetch,
+        graph: ports.graph,
+    }
+}
+
+/// A frontend holding where the plan stands, as `Week` walks it, and
+/// counting each time a run asks for it.
+struct Held {
+    week: Week,
+    asked: AtomicUsize,
+}
+
+impl HeldNodes for Held {
+    async fn standing<F>(&self, now: DayPart, _read: F) -> Result<Standing, StoreError>
+    where
+        F: Future<Output = Result<Standing, StoreError>> + Send,
+    {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        self.week.standing(now).await
+    }
+
+    async fn upcoming<F>(&self, derive: F) -> Arc<application::next::Upcoming>
+    where
+        F: Future<Output = application::next::Upcoming> + Send,
+    {
+        Arc::new(derive.await)
+    }
+}
+
+/// **A run reads where the plan stands from what the frontend holds**
+/// (#830), both before it gathers and after, so a page that has just drawn
+/// it hands it over rather than the run walking the plan again.
+#[test]
+fn a_run_reads_where_the_plan_stands_from_what_is_held() {
+    let states = || {
+        Week(vec![
+            SessionState::ToBePrescribed,
+            SessionState::ToBePrescribed,
+        ])
+    };
+    let held = Held {
+        week: states(),
+        asked: AtomicUsize::new(0),
+    };
+    let ports = holding(
+        ports(Recorded::week().expect("a week"), states(), Committer(None))
+            .expect("the ports build"),
+        &held,
+    );
+    runtime()
+        .expect("a current-thread runtime builds")
+        .block_on(Next::new(ports).run(now(), None, IfGoing::Refuse, &Heard::default()))
+        .expect("the run answers");
+    assert_eq!(held.asked.load(Ordering::SeqCst), 2);
 }
 
 const fn now() -> DayPart {

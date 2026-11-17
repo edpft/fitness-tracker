@@ -214,6 +214,13 @@ impl Runs {
         &self.held
     }
 
+    /// Where the plan stands and what is next, as held, for a run or the
+    /// question whether one is wanted (#830).
+    const fn held_next(&self) -> configurator::held::HeldNext<'_> {
+        let setting = &self.setting;
+        configurator::held::HeldNext::new(&self.held, &setting.store, &setting.zone, setting.build)
+    }
+
     /// Each card's last drawing.
     pub const fn drawings(&self) -> &crate::card::Drawings {
         &self.drawings
@@ -330,8 +337,7 @@ impl Runs {
         };
         let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
         Box::pin(configurator::next::wanted(
-            &setting.store,
-            &setting.zone,
+            &self.held_next(),
             &credentials,
             DayPart::containing(here.datetime()),
             scope,
@@ -424,14 +430,9 @@ impl Runs {
         };
         let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
         let following = Following(&self.view);
+        let held = self.held_next();
         let failed = match asked {
             Asked::Everything => {
-                let held = configurator::held::HeldNext::new(configurator::held::Holding::new(
-                    &self.held,
-                    &setting.store,
-                    &setting.zone,
-                    setting.build,
-                ));
                 match runtime.block_on(configurator::next::run(
                     &held,
                     &credentials,
@@ -448,8 +449,7 @@ impl Runs {
             }
             Asked::Only(scope) => runtime
                 .block_on(configurator::next::collect(
-                    &setting.store,
-                    &setting.zone,
+                    &held,
                     &credentials,
                     DayPart::containing(here.datetime()),
                     scope,

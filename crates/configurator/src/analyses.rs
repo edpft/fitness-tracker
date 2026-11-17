@@ -46,7 +46,7 @@ use crate::{
     body_weight as weigh_ins,
     clock::{Now, Today},
     composition as components, devices, ftp_tests,
-    held::{Analysed, Of},
+    held::{Analysed, Consulted, Of},
     macrocycle::Stood,
     next::NextFailure,
     one_rep_max, rescheduling,
@@ -151,7 +151,9 @@ pub struct FtpTests;
 impl Analysed for FtpTests {
     const ANALYSIS: Analysis = Analysis::FtpTests;
     type Ports = ftp_tests::Tests;
-    type Reads = (Of<FtpHistory>, Of<BodyWeight>);
+    /// **Body weight consulted**: each test is read against the weigh-in on
+    /// its own day, which a later weigh-in does not change.
+    type Reads = (Of<FtpHistory>, Consulted<BodyWeight>);
     type Value = Vec<ftp_test::Test>;
 
     async fn open(store: &Store, _: &OperatorZone) -> Result<Self::Ports, NextFailure> {
@@ -243,7 +245,8 @@ pub struct Strength;
 impl Analysed for Strength {
     const ANALYSIS: Analysis = Analysis::Strength;
     type Ports = one_rep_max::Strength;
-    type Reads = (Of<Plans>, Of<BodyWeight>, Today);
+    /// **Body weight consulted**, as the FTP tests consult it.
+    type Reads = (Of<Plans>, Consulted<BodyWeight>, Today);
     type Value = (Vec<Tests>, View);
 
     async fn open(store: &Store, zone: &OperatorZone) -> Result<Self::Ports, NextFailure> {
