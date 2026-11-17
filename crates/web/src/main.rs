@@ -14,6 +14,8 @@ mod composition;
 mod curves;
 mod detail;
 mod drawn;
+#[cfg(test)]
+mod drive;
 mod equipment;
 mod ftp;
 mod history;

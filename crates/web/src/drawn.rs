@@ -95,6 +95,9 @@ pub struct Pages {
     router: Router<Arc<Runs>>,
     reads: Vec<(&'static str, Reads)>,
     cards: std::collections::BTreeMap<&'static str, Reads>,
+    /// The routes of the pages drawn as their cards.
+    #[cfg(test)]
+    carded: Vec<&'static str>,
 }
 
 impl Pages {
@@ -103,6 +106,8 @@ impl Pages {
             router: Router::new(),
             reads: Vec::new(),
             cards: std::collections::BTreeMap::new(),
+            #[cfg(test)]
+            carded: Vec::new(),
         }
     }
 
@@ -110,6 +115,8 @@ impl Pages {
     pub fn cards<P: crate::card::Page>(mut self) -> Self {
         self.router = self.router.route(P::ROUTE, get(crate::card::page::<P>));
         self.reads.push((P::ROUTE, crate::card::reads::<P>()));
+        #[cfg(test)]
+        self.carded.push(P::ROUTE);
         <P::Cards as crate::card::Cards>::routed(self)
     }
 
@@ -158,6 +165,12 @@ impl Pages {
     #[cfg(test)]
     pub fn reads(&self) -> &[(&'static str, Reads)] {
         &self.reads
+    }
+
+    /// The routes of the pages drawn as their cards.
+    #[cfg(test)]
+    pub fn carded(&self) -> &[&'static str] {
+        &self.carded
     }
 
     /// Each card routed, by its name, and what it reads.

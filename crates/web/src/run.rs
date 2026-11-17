@@ -296,10 +296,13 @@ impl Runs {
     /// A run going over `asked`, as though this server had started one.
     #[cfg(test)]
     pub fn going_over(&self, asked: Asked) {
-        self.going
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(asked);
+        let _going = self.going(&asked);
+    }
+
+    /// The run going over `asked` ended, as though this server's had.
+    #[cfg(test)]
+    pub fn ended_over(&self, asked: &Asked) {
+        self.end(asked);
     }
 
     /// Start a run of what a page asks for, as [`Self::start`] does, unless
@@ -356,27 +359,9 @@ impl Runs {
     /// not be started at all: there is no one request to answer, so it is
     /// said where every page will see it.
     pub fn start(self: &Arc<Self>, asked: &Asked) {
-        {
-            let mut going = self.going.lock().unwrap_or_else(PoisonError::into_inner);
-            if going.iter().any(|run| run.covers(asked)) {
-                configurator::telemetry::joined();
-                return;
-            }
-            // **The steps shown are this server's runs since none was going**,
-            // so a run started beside another adds to what the page shows.
-            if going.is_empty() {
-                let (ended, collected_before) = {
-                    let view = self.view.borrow();
-                    (view.ended, view.collected())
-                };
-                self.view.send_replace(View {
-                    going: true,
-                    ended,
-                    collected_before,
-                    ..View::default()
-                });
-            }
-            going.push(asked.clone());
+        if !self.going(asked) {
+            configurator::telemetry::joined();
+            return;
         }
 
         // Made here, while the page load that asked for it is going, so the
@@ -394,6 +379,31 @@ impl Runs {
             self.refuse(&format!("the run could not be started: {error}"));
             self.end(asked);
         }
+    }
+
+    /// `asked` going, unless a run going covers it: whether it is new.
+    ///
+    /// **The steps shown are this server's runs since none was going**, so a
+    /// run started beside another adds to what the page shows.
+    fn going(&self, asked: &Asked) -> bool {
+        let mut going = self.going.lock().unwrap_or_else(PoisonError::into_inner);
+        if going.iter().any(|run| run.covers(asked)) {
+            return false;
+        }
+        if going.is_empty() {
+            let (ended, collected_before) = {
+                let view = self.view.borrow();
+                (view.ended, view.collected())
+            };
+            self.view.send_replace(View {
+                going: true,
+                ended,
+                collected_before,
+                ..View::default()
+            });
+        }
+        going.push(asked.clone());
+        true
     }
 
     /// Say why a page's run could not be asked for, where every page sees it.
@@ -484,15 +494,25 @@ impl Runs {
 /// What a page drawn from the store is sent of a change to the run: an event
 /// for each part collected since `collected`, then the step as
 /// [`step_event`] names it.
+///
+/// **No event is sent with no data**: a browser drops one unseen (the
+/// EventSource processing model dispatches nothing for an empty data
+/// buffer), so every card waiting on a part, and on a run ending with no
+/// step to show, waited for ever on 2026-11-17 while `curl` showed every
+/// event (#830). A part's event carries its own name, and the step is sent
+/// inside an element of its own, which is empty once the run has ended.
 pub fn page_events(since: &mut u64, collected: &mut u64, view: &View) -> Vec<(String, String)> {
     let mut events: Vec<(String, String)> = view
         .collected_since(*collected)
         .iter()
-        .map(|part| (event(part), String::new()))
+        .map(|part| {
+            let name = event(part);
+            (name.clone(), name)
+        })
         .collect();
     *collected = view.collected();
     let (name, shown) = step_event(since, view);
-    events.push((name.to_owned(), shown.into_string()));
+    events.push((name.to_owned(), html! { div { (shown) } }.into_string()));
     events
 }
 
@@ -818,6 +838,29 @@ mod tests {
         assert!(hrv.covers(&only(&["garmin.hrv"])));
         assert!(!hrv.covers(&Asked::Everything));
         assert!(!hrv.covers(&only(&["withings.measurements"])));
+    }
+
+    /// **Every event a page is sent carries data** (#830), or a browser drops
+    /// it: a part collected, and a run ended with no step left to show.
+    #[test]
+    fn every_event_a_page_is_sent_carries_data() {
+        let view = watch::Sender::new(View {
+            going: true,
+            ..View::default()
+        });
+        Following(&view).collected(&[Part::Delivering]);
+        view.send_modify(|view| {
+            view.going = false;
+            view.ended += 1;
+        });
+        let events = page_events(&mut 0, &mut 0, &view.borrow());
+        assert_eq!(
+            events.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
+            ["delivered", "ended"]
+        );
+        for (name, data) in &events {
+            assert!(!data.is_empty(), "{name} has no data");
+        }
     }
 
     /// A page drawn from the store says which step the run is on, and

@@ -142,7 +142,13 @@ async fn pattern_slots(
 }
 
 impl DiaryStore for SqliteDiaryStore {
+    /// **One snapshot, so one connection** (#830). Until 2026-11-17 each part
+    /// took its own, and the last three were taken in one expression, whose
+    /// temporaries all live to its end: a diary held three of the pool's four
+    /// connections at once, and two read together waited on each other until
+    /// the pool gave up, 30 s later.
     async fn diary(&self) -> Result<Diary, StoreError> {
+        let mut reading = self.store.reading().await?;
         let weeks = sqlx::query!(
             r"
             SELECT id, from_date, zone
@@ -150,13 +156,13 @@ impl DiaryStore for SqliteDiaryStore {
             ORDER BY from_date
             "
         )
-        .fetch_all(&mut *self.store.reading().await?)
+        .fetch_all(&mut *reading)
         .await
         .map_err(|error| store_error(&error))?;
 
         let mut patterns = Vec::with_capacity(weeks.len());
         for week in weeks {
-            let slots = pattern_slots(&mut *self.store.reading().await?, week.id).await?;
+            let slots = pattern_slots(&mut *reading, week.id).await?;
 
             patterns.push(TrainingPattern::new(
                 date_of(&week.from_date)?,
@@ -165,12 +171,12 @@ impl DiaryStore for SqliteDiaryStore {
             ));
         }
 
-        Ok(Diary::new(
-            patterns,
-            read_alterations(&mut *self.store.reading().await?).await?,
-        )
-        .with_illnesses(read_illnesses(&mut *self.store.reading().await?).await?)
-        .with_skips(read_skips(&mut *self.store.reading().await?).await?))
+        let alterations = read_alterations(&mut *reading).await?;
+        let illnesses = read_illnesses(&mut *reading).await?;
+        let skips = read_skips(&mut *reading).await?;
+        Ok(Diary::new(patterns, alterations)
+            .with_illnesses(illnesses)
+            .with_skips(skips))
     }
 }
 
