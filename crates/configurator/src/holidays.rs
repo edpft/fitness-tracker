@@ -4,7 +4,7 @@
 //! school and by the government; a run of `next` asks each whether it has
 //! changed, and everything else reads what is kept and asks nothing.
 
-use application::{HolidayCalendar as _, SourceError, microcycle::Term};
+use application::{Calendar, HolidayCalendar as _, SourceError, microcycle::Term};
 use domain::schedule::Holidays;
 use infrastructure::{BankHolidays, GOV_UK_BANK_HOLIDAYS, SchoolCalendar, SqliteCalendarStore};
 
@@ -24,9 +24,20 @@ pub type Calendars =
 pub(crate) fn calendars(store: &Store) -> Calendars {
     Calendars::new(
         store.adapter(SqliteCalendarStore::new),
-        SchoolCalendar::new(SCHOOL_CALENDAR),
-        BankHolidays::new(GOV_UK_BANK_HOLIDAYS),
+        SchoolCalendar::new(url(Calendar::School, SCHOOL_CALENDAR)),
+        BankHolidays::new(url(Calendar::Public, GOV_UK_BANK_HOLIDAYS)),
     )
+}
+
+/// Where `calendar` is asked: the URL its variable states, as a source's
+/// root is read from its own, and its publisher's otherwise.
+fn url(calendar: Calendar, publisher: &str) -> String {
+    std::env::var(variable(calendar)).unwrap_or_else(|_| publisher.to_owned())
+}
+
+/// `SCHOOL_CALENDAR_URL`, named from the calendar.
+fn variable(calendar: Calendar) -> String {
+    format!("{}_CALENDAR_URL", calendar.as_str().to_uppercase())
 }
 
 /// Every school and public holiday, as last served.
@@ -53,7 +64,16 @@ pub async fn term(store: &Store) -> Option<Term> {
 
 #[cfg(test)]
 mod tests {
-    use super::SCHOOL_CALENDAR;
+    use application::Calendar;
+
+    use super::{SCHOOL_CALENDAR, variable};
+
+    /// Each calendar's variable, named from it.
+    #[test]
+    fn each_calendar_is_reached_where_its_variable_says() {
+        assert_eq!(variable(Calendar::School), "SCHOOL_CALENDAR_URL");
+        assert_eq!(variable(Calendar::Public), "PUBLIC_CALENDAR_URL");
+    }
 
     /// **A stub cannot catch a wrong default**, so the feed is pinned.
     #[test]

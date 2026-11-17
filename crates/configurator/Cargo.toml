@@ -28,6 +28,9 @@ tracing-subscriber.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 tempfile.workspace = true
+# Stub sources for a run end to end (#830).
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+wiremock.workspace = true
 
 [lints]
 workspace = true
