@@ -102,7 +102,7 @@ impl crate::card::Page for Page {
             (DOCTYPE)
             html lang="en" {
                 head { (page::head(Place::Today.name(), &[])) }
-                body {
+                body hx-boost="true" {
                     main {
                         div.home {
                             (next)

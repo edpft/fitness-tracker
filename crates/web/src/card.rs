@@ -360,9 +360,9 @@ pub fn reads<P: Page>() -> Reads {
 
 /// `P` as the request asks for it: each card as it now stands.
 ///
-/// **Opening it starts a run** of what its cards read, unless htmx asks,
-/// which is a page redrawing itself: starting another would redraw it again
-/// when that one ended, for ever.
+/// **Opening it starts a run** of what its cards read, unless it is
+/// redrawing itself ([`crate::page::redrawing`]): starting another would
+/// redraw it again when that one ended, for ever.
 ///
 /// **Each card follows the run itself** (#830), so the page is not drawn
 /// again when the run ends.
@@ -379,7 +379,7 @@ pub async fn page<P: Page>(
     if let Some(over) = page.over() {
         configurator::telemetry::ranged(range::name(over));
     }
-    let redraw = headers.contains_key("hx-request");
+    let redraw = crate::page::redrawing(&headers);
     if !redraw {
         runs.open(&P::run()).await;
     }
@@ -600,7 +600,7 @@ mod tests {
         };
         let stream =
             domain::landing::LandingStream::try_from("withings.measurements").expect("a stream");
-        runs.going_over(crate::run::Asked::Everything);
+        runs.going_over(&crate::run::Asked::Everything);
 
         let (weight, dated) = load();
         assert!(

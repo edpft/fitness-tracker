@@ -28,15 +28,19 @@ struct Browser {
     socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
     session: String,
     sent: u64,
+    /// Whether a page has been loaded, so the next is reached by a link.
+    loaded: bool,
 }
 
-/// Set on a page as the connection on its body opens, so nothing is sent to
-/// it before it can hear.
+/// Set on a page as its connection to the run opens, so nothing is sent to it
+/// before it can hear.
 ///
 /// **What htmx did to each card is kept**, so a card left asking says why.
 const LISTENING: &str = "window.happened = []; window.started = Date.now();
 document.addEventListener('htmx:sseOpen', (event) => {
-    if (event.target === document.body) { window.listening = true; }
+    if (event.target.classList && event.target.classList.contains('connected')) {
+        window.listening = true;
+    }
 });
 for (const name of ['htmx:sseMessage', 'htmx:beforeRequest', 'htmx:afterRequest',
                     'htmx:sendError', 'htmx:responseError', 'htmx:swapError', 'htmx:sseError']) {
@@ -100,6 +104,7 @@ impl Browser {
             socket,
             session: String::new(),
             sent: 0,
+            loaded: false,
         };
         let target = browser
             .command("Target.createTarget", json!({ "url": "about:blank" }))
@@ -166,9 +171,28 @@ impl Browser {
         Ok(evaluated["result"]["value"].clone())
     }
 
-    /// Open `url` and wait until the connection on its body is open.
+    /// Open `url` and wait until its connection to the run is open: loaded,
+    /// the first time, and from then on **reached by a link**, as the
+    /// operator reaches one, which htmx follows by swapping the page in.
     async fn open(&mut self, url: &str) -> Result<(), String> {
-        self.command("Page.navigate", json!({ "url": url })).await?;
+        if self.loaded {
+            let followed = format!(
+                "{{
+                    window.listening = false;
+                    window.happened = [];
+                    const link = document.createElement('a');
+                    link.href = {};
+                    document.querySelector('main').appendChild(link);
+                    htmx.process(link);
+                    link.click();
+                }}",
+                json!(url)
+            );
+            self.evaluate(&followed).await?;
+        } else {
+            self.command("Page.navigate", json!({ "url": url })).await?;
+            self.loaded = true;
+        }
         self.until("window.listening === true", |listening| {
             *listening == json!(true)
         })
@@ -215,7 +239,7 @@ async fn opened(
     parts: &[Part],
     ending: Ending,
 ) -> Result<(Value, Value), String> {
-    runs.going_over(Asked::Everything);
+    runs.going_over(&Asked::Everything);
     browser.open(url).await?;
     let waited = browser.evaluate(ASKING).await?;
     if matches!(ending, Ending::Collected) {
@@ -223,7 +247,9 @@ async fn opened(
     }
     runs.ended_over(&Asked::Everything);
     match browser
-        .until(ASKING, |asking| asking.as_array().is_some_and(Vec::is_empty))
+        .until(ASKING, |asking| {
+            asking.as_array().is_some_and(Vec::is_empty)
+        })
         .await
     {
         Ok(asking) => Ok((waited, asking)),
@@ -264,7 +290,13 @@ fn every_card_on_every_page_is_drawn() {
     let parts: Vec<Part> = pages
         .reads()
         .iter()
-        .flat_map(|(_, reads)| crate::card::scope(reads).parts().iter().cloned().collect::<Vec<_>>())
+        .flat_map(|(_, reads)| {
+            crate::card::scope(reads)
+                .parts()
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+        })
         .chain([Part::Delivering])
         .collect::<BTreeSet<_>>()
         .into_iter()

@@ -69,7 +69,7 @@ pub fn page(here: &str, title: &str, over: Option<Over>, body: &Markup) -> Marku
         (DOCTYPE)
         html lang="en" {
             head { (crate::page::head(title, &[])) }
-            body {
+            body hx-boost="true" {
                 main {
                     (crate::page::bar(here))
                     (crate::page::header(here, title))

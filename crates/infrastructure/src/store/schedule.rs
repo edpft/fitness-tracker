@@ -162,7 +162,7 @@ impl DiaryStore for SqliteDiaryStore {
 
         let mut patterns = Vec::with_capacity(weeks.len());
         for week in weeks {
-            let slots = pattern_slots(&mut *reading, week.id).await?;
+            let slots = pattern_slots(&mut reading, week.id).await?;
 
             patterns.push(TrainingPattern::new(
                 date_of(&week.from_date)?,
@@ -171,9 +171,9 @@ impl DiaryStore for SqliteDiaryStore {
             ));
         }
 
-        let alterations = read_alterations(&mut *reading).await?;
-        let illnesses = read_illnesses(&mut *reading).await?;
-        let skips = read_skips(&mut *reading).await?;
+        let alterations = read_alterations(&mut reading).await?;
+        let illnesses = read_illnesses(&mut reading).await?;
+        let skips = read_skips(&mut reading).await?;
         Ok(Diary::new(patterns, alterations)
             .with_illnesses(illnesses)
             .with_skips(skips))

@@ -199,7 +199,7 @@ async fn served<P: Drawn>(
     // **Not when htmx asks**, which is a page redrawing itself because a run
     // ended: starting another would redraw it again when that one ended, for
     // ever.
-    let redraw = headers.contains_key("hx-request");
+    let redraw = crate::page::redrawing(&headers);
     if P::OPENS && !redraw {
         runs.open(&Asked::Only(scope.clone())).await;
     }
@@ -477,7 +477,7 @@ mod tests {
         );
         serving.kept(&runs, "/estimated-1rm", "Front squat 92.5kg");
 
-        runs.going_over(Asked::Everything);
+        runs.going_over(&Asked::Everything);
         let page = shown("No test has been recorded.", &read);
         let shown_now = serving.drawn(&runs, &page, false);
         assert!(shown_now.contains("Front squat 92.5kg"), "{shown_now}");
@@ -488,7 +488,7 @@ mod tests {
         );
 
         let restarted = serving.fresh(None);
-        restarted.going_over(Asked::Everything);
+        restarted.going_over(&Asked::Everything);
         let shown_now = serving.drawn(&restarted, &page, false);
         assert!(shown_now.contains("Front squat 92.5kg"), "{shown_now}");
         assert!(!shown_now.contains("No test"), "{shown_now}");

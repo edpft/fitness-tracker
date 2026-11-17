@@ -41,7 +41,7 @@ pub fn page(read: &Result<(Listed, Date), String>) -> Markup {
         (DOCTYPE)
         html lang="en" {
             head { (page::head(Place::History.name(), &[])) }
-            body {
+            body hx-boost="true" {
                 main.history {
                     h1 { (Place::History.name()) }
                     @match read {
@@ -253,7 +253,7 @@ pub fn session(here: &str, on: Date, session: &Result<Option<opened::Activity>, 
         (DOCTYPE)
         html lang="en" {
             head { (page::head(title, &[])) }
-            body {
+            body hx-boost="true" {
                 main.history {
                     (page::header(here, title))
                     @if let Some(test) = marked { p.test { (test) } }

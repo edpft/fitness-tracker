@@ -201,7 +201,6 @@ pub fn page(
         HERE,
         TITLE,
         &html! {
-            script src="/htmx.min.js" {}
             (week(diary, today, &tapped, refused))
             (illness(diary, today, refused))
         },

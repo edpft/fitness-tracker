@@ -295,8 +295,8 @@ impl Runs {
 
     /// A run going over `asked`, as though this server had started one.
     #[cfg(test)]
-    pub fn going_over(&self, asked: Asked) {
-        let _going = self.going(&asked);
+    pub fn going_over(&self, asked: &Asked) {
+        let _going = self.going(asked);
     }
 
     /// The run going over `asked` ended, as though this server's had.
@@ -496,7 +496,7 @@ impl Runs {
 /// [`step_event`] names it.
 ///
 /// **No event is sent with no data**: a browser drops one unseen (the
-/// EventSource processing model dispatches nothing for an empty data
+/// `EventSource` processing model dispatches nothing for an empty data
 /// buffer), so every card waiting on a part, and on a run ending with no
 /// step to show, waited for ever on 2026-11-17 while `curl` showed every
 /// event (#830). A part's event carries its own name, and the step is sent
@@ -736,13 +736,13 @@ mod tests {
 
         let runs = fresh();
         assert!(!runs.collecting(&hrv), "nothing is going");
-        runs.going_over(only(&["withings.measurements"]));
+        runs.going_over(&only(&["withings.measurements"]));
         assert!(!runs.collecting(&hrv), "a run over other streams");
-        runs.going_over(only(&["garmin.hrv"]));
+        runs.going_over(&only(&["garmin.hrv"]));
         assert!(runs.collecting(&hrv), "a run sharing a stream");
 
         let runs = fresh();
-        runs.going_over(Asked::Everything);
+        runs.going_over(&Asked::Everything);
         assert!(runs.collecting(&hrv), "the whole of next");
     }
 
@@ -776,7 +776,7 @@ mod tests {
         };
 
         assert_eq!(runs.waiting(&weight), Waiting::No, "nothing is going");
-        runs.going_over(Asked::Everything);
+        runs.going_over(&Asked::Everything);
         assert_eq!(
             runs.waiting(&weight),
             Waiting::Here(vec![normalising("withings.measurements")])
@@ -855,7 +855,10 @@ mod tests {
         });
         let events = page_events(&mut 0, &mut 0, &view.borrow());
         assert_eq!(
-            events.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
+            events
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
             ["delivered", "ended"]
         );
         for (name, data) in &events {
