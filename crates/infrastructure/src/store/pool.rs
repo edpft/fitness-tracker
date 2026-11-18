@@ -11,7 +11,7 @@ use std::{
     },
 };
 
-use application::{StoreError, graph::Node};
+use application::{Node, StoreError};
 use jiff::Timestamp;
 use sqlx::{
     SqliteConnection, SqlitePool,

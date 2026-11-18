@@ -107,7 +107,7 @@ fn a_write_is_counted_and_a_read_or_a_drawing_is_not() {
 /// outside moves everything.
 #[test]
 fn a_write_moves_what_its_step_names() {
-    use application::graph::Node;
+    use application::Node;
     use domain::landing::LandingStream;
     use infrastructure::moving;
 
