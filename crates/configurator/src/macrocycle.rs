@@ -137,6 +137,7 @@ pub async fn planned(
 /// Where the plan stands at a part of the day, and the walk that says so
 /// (#830): what the home page's microcycle and curves are drawn from, and
 /// what is next is derived from.
+#[derive(PartialEq)]
 pub struct Stood {
     pub walked: Arc<Walked>,
     pub plan: PlanStanding,

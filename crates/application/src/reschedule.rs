@@ -322,6 +322,13 @@ pub struct WalkedPlans<W> {
 
 crate::graph::through!(WalkedPlans<W>);
 
+/// The same plans and holidays, whichever walk read them: `W` is a marker.
+impl<W> PartialEq for WalkedPlans<W> {
+    fn eq(&self, other: &Self) -> bool {
+        self.written == other.written && self.now == other.now && self.holidays == other.holidays
+    }
+}
+
 impl<W> WalkedPlans<W> {
     /// `written`, the plans `walk` read, as they stand after its
     /// `reschedule`, and the `holidays` its term was read in.

@@ -61,6 +61,7 @@ reads! {
 /// **One walk for everything that reads the plan** (#830): what a chart's
 /// ranges and aims are drawn across, and where the home page says the plan
 /// stands, are read from this one walk.
+#[derive(PartialEq)]
 pub struct Walked {
     /// The part of the day it was walked at.
     pub now: DayPart,

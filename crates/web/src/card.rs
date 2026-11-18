@@ -198,8 +198,8 @@ impl<'a> Showing<'a> {
                 return asking(&address, &kept.drawing, "load");
             }
         }
-        let drawing = match self.holding.fetch::<C::Reads>().await {
-            Ok(read) => configurator::telemetry::drawing_card(C::NAME, || card.render(read)),
+        let read = match self.holding.fetch::<C::Reads>().await {
+            Ok(read) => read,
             Err(error) => {
                 return held(
                     &address,
@@ -208,6 +208,18 @@ impl<'a> Showing<'a> {
                 );
             }
         };
+        // What it reads is now derived, and an analysis derived again to
+        // what it was has kept its version: then the drawing kept still
+        // stands (#830).
+        let from = self.holding.drawn_from(&reads).await;
+        if let Some(kept) = &kept
+            && from.is_some()
+            && kept.from == from
+        {
+            configurator::telemetry::served(Served::Unchanged);
+            return held(&address, &kept.drawing);
+        }
+        let drawing = configurator::telemetry::drawing_card(C::NAME, || card.render(read));
         configurator::telemetry::served(Served::Drawn);
         if let Some(kept) = &kept {
             configurator::telemetry::same(kept.drawing == drawing.0);
@@ -487,7 +499,7 @@ mod tests {
 
     use application::{Part, graph::Input as _};
     use configurator::{
-        analyses::{BodyWeight, Plans, Sleep},
+        analyses::{BodyWeight, Plans, Ranges, Sleep},
         held::{Analysed, Of},
     };
     use domain::normalised::OperatorZone;
@@ -497,6 +509,7 @@ mod tests {
     use crate::run::{Asked, Runs, Setting};
 
     static PLANNED: AtomicUsize = AtomicUsize::new(0);
+    static RANGED: AtomicUsize = AtomicUsize::new(0);
     static SLEPT: AtomicUsize = AtomicUsize::new(0);
     static WEIGHT: AtomicUsize = AtomicUsize::new(0);
 
@@ -514,6 +527,24 @@ mod tests {
         fn render(&self, _: Arc<<Plans as Analysed>::Value>) -> Markup {
             let drawn = PLANNED.fetch_add(1, Ordering::SeqCst) + 1;
             html! { section.card { p { "planned " (drawn) } } }
+        }
+    }
+
+    /// A card reading the ranges, which are derived from the plans, counting
+    /// its drawings.
+    struct Ranged;
+
+    impl Card for Ranged {
+        const NAME: &'static str = "test-ranged";
+        type Reads = Of<Ranges>;
+
+        fn asked(_: &HashMap<String, String>) -> Self {
+            Self
+        }
+
+        fn render(&self, _: Arc<<Ranges as Analysed>::Value>) -> Markup {
+            let drawn = RANGED.fetch_add(1, Ordering::SeqCst) + 1;
+            html! { section.card { p { "ranged " (drawn) } } }
         }
     }
 
@@ -712,5 +743,44 @@ mod tests {
         assert!(planned.contains("planned 2"), "{planned}");
         assert!(slept.contains("slept 1"), "{slept}");
         assert_eq!(SLEPT.load(Ordering::SeqCst), 1, "sleep never moved");
+    }
+
+    /// **An analysis derived again to what it was moves nothing that reads
+    /// it** (#830): an illness written in the diary moves the plans, and the
+    /// ranges derived from them come out as they were, so the card reading
+    /// the ranges asks to be drawn again and is served as it was, not drawn.
+    #[test]
+    fn an_analysis_derived_to_what_it_was_redraws_nothing() {
+        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let runs = runs(&runtime, &directory);
+        let load = |redraw: bool| -> String {
+            runtime.block_on(async {
+                Showing::new(&runs, redraw)
+                    .card(&Ranged)
+                    .await
+                    .into_string()
+            })
+        };
+
+        let ranged = load(false);
+        assert!(ranged.contains("ranged 1"), "{ranged}");
+
+        runtime
+            .block_on(configurator::scheduling::ill(
+                &runs.setting().store,
+                jiff::civil::date(2026, 11, 16),
+            ))
+            .expect("the diary written");
+        let ranged = load(false);
+        assert!(ranged.contains(r#"hx-trigger="load""#), "{ranged}");
+
+        let ranged = load(true);
+        assert!(ranged.contains("ranged 1"), "{ranged}");
+        assert!(!ranged.contains("hx-trigger"), "{ranged}");
+        assert_eq!(RANGED.load(Ordering::SeqCst), 1, "the ranges did not move");
     }
 }

@@ -31,8 +31,18 @@ use crate::{
 pub struct DrawnFrom([u8; 32]);
 
 impl DrawnFrom {
-    fn of(stated: &str) -> Self {
+    /// The digest of `stated`, which says where everything read stood.
+    #[must_use]
+    pub fn of(stated: &str) -> Self {
         Self(Sha256::digest(stated.as_bytes()).into())
+    }
+}
+
+impl std::fmt::Display for DrawnFrom {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0
+            .iter()
+            .try_for_each(|byte| write!(formatter, "{byte:02x}"))
     }
 }
 
@@ -110,7 +120,11 @@ where
 
     /// Where `node` stands, as text compared and nothing else, or `None` where
     /// it has no version: asked once, and remembered after.
-    async fn stands(
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    pub async fn stands(
         &self,
         graph: &Graph,
         node: &Node,
