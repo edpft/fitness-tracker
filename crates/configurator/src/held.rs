@@ -62,6 +62,18 @@ pub trait Analysed: Send + Sync + 'static {
         ports: Self::Ports,
         read: <Self::Reads as Fetch>::Fetched,
     ) -> impl Future<Output = Result<Self::Value, NextFailure>> + Send;
+
+    /// Work it out again where only the clock has moved since it was
+    /// derived `before` (#830): from what that derivation settled, where
+    /// time passing cannot unsettle it, and afresh otherwise.
+    fn resume(
+        ports: Self::Ports,
+        read: <Self::Reads as Fetch>::Fetched,
+        before: Arc<Self::Value>,
+    ) -> impl Future<Output = Result<Self::Value, NextFailure>> + Send {
+        drop(before);
+        Self::derive(ports, read)
+    }
 }
 
 /// The derivation of `A`: what its ports and what else it reads.
@@ -226,7 +238,16 @@ struct Derived {
 /// An analysis derived from inputs standing at `inputs`, once it has been.
 struct Slot {
     inputs: DrawnFrom,
+    /// Where those inputs other than the clock stood.
+    unclocked: Option<DrawnFrom>,
     derived: Arc<OnceCell<Derived>>,
+}
+
+/// What a slot held before it was derived from other inputs.
+struct Before {
+    derived: Derived,
+    /// Whether only the clock has moved since.
+    clock_only: bool,
 }
 
 /// Where an analysis held stands against where its inputs now do.
@@ -263,13 +284,15 @@ impl Held {
             })
     }
 
-    /// The slot for `analysis` derived from `inputs`, and what it held before
-    /// where that was derived from anything else.
+    /// The slot for `analysis` derived from `inputs`, which stand at
+    /// `unclocked` but for the clock, and what it held before where that was
+    /// derived from anything else.
     fn slot(
         &self,
         analysis: Analysis,
         inputs: DrawnFrom,
-    ) -> (Arc<OnceCell<Derived>>, Option<Derived>) {
+        unclocked: Option<DrawnFrom>,
+    ) -> (Arc<OnceCell<Derived>>, Option<Before>) {
         let mut slots = self.slots.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(slot) = slots.get(&analysis)
             && slot.inputs == inputs
@@ -281,11 +304,17 @@ impl Held {
             analysis,
             Slot {
                 inputs,
+                unclocked,
                 derived: Arc::clone(&derived),
             },
         );
         drop(slots);
-        let before = replaced.and_then(|slot| slot.derived.get().cloned());
+        let before = replaced.and_then(|slot| {
+            Some(Before {
+                derived: slot.derived.get().cloned()?,
+                clock_only: unclocked.is_some() && slot.unclocked == unclocked,
+            })
+        });
         (derived, before)
     }
 }
@@ -384,9 +413,21 @@ impl<'a> Holding<'a> {
 
     /// Where everything the analysis `node` reads stands.
     async fn inputs(&self, node: &Node) -> Option<DrawnFrom> {
+        self.standing_of(node, |_| true).await
+    }
+
+    /// Where everything the analysis `node` reads stands but the clock: the
+    /// date and the part of the day.
+    async fn unclocked(&self, node: &Node) -> Option<DrawnFrom> {
+        self.standing_of(node, |read| !matches!(read, Node::Date | Node::DayPart))
+            .await
+    }
+
+    /// Where what the analysis `node` reads stands, of what `counts`.
+    async fn standing_of(&self, node: &Node, counts: fn(&Node) -> bool) -> Option<DrawnFrom> {
         let reads = crate::graph::graph().reads(node)?;
         let mut stated = String::new();
-        for read in reads.nodes() {
+        for read in reads.nodes().filter(|read| counts(read)) {
             let stands = self.version(read).await?;
             let _infallible = writeln!(stated, "{read:?} {stands}");
         }
@@ -441,7 +482,8 @@ impl<'a> Holding<'a> {
                     .await,
             );
         };
-        let (slot, before) = self.held.slot(A::ANALYSIS, inputs);
+        let unclocked = self.unclocked(&node).await;
+        let (slot, before) = self.held.slot(A::ANALYSIS, inputs, unclocked);
         if let Some(held) = slot
             .get()
             .and_then(|held| Arc::clone(&held.value).downcast::<A::Value>().ok())
@@ -453,8 +495,32 @@ impl<'a> Holding<'a> {
                 .instrument(crate::telemetry::deriving(A::ANALYSIS))
                 .await,
         );
+        let before = before.map(|before| before.derived);
         let _first = slot.set(derived(Arc::clone(&value), inputs, before.as_ref()));
         value
+    }
+
+    /// `A` derived from `read`, carried on from `before` where that is
+    /// given.
+    async fn derive<A: Analysed>(
+        &self,
+        read: <A::Reads as Fetch>::Fetched,
+        before: Option<Arc<A::Value>>,
+    ) -> Result<A::Value, NextFailure> {
+        let span = if before.is_some() {
+            crate::telemetry::carrying_on(A::ANALYSIS)
+        } else {
+            crate::telemetry::deriving(A::ANALYSIS)
+        };
+        async {
+            let ports = A::open(self.store, self.zone).await?;
+            match before {
+                Some(before) => A::resume(ports, read, before).await,
+                None => A::derive(ports, read).await,
+            }
+        }
+        .instrument(span)
+        .await
     }
 
     /// `A`, as held where what it reads still stands, and derived otherwise.
@@ -471,18 +537,28 @@ impl<'a> Holding<'a> {
         if let Some(value) = self.standing::<A>(inputs) {
             return Ok(value);
         }
-        let derive = async {
-            let ports = A::open(self.store, self.zone).await?;
-            A::derive(ports, read).await
-        }
-        .instrument(crate::telemetry::deriving(A::ANALYSIS));
         let Some(inputs) = inputs else {
-            return Ok(Arc::new(derive.await?));
+            return Ok(Arc::new(self.derive::<A>(read, None).await?));
         };
-        let (slot, before) = self.held.slot(A::ANALYSIS, inputs);
+        let unclocked = self.unclocked(&node).await;
+        let (slot, before) = self.held.slot(A::ANALYSIS, inputs, unclocked);
         let held = slot
             .get_or_try_init(|| async {
-                Ok::<_, NextFailure>(derived(Arc::new(derive.await?), inputs, before.as_ref()))
+                // **Carried on from where only the clock moved**: where the
+                // plan stands at a new part of the day walks on from the
+                // microcycles it had already ended (#830).
+                let resumed =
+                    before
+                        .as_ref()
+                        .filter(|before| before.clock_only)
+                        .and_then(|before| {
+                            Arc::clone(&before.derived.value)
+                                .downcast::<A::Value>()
+                                .ok()
+                        });
+                let value = self.derive::<A>(read, resumed).await?;
+                let before = before.map(|before| before.derived);
+                Ok::<_, NextFailure>(derived(Arc::new(value), inputs, before.as_ref()))
             })
             .await?;
         Arc::clone(&held.value).downcast::<A::Value>().map_err(|_| {

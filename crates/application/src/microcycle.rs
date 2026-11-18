@@ -120,6 +120,32 @@ impl Standing {
     }
 }
 
+/// Every microcycle of a plan that had ended when it was walked, and how
+/// each ended: where a walk at a later part of the day carries on from
+/// (#830).
+///
+/// **The clock moving cannot undo a microcycle's end.** One ends once none of
+/// its sessions can still be completed, and time passing completes nothing.
+/// So, over the same plans, diary and record, a later walk reads every week
+/// before [`Self::monday`] as this one did, and walks on from there rather
+/// than from the plan's first week.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ended {
+    /// The part of the day it was walked at.
+    at: DayPart,
+    /// The plan it walked.
+    plan: PlanName,
+    /// The Monday of the first microcycle that had not ended.
+    monday: Date,
+    /// Where the microcycle before it ended, `None` for the plan's first.
+    opens: Option<Boundary>,
+    reruns: Vec<Rerun>,
+    weeks: Vec<(Date, MicrocycleState)>,
+    missed: Missed,
+    /// The tests carried past the week they were missed in (#732).
+    carried: Missed,
+}
+
 /// One week read against the plan, and when it ended if it has.
 struct Week {
     sessions: Vec<Session>,
@@ -153,7 +179,7 @@ struct Account {
 /// the last one — even in the same part of the day — is the next microcycle's.
 /// A window closing settles it at the part of the day it closes on, and the
 /// record knows a session's part only as [`DayPart::containing`] reads it.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Boundary {
     After(DateTime),
     From(DayPart),
@@ -351,24 +377,64 @@ where
         plans: &[Plan],
         diary: &Diary,
     ) -> Result<Standing, StoreError> {
+        Ok(self.standing_after(now, plans, diary, None).await?.0)
+    }
+
+    /// Where the plan stands on `now`, as [`Self::standing_among`] says,
+    /// carrying on from where an earlier walk had `ended`, and how far this
+    /// one got: `None` where no plan has begun.
+    ///
+    /// **Only for a walk over the same plans, the same diary and the same
+    /// record** (#830): the caller knows whether those moved, and only the
+    /// clock may have. An `ended` walked at a later part of the day, or over
+    /// another plan, is not carried on from.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable, including a plan that will not reschedule.
+    pub async fn standing_after(
+        &self,
+        now: DayPart,
+        plans: &[Plan],
+        diary: &Diary,
+        ended: Option<&Ended>,
+    ) -> Result<(Standing, Option<Ended>), StoreError> {
         let Some(authored) = begun_by(plans, now.date) else {
-            return Ok(Standing::default());
+            return Ok((Standing::default(), None));
         };
         let stored = self.ports.plans.completed(authored.name()).await?;
         let settled = |monday: Date| stored.as_ref().filter(|stored| stored.covers(monday));
 
-        let mut monday = planner::commencing(authored.window().span().start());
-        let mut opens: Option<Boundary> = None;
-        let mut reruns: Vec<Rerun> = Vec::new();
-        let mut weeks: Vec<(Date, MicrocycleState)> = Vec::new();
-        let mut missed = Missed::none();
-        // The tests carried past the week they were missed in (#732).
-        let mut carried = Missed::none();
+        let Ended {
+            mut monday,
+            mut opens,
+            mut reruns,
+            mut weeks,
+            mut missed,
+            mut carried,
+            ..
+        } = ended
+            .filter(|ended| ended.at <= now && ended.plan == *authored.name())
+            .cloned()
+            .unwrap_or_else(|| Ended {
+                at: now,
+                plan: authored.name().clone(),
+                monday: planner::commencing(authored.window().span().start()),
+                opens: None,
+                reruns: Vec::new(),
+                weeks: Vec::new(),
+                missed: Missed::none(),
+                carried: Missed::none(),
+            });
         loop {
             let plan = rescheduled(&authored, &reruns, diary)?;
             let week = self
                 .week_of(&plan, diary, monday, opens, now, &carried)
                 .await?;
+            // Where a later walk carries on from, if this week has not ended:
+            // what the weeks before it missed, and not what it did.
+            let before = missed.clone();
             missed.extend(week.missed);
             // **An open illness stops the walk at the week now has reached**
             // (#674). Every session after its start reads taken, so every week
@@ -392,15 +458,26 @@ where
                             .is_none_or(|stored| now.through() > stored.through())
                     })
                     .map(|completed| (authored.name().clone(), completed));
-                return Ok(Standing {
+                let standing = Standing {
                     commencing: Some(monday),
                     sessions: week.sessions,
-                    weeks,
-                    reruns,
+                    weeks: weeks.clone(),
+                    reruns: reruns.clone(),
                     missed: missed.with_carried(&carried),
                     mesocycle,
                     completed,
-                });
+                };
+                let reached = Ended {
+                    at: now,
+                    plan: authored.name().clone(),
+                    monday,
+                    opens,
+                    reruns,
+                    weeks,
+                    missed: before,
+                    carried,
+                };
+                return Ok((standing, Some(reached)));
             };
 
             let placed = placed(&week.sessions);

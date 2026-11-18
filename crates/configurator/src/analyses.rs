@@ -133,6 +133,17 @@ impl Analysed for Plans {
     async fn derive(walk: Self::Ports, now: DayPart) -> Result<Self::Value, NextFailure> {
         Ok(walk.walked_on(now).await?)
     }
+
+    /// **Not from the plan's first week**: a new part of the day ends no
+    /// microcycle the walk before had not, so the walk carries on from the
+    /// first one that had not ended (#830).
+    async fn resume(
+        walk: Self::Ports,
+        now: DayPart,
+        before: Arc<Self::Value>,
+    ) -> Result<Self::Value, NextFailure> {
+        Ok(walk.walked_after(now, Some(&before)).await?)
+    }
 }
 
 /// Every device the record identifies, and the days a watch was worn.
