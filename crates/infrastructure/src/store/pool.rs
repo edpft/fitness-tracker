@@ -78,6 +78,11 @@ async fn opened(path: &Path) -> Result<(SqlitePool, Commits), StoreError> {
     let released = commits.clone();
     let pool = SqlitePoolOptions::new()
         .max_connections(4)
+        // sqlx closes a connection past its lifetime as it is released, without
+        // `after_release`, so what it committed would never settle and nothing
+        // read after it would be kept (#830). A file on this machine has no
+        // server to drop a connection, so none is ever too old.
+        .max_lifetime(None)
         .after_connect(move |connection, _: PoolConnectionMetadata| {
             let commits = connected.clone();
             let writes = writing_now();
