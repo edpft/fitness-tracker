@@ -513,6 +513,21 @@ pub trait Progress {
     /// have ended, reported or not, and a joined part once the run holding it
     /// has.
     fn collected(&self, parts: &[Part]);
+
+    /// Run `step`, which writes what `parts` write and nothing else (#830).
+    ///
+    /// **So what reads anything else is still held**: the operator,
+    /// 2026-11-18, *"if we receive new data, I would expect all data that's
+    /// derived from it to update. I would not expect data that's not derived
+    /// from it to update."* A frontend holding nothing runs it as it is.
+    fn moving<F: Future + Send>(
+        &self,
+        parts: &[Part],
+        step: F,
+    ) -> impl Future<Output = F::Output> + Send {
+        let _ = parts;
+        step
+    }
 }
 
 /// Why `next` could not answer at all.
@@ -2002,15 +2017,21 @@ where
         // the same login, and only by a run that delivers.
         let (gym, cycling, weigh_ins, watch) = all(
             async {
-                let done = self
-                    .fetch(&self.ports.gym_records, scope, judge, progress)
+                let done = progress
+                    .moving(
+                        &walked(&self.ports.gym_records, scope),
+                        self.fetch(&self.ports.gym_records, scope, judge, progress),
+                    )
                     .await;
                 collected(walked(&self.ports.gym_records, scope));
                 done
             },
             async {
-                let fetching = self
-                    .fetch(&self.ports.cycling_records, scope, judge, progress)
+                let fetching = progress
+                    .moving(
+                        &walked(&self.ports.cycling_records, scope),
+                        self.fetch(&self.ports.cycling_records, scope, judge, progress),
+                    )
                     .await;
                 collected(walked(&self.ports.cycling_records, scope));
                 let mut done = fetching?;
@@ -2021,8 +2042,11 @@ where
                 Ok::<_, NextError>(done)
             },
             async {
-                let done = self
-                    .fetch(&self.ports.weigh_in_records, scope, judge, progress)
+                let done = progress
+                    .moving(
+                        &walked(&self.ports.weigh_in_records, scope),
+                        self.fetch(&self.ports.weigh_in_records, scope, judge, progress),
+                    )
                     .await;
                 collected(walked(&self.ports.weigh_in_records, scope));
                 done
@@ -2030,13 +2054,19 @@ where
             // **The watch's days after its activities**, on the one sign-in:
             // Garmin is asked one request at a time.
             async {
-                let records = self
-                    .fetch(&self.ports.watch_records, scope, judge, progress)
+                let records = progress
+                    .moving(
+                        &walked(&self.ports.watch_records, scope),
+                        self.fetch(&self.ports.watch_records, scope, judge, progress),
+                    )
                     .await;
                 collected(walked(&self.ports.watch_records, scope));
                 let mut done = records?;
-                let days = self
-                    .fetch(&self.ports.watch_days, scope, judge, progress)
+                let days = progress
+                    .moving(
+                        &walked(&self.ports.watch_days, scope),
+                        self.fetch(&self.ports.watch_days, scope, judge, progress),
+                    )
                     .await;
                 collected(walked(&self.ports.watch_days, scope));
                 done.extend(days?);
@@ -2052,10 +2082,15 @@ where
         for calendar in Calendar::ALL {
             if scope.has(&Part::FetchingCalendar(calendar)) {
                 let started = start(progress, Step::FetchingCalendar(calendar));
-                let outcome = self
-                    .ports
-                    .holidays
-                    .ask(calendar, judge.at.as_timestamp(), self.ports.refetch)
+                let outcome = progress
+                    .moving(
+                        &[Part::FetchingCalendar(calendar)],
+                        self.ports.holidays.ask(
+                            calendar,
+                            judge.at.as_timestamp(),
+                            self.ports.refetch,
+                        ),
+                    )
                     .await?;
                 finish(progress, &mut run, started, outcome);
                 collected(vec![Part::FetchingCalendar(calendar)]);
@@ -2164,10 +2199,20 @@ where
             let part = pending.remove(at);
             match &part {
                 Part::Normalising(stream) => {
-                    self.normalise(stream.clone(), progress, &mut run).await?;
+                    progress
+                        .moving(
+                            std::slice::from_ref(&part),
+                            self.normalise(stream.clone(), progress, &mut run),
+                        )
+                        .await?;
                 }
                 Part::Canonicalising(layer) => {
-                    self.canonicalise(*layer, progress, &mut run).await?;
+                    progress
+                        .moving(
+                            std::slice::from_ref(&part),
+                            self.canonicalise(*layer, progress, &mut run),
+                        )
+                        .await?;
                 }
                 Part::Fetching(_) | Part::FetchingCalendar(_) | Part::Delivering => {}
             }

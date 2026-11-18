@@ -314,6 +314,23 @@ pub enum Part {
     Delivering,
 }
 
+impl Part {
+    /// The node this part writes (#830), where it writes one: delivering
+    /// refreshes the classes, commits the plan and records each delivery.
+    pub fn writes(&self) -> Option<crate::graph::Node> {
+        use crate::graph::{Generation, Node};
+        match self {
+            Self::Fetching(stream) => Some(Node::Landing(stream.clone())),
+            Self::Normalising(stream) => Some(Node::Normalised(stream.clone())),
+            Self::Canonicalising(layer) => Some(Node::Canonical(*layer)),
+            Self::FetchingCalendar(calendar) => {
+                Some(Node::Generation(Generation::Calendar(*calendar)))
+            }
+            Self::Delivering => None,
+        }
+    }
+}
+
 /// Whether a run took its parts.
 #[derive(Debug)]
 pub enum Taken<G> {

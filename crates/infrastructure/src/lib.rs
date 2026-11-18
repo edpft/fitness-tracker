@@ -70,7 +70,7 @@ pub use store::{
     SqliteRestingHeartRateHistory, SqliteRestingHeartRateStore, SqliteResumptionPointStore,
     SqliteSleepHistory, SqliteSleepStore, SqliteSpreadsheetStore, SqliteWeighInStore,
     WahooFileLandingStore, WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
-    connect_counting,
+    connect_counting, moving,
 };
 pub use store::{
     GarminBodyBatteryEventLandingStore, GarminBodyBatteryLandingStore,

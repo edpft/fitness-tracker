@@ -91,6 +91,36 @@ impl Store {
         FileRunLock::beside(&self.path)
     }
 
+    /// What `compute` gives, as it last gave it where nothing `on` declares
+    /// has moved since (#830), and computed otherwise.
+    ///
+    /// **`with` is what else the answer depends on**, and `name` names it.
+    pub(crate) fn held<T, E, F>(
+        &self,
+        name: &'static str,
+        with: String,
+        on: &Reads,
+        compute: F,
+    ) -> impl Future<Output = Result<T, E>> + Send + use<T, E, F>
+    where
+        T: Clone + Send + Sync + 'static,
+        F: Future<Output = Result<T, E>> + Send,
+    {
+        let answers = self.kept.clone();
+        let on = on.clone();
+        async move {
+            let at = match answers.answered::<T>(name, &with) {
+                Ok(answer) => return Ok(answer),
+                Err(at) => at,
+            };
+            let answer = compute.await?;
+            if let Some(at) = at {
+                answers.keep(name, with, at, &on, answer.clone());
+            }
+            Ok(answer)
+        }
+    }
+
     /// The adapter `new` builds over the store, spanned.
     ///
     /// A function and not a closure, so that the pool it is given cannot be
