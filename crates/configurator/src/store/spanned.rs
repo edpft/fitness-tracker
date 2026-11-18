@@ -9,7 +9,11 @@
 //! of ports calls through the ones it was given, so its calls are each spanned
 //! once and a call is never inside another.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    any::Any,
+    collections::{BTreeMap, BTreeSet, HashMap},
+    sync::{Arc, Mutex, PoisonError},
+};
 
 use application::{
     AccountReader, Activities, CalendarStore, CanonicalCyclingSessionStore,
@@ -55,17 +59,24 @@ use domain::prescription::{
 };
 use domain::provider::ExternalProgramme;
 use domain::schedule::{Alteration, Diary, Holidays, Illness, Skip, TrainingPattern};
+use infrastructure::Commits;
 use jiff::{Timestamp, civil::Date};
 use tracing::{Instrument as _, field::Empty};
 
 /// An adapter, each call through its ports a `call` span named for the port
 /// and the method, with the rows it returned where it returned a list.
 #[derive(Debug, Clone)]
-pub struct Spanned<A>(A);
+pub struct Spanned<A>(A, Answers);
 
 impl<A> Spanned<A> {
-    pub(crate) const fn new(adapter: A) -> Self {
-        Self(adapter)
+    /// `adapter`, keeping nothing: one not over the store.
+    pub(crate) fn new(adapter: A) -> Self {
+        Self(adapter, Answers::default())
+    }
+
+    /// `adapter` over the store, keeping what its held calls answer in `kept`.
+    pub(crate) const fn kept(adapter: A, kept: Answers) -> Self {
+        Self(adapter, kept)
     }
 
     /// A call that is not through a port, spanned as `name`: an adapter's
@@ -76,6 +87,40 @@ impl<A> Spanned<A> {
         call: impl FnOnce(&'a A) -> F,
     ) -> tracing::instrument::Instrumented<F> {
         call(&self.0).instrument(tracing::info_span!("call", call = name, rows = Empty))
+    }
+
+    /// A call that is not through a port, spanned as `name` and answered as
+    /// it last was where nothing has been committed since ([`Answers`]).
+    ///
+    /// **`with` is what else the answer depends on**: what the adapter was
+    /// built with, and what `call` is asked.
+    pub(crate) fn held<'a, T, E, F>(
+        &'a self,
+        name: &'static str,
+        with: String,
+        call: impl FnOnce(&'a A) -> F,
+    ) -> impl Future<Output = Result<T, E>> + 'a
+    where
+        T: Clone + Send + Sync + 'static,
+        F: Future<Output = Result<T, E>> + Send + 'a,
+    {
+        let answers = self.1.clone();
+        let asked = self
+            .1
+            .answered::<T>(name, &with)
+            .map_err(|at| (at, self.call(name, call)));
+        async move {
+            match asked {
+                Ok(answer) => Ok(answer),
+                Err((at, call)) => {
+                    let answer = call.await?;
+                    if let Some(at) = at {
+                        answers.keep(name, with, at, answer.clone());
+                    }
+                    Ok(answer)
+                }
+            }
+        }
     }
 }
 
@@ -106,8 +151,92 @@ impl<T> Unlisted for &Returned<'_, T> {
     }
 }
 
+/// What the store answered, kept until this process next commits to it (#830).
+///
+/// **Nothing moves the store but a commit**, and this process sees only its
+/// own: the operator, 2026-11-18, *"until they do it's okay for the web server
+/// to be unaware of changes made by the CLI."* So a call asked again with
+/// nothing committed since is answered from what it answered before, and
+/// reads nothing.
+///
+/// **Keyed on the adapter, the call and its arguments**, and kept only where
+/// every commit had settled when it was asked and none was made while it read
+/// ([`Commits`]): a read that might have seen the store either side of a commit
+/// is answered and forgotten.
+#[derive(Clone, Default)]
+pub struct Answers {
+    commits: Option<Commits>,
+    answers: Arc<Mutex<HashMap<Asked, Answer>>>,
+}
+
+/// A call through a port, and its arguments as they were debug-formatted.
+type Asked = (&'static str, String);
+
+/// What a call answered, and the count of commits it was asked at.
+type Answer = (u64, Arc<dyn Any + Send + Sync>);
+
+impl std::fmt::Debug for Answers {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Answers")
+            .field("commits", &self.commits)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Answers {
+    /// Keeping what is answered until the next of `commits`.
+    pub(crate) fn until(commits: Commits) -> Self {
+        Self {
+            commits: Some(commits),
+            answers: Arc::default(),
+        }
+    }
+
+    /// What `call` answered when asked `with`, where nothing has been
+    /// committed since, and otherwise the count to keep a new answer at,
+    /// where one read now would be worth keeping.
+    fn answered<T: Clone + 'static>(
+        &self,
+        call: &'static str,
+        with: &str,
+    ) -> Result<T, Option<u64>> {
+        let Some(commits) = &self.commits else {
+            return Err(None);
+        };
+        let now = commits.committed();
+        self.answers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&(call, with.to_owned()))
+            .filter(|(at, _)| *at == now)
+            .and_then(|(_, answer)| answer.downcast_ref::<T>().cloned())
+            .ok_or_else(|| commits.settled())
+    }
+
+    /// Keep what `call` answered when asked `with`, at the count of commits
+    /// settled before it was asked, unless one was committed while it read.
+    fn keep<T: Send + Sync + 'static>(&self, call: &'static str, with: String, at: u64, answer: T) {
+        if self
+            .commits
+            .as_ref()
+            .is_none_or(|commits| commits.committed() != at)
+        {
+            return;
+        }
+        self.answers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert((call, with), (at, Arc::new(answer)));
+    }
+}
+
 /// `$port` for every [`Spanned`] adapter that implements it, each method
 /// listed with its arguments and what its future gives.
+///
+/// The methods whose answer moves only when the store does are listed under
+/// `held`, and each is answered from what it last answered while nothing has
+/// been committed since ([`Answers`]).
 ///
 /// The methods that return a value rather than a future are listed under
 /// `at_once`, and passed through unspanned: they do not reach the store.
@@ -119,6 +248,13 @@ macro_rules! spanned {
                 fn $method:ident(&self $(, $argument:ident: $type:ty)* $(,)?) -> $output:ty;
             )*
         }
+        $(
+            held {
+                $(
+                    fn $held:ident(&self $(, $held_argument:ident: $held_type:ty)* $(,)?) -> Result<$answer:ty, StoreError>;
+                )*
+            }
+        )?
         $(
             at_once {
                 $(
@@ -147,6 +283,29 @@ macro_rules! spanned {
                 }
             )*
             $($(
+                fn $held(&self $(, $held_argument: $held_type)*) -> impl Future<Output = Result<$answer, StoreError>> + Send {
+                    const CALL: &str = concat!(stringify!($port), "::", stringify!($held));
+                    let with = format!("{} {:?}", std::any::type_name::<A>(), ($(&$held_argument,)*));
+                    let kept = self.1.clone();
+                    let call = self.0.$held($($held_argument),*);
+                    async move {
+                        let at = match kept.answered::<$answer>(CALL, &with) {
+                            Ok(answer) => return Ok(answer),
+                            Err(at) => at,
+                        };
+                        let span = tracing::info_span!("call", call = CALL, rows = Empty);
+                        let returned: Result<$answer, StoreError> = call.instrument(span.clone()).await;
+                        if let Some(rows) = (&Returned(&returned)).rows() {
+                            span.record("rows", rows);
+                        }
+                        if let (Some(at), Ok(answer)) = (at, &returned) {
+                            kept.keep(CALL, with, at, answer.clone());
+                        }
+                        returned
+                    }
+                }
+            )*)?
+            $($(
                 fn $now(&self $(, $now_argument: $now_type)*) -> $now_output {
                     self.0.$now($($now_argument),*)
                 }
@@ -171,7 +330,9 @@ spanned! {
     LandingStore {
         fn latest_digest(&self, id: &SourceRecordId) -> Result<Option<PayloadDigest>, StoreError>;
         fn append(&self, run: RunId, records: Vec<LandingRecord>) -> Result<RecordCount, StoreError>;
-        fn count(&self) -> Result<RecordCount, StoreError>;
+    }
+    held {
+            fn count(&self) -> Result<RecordCount, StoreError>;
     }
     at_once {
             fn stream(&self) -> &LandingStream;
@@ -196,13 +357,17 @@ spanned! {
 
 spanned! {
     FetchLog {
-        fn fetched(&self, stream: &LandingStream) -> Result<Fetched, StoreError>;
+    }
+    held {
+            fn fetched(&self, stream: &LandingStream) -> Result<Fetched, StoreError>;
     }
 }
 
 spanned! {
     RawExtent {
-        fn records(&self) -> Result<RecordCount, StoreError>;
+    }
+    held {
+            fn records(&self) -> Result<RecordCount, StoreError>;
     }
 }
 
@@ -232,7 +397,9 @@ spanned! {
     NormalisedGymSessionReader {
         fn all(&self) -> Result<Vec<NormalisedGymSession>, StoreError>;
         fn on(&self, days: &BTreeSet<Date>) -> Result<Vec<NormalisedGymSession>, StoreError>;
-        fn written_by(&self) -> Result<DerivedFrom, StoreError>;
+    }
+    held {
+            fn written_by(&self) -> Result<DerivedFrom, StoreError>;
     }
 }
 
@@ -250,7 +417,9 @@ spanned! {
     NormalisedCyclingSessionReader {
         fn all(&self) -> Result<Vec<CanonicalCyclingSession>, StoreError>;
         fn on(&self, days: &BTreeSet<Date>) -> Result<Vec<CanonicalCyclingSession>, StoreError>;
-        fn written_by(&self) -> Result<DerivedFrom, StoreError>;
+    }
+    held {
+            fn written_by(&self) -> Result<DerivedFrom, StoreError>;
     }
 }
 
@@ -323,7 +492,9 @@ spanned! {
 
 spanned! {
     PerformedSessionLog {
-        fn performed_between(&self, from: Date, to: Date) -> Result<Vec<Occurred>, StoreError>;
+    }
+    held {
+            fn performed_between(&self, from: Date, to: Date) -> Result<Vec<Occurred>, StoreError>;
     }
 }
 
@@ -335,7 +506,9 @@ spanned! {
 
 spanned! {
     RiddenSessionLog {
-        fn ridden_between(&self, from: Date, to: Date) -> Result<Vec<RiddenSession>, StoreError>;
+    }
+    held {
+            fn ridden_between(&self, from: Date, to: Date) -> Result<Vec<RiddenSession>, StoreError>;
     }
 }
 
@@ -391,7 +564,9 @@ spanned! {
     NormalisedWeighInReader {
         fn all(&self) -> Result<Vec<WeighInAccount>, StoreError>;
         fn on(&self, days: &BTreeSet<Date>) -> Result<Vec<WeighInAccount>, StoreError>;
-        fn written_by(&self) -> Result<DerivedFrom, StoreError>;
+    }
+    held {
+            fn written_by(&self) -> Result<DerivedFrom, StoreError>;
     }
 }
 
@@ -422,8 +597,10 @@ spanned! {
 
 spanned! {
     GenerationParameterStore {
-        fn scales_on(&self, date: jiff::civil::Date) -> Result<Scales, StoreError>;
         fn bands_on(&self, specific: &domain::gym::equipment::Specific, date: jiff::civil::Date) -> Result<Option<domain::gym::equipment::BandRange>, StoreError>;
+    }
+    held {
+            fn scales_on(&self, date: jiff::civil::Date) -> Result<Scales, StoreError>;
     }
 }
 
@@ -455,12 +632,14 @@ spanned! {
 spanned! {
     PlanStore {
         fn windows(&self) -> Result<Vec<PlanWindow>, StoreError>;
-        fn plans(&self) -> Result<Vec<Plan>, StoreError>;
         fn named(&self, name: &PlanName) -> Result<Option<Plan>, StoreError>;
         fn author(&self, plan: &Plan) -> Result<PlanId, StoreError>;
         fn commit(&self, plan: &PlanName, gym: &[GymMesocycle], cycling: &[CyclingMesocycle]) -> Result<(), StoreError>;
-        fn completed(&self, plan: &PlanName) -> Result<Option<Completed>, StoreError>;
         fn complete(&self, plan: &PlanName, completed: &Completed) -> Result<(), StoreError>;
+    }
+    held {
+            fn plans(&self) -> Result<Vec<Plan>, StoreError>;
+            fn completed(&self, plan: &PlanName) -> Result<Option<Completed>, StoreError>;
     }
 }
 
@@ -479,23 +658,29 @@ spanned! {
 
 spanned! {
     CyclingMesocycleStore {
-        fn on(&self, date: Date) -> Result<Option<(CyclingMesocycleId, PlanName, CyclingMesocycle)>, StoreError>;
         fn following(&self, date: Date) -> Result<Option<(CyclingMesocycleId, PlanName, CyclingMesocycle)>, StoreError>;
+    }
+    held {
+            fn on(&self, date: Date) -> Result<Option<(CyclingMesocycleId, PlanName, CyclingMesocycle)>, StoreError>;
     }
 }
 
 spanned! {
     CyclingDeliveryStore {
-        fn delivered_for(&self, date: Date, destination: &DestinationName) -> Result<Option<DeliveredRide>, StoreError>;
         fn record(&self, delivered: &DeliveredRide) -> Result<(), StoreError>;
+    }
+    held {
+            fn delivered_for(&self, date: Date, destination: &DestinationName) -> Result<Option<DeliveredRide>, StoreError>;
     }
 }
 
 spanned! {
     PrescribedWorkoutStore {
         fn issue(&self, workout: &PrescribedWorkout) -> Result<PrescribedWorkoutId, StoreError>;
-        fn issued_for(&self, date: Date) -> Result<Option<(PrescribedWorkoutId, PrescribedWorkout)>, StoreError>;
         fn ordinal_in(&self, plan: &PlanName, date: Date) -> Result<Option<SessionOrdinal>, StoreError>;
+    }
+    held {
+            fn issued_for(&self, date: Date) -> Result<Option<(PrescribedWorkoutId, PrescribedWorkout)>, StoreError>;
     }
 }
 
@@ -508,11 +693,13 @@ spanned! {
 spanned! {
     PrescriptionDeliveryStore {
         fn reference_for(&self, prescription: PrescribedWorkoutId, destination: &DestinationName) -> Result<Option<DeliveryReference>, StoreError>;
-        fn occupying(&self, date: Date, destination: &DestinationName) -> Result<Option<Occupant>, StoreError>;
         fn record(&self, prescription: PrescribedWorkoutId, destination: &DestinationName, reference: &DeliveryReference, rendering: &RenderingDigest, at: Timestamp) -> Result<(), StoreError>;
         fn record_rendering(&self, prescription: PrescribedWorkoutId, destination: &DestinationName, reference: &DeliveryReference, rendering: &RenderingDigest, at: Timestamp) -> Result<(), StoreError>;
         fn hand_over(&self, from: PrescribedWorkoutId, to: PrescribedWorkoutId, destination: &DestinationName, reference: &DeliveryReference, rendering: &RenderingDigest, at: Timestamp) -> Result<(), StoreError>;
         fn record_reply(&self, prescription: PrescribedWorkoutId, destination: &DestinationName, reply: &DestinationReply, at: Timestamp) -> Result<(), StoreError>;
+    }
+    held {
+            fn occupying(&self, date: Date, destination: &DestinationName) -> Result<Option<Occupant>, StoreError>;
     }
 }
 
@@ -524,15 +711,19 @@ spanned! {
 
 spanned! {
     CalendarStore {
-        fn kept(&self, calendar: Calendar) -> Result<Option<Kept>, StoreError>;
         fn keep(&self, calendar: Calendar, served: &Served, asked: Timestamp) -> Result<(), StoreError>;
         fn unchanged(&self, calendar: Calendar, asked: Timestamp) -> Result<(), StoreError>;
+    }
+    held {
+            fn kept(&self, calendar: Calendar) -> Result<Option<Kept>, StoreError>;
     }
 }
 
 spanned! {
     DiaryStore {
-        fn diary(&self) -> Result<Diary, StoreError>;
+    }
+    held {
+            fn diary(&self) -> Result<Diary, StoreError>;
     }
 }
 
@@ -547,29 +738,37 @@ spanned! {
 
 spanned! {
     RecordedDevices {
-        fn sightings(&self) -> Result<Vec<domain::device::Sighting>, StoreError>;
+    }
+    held {
+            fn sightings(&self) -> Result<Vec<domain::device::Sighting>, StoreError>;
     }
 }
 
 spanned! {
     WearRecord {
-        fn wear(&self) -> Result<domain::device::Wear, StoreError>;
+    }
+    held {
+            fn wear(&self) -> Result<domain::device::Wear, StoreError>;
     }
 }
 
 spanned! {
     Revisions {
-        fn revision(&self, node: &Node) -> Result<Revision, StoreError>;
+    }
+    held {
+            fn revision(&self, node: &Node) -> Result<Revision, StoreError>;
     }
 }
 
 spanned! {
     DerivationLedger {
-        fn normalised(&self, stream: &LandingStream) -> Result<Option<DerivedFrom>, StoreError>;
-        fn ever_normalised(&self, stream: &LandingStream) -> Result<bool, StoreError>;
         fn record_normalised(&self, run: NormalisationRunId, from: &DerivedFrom) -> Result<(), StoreError>;
-        fn canonical(&self, layer: CanonicalLayer) -> Result<Option<DerivedFrom>, StoreError>;
         fn record_canonical(&self, layer: CanonicalLayer, from: &DerivedFrom) -> Result<(), StoreError>;
+    }
+    held {
+            fn normalised(&self, stream: &LandingStream) -> Result<Option<DerivedFrom>, StoreError>;
+            fn ever_normalised(&self, stream: &LandingStream) -> Result<bool, StoreError>;
+            fn canonical(&self, layer: CanonicalLayer) -> Result<Option<DerivedFrom>, StoreError>;
     }
 }
 

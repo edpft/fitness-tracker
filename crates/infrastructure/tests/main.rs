@@ -15,6 +15,7 @@ mod btwb_sessions;
 mod calendar_contract;
 mod canonical_gym_session;
 mod canonicalise;
+mod commits;
 mod comparison;
 mod concurrent_writes;
 mod cycling_mesocycle;

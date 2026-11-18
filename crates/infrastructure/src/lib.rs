@@ -46,7 +46,7 @@ pub use spreadsheets::{
 };
 pub use store::{Authoring, CanonicalGymReading, Held, Reading, SqliteRevisions, Writing};
 pub use store::{
-    BtwbExportAccountReader, BtwbExportLandingStore, GarminActivityFileLandingStore,
+    BtwbExportAccountReader, BtwbExportLandingStore, Commits, GarminActivityFileLandingStore,
     GarminActivityLandingStore, GarminDailyHeartRateAccountReader,
     GarminDailyHeartRateLandingStore, GarminExerciseSetLandingStore, GarminGymAccountReader,
     GarminGymRawExtent, GarminHrvAccountReader, GarminHrvLandingStore, GarminRecordedDevices,
@@ -70,6 +70,7 @@ pub use store::{
     SqliteRestingHeartRateHistory, SqliteRestingHeartRateStore, SqliteResumptionPointStore,
     SqliteSleepHistory, SqliteSleepStore, SqliteSpreadsheetStore, SqliteWeighInStore,
     WahooFileLandingStore, WithingsMeasurementLandingStore, WithingsWeighInAccountReader, connect,
+    connect_counting,
 };
 pub use store::{
     GarminBodyBatteryEventLandingStore, GarminBodyBatteryLandingStore,

@@ -15,6 +15,8 @@ mod spanned;
 pub use infrastructure::KeptDrawing;
 pub use spanned::Spanned;
 
+use spanned::Answers;
+
 use std::path::Path;
 use std::sync::Arc;
 
@@ -37,7 +39,7 @@ use infrastructure::{
     SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
     SqliteGymMesocycleStore, SqliteKeptDrawings, SqliteOperatorSettingsStore,
     SqlitePelotonClassStore, SqlitePlanStore, SqlitePool, SqlitePrescribedWorkoutStore,
-    SqlitePrescriptionDeliveryStore, SqliteRevisions, connect,
+    SqlitePrescriptionDeliveryStore, SqliteRevisions, connect_counting,
 };
 
 /// The operator's store, opened.
@@ -49,6 +51,8 @@ use infrastructure::{
 pub struct Store {
     pool: SqlitePool,
     path: Arc<Path>,
+    /// What the adapters over it answered, kept until it is next written.
+    kept: Answers,
 }
 
 impl Store {
@@ -70,11 +74,13 @@ impl Store {
     )]
     pub async fn open(database: &Path) -> Result<Self, StoreError> {
         use tracing::Instrument as _;
+        let (pool, commits) = connect_counting(database)
+            .instrument(crate::telemetry::opening())
+            .await?;
         Ok(Self {
-            pool: connect(database)
-                .instrument(crate::telemetry::opening())
-                .await?,
+            pool,
             path: Arc::from(database),
+            kept: Answers::until(commits),
         })
     }
 
@@ -90,7 +96,7 @@ impl Store {
     /// A function and not a closure, so that the pool it is given cannot be
     /// kept: it goes into the adapter and nowhere else.
     pub(crate) fn adapter<A>(&self, new: fn(SqlitePool) -> A) -> Spanned<A> {
-        Spanned::new(new(self.pool.clone()))
+        Spanned::kept(new(self.pool.clone()), self.kept.clone())
     }
 
     /// The adapter `new` builds over the store, spanned, where it could be
@@ -103,12 +109,12 @@ impl Store {
         &self,
         new: fn(SqlitePool) -> Result<A, E>,
     ) -> Result<Spanned<A>, E> {
-        new(self.pool.clone()).map(Spanned::new)
+        new(self.pool.clone()).map(|adapter| Spanned::kept(adapter, self.kept.clone()))
     }
 
     /// The adapter `new` builds over the store and `with`, spanned.
     pub(crate) fn adapter_with<W, A>(&self, new: fn(SqlitePool, W) -> A, with: W) -> Spanned<A> {
-        Spanned::new(new(self.pool.clone(), with))
+        Spanned::kept(new(self.pool.clone(), with), self.kept.clone())
     }
 
     /// The adapter `new` builds over the store and `with`, spanned, where it
@@ -122,7 +128,7 @@ impl Store {
         new: fn(SqlitePool, W) -> Result<A, E>,
         with: W,
     ) -> Result<Spanned<A>, E> {
-        new(self.pool.clone(), with).map(Spanned::new)
+        new(self.pool.clone(), with).map(|adapter| Spanned::kept(adapter, self.kept.clone()))
     }
 
     /// Peloton's class library, as a [`ClassCatalogue`] reads it.
