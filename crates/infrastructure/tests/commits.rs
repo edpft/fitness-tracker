@@ -102,3 +102,53 @@ fn a_write_is_counted_and_a_read_or_a_drawing_is_not() {
             );
         });
 }
+
+/// **A commit inside [`moving`] moves what it names, and nothing else**; one
+/// outside moves everything.
+#[test]
+fn a_write_moves_what_its_step_names() {
+    use application::graph::Node;
+    use domain::landing::LandingStream;
+    use infrastructure::moving;
+
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime")
+        .block_on(async {
+            let directory = tempfile::tempdir().expect("a directory");
+            let (pool, commits) = connect_counting(&directory.path().join("test.db"))
+                .await
+                .expect("a store");
+            let landing = |name: &str| {
+                Node::Landing(LandingStream::try_from(name).expect("a stream"))
+            };
+            let withings = [landing("withings.measurements")].into();
+            let sleep = [landing("garmin.sleep")].into();
+            let at = commits.committed();
+
+            moving(
+                [landing("withings.measurements")].into(),
+                sqlx::query(
+                    "INSERT INTO extraction_run (stream, started_at) VALUES ('withings.measurements', '2026-11-18T06:00:00Z')",
+                )
+                .execute(&pool),
+            )
+            .await
+            .expect("written");
+            assert!(commits.moved_since(at, &withings), "what it names moves");
+            assert!(!commits.moved_since(at, &sleep), "and nothing else does");
+
+            let at = commits.committed();
+            sqlx::query(
+                "INSERT INTO extraction_run (stream, started_at) VALUES ('garmin.sleep', '2026-11-18T06:00:00Z')",
+            )
+            .execute(&pool)
+            .await
+            .expect("written");
+            assert!(
+                commits.moved_since(at, &withings) && commits.moved_since(at, &sleep),
+                "a write naming nothing moves everything"
+            );
+        });
+}

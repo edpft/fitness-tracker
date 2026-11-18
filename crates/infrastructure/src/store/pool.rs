@@ -1,7 +1,7 @@
 //! Opening the store, and bringing its schema up to date.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     num::NonZeroUsize,
     path::Path,
     str::FromStr,
@@ -11,7 +11,7 @@ use std::{
     },
 };
 
-use application::StoreError;
+use application::{StoreError, graph::Node};
 use jiff::Timestamp;
 use sqlx::{
     SqliteConnection, SqlitePool,
@@ -80,7 +80,16 @@ async fn opened(path: &Path) -> Result<(SqlitePool, Commits), StoreError> {
         .max_connections(4)
         .after_connect(move |connection, _: PoolConnectionMetadata| {
             let commits = connected.clone();
-            Box::pin(async move { commits.watch(connection).await })
+            let writes = writing_now();
+            Box::pin(async move { commits.watch(connection, writes).await })
+        })
+        .before_acquire({
+            let commits = commits.clone();
+            move |connection, _: PoolConnectionMetadata| {
+                let commits = commits.clone();
+                let writes = writing_now();
+                Box::pin(async move { commits.acquired(connection, writes).await })
+            }
         })
         .after_release(move |connection, _: PoolConnectionMetadata| {
             let commits = released.clone();
@@ -187,14 +196,47 @@ pub struct Commits(Arc<Counted>);
 /// The table a page's drawing is kept in, which nothing is derived from.
 const DRAWINGS: &str = "kept_drawing";
 
+tokio::task_local! {
+    /// What the step running on this task writes (#830).
+    static WRITING: Arc<BTreeSet<Node>>;
+}
+
+/// Run `step`, which writes `nodes` and nothing else (#830).
+///
+/// **A commit made inside it moves those nodes alone**, so what reads
+/// anything else is still held. The operator, 2026-11-18: *"if we receive new
+/// data, I would expect all data that's derived from it to update. I would
+/// not expect data that's not derived from it to update."* A commit made
+/// outside any moves everything.
+///
+/// **Read where a connection is taken from the pool**, so a connection is the
+/// step's for as long as the step holds it, whatever else runs beside it.
+pub async fn moving<F: Future>(nodes: BTreeSet<Node>, step: F) -> F::Output {
+    WRITING.scope(Arc::new(nodes), step).await
+}
+
+/// What the step running on this task writes, where one says.
+fn writing_now() -> Option<Arc<BTreeSet<Node>>> {
+    WRITING.try_with(Arc::clone).ok()
+}
+
 #[derive(Debug, Default)]
 struct Counted {
     /// Transactions committed, each counted at its commit hook.
     committed: AtomicU64,
     /// Of those, the ones whose connection has been released since.
     settled: AtomicU64,
+    /// Which commit last moved each node.
+    moved: Mutex<Moved>,
     /// What each open connection has written, by the address of its handle.
     connections: Mutex<HashMap<NonZeroUsize, Arc<Mutex<Written>>>>,
+}
+
+/// Which commit last moved each node, and the last that moved everything.
+#[derive(Debug, Default)]
+struct Moved {
+    everything: u64,
+    nodes: HashMap<Node, u64>,
 }
 
 /// What one connection has written: in the transaction it has open, and
@@ -207,6 +249,8 @@ struct Written {
     elsewhere: bool,
     /// Transactions that count, committed since the last release.
     committed: u64,
+    /// What the step holding the connection writes, where one said.
+    writes: Option<Arc<BTreeSet<Node>>>,
 }
 
 impl Written {
@@ -246,9 +290,26 @@ impl Commits {
         (self.0.settled.load(Ordering::Acquire) == committed).then_some(committed)
     }
 
-    /// Note what `connection` writes and commits.
-    async fn watch(&self, connection: &mut SqliteConnection) -> Result<(), sqlx::Error> {
-        let written = Arc::new(Mutex::new(Written::default()));
+    /// Whether anything in `nodes` has been moved by a commit after the
+    /// `at`th.
+    pub fn moved_since(&self, at: u64, nodes: &BTreeSet<Node>) -> bool {
+        let moved = self.0.moved.lock().unwrap_or_else(PoisonError::into_inner);
+        moved.everything > at
+            || nodes
+                .iter()
+                .any(|node| moved.nodes.get(node).is_some_and(|by| *by > at))
+    }
+
+    /// Note what `connection` writes and commits, for the step that opened it.
+    async fn watch(
+        &self,
+        connection: &mut SqliteConnection,
+        writes: Option<Arc<BTreeSet<Node>>>,
+    ) -> Result<(), sqlx::Error> {
+        let written = Arc::new(Mutex::new(Written {
+            writes,
+            ..Written::default()
+        }));
         let mut handle = connection.lock_handle().await?;
         self.0
             .connections
@@ -273,16 +334,35 @@ impl Commits {
         });
         let counted = Arc::clone(&self.0);
         handle.set_commit_hook(move || {
-            if written
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .commit()
-            {
-                counted.committed.fetch_add(1, Ordering::AcqRel);
+            let mut written = written.lock().unwrap_or_else(PoisonError::into_inner);
+            if written.commit() {
+                counted.commit(written.writes.as_deref());
             }
             true
         });
         Ok(())
+    }
+
+    /// `connection`, taken from the pool by the step running now.
+    async fn acquired(
+        &self,
+        connection: &mut SqliteConnection,
+        writes: Option<Arc<BTreeSet<Node>>>,
+    ) -> Result<bool, sqlx::Error> {
+        let address = connection.lock_handle().await?.as_raw_handle().addr();
+        if let Some(written) = self
+            .0
+            .connections
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&address)
+        {
+            written
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .writes = writes;
+        }
+        Ok(true)
     }
 
     /// Settle what `connection` committed before it was released, and keep it.
@@ -296,14 +376,28 @@ impl Commits {
             .get(&address)
             .cloned();
         let committed = written.map_or(0, |written| {
-            std::mem::take(
-                &mut written
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .committed,
-            )
+            let mut written = written.lock().unwrap_or_else(PoisonError::into_inner);
+            written.writes = None;
+            std::mem::take(&mut written.committed)
         });
         self.0.settled.fetch_add(committed, Ordering::AcqRel);
         Ok(true)
+    }
+}
+
+impl Counted {
+    /// A commit that counts, moving `writes`, or everything where no step
+    /// said what it writes.
+    fn commit(&self, writes: Option<&BTreeSet<Node>>) {
+        let mut moved = self.moved.lock().unwrap_or_else(PoisonError::into_inner);
+        let at = self.committed.fetch_add(1, Ordering::AcqRel) + 1;
+        match writes {
+            Some(nodes) => {
+                for node in nodes {
+                    moved.nodes.insert(node.clone(), at);
+                }
+            }
+            None => moved.everything = at,
+        }
     }
 }

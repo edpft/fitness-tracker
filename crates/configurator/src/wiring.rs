@@ -279,6 +279,30 @@ pub async fn inputs(
     store: &Store,
     zone: &OperatorZone,
 ) -> Result<DerivedFrom, WiringError> {
+    let stream = known.landing_stream()?;
+    // **Held as long as nothing the layer is derived from moves** (#830):
+    // its landing tables, its overlay and the zones, as the graph says.
+    match crate::graph::graph().reads(&application::graph::Node::Normalised(stream.clone())) {
+        Some(on) => {
+            store
+                .held(
+                    "wiring::inputs",
+                    format!("{stream} {zone:?}"),
+                    on,
+                    inputs_now(known, store, zone),
+                )
+                .await
+        }
+        None => inputs_now(known, store, zone).await,
+    }
+}
+
+/// What the stream's layer would be derived from now, read from the store.
+async fn inputs_now(
+    known: &KnownStream,
+    store: &Store,
+    zone: &OperatorZone,
+) -> Result<DerivedFrom, WiringError> {
     use application::RawExtent as _;
     let (records, overlay, version) = match known.name().as_str() {
         HevyWorkoutLandingStore::STREAM => (
@@ -408,6 +432,9 @@ async fn corrections(
             .held(
                 "SqliteEditOverlayStore::all",
                 stream.to_owned(),
+                &application::graph::Reads::of([application::graph::Node::Edits(
+                    LandingStream::try_from(stream).map_err(WiringError::from)?,
+                )]),
                 SqliteEditOverlayStore::all,
             )
             .await?
@@ -449,6 +476,9 @@ pub(crate) async fn stated_zones(
         .held(
             "SqliteOperatorSettingsStore::zones",
             String::new(),
+            &application::graph::Reads::of([application::graph::Node::Interpretive(
+                application::graph::Interpretive::Zones,
+            )]),
             infrastructure::SqliteOperatorSettingsStore::zones,
         )
         .await?

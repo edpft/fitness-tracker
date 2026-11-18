@@ -127,7 +127,7 @@ pub use peloton_normalised::{
 };
 pub use peloton_samples_landing::PelotonRideSampleLandingStore;
 pub use plan::SqlitePlanStore;
-pub use pool::{Commits, connect, connect_counting};
+pub use pool::{Commits, connect, connect_counting, moving};
 pub use prescription::SqlitePrescribedWorkoutStore;
 pub use pulse_wave_velocity::SqlitePulseWaveVelocityHistory;
 pub use refusals::SqliteRefusalStore;
