@@ -315,6 +315,18 @@ pub(crate) fn deriving(analysis: application::graph::Analysis) -> Span {
     span
 }
 
+/// Deriving an analysis again from what it held, where only the clock has
+/// moved since (#830): `carried_on` on its span, so a walk of the plan that
+/// started again from the first week is told from one that carried on.
+pub(crate) fn carrying_on(analysis: application::graph::Analysis) -> Span {
+    tracing::info_span!(
+        "step",
+        step = "deriving",
+        read = analysis.as_str(),
+        carried_on = true
+    )
+}
+
 /// Showing the card `name` on a page load, as a `step` under it (#830): how
 /// it was served, and its derivations, reads and drawing as its children.
 pub fn card(name: &'static str) -> Span {

@@ -13,7 +13,7 @@
 
 use application::{
     DiaryStore as _, HolidayCalendar as _, PlanStore as _, StoreError,
-    microcycle::{Standing, Term},
+    microcycle::{Ended, Standing, Term},
     next::StandingReader,
     reschedule::{Reschedule, Rescheduled, WalkedPlans},
 };
@@ -70,6 +70,9 @@ pub struct Walked {
     pub diary: Diary,
     pub standing: Standing,
     pub reschedule: Reschedule,
+    /// The microcycles that had ended, for a walk at a later part of the day
+    /// to carry on from (#830).
+    ended: Option<Ended>,
 }
 
 /// The plans, as written and as they now stand: what Plan reads, so every
@@ -153,11 +156,33 @@ impl Walk {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub(crate) async fn walked_on(&self, now: DayPart) -> Result<Walked, StoreError> {
+        self.walked_after(now, None).await
+    }
+
+    /// Where the plan stands on `now`, as [`Self::walked_on`] says, carrying
+    /// on from the microcycles `before` had ended.
+    ///
+    /// **Only where nothing but the clock has moved since `before`** (#830):
+    /// the same plans, diary and record, a later part of the day.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub(crate) async fn walked_after(
+        &self,
+        now: DayPart,
+        before: Option<&Walked>,
+    ) -> Result<Walked, StoreError> {
         let written = self.plans.plans().await?;
         let diary = self.diary.diary().await?;
-        let standing = self
+        let (standing, ended) = self
             .microcycle
-            .standing_among(now, &written, &diary)
+            .standing_after(
+                now,
+                &written,
+                &diary,
+                before.and_then(|before| before.ended.as_ref()),
+            )
             .await?;
         let reschedule = standing.reschedule(diary.clone());
         Ok(Walked {
@@ -166,6 +191,7 @@ impl Walk {
             reschedule,
             standing,
             diary,
+            ended,
         })
     }
 

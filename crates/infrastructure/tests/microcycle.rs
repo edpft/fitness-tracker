@@ -1954,3 +1954,146 @@ fn an_open_illness_reports_the_week_now_is_in() {
         standing.sessions
     );
 }
+
+/// Where the plan stands at every part of the day from 7 September to 12
+/// October, each walked afresh and each carried on from the part of the day
+/// before: the two pairs, one per part of the day.
+async fn walked_and_carried_on(
+    pool: &SqlitePool,
+    term: Option<application::microcycle::Term>,
+    gym_performed: Trained,
+    cycling_performed: Ridden,
+) -> Fallible<Vec<(DayPart, Walked, Walked)>> {
+    let walk = Microcycle::new(
+        MicrocyclePorts {
+            diary: SqliteDiaryStore::new(pool.clone()),
+            plans: SqlitePlanStore::new(pool.clone(), corpus::zone()?),
+            gym_deliveries: SqlitePrescriptionDeliveryStore::new(pool.clone()),
+            cycling_deliveries: SqliteCyclingDeliveryStore::new(pool.clone()),
+            gym_performed,
+            cycling_performed,
+        },
+        hevy()?,
+        peloton()?,
+    );
+    let walk = match term {
+        Some(term) => walk.within(term),
+        None => walk,
+    };
+    let plans = SqlitePlanStore::new(pool.clone(), corpus::zone()?)
+        .plans()
+        .await?;
+    let diary = SqliteDiaryStore::new(pool.clone()).diary().await?;
+    let mut walked = Vec::new();
+    let mut ended = None;
+    let mut date = Date::constant(2026, 9, 7);
+    while date <= Date::constant(2026, 10, 12) {
+        for part in [PartOfDay::Morning, PartOfDay::Afternoon, PartOfDay::Evening] {
+            let now = DayPart::new(date, part);
+            let afresh = walk.standing_after(now, &plans, &diary, None).await?;
+            let carried = walk
+                .standing_after(now, &plans, &diary, ended.as_ref())
+                .await?;
+            ended.clone_from(&carried.1);
+            walked.push((now, afresh, carried));
+        }
+        date = date.tomorrow()?;
+    }
+    Ok(walked)
+}
+
+/// A walk's standing and how far it got.
+type Walked = (
+    application::microcycle::Standing,
+    Option<application::microcycle::Ended>,
+);
+
+/// Every pair differs where carrying on from the part of the day before
+/// changed the walk.
+fn differences(walked: &[(DayPart, Walked, Walked)]) -> Vec<String> {
+    walked
+        .iter()
+        .filter(|(_, afresh, carried)| afresh != carried)
+        .map(|(now, afresh, carried)| format!("{now:?}: {afresh:?} carried on as {carried:?}"))
+        .collect()
+}
+
+/// **#830, a new part of the day walks on from where the walk before
+/// stopped**, and stands where a walk from the plan's first week does.
+///
+/// Three autumns, each walked through every part of the day from the week
+/// before the plan to three weeks after the test week: one whose test week
+/// runs again, one whose missed FTP test is carried to the next Wednesday,
+/// and one with an illness still open.
+#[test]
+fn a_walk_carried_on_from_the_part_of_the_day_before_stands_as_one_afresh() {
+    let walked = corpus::block_on(async {
+        let rerun = {
+            let (pool, _directory) = autumn_tested().await?;
+            away_over_the_monday(&pool).await?;
+            gym_delivered_for_the_friday(&pool).await?;
+            ill_to_the_sunday(&pool).await?;
+            walked_and_carried_on(
+                &pool,
+                None,
+                Trained::at(vec![Date::constant(2026, 9, 7).at(19, 0, 0, 0)]),
+                Ridden::of(vec![(
+                    Date::constant(2026, 9, 16).at(19, 0, 0, 0),
+                    vec![RideVenue::new("4d302bef", "20 min FTP Test Ride")?],
+                )]),
+            )
+            .await?
+        };
+        let carried = {
+            let (pool, _directory) = autumn_tested().await?;
+            away_over_the_monday(&pool).await?;
+            gym_delivered_for_the_friday(&pool).await?;
+            walked_and_carried_on(
+                &pool,
+                Some(autumn_term()?),
+                Trained::at(vec![Date::constant(2026, 9, 19).at(10, 0, 0, 0)]),
+                Ridden::of(vec![(
+                    Date::constant(2026, 9, 16).at(19, 0, 0, 0),
+                    vec![RideVenue::new(
+                        "725d6185",
+                        "45 min Power Zone Endurance Ride",
+                    )?],
+                )]),
+            )
+            .await?
+        };
+        let ill = {
+            let (pool, _directory) = autumn().await?;
+            SqliteDiaryStore::new(pool.clone())
+                .record_illness(&Illness::new(Date::constant(2026, 9, 18)))
+                .await?;
+            walked_and_carried_on(&pool, None, Trained::nothing(), Ridden::nothing()).await?
+        };
+        Fallible::Ok([rerun, carried, ill])
+    })
+    .expect("a runtime is available")
+    .expect("the store authors and answers");
+
+    for (autumn, walked) in ["rerun", "carried", "ill"].iter().zip(&walked) {
+        assert_eq!(differences(walked), Vec::<String>::new(), "{autumn}");
+        assert!(
+            walked
+                .iter()
+                .any(|(_, (standing, _), _)| standing.weeks.len() >= 3),
+            "{autumn}: the walk reaches past three ended microcycles"
+        );
+    }
+    let [rerun, carried, _] = &walked;
+    assert!(
+        rerun
+            .iter()
+            .any(|(_, (standing, _), _)| !standing.reruns.is_empty()),
+        "a week runs again"
+    );
+    assert!(
+        carried
+            .iter()
+            .any(|(_, (standing, _), _)| standing.missed != domain::planner::Missed::none()),
+        "a test is carried"
+    );
+}
