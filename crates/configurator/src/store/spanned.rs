@@ -284,7 +284,7 @@ macro_rules! spanned {
         $(
             held {
                 $(
-                    fn $held:ident(&self $(, $held_argument:ident: $held_type:ty)* $(,)?) -> Result<$answer:ty, StoreError> on $on:expr;
+                    fn $held:ident(&self $(, $held_argument:ident: $held_type:ty)* $(,)?) -> Result<$answer:ty, $error:ty> on $on:expr;
                 )*
             }
         )?
@@ -316,7 +316,7 @@ macro_rules! spanned {
                 }
             )*
             $($(
-                fn $held(&self $(, $held_argument: $held_type)*) -> impl Future<Output = Result<$answer, StoreError>> + Send {
+                fn $held(&self $(, $held_argument: $held_type)*) -> impl Future<Output = Result<$answer, $error>> + Send {
                     const CALL: &str = concat!(stringify!($port), "::", stringify!($held));
                     let with = format!("{} {:?}", std::any::type_name::<A>(), ($(&$held_argument,)*));
                     let on: Reads = ($on)(&self.0);
@@ -328,7 +328,7 @@ macro_rules! spanned {
                             Err(at) => at,
                         };
                         let span = tracing::info_span!("call", call = CALL, rows = Empty);
-                        let returned: Result<$answer, StoreError> = call.instrument(span.clone()).await;
+                        let returned: Result<$answer, $error> = call.instrument(span.clone()).await;
                         if let Some(rows) = (&Returned(&returned)).rows() {
                             span.record("rows", rows);
                         }
@@ -502,16 +502,20 @@ spanned! {
 }
 
 spanned! {
-    ExerciseHistory {
-        fn last_performances(&self, exercises: &[RepsExercise]) -> Result<BTreeMap<RepsExercise, LastPerformance>, StoreError>;
-        fn performances(&self, exercise: RepsExercise) -> Result<Vec<(Performance, Option<FulfilledSession>)>, StoreError>;
+    ExerciseHistory where Input {
         fn newest_performance(&self) -> Result<Option<Date>, StoreError>;
+    }
+    held {
+            fn last_performances(&self, exercises: &[RepsExercise]) -> Result<BTreeMap<RepsExercise, LastPerformance>, StoreError> on |adapter| declared(adapter);
+            fn performances(&self, exercise: RepsExercise) -> Result<Vec<(Performance, Option<FulfilledSession>)>, StoreError> on |adapter| declared(adapter);
     }
 }
 
 spanned! {
-    Performances {
-        fn of(&self, exercises: &[RepsExercise], from: Date, to: Date) -> Result<Vec<Performance>, StoreError>;
+    Performances where Input {
+    }
+    held {
+            fn of(&self, exercises: &[RepsExercise], from: Date, to: Date) -> Result<Vec<Performance>, StoreError> on |adapter| declared(adapter);
     }
 }
 
@@ -612,18 +616,22 @@ spanned! {
 }
 
 spanned! {
-    WorkoutStore {
-        fn workout_at(&self, intensity: Relative, at: Timestamp) -> Result<Option<(Timestamp, Workout)>, StoreError>;
+    WorkoutStore where Input {
         fn author_workout(&self, intensity: Relative, at: Timestamp, workout: &Workout) -> Result<(), StoreError>;
+    }
+    held {
+            fn workout_at(&self, intensity: Relative, at: Timestamp) -> Result<Option<(Timestamp, Workout)>, StoreError> on |adapter| declared(adapter);
     }
 }
 
 spanned! {
-    ProgressionStore {
-        fn linear_at(&self, at: Timestamp) -> Result<Option<(Timestamp, LinearProgression)>, StoreError>;
+    ProgressionStore where Input {
         fn author_linear(&self, at: Timestamp, linear: &LinearProgression) -> Result<(), StoreError>;
-        fn sbs_at(&self, at: Timestamp) -> Result<Option<(Timestamp, SbsProgression)>, StoreError>;
         fn author_sbs(&self, at: Timestamp, sbs: &SbsProgression) -> Result<(), StoreError>;
+    }
+    held {
+            fn linear_at(&self, at: Timestamp) -> Result<Option<(Timestamp, LinearProgression)>, StoreError> on |adapter| declared(adapter);
+            fn sbs_at(&self, at: Timestamp) -> Result<Option<(Timestamp, SbsProgression)>, StoreError> on |adapter| declared(adapter);
     }
 }
 
@@ -676,9 +684,11 @@ spanned! {
 }
 
 spanned! {
-    FtpHistory {
-        fn in_force_on(&self, date: Date) -> Result<Option<Ftp>, StoreError>;
+    FtpHistory where Input {
         fn series(&self) -> Result<Vec<Ftp>, StoreError>;
+    }
+    held {
+            fn in_force_on(&self, date: Date) -> Result<Option<Ftp>, StoreError> on |adapter| declared(adapter);
     }
 }
 
@@ -690,9 +700,9 @@ spanned! {
 
 spanned! {
     CyclingMesocycleStore where Input {
-        fn following(&self, date: Date) -> Result<Option<(CyclingMesocycleId, PlanName, CyclingMesocycle)>, StoreError>;
     }
     held {
+            fn following(&self, date: Date) -> Result<Option<(CyclingMesocycleId, PlanName, CyclingMesocycle)>, StoreError> on |adapter| declared(adapter);
             fn on(&self, date: Date) -> Result<Option<(CyclingMesocycleId, PlanName, CyclingMesocycle)>, StoreError> on |adapter| declared(adapter);
     }
 }
@@ -736,8 +746,10 @@ spanned! {
 }
 
 spanned! {
-    HolidayCalendar {
-        fn holidays(&self) -> Result<Holidays, SourceError>;
+    HolidayCalendar where Input {
+    }
+    held {
+            fn holidays(&self) -> Result<Holidays, SourceError> on |adapter| declared(adapter);
     }
 }
 
@@ -826,8 +838,10 @@ spanned! {
 }
 
 spanned! {
-    PublishedProgrammes {
-        fn read(&self, which: PublishedCycling) -> Result<PublishedRead, SourceError>;
+    PublishedProgrammes where Input {
+    }
+    held {
+            fn read(&self, which: PublishedCycling) -> Result<PublishedRead, SourceError> on |adapter| declared(adapter);
     }
     at_once {
             fn which(&self, programme: &ExternalProgramme) -> Option<PublishedCycling>;

@@ -368,7 +368,7 @@ async fn over(
                 parameters: parameters.clone(),
                 holding: Spanned::new(PelotonHoldingRides::new(catalogue)),
                 ridden: store.adapter(SqliteCanonicalCyclingSessionStore::new),
-                published: Spanned::new(PelotonProgrammes::new(catalogue)),
+                published: store.kept(PelotonProgrammes::new(catalogue)),
             },
             zone.clone(),
         )),
