@@ -5,11 +5,15 @@
 //! answers whether he is losing weight at the rate the plan intends and
 //! whether what he loses is fat or fat-free mass.
 //!
-//! **Two sections, each with its own summary** (operator, 2026-11-13): body
-//! weight, its trend against where the plan's aims would have taken it; then
-//! body composition, fat and fat-free mass against what the aims expect of
-//! them. Each expectation resets at every mesocycle's start. Beneath both,
-//! the weigh-ins, each its weight, fat and fat-free mass.
+//! **Two sections** (operator, 2026-11-13): body weight, its trend against
+//! where the plan's aims would have taken it; then body composition, fat and
+//! fat-free mass against what the aims expect of them, under their summary.
+//! Each expectation resets at every mesocycle's start. Beneath both, the
+//! weigh-ins, each its weight, fat and fat-free mass.
+//!
+//! **Body weight is one chart here** (operator, 2026-11-18): Progress's body
+//! weight card is a sparkline of it, read from the same analyses, and is not
+//! repeated above it.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -122,15 +126,8 @@ impl Body<'_> {
 ///
 /// **A heading over nothing is not shown**: a section none of whose cards
 /// drew anything is hidden by the stylesheet.
-fn laid_out(over: Over, cards: [Markup; 6]) -> Markup {
-    let [
-        weighed,
-        weight_charts,
-        fat,
-        fat_free,
-        composition_charts,
-        weigh_ins,
-    ] = cards;
+fn laid_out(over: Over, cards: [Markup; 5]) -> Markup {
+    let [weight_charts, fat, fat_free, composition_charts, weigh_ins] = cards;
     detail::page(
         PATH,
         TITLE,
@@ -138,7 +135,6 @@ fn laid_out(over: Over, cards: [Markup; 6]) -> Markup {
         &html! {
             div.cards {
                 h2.group { "Body weight" }
-                (crate::summary::atop(&weighed))
                 (weight_charts)
             }
             div.cards {
@@ -171,7 +167,6 @@ pub fn page(
     laid_out(
         over,
         [
-            maud::html! {},
             body.weight_charts(),
             maud::html! {},
             maud::html! {},
@@ -260,7 +255,6 @@ pub struct Page {
 impl crate::card::Page for Page {
     const ROUTE: &'static str = PATH;
     type Cards = (
-        crate::summary::BodyWeightSince,
         WeightCharts,
         crate::summary::Fat,
         crate::summary::FatFree,
@@ -281,7 +275,7 @@ impl crate::card::Page for Page {
         Some(self.over)
     }
 
-    fn layout(&self, cards: [Markup; 6]) -> Markup {
+    fn layout(&self, cards: [Markup; 5]) -> Markup {
         laid_out(self.over, cards)
     }
 }
@@ -303,8 +297,8 @@ mod tests {
 
     use super::page;
 
-    /// **One page reads both, in two sections**: body weight with its own
-    /// summary, then composition with fat's and fat-free mass's.
+    /// **One page reads both, in two sections**: body weight's chart alone,
+    /// then composition under fat's and fat-free mass's summary.
     #[test]
     fn body_weight_and_composition_are_one_page() {
         let weigh_ins = (1..=28)
@@ -354,8 +348,8 @@ mod tests {
         );
         assert_eq!(
             page.matches(r#"class="card tile summary-of""#).count(),
-            2,
-            "a summary for each section: {page}"
+            1,
+            "composition's summary alone: {page}"
         );
         let order: Vec<usize> = [
             r#"<h2 class="group">Body weight</h2>"#,
