@@ -675,6 +675,7 @@ composed!(
 
 /// The heart rate each FTP test was ridden at, and the days the tests span,
 /// which its chart is drawn over so it lines up with the tests'.
+#[derive(PartialEq, Eq)]
 pub struct TestsRidden {
     pub tests: Option<range::Range>,
     pub heart_rates: Arc<Vec<ftp_test::TestHeartRate>>,
@@ -697,6 +698,7 @@ composed!(
 
 /// The weigh-ins, the composition and the aims, as `/body` reads them
 /// together.
+#[derive(PartialEq)]
 pub struct WeightAndComposition {
     pub series: Arc<body_weight::Series>,
     pub components: Arc<Vec<ComponentSeries>>,
