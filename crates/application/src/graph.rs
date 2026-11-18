@@ -91,6 +91,10 @@ pub enum Analysis {
     Standing,
     /// What is next, and the session derived for it, issued or not.
     Prescription,
+    /// This microcycle's sessions.
+    Microcycle,
+    /// The macrocycle's week, and its volume and intensity curves.
+    Curves,
     /// The macrocycle in force today, where one is.
     Macrocycle,
     /// The ranges a chart can be read over today.
@@ -123,7 +127,7 @@ pub enum Analysis {
 }
 
 impl Analysis {
-    pub const ALL: [Self; 34] = [
+    pub const ALL: [Self; 36] = [
         Self::BodyWeight,
         Self::Composition,
         Self::Plans,
@@ -145,6 +149,8 @@ impl Analysis {
         Self::PulseWaveVelocity,
         Self::Standing,
         Self::Prescription,
+        Self::Microcycle,
+        Self::Curves,
         Self::Macrocycle,
         Self::Ranges,
         Self::Aims,
@@ -184,6 +190,8 @@ impl Analysis {
             Self::PulseWaveVelocity => "pulse wave velocity",
             Self::Standing => "standing",
             Self::Prescription => "prescription",
+            Self::Microcycle => "microcycle",
+            Self::Curves => "curves",
             Self::Macrocycle => "macrocycle",
             Self::Ranges => "ranges",
             Self::Aims => "aims",

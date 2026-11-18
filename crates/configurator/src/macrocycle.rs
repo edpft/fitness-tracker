@@ -134,15 +134,6 @@ pub async fn planned(
     .map_err(PlannedFailure::from)
 }
 
-/// Where the plan stands at a part of the day, and the walk that says so
-/// (#830): what the home page's microcycle and curves are drawn from, and
-/// what is next is derived from.
-#[derive(PartialEq)]
-pub struct Stood {
-    pub walked: Arc<Walked>,
-    pub plan: PlanStanding,
-}
-
 /// Where the plan stands, as `walked` says, as a run says it.
 ///
 /// **The walk is not walked again**, nor the plans read again: what it read
@@ -155,7 +146,7 @@ pub(crate) async fn stood(
     store: &Store,
     zone: &OperatorZone,
     walked: Arc<Walked>,
-) -> Result<Stood, NextFailure> {
+) -> Result<PlanStanding, NextFailure> {
     let classes = store.peloton_classes();
     let catalogue = ClassCatalogue::over(&classes, None);
     let committer: Committer<'_> = Committing::new(
@@ -172,7 +163,7 @@ pub(crate) async fn stood(
         Some(holidays) => Ok(holidays.clone()),
         None => holidays::calendars(store).holidays().await,
     };
-    let plan = application::next::plan_standing(
+    Ok(application::next::plan_standing(
         &committer,
         walked.plans.now(),
         walked.now,
@@ -180,6 +171,5 @@ pub(crate) async fn stood(
         &walked.standing,
         &walked.diary,
     )
-    .await?;
-    Ok(Stood { walked, plan })
+    .await?)
 }
