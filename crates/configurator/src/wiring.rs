@@ -405,7 +405,11 @@ async fn corrections(
         None => Vec::new(),
         Some(stream) => store
             .try_adapter_with(SqliteEditOverlayStore::new, stream)?
-            .call("SqliteEditOverlayStore::all", SqliteEditOverlayStore::all)
+            .held(
+                "SqliteEditOverlayStore::all",
+                stream.to_owned(),
+                SqliteEditOverlayStore::all,
+            )
             .await?
             .iter()
             .map(|correction| correction.id().to_string())
@@ -442,8 +446,9 @@ pub(crate) async fn stated_zones(
 ) -> Result<StatedZones, application::StoreError> {
     Ok(store
         .adapter(infrastructure::SqliteOperatorSettingsStore::new)
-        .call(
+        .held(
             "SqliteOperatorSettingsStore::zones",
+            String::new(),
             infrastructure::SqliteOperatorSettingsStore::zones,
         )
         .await?

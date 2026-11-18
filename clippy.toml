@@ -35,4 +35,5 @@ disallowed-methods = [
   # and hands out each adapter spanned, so that every call through a port is a
   # `call` span (#816). An adapter's own tests open it raw: they are its ring.
   { path = "infrastructure::connect", reason = "open a `Store`, which spans each call through a port (#816)" },
+  { path = "infrastructure::connect_counting", reason = "open a `Store`, which spans each call through a port (#816) and keeps what it answered until it is written (#830)" },
 ]

@@ -30,8 +30,12 @@ async fn around_a_correction(
     let zone = OperatorZone::try_from("Europe/London".to_owned())?;
     let hevy = catalogue::lookup("hevy.workouts").ok_or("hevy is catalogued")?;
     let peloton = catalogue::lookup("peloton.rides").ok_or("peloton is catalogued")?;
-    let store = configurator::store::Store::open(database).await?;
-    let inputs = async |known| wiring::inputs(known, &store, &zone).await;
+    // A store opened for each read: the overlay is written from outside it,
+    // as from another process, which a store already open does not see.
+    let inputs = async |known| -> Fallible<application::DerivedFrom> {
+        let store = configurator::store::Store::open(database).await?;
+        Ok(wiring::inputs(known, &store, &zone).await?)
+    };
 
     let before = inputs(hevy).await?;
     let peloton_before = inputs(peloton).await?;
@@ -91,8 +95,10 @@ fn a_correction_moves_the_inputs_of_the_layer_it_corrects_and_no_other() {
 async fn around_a_move(database: &std::path::Path) -> Fallible<[application::DerivedFrom; 3]> {
     let auckland = OperatorZone::try_from("Pacific/Auckland".to_owned())?;
     let hevy = catalogue::lookup("hevy.workouts").ok_or("hevy is catalogued")?;
-    let store = configurator::store::Store::open(database).await?;
-    let inputs = async || wiring::inputs(hevy, &store, &auckland).await;
+    let inputs = async || -> Fallible<application::DerivedFrom> {
+        let store = configurator::store::Store::open(database).await?;
+        Ok(wiring::inputs(hevy, &store, &auckland).await?)
+    };
 
     let nothing_stated = inputs().await?;
     let settings = SqliteOperatorSettingsStore::new(connect(database).await?);
