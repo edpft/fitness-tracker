@@ -11,10 +11,7 @@ use application::{
     UnderivableSlot,
     cycling::PrescribedRide,
     microcycle::Session,
-    next::{
-        CyclingDerived, Derived, Done, Found, GymDerived, InPlace, PlanStanding, Step, Upcoming,
-        WhatIsNext,
-    },
+    next::{CyclingDerived, Derived, Done, Found, GymDerived, InPlace, Step, Upcoming, WhatIsNext},
 };
 use domain::{
     cycling::{CyclingMicrocycle, CyclingSession, PowerZone, Ride, clock},
@@ -27,6 +24,7 @@ use domain::{
     },
     schedule::DayPart,
 };
+use jiff::civil::Date;
 use maud::{Markup, html};
 
 /// A step of the run, named.
@@ -159,9 +157,9 @@ pub fn next(upcoming: &Upcoming) -> Markup {
 /// **Not where each discipline stands in its mesocycle**: the operator,
 /// 2026-11-09, *"isn't very meaningful"*. The volume and intensity curves
 /// replace it (#742).
-pub fn microcycle(plan: &PlanStanding) -> Markup {
+pub fn microcycle(microcycle: Option<&(Date, Vec<Session>)>) -> Markup {
     html! {
-        @if let Some((_, sessions)) = &plan.microcycle {
+        @if let Some((_, sessions)) = microcycle {
             section.card.microcycle {
                 h2 { "This microcycle" }
                 @for session in sessions {

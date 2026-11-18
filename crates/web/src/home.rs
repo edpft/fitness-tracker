@@ -8,13 +8,17 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use application::next::Upcoming;
+use application::{
+    commit::CommitError,
+    microcycle::Session,
+    next::{MacrocycleStanding, PlanCurves, Upcoming},
+};
 use axum::{extract::RawPathParams, response::Redirect};
 use configurator::{
-    analyses::{Prescription, Standing},
+    analyses::{self, Prescription},
     held::Of,
-    macrocycle::Stood,
 };
+use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, html};
 
 use crate::{
@@ -48,14 +52,14 @@ pub struct Microcycle;
 
 impl Card for Microcycle {
     const NAME: &'static str = "home-microcycle";
-    type Reads = Of<Standing>;
+    type Reads = Of<analyses::Microcycle>;
 
     fn asked(_: &HashMap<String, String>) -> Self {
         Self
     }
 
-    fn render(&self, stood: Arc<Stood>) -> Markup {
-        crate::report::microcycle(&stood.plan)
+    fn render(&self, microcycle: Arc<Option<(Date, Vec<Session>)>>) -> Markup {
+        crate::report::microcycle(microcycle.as_ref().as_ref())
     }
 }
 
@@ -64,14 +68,18 @@ pub struct Curves;
 
 impl Card for Curves {
     const NAME: &'static str = "home-curves";
-    type Reads = Of<Standing>;
+    type Reads = Of<analyses::Curves>;
 
     fn asked(_: &HashMap<String, String>) -> Self {
         Self
     }
 
-    fn render(&self, stood: Arc<Stood>) -> Markup {
-        crate::curves::card(&stood.plan.macrocycle, &stood.plan.curves)
+    fn render(
+        &self,
+        week_and_curves: Arc<(MacrocycleStanding, Result<Option<PlanCurves>, CommitError>)>,
+    ) -> Markup {
+        let (macrocycle, curves) = &*week_and_curves;
+        crate::curves::card(macrocycle, curves)
     }
 }
 

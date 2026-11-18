@@ -9,10 +9,12 @@ use std::sync::Arc;
 
 use application::{
     FtpHistory as _, StressHistory as _, TrainingDone as _,
+    commit::CommitError,
     ftp_tests::TestHeartRates as HeartRatesOfTests,
     graph::Analysis,
     heart_rate::RideHeartRates as HeartRatesOfRides,
-    next::Upcoming,
+    microcycle::Session,
+    next::{MacrocycleStanding, PlanCurves, PlanStanding, Upcoming},
     one_rep_max::{Tests, View},
     per_device::PerDevice,
     pulse_wave_velocity::PulseWaveVelocities,
@@ -51,7 +53,6 @@ use crate::{
     clock::{Now, Today},
     composition as components, devices, ftp_tests,
     held::{Analysed, Consulted, Of},
-    macrocycle::Stood,
     next::NextFailure,
     one_rep_max, rescheduling,
     store::{Spanned, Store},
@@ -767,13 +768,16 @@ impl application::graph::Input for Planning {
 
 /// Where the plan stands now: the macrocycle's week and its curves, and the
 /// microcycle's sessions, as the one walk says.
+///
+/// **Not the walk itself**, which holds the diary: a diary write that leaves
+/// where the plan stands as it was moves nothing reading this (#830).
 pub struct Standing;
 
 impl Analysed for Standing {
     const ANALYSIS: Analysis = Analysis::Standing;
     type Ports = Over<Planning>;
     type Reads = Of<Plans>;
-    type Value = Stood;
+    type Value = PlanStanding;
 
     async fn open(store: &Store, zone: &OperatorZone) -> Result<Self::Ports, NextFailure> {
         Ok(Over::new(store, zone))
@@ -786,6 +790,25 @@ impl Analysed for Standing {
         crate::macrocycle::stood(&ports.store, &ports.zone, walked).await
     }
 }
+
+composed!(
+    /// This microcycle's sessions, and the Monday it commences: `None` where
+    /// no plan covers it.
+    ///
+    /// **A node of its own** (#830), so that what moves the curves alone does
+    /// not redraw the sessions, nor the reverse.
+    Microcycle: Option<(Date, Vec<Session>)> = |plan: Arc<PlanStanding>| {
+        plan.microcycle.clone()
+    },
+    from Of<Standing>
+);
+
+composed!(
+    /// The macrocycle's week, and its volume and intensity curves.
+    Curves: (MacrocycleStanding, Result<Option<PlanCurves>, CommitError>) =
+        |plan: Arc<PlanStanding>| (plan.macrocycle.clone(), plan.curves.clone()),
+    from Of<Standing>
+);
 
 /// What prescribing either discipline reads.
 pub struct Prescribers;
@@ -847,6 +870,8 @@ pub(crate) fn derivations() -> [application::graph::Derivation; Analysis::ALL.le
         derivation::<PulseWaveVelocity>(),
         derivation::<Standing>(),
         derivation::<Prescription>(),
+        derivation::<Microcycle>(),
+        derivation::<Curves>(),
         derivation::<Macrocycle>(),
         derivation::<Ranges>(),
         derivation::<Aims>(),

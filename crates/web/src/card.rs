@@ -499,7 +499,7 @@ mod tests {
 
     use application::{Part, graph::Input as _};
     use configurator::{
-        analyses::{BodyWeight, Plans, Ranges, Sleep},
+        analyses::{BodyWeight, Curves, Microcycle, Plans, Ranges, Sleep},
         held::{Analysed, Of},
     };
     use domain::normalised::OperatorZone;
@@ -510,6 +510,8 @@ mod tests {
 
     static PLANNED: AtomicUsize = AtomicUsize::new(0);
     static RANGED: AtomicUsize = AtomicUsize::new(0);
+    static SESSIONS: AtomicUsize = AtomicUsize::new(0);
+    static CURVES: AtomicUsize = AtomicUsize::new(0);
     static SLEPT: AtomicUsize = AtomicUsize::new(0);
     static WEIGHT: AtomicUsize = AtomicUsize::new(0);
 
@@ -545,6 +547,40 @@ mod tests {
         fn render(&self, _: Arc<<Ranges as Analysed>::Value>) -> Markup {
             let drawn = RANGED.fetch_add(1, Ordering::SeqCst) + 1;
             html! { section.card { p { "ranged " (drawn) } } }
+        }
+    }
+
+    /// A card reading this microcycle's sessions, counting its drawings.
+    struct Sessions;
+
+    impl Card for Sessions {
+        const NAME: &'static str = "test-sessions";
+        type Reads = Of<Microcycle>;
+
+        fn asked(_: &HashMap<String, String>) -> Self {
+            Self
+        }
+
+        fn render(&self, _: Arc<<Microcycle as Analysed>::Value>) -> Markup {
+            let drawn = SESSIONS.fetch_add(1, Ordering::SeqCst) + 1;
+            html! { section.card { p { "sessions " (drawn) } } }
+        }
+    }
+
+    /// A card reading the macrocycle's curves, counting its drawings.
+    struct Curved;
+
+    impl Card for Curved {
+        const NAME: &'static str = "test-curves";
+        type Reads = Of<Curves>;
+
+        fn asked(_: &HashMap<String, String>) -> Self {
+            Self
+        }
+
+        fn render(&self, _: Arc<<Curves as Analysed>::Value>) -> Markup {
+            let drawn = CURVES.fetch_add(1, Ordering::SeqCst) + 1;
+            html! { section.card { p { "curves " (drawn) } } }
         }
     }
 
@@ -782,5 +818,45 @@ mod tests {
         assert!(ranged.contains("ranged 1"), "{ranged}");
         assert!(!ranged.contains("hx-trigger"), "{ranged}");
         assert_eq!(RANGED.load(Ordering::SeqCst), 1, "the ranges did not move");
+    }
+
+    /// **A diary write that leaves where the plan stands as it was redraws
+    /// neither this microcycle nor the curves** (#830): each reads its own
+    /// part of where the plan stands, and not the walk, which holds the diary.
+    #[test]
+    fn a_diary_write_that_moves_no_session_redraws_neither_home_card() {
+        let directory = tempfile::TempDir::new().expect("a temporary directory");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let runs = runs(&runtime, &directory);
+        let load = |redraw: bool| -> [String; 2] {
+            runtime.block_on(async {
+                let showing = Showing::new(&runs, redraw);
+                [
+                    showing.card(&Sessions).await.into_string(),
+                    showing.card(&Curved).await.into_string(),
+                ]
+            })
+        };
+
+        let [sessions, curves] = load(false);
+        assert!(sessions.contains("sessions 1"), "{sessions}");
+        assert!(curves.contains("curves 1"), "{curves}");
+
+        runtime
+            .block_on(configurator::scheduling::ill(
+                &runs.setting().store,
+                jiff::civil::date(2026, 11, 16),
+            ))
+            .expect("the diary written");
+        load(false);
+
+        let [sessions, curves] = load(true);
+        assert!(sessions.contains("sessions 1"), "{sessions}");
+        assert!(curves.contains("curves 1"), "{curves}");
+        assert_eq!(SESSIONS.load(Ordering::SeqCst), 1, "no session moved");
+        assert_eq!(CURVES.load(Ordering::SeqCst), 1, "no curve moved");
     }
 }
