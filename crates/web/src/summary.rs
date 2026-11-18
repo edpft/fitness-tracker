@@ -10,7 +10,9 @@
 //!
 //! **A card is one reading's row, and the page lays it out**: Progress groups
 //! rows into its tiles and opens each row's page, and a reading's page puts
-//! its row at the top. A reading with nothing to show draws nothing, and the
+//! its row at the top. Body weight's is the exception: its sparkline is a
+//! simplification of `/body`'s chart, so `/body` does not repeat it
+//! (operator, 2026-11-18). A reading with nothing to show draws nothing, and the
 //! stylesheet hides a tile left with no row. On a day no plan is in force
 //! there is no macrocycle to read, so no summary is drawn.
 
