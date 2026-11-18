@@ -19,6 +19,7 @@ use application::{
 };
 use domain::{
     normalised::OperatorZone,
+    plan::Plan,
     schedule::{DayPart, Diary, Holidays},
 };
 use infrastructure::{
@@ -177,6 +178,15 @@ impl Walk {
 impl StandingReader for Walk {
     async fn standing(&self, now: DayPart) -> Result<Standing, StoreError> {
         self.microcycle.standing(now).await
+    }
+
+    async fn standing_among(
+        &self,
+        now: DayPart,
+        plans: &[Plan],
+        diary: &Diary,
+    ) -> Result<Standing, StoreError> {
+        self.microcycle.standing_among(now, plans, diary).await
     }
 }
 

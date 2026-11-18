@@ -83,9 +83,10 @@ pub struct Standing {
     /// together, as the plan now stands: what says which phase of the
     /// macrocycle this is (#224).
     pub mesocycle: Option<Span>,
-    /// What the plan has completed, as of the current microcycle: what
-    /// `fitness next` writes, so that the walk reads it rather than deriving
-    /// it again (#801).
+    /// What the plan has completed since it was last written, as of the
+    /// current microcycle: what `fitness next` writes, so that the walk reads
+    /// it rather than deriving it again (#801). `None` where nothing has
+    /// completed since, so a run writes it without reading it back (#830).
     pub completed: Option<(PlanName, Completed)>,
 }
 
@@ -390,7 +391,6 @@ where
                             .as_ref()
                             .is_none_or(|stored| now.through() > stored.through())
                     })
-                    .or(stored)
                     .map(|completed| (authored.name().clone(), completed));
                 return Ok(Standing {
                     commencing: Some(monday),

@@ -405,23 +405,28 @@ impl<'a> HeldNext<'a> {
 }
 
 impl application::next::HeldNodes for HeldNext<'_> {
-    /// **Walked as `read` walks it where it cannot be held**, so a failure
+    /// **Walked as `walk` walks it where it cannot be held**, so a failure
     /// is the walk's to say.
-    async fn standing<F>(
+    async fn walked<F>(
         &self,
         now: DayPart,
-        read: F,
-    ) -> Result<application::microcycle::Standing, StoreError>
+        walk: F,
+    ) -> Result<application::next::Walked, StoreError>
     where
-        F: Future<Output = Result<application::microcycle::Standing, StoreError>> + Send,
+        F: Future<Output = Result<application::next::Walked, StoreError>> + Send,
     {
         let holding = Holding {
             now,
             ..self.holding()
         };
         match holding.held::<crate::analyses::Plans>().await {
-            Ok(walked) => Ok(walked.standing.clone()),
-            Err(_) => read.await,
+            Ok(walked) => Ok(application::next::Walked {
+                standing: walked.standing.clone(),
+                diary: walked.diary.clone(),
+                plans: walked.plans.now().to_vec(),
+                holidays: walked.plans.holidays().cloned(),
+            }),
+            Err(_) => walk.await,
         }
     }
 

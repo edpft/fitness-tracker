@@ -31,7 +31,7 @@ use application::{
         CyclingSessions, Daily, Done, Expects, Found, GymDerived, GymDeriving, GymPrescribed,
         GymSessions, HeldNodes, IfGoing, MesocycleCommitter, Next, NextError, NextPorts, NoAccess,
         NotDue, Prescribed, Progress, Records, Refetch, Report, Scope, SkipRefused, StandingReader,
-        Step, StepFailure, Unheld, Walks, WhatIsNext,
+        Step, StepFailure, Unheld, Walked, Walks, WhatIsNext,
     },
     reschedule::Reschedule,
 };
@@ -645,6 +645,15 @@ fn slot(date: Date, discipline: Discipline) -> ScheduledSlot {
 }
 
 impl StandingReader for Week {
+    async fn standing_among(
+        &self,
+        now: DayPart,
+        _plans: &[Plan],
+        _diary: &Diary,
+    ) -> Result<Standing, StoreError> {
+        self.standing(now).await
+    }
+
     async fn standing(&self, _now: DayPart) -> Result<Standing, StoreError> {
         let monday = Date::constant(2026, 10, 12);
         let wednesday = Date::constant(2026, 10, 14);
@@ -686,6 +695,7 @@ impl MesocycleCommitter for Committer {
         _holidays: &Holidays,
         _standing: &Standing,
         _diary: &Diary,
+        _plans: &[Plan],
     ) -> Result<Option<Due>, CommitError> {
         self.0.clone().map_or(Ok(None), Err)
     }
@@ -988,12 +998,15 @@ struct Held {
 }
 
 impl HeldNodes for Held {
-    async fn standing<F>(&self, now: DayPart, _read: F) -> Result<Standing, StoreError>
+    async fn walked<F>(&self, now: DayPart, walk: F) -> Result<Walked, StoreError>
     where
-        F: Future<Output = Result<Standing, StoreError>> + Send,
+        F: Future<Output = Result<Walked, StoreError>> + Send,
     {
         self.asked.fetch_add(1, Ordering::SeqCst);
-        self.week.standing(now).await
+        Ok(Walked {
+            standing: self.week.standing(now).await?,
+            ..walk.await?
+        })
     }
 
     async fn upcoming<F>(&self, derive: F) -> Arc<application::next::Upcoming>
