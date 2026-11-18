@@ -161,6 +161,12 @@ impl Store {
         new(self.pool.clone(), with).map(|adapter| Spanned::kept(adapter, self.kept.clone()))
     }
 
+    /// `adapter`, built over what this store holds rather than from its pool,
+    /// spanned and kept as the store's own adapters are (#830).
+    pub(crate) fn kept<A>(&self, adapter: A) -> Spanned<A> {
+        Spanned::kept(adapter, self.kept.clone())
+    }
+
     /// Peloton's class library, as a [`ClassCatalogue`] reads it.
     ///
     /// **Not spanned, because it is not a port.** It is read only inside the
@@ -370,5 +376,119 @@ impl Store {
         self.adapter(SqliteKeptDrawings::new)
             .call("SqliteKeptDrawings::kept", |adapter| adapter.kept(address))
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use application::{
+        DiaryAuthor as _, FtpHistory, HolidayCalendar, Input, Reads, SourceError, StoreError,
+    };
+    use domain::{cycling::Ftp, normalised::OperatorZone, schedule::Holidays};
+    use infrastructure::{SqliteCalendarStore, SqliteFtpHistory};
+    use jiff::civil::Date;
+
+    use super::Store;
+
+    /// An adapter that reads what `D` reads, counting the times it is asked.
+    struct Counting<D>(Arc<AtomicUsize>, std::marker::PhantomData<D>);
+
+    impl<D> Counting<D> {
+        fn asked(&self) -> usize {
+            self.0.fetch_add(1, Ordering::SeqCst)
+        }
+    }
+
+    impl<D: Input> Input for Counting<D> {
+        fn reads() -> Reads {
+            D::reads()
+        }
+    }
+
+    impl<D: Send + Sync> FtpHistory for Counting<D> {
+        async fn in_force_on(&self, _: Date) -> Result<Option<Ftp>, StoreError> {
+            self.asked();
+            Ok(None)
+        }
+
+        async fn series(&self) -> Result<Vec<Ftp>, StoreError> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl<D: Send + Sync> HolidayCalendar for Counting<D> {
+        async fn holidays(&self) -> Result<Holidays, SourceError> {
+            self.asked();
+            Ok(Holidays::default())
+        }
+    }
+
+    /// How many times the FTP in force and the holidays were read from the
+    /// store, each asked twice, then again once a week is written.
+    async fn asked_around_a_diary_write(
+        database: &Path,
+    ) -> Result<[usize; 2], Box<dyn std::error::Error>> {
+        let store = Store::open(database).await?;
+        // Opening commits the migrations, and a read is kept only once each
+        // has settled, as its connection goes back to the pool.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let ftp_asked = Arc::new(AtomicUsize::new(0));
+        let holidays_asked = Arc::new(AtomicUsize::new(0));
+        let ftp = store.kept(Counting::<SqliteFtpHistory>(
+            Arc::clone(&ftp_asked),
+            std::marker::PhantomData,
+        ));
+        let holidays = store.kept(Counting::<SqliteCalendarStore>(
+            Arc::clone(&holidays_asked),
+            std::marker::PhantomData,
+        ));
+        let day = Date::constant(2026, 11, 18);
+        for _ in 0..2 {
+            ftp.in_force_on(day).await?;
+            holidays.holidays().await?;
+        }
+        store
+            .diary()
+            .record_pattern(&domain::schedule::TrainingPattern::new(
+                Date::constant(2026, 12, 7),
+                OperatorZone::try_from("Europe/London".to_owned())?,
+                std::collections::BTreeMap::from([(
+                    domain::schedule::TrainingSlot::new(
+                        jiff::civil::Weekday::Tuesday,
+                        domain::schedule::PartOfDay::Evening,
+                    ),
+                    domain::schedule::SlotLength::Shorter,
+                )]),
+            ))
+            .await?;
+        ftp.in_force_on(day).await?;
+        holidays.holidays().await?;
+        Ok([
+            ftp_asked.load(Ordering::SeqCst),
+            holidays_asked.load(Ordering::SeqCst),
+        ])
+    }
+
+    /// **A week written in the diary leaves what the diary does not feed
+    /// held** (#830): after one, preparing the next session asked again for
+    /// the FTP in force, the programmes, the progressions, the performances,
+    /// the published programmes and the holidays.
+    #[test]
+    fn a_diary_write_leaves_what_it_does_not_feed_held() {
+        let directory = tempfile::tempdir().expect("a scratch directory");
+        let [ftp, holidays] = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime")
+            .block_on(asked_around_a_diary_write(
+                &directory.path().join("test.db"),
+            ))
+            .expect("the store answers");
+        assert_eq!(ftp, 1, "the FTP in force is read once");
+        assert_eq!(holidays, 1, "the holidays are read once");
     }
 }

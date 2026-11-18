@@ -100,7 +100,7 @@ pub async fn planned(
             parameters: store.adapter(SqliteGenerationParameterStore::new),
             holding: Spanned::new(PelotonHoldingRides::new(catalogue)),
             ridden: store.adapter(SqliteCanonicalCyclingSessionStore::new),
-            published: Spanned::new(PelotonProgrammes::new(catalogue)),
+            published: store.kept(PelotonProgrammes::new(catalogue)),
         },
         zone.clone(),
     );
@@ -164,7 +164,7 @@ pub(crate) async fn stood(
             parameters: store.adapter(SqliteGenerationParameterStore::new),
             holding: Spanned::new(PelotonHoldingRides::new(catalogue)),
             ridden: store.adapter(SqliteCanonicalCyclingSessionStore::new),
-            published: Spanned::new(PelotonProgrammes::new(catalogue)),
+            published: store.kept(PelotonProgrammes::new(catalogue)),
         },
         zone.clone(),
     );

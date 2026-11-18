@@ -134,7 +134,8 @@ pub async fn published(
 ) -> Result<PublishedRead, SourceError> {
     let stored = store.peloton_classes();
     let catalogue = ClassCatalogue::over(&stored, peloton.map(|peloton| &peloton.classes));
-    Spanned::new(PelotonProgrammes::new(catalogue))
+    store
+        .kept(PelotonProgrammes::new(catalogue))
         .read(which)
         .await
 }
