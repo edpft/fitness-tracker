@@ -152,3 +152,22 @@ fn a_write_moves_what_its_step_names() {
             );
         });
 }
+
+/// **No connection is too old to settle what it committed.** sqlx closes a
+/// connection past its lifetime as it is released, without `after_release`,
+/// so a commit on one would never settle, and nothing read after it would be
+/// kept for as long as the web service ran.
+#[test]
+fn a_connection_is_never_too_old_to_settle() {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime")
+        .block_on(async {
+            let directory = tempfile::tempdir().expect("a directory");
+            let (pool, _) = connect_counting(&directory.path().join("test.db"))
+                .await
+                .expect("a store");
+            assert_eq!(pool.options().get_max_lifetime(), None);
+        });
+}
