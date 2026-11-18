@@ -831,20 +831,20 @@ impl<P: Progress + Sync> Progress for Spanned<'_, P> {
         self.progress.collected(parts);
     }
 
-    /// **A commit inside `step` moves what `parts` write**, where each of
-    /// them writes one node, and everything otherwise.
+    /// **A commit inside `step` moves what `parts` write**, and nothing else.
     fn moving<F: Future + Send>(
         &self,
         parts: &[application::Part],
         step: F,
     ) -> impl Future<Output = F::Output> + Send {
-        let writes: Option<std::collections::BTreeSet<_>> =
-            parts.iter().map(application::Part::writes).collect();
+        let writes: std::collections::BTreeSet<_> =
+            parts.iter().flat_map(application::Part::writes).collect();
         let inner = self.progress.moving(parts, step);
         async move {
-            match writes {
-                Some(nodes) if !nodes.is_empty() => infrastructure::moving(nodes, inner).await,
-                _ => inner.await,
+            if writes.is_empty() {
+                inner.await
+            } else {
+                infrastructure::moving(writes, inner).await
             }
         }
     }

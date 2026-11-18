@@ -48,17 +48,25 @@ impl Authoring {
     /// A write of what `W` authors, holding the store's write lock from its
     /// first statement.
     ///
+    /// **Its commit moves what `W` authors, and nothing else** (#830), so a
+    /// diary written from a page leaves what reads only the weigh-ins held.
+    /// A write that authors nothing moves what the step it is made in names.
+    ///
     /// # Errors
     ///
     /// [`StoreError`] if no connection is free or the lock is not given up.
     pub async fn writing<W: Authors>(&self) -> Result<Writing<W>, StoreError> {
-        super::writing(&self.pool)
-            .await
-            .map(|transaction| Writing {
-                transaction,
-                author: PhantomData,
-            })
-            .map_err(|error| store_error(&error))
+        let authors = W::authors();
+        if authors.is_empty() {
+            super::writing(&self.pool).await
+        } else {
+            Box::pin(super::moving(authors, super::writing(&self.pool))).await
+        }
+        .map(|transaction| Writing {
+            transaction,
+            author: PhantomData,
+        })
+        .map_err(|error| store_error(&error))
     }
 }
 
