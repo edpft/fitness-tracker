@@ -34,6 +34,10 @@ async fn around_two_writers(database: &std::path::Path) -> Fallible<[application
     let store = configurator::store::Store::open(database).await?;
     let reason = CorrectionReason::try_from("Hevy had no neutral grip pull up")?;
 
+    // Opening commits the migrations, and a read is only kept once every
+    // commit has settled, which happens as each connection goes back to the
+    // pool, on a task of its own.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     let first = wiring::inputs(hevy, &store, &zone).await?;
 
     let elsewhere_term = a_term("from-another-process")?;
