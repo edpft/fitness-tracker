@@ -315,18 +315,23 @@ pub enum Part {
 }
 
 impl Part {
-    /// The node this part writes (#830), where it writes one: delivering
-    /// refreshes the classes, commits the plan and records each delivery.
-    pub fn writes(&self) -> Option<crate::graph::Node> {
+    /// The nodes this part writes (#830): delivering refreshes the classes,
+    /// commits the plan and issues and records each delivery.
+    pub fn writes(&self) -> std::collections::BTreeSet<crate::graph::Node> {
         use crate::graph::{Generation, Node};
         match self {
-            Self::Fetching(stream) => Some(Node::Landing(stream.clone())),
-            Self::Normalising(stream) => Some(Node::Normalised(stream.clone())),
-            Self::Canonicalising(layer) => Some(Node::Canonical(*layer)),
+            Self::Fetching(stream) => [Node::Landing(stream.clone())].into(),
+            Self::Normalising(stream) => [Node::Normalised(stream.clone())].into(),
+            Self::Canonicalising(layer) => [Node::Canonical(*layer)].into(),
             Self::FetchingCalendar(calendar) => {
-                Some(Node::Generation(Generation::Calendar(*calendar)))
+                [Node::Generation(Generation::Calendar(*calendar))].into()
             }
-            Self::Delivering => None,
+            Self::Delivering => [
+                Node::Generation(Generation::Classes),
+                Node::PLAN,
+                Node::PRESCRIPTIONS,
+            ]
+            .into(),
         }
     }
 }

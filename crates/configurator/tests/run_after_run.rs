@@ -7,9 +7,17 @@
 //! #830's earlier checks ran on a copy of the store with no credentials, where
 //! nothing is fetched or delivered, so none of them could see it.
 //!
+//! **A run that delivers moves only what it wrote**, in a store of its own:
+//! what reads the weigh-ins is still held after it, as the operator put it on 2026-11-18, *"I would not
+//! expect data that's not derived from it to update."*
+//!
 //! **The run goes in a child process**: a source's root is read from the
 //! environment, as it is for the installed build, and the environment is set
 //! where the child is started rather than in this process.
+#![expect(
+    clippy::disallowed_methods,
+    reason = "a second pool stands for another process writing the store"
+)]
 
 use std::{
     collections::BTreeMap,
@@ -18,7 +26,7 @@ use std::{
 };
 
 use application::{
-    DiaryAuthor as _, EquipmentStore as _, PlanAuthor as _, ProgressionStore as _,
+    DerivedFrom, DiaryAuthor as _, EquipmentStore as _, PlanAuthor as _, ProgressionStore as _,
     WorkoutStore as _,
     next::{Found, GymPrescribed, Prescribed, Report, Scope, StepFailure, WhatIsNext},
     ports::Placed,
@@ -101,15 +109,42 @@ fn a_run_straight_after_a_run_does_nothing() {
     );
 }
 
-/// The run, as the child the test starts: `first` runs once, and `again`
+/// **A run that delivers moves only what it wrote**: what Withings' layer
+/// reads is still held after it.
+#[test]
+fn a_run_that_delivers_moves_only_what_it_wrote() {
+    let directory = tempfile::TempDir::new().expect("a temporary directory");
+    let store = directory.path().join("fitness.db");
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let hevy = runtime.block_on(hevy()).expect("the stub answers");
+    let calendars = runtime.block_on(calendars()).expect("the stub answers");
+    runtime.block_on(seed(&store)).expect("the store is seeded");
+
+    let held = child(&store, &hevy.uri(), &calendars.uri(), "held").expect("the child starts");
+    assert!(held.status.success(), "the run: {}", said(&held));
+    assert!(
+        runtime
+            .block_on(asked(&hevy))
+            .iter()
+            .any(|line| line == "POST /v1/routines"),
+        "the run delivered: {}",
+        said(&held)
+    );
+}
+
+/// The run, as the child the tests start: `first` runs once, `again`
 /// asks whether a run is wanted and then runs anyway, asserting that it
-/// found nothing to do.
+/// found nothing to do, and `held` runs once, asserting that what Withings'
+/// layer reads was not read again.
 ///
 /// **A source with no access is nothing to do**: it is asked nothing.
 ///
 /// Ignored, so it runs only where the test above starts it.
 #[test]
-#[ignore = "started by a_run_straight_after_a_run_does_nothing, in the stub's environment"]
+#[ignore = "started by the tests above, in the stub's environment"]
 fn the_run_in_a_child() {
     let act = std::env::var(ACT).expect("the act is named");
     let store = std::env::var(STORE).expect("the store is named");
@@ -117,14 +152,25 @@ fn the_run_in_a_child() {
         .enable_all()
         .build()
         .expect("a runtime");
-    let (wanted, report) = runtime
-        .block_on(run(Path::new(&store), act == "again"))
+    let (wanted, report, withings) = runtime
+        .block_on(run(Path::new(&store), &act))
         .expect("the run answers");
     println!("wanted by a page, and Hevy by the terminal: {wanted:?}");
     for done in &report.run {
         println!("{:?}: {:?}", done.step, done.outcome);
     }
     println!("next: {:#?}", report.next);
+
+    if let Some([before, after, afresh]) = withings {
+        assert_eq!(
+            before, after,
+            "what Withings' layer reads is still held after a run that delivered"
+        );
+        assert_ne!(
+            after, afresh,
+            "though the zone another process stated would move it"
+        );
+    }
 
     if act == "again" {
         assert_eq!(
@@ -167,16 +213,37 @@ fn the_run_in_a_child() {
 /// **The terminal, because it fetches whenever a stream is due**: a page
 /// fetches nothing fetched within the shortest visit, which would hide
 /// whether a session just delivered is due.
-async fn run(store: &Path, ask_first: bool) -> Fallible<(Option<(bool, bool)>, Report)> {
-    let store = configurator::store::Store::open(store).await?;
+///
+/// **Where `act` is `held`, what Withings' layer reads**: before the run,
+/// after another process states a zone and the run has gone, and from a store
+/// opened after.
+async fn run(
+    path: &Path,
+    act: &str,
+) -> Fallible<(Option<(bool, bool)>, Report, Option<[DerivedFrom; 3]>)> {
+    let store = configurator::store::Store::open(path).await?;
     let zone = domain::normalised::OperatorZone::try_from(ZONE)?;
+    let withings =
+        configurator::catalogue::lookup("withings.measurements").ok_or("withings is catalogued")?;
+    let before = if act == "held" {
+        // Opening commits the migrations, which settle as each connection
+        // goes back to the pool, on a task of its own.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let before = configurator::wiring::inputs(withings, &store, &zone).await?;
+        infrastructure::SqliteOperatorSettingsStore::new(infrastructure::connect(path).await?)
+            .author("2026-09-15T13:29:25Z".parse()?, "Pacific/Auckland")
+            .await?;
+        Some(before)
+    } else {
+        None
+    };
     let held = configurator::next::Afresh {
         store: &store,
         zone: &zone,
     };
     let credentials = infrastructure::Credentials::default();
     let now = DayPart::new(MONDAY, PartOfDay::Afternoon);
-    let wanted = if ask_first {
+    let wanted = if act == "again" {
         let hevy = Scope::new([application::Part::Fetching(
             domain::landing::LandingStream::try_from("hevy.workouts")?,
         )]);
@@ -210,7 +277,20 @@ async fn run(store: &Path, ask_first: bool) -> Fallible<(Option<(bool, bool)>, R
         &Silent,
     )
     .await?;
-    Ok((wanted, report))
+    let withings = match before {
+        Some(before) => Some([
+            before,
+            configurator::wiring::inputs(withings, &store, &zone).await?,
+            configurator::wiring::inputs(
+                withings,
+                &configurator::store::Store::open(path).await?,
+                &zone,
+            )
+            .await?,
+        ]),
+        None => None,
+    };
+    Ok((wanted, report, withings))
 }
 
 /// Nothing to report to.

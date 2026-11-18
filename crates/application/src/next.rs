@@ -1554,12 +1554,20 @@ where
         let mut walked = self.walked(now).await?;
         // What the mesocycles that have completed settled, written once, so the
         // walk reads it from here on rather than deriving it again (#801).
+        //
+        // **What delivering writes is named**, so a commit here moves the
+        // plan, the prescriptions and the classes, and nothing else (#830).
+        let delivering = [Part::Delivering];
         if let Some((plan, completed)) = &walked.standing.completed {
-            self.ports.plans.complete(plan, completed).await?;
+            progress
+                .moving(&delivering, self.ports.plans.complete(plan, completed))
+                .await?;
         }
         let holidays = self.holidays(&walked).await;
         if let Ok(holidays) = &holidays
-            && let Some((started, outcome)) = self.commit(now, holidays, &walked, progress).await
+            && let Some((started, outcome)) = progress
+                .moving(&delivering, self.commit(now, holidays, &walked, progress))
+                .await
         {
             finish(progress, &mut run, started, outcome);
             walked = self.walked(now).await?;
@@ -1603,7 +1611,9 @@ where
                 &reschedule,
             ))
             .await;
-        let next = self.deliver(&upcoming, &reschedule).await;
+        let next = progress
+            .moving(&delivering, self.deliver(&upcoming, &reschedule))
+            .await;
         progress.collected(&[Part::Delivering]);
         Ok(Report { run, plan, next })
     }
@@ -2036,7 +2046,9 @@ where
                 collected(walked(&self.ports.cycling_records, scope));
                 let mut done = fetching?;
                 if scope.has(&Part::Delivering) {
-                    let (started, outcome) = self.refresh(judge, progress).await;
+                    let (started, outcome) = progress
+                        .moving(&[Part::Delivering], self.refresh(judge, progress))
+                        .await;
                     finish(progress, &mut done, started, outcome);
                 }
                 Ok::<_, NextError>(done)
