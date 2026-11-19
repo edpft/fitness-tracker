@@ -94,6 +94,20 @@ pub fn each_mesocycle(
     runs
 }
 
+/// Each line a chart draws, as one run per start: runs broken only where
+/// the trend broke are one line, and a mesocycle's start is a new one.
+#[must_use]
+pub fn lines(runs: &[Vec<Expected>]) -> Vec<Vec<(Date, f64)>> {
+    let mut lines: Vec<(Date, Vec<(Date, f64)>)> = Vec::new();
+    for day in runs.iter().flatten() {
+        match lines.last_mut() {
+            Some((since, line)) if *since == day.since => line.push((day.on, day.value)),
+            _ => lines.push((day.since, vec![(day.on, day.value)])),
+        }
+    }
+    lines.into_iter().map(|(_, line)| line).collect()
+}
+
 /// What the aims expect a trend to move between two days, from `from`'s
 /// level: each day after `from` to `to` adds its mesocycle's aim, a seventh
 /// of a week's. `None` where a day's aim states none.

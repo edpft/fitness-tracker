@@ -47,13 +47,11 @@ pub fn charts(series: &Series, aims: &[Aim], began: Option<Date>, range: Range) 
     }
     let today = range.to;
     let within = series.within(range);
-    let expected = detail::expected(
-        &began
-            .and_then(|began| against_aims(&series.trend, aims, began, today))
-            .map(|weight| weight.aimed)
-            .unwrap_or_default(),
-        range,
-    );
+    let aimed = began
+        .and_then(|began| against_aims(&series.trend, aims, began, today))
+        .map(|weight| weight.aimed)
+        .unwrap_or_default();
+    let expected = detail::expected(&aimed, range);
     html! {
         (detail::chart(&Chart {
             id: "weight",
@@ -67,6 +65,7 @@ pub fn charts(series: &Series, aims: &[Aim], began: Option<Date>, range: Range) 
                 Layer::Trend(within.trend.iter().map(|run| run.iter().map(traced).collect()).collect()),
                 Layer::Dots(within.weigh_ins.iter().map(|weighed| (weighed.at.day(), kilograms(weighed.mass))).collect()),
                 Layer::Aim(expected.clone()),
+                Layer::Moving(series.moving(&aimed)),
             ],
             days: days(&within, &expected.iter().flatten().copied().collect(), today),
         }))

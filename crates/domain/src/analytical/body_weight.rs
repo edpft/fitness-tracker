@@ -46,7 +46,8 @@ use jiff::civil::Date;
 use super::{
     Weighed,
     confidence::Noise,
-    expected::{Expected, each_mesocycle, over},
+    expected::{Expected, each_mesocycle, lines, over},
+    gap::{Stretch, stretches},
     nutrition_phase::NutritionPhase,
     range::Range,
     since_start::{SinceStart, since_start},
@@ -106,6 +107,23 @@ impl Series {
         let weigh_ins = body_weight(weigh_ins);
         let trend = trend(&weigh_ins);
         Self { weigh_ins, trend }
+    }
+
+    /// Whether each day's weigh-ins have got closer to `aimed` or further
+    /// from it (#874), judged against each line it draws.
+    #[must_use]
+    pub fn moving(&self, aimed: &[Vec<Expected>]) -> Vec<Stretch> {
+        let mut by_day: BTreeMap<Date, Vec<f64>> = BTreeMap::new();
+        for weighed in &self.weigh_ins {
+            if let Some(kg) = kilograms(weighed.mass) {
+                by_day.entry(weighed.at.day()).or_default().push(kg);
+            }
+        }
+        let each_day = by_day
+            .into_iter()
+            .filter_map(|(on, masses)| Some((on, super::composition::mean(&masses)?)))
+            .collect();
+        stretches(&each_day, &lines(aimed))
     }
 }
 

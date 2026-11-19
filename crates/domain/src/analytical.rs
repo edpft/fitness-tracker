@@ -16,6 +16,7 @@ pub mod composition;
 pub mod confidence;
 pub mod expected;
 pub mod ftp_test;
+pub mod gap;
 pub mod heart_rate;
 pub mod heart_rate_at_power;
 pub mod hrv;

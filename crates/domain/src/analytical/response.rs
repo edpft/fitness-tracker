@@ -39,7 +39,13 @@ use std::collections::BTreeMap;
 
 use jiff::civil::Date;
 
-use super::{composition::mean, confidence::Noise, range::Range, training_done::Carried};
+use super::{
+    composition::mean,
+    confidence::Noise,
+    gap::{Stretch, stretches},
+    range::Range,
+    training_done::Carried,
+};
 
 const FORTNIGHT_DAYS: i64 = 14;
 const FORTNIGHT_RECORDED: usize = 6;
@@ -147,6 +153,9 @@ pub struct Response {
     pub change: Option<Change>,
     /// The week to each day since the start, oldest first, as unbroken runs.
     pub weeks: Vec<Vec<Week>>,
+    /// Whether each day's reading has got closer to the weeks' expected
+    /// result or further from it (#874), one line since the start.
+    pub moving: Vec<Stretch>,
 }
 
 /// One watch's `days` of a reading over the macrocycle that `began` on a day,
@@ -214,11 +223,18 @@ pub fn response(
     if !run.is_empty() {
         weeks.push(run);
     }
+    let line: Vec<(Date, f64)> = weeks
+        .iter()
+        .flatten()
+        .filter_map(|week| Some((week.to, week.expected?)))
+        .collect();
+    let moving = stretches(days, &[line]);
 
     Some(Response {
         before,
         change,
         weeks,
+        moving,
     })
 }
 

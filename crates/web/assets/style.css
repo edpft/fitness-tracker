@@ -7,6 +7,8 @@
   --bg: #121214; --card: #1e1e21; --raised: #2a2a2e;
   --ink: #f4f4f6; --ink2: #b4b4bc; --muted: #7c7c86; --grid: #2e2e33;
   --failed: #f87171; --good: #0ca30c;
+  /* Closer to expected or further from it (#874). */
+  --closer: #5cc48a; --further: #f07a6a;
   /* The names the pages not yet on the template draw with. */
   --surface: var(--card); --axis: var(--muted); --mark: #7aa2ff; --trend: var(--ink);
   /* One colour per metric. */
@@ -149,6 +151,17 @@ svg.reference { margin-top: 12px; }
 .plotted .tip .on { color: var(--ink2); }
 .plotted .day:hover .tip, .plotted .day:hover .cross,
 .plotted .day input:checked ~ .tip, .plotted .day input:checked ~ .cross { display: block; }
+
+/* Closer to expected or further from it (#874): the latest said above the
+   chart, every stretch in a strip beneath it. */
+.moving { margin: 2px 0 4px; }
+.moving b { display: block; font-size: 17px; font-weight: 600; }
+.moving span { font-size: 14px; color: var(--ink2); }
+svg.strip { display: block; width: calc(100% + 36px); height: auto; margin: 0 -18px; }
+svg.strip .tick { fill: var(--muted); font-size: 12px; }
+svg.strip .stretch.closer { fill: var(--closer); }
+svg.strip .stretch.further { fill: var(--further); }
+svg.strip .stretch.no-change { fill: var(--muted); fill-opacity: 0.5; }
 
 /* The latest entries. */
 .latest .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }

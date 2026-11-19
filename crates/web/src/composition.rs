@@ -17,6 +17,7 @@ use domain::{
     analytical::{
         body_weight::Aim,
         composition::{AGAINST_DAYS, Change, ComponentSeries, Method, Unit},
+        gap::Stretch,
         range::Range,
     },
     body::Component,
@@ -58,19 +59,32 @@ pub fn charts(
 ) -> Markup {
     let today = range.to;
     let shaded = detail::mesocycles(&aims.iter().map(|aim| aim.span).collect::<Vec<_>>(), range);
-    let expected = |one: &ComponentSeries| -> Vec<Vec<(Date, f64)>> {
+    // The dashed line for each method, and whether the method read last got
+    // closer to its line or further from it (#874).
+    let expected = |one: &ComponentSeries| -> (Vec<Vec<(Date, f64)>>, Vec<Stretch>) {
         let Some(began) = began.filter(|_| one.unit == Unit::Kilograms) else {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         };
-        one.series
+        let aimed: Vec<_> = one
+            .series
             .iter()
-            .flat_map(|series| {
-                detail::expected(
-                    &series.against_aims(one.component, aims, began, today),
-                    range,
+            .map(|series| {
+                (
+                    series,
+                    series.against_aims(one.component, aims, began, today),
                 )
             })
-            .collect()
+            .collect();
+        let moving = aimed
+            .iter()
+            .max_by_key(|(series, _)| series.readings.last().map(|reading| reading.on))
+            .map(|(series, aimed)| series.moving(aimed))
+            .unwrap_or_default();
+        let lines = aimed
+            .iter()
+            .flat_map(|(_, aimed)| detail::expected(aimed, range))
+            .collect();
+        (lines, moving)
     };
     let fat: Vec<(&str, Chart<'_>)> = [Unit::Kilograms, Unit::Percentage]
         .into_iter()
@@ -149,7 +163,7 @@ fn chart(
     metric: Metric,
     range: Range,
     today: Date,
-    expected: Vec<Vec<(Date, f64)>>,
+    (expected, moving): (Vec<Vec<(Date, f64)>>, Vec<Stretch>),
     mesocycles: &[(Date, Date, String)],
 ) -> Chart<'static> {
     let aimed: BTreeMap<Date, f64> = expected.iter().flatten().copied().collect();
@@ -198,6 +212,7 @@ fn chart(
             Layer::Hollow(points(true)),
             Layer::Dots(points(false)),
             Layer::Aim(expected),
+            Layer::Moving(moving),
         ],
         days: days(component, &aimed, today),
     }
