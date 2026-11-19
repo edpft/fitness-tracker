@@ -20,12 +20,13 @@ use application::{
     CanonicalGymSessionStore, CanonicalLayer, CanonicalWeighInStore, ClassSource, ClassesHeld,
     ClassesListed, ClassesRead, CompositionHistory, CyclingDeliveryStore, CyclingMesocycleStore,
     DeliveryReference, DerivationLedger, DerivedFrom, DestinationName, DestinationReply,
-    DiaryAuthor, DiaryStore, EquipmentStore, ExerciseHistory, ExtractionRunLog, FetchLog, Fetched,
-    FillChangeStore, FtpHistory, FulfilledSession, GenerationParameterStore, HoldingRides,
-    HolidayCalendar, Input, Kept, LandingStore, LastPerformance, Mark, MesocycleInForce,
-    MesocycleStore, NewestObservation, NormalisationRunLog, NormalisedCyclingSessionReader,
-    NormalisedEntityStore, NormalisedGymSessionReader, NormalisedWeighInReader, NotRaw, Occupant,
-    Output, OvernightHrvHistory, Performances, PerformedCyclingSessions, PerformedGymSessions,
+    DiaryAuthor, DiaryStore, DrinkingAuthor, DrinkingStore, EquipmentStore, ExerciseHistory,
+    ExtractionRunLog, FetchLog, Fetched, FillChangeStore, FtpHistory, FulfilledSession,
+    GenerationParameterStore, HoldingRides, HolidayCalendar, Input, Kept, LandingStore,
+    LastPerformance, Mark, MesocycleInForce, MesocycleStore, NewestObservation,
+    NormalisationRunLog, NormalisedCyclingSessionReader, NormalisedEntityStore,
+    NormalisedGymSessionReader, NormalisedWeighInReader, NotRaw, Occupant, Output,
+    OvernightHrvHistory, Performances, PerformedCyclingSessions, PerformedGymSessions,
     PerformedSessionLog, PlanStore, PlayedPadelMatch, PlayedPadelMatches, PrescribedWorkoutId,
     PrescribedWorkoutStore, PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore,
     PublishedCycling, PublishedProgrammes, PublishedRead, PulseWaveVelocityHistory, RawExtent,
@@ -42,6 +43,7 @@ use domain::cycling::{
     CanonicalBikePlusRide, CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId,
     CyclingSession, DeliveredRide, Ftp, RideVenue,
 };
+use domain::drinking::{Evening, OwnDrink};
 use domain::gym::{CanonicalGymSession, NormalisedGymSession, Performance, exercise::RepsExercise};
 use domain::landing::{
     ExtractionRun, FetchedAt, LandingRecord, LandingRecordId, LandingStream, PayloadDigest,
@@ -779,6 +781,23 @@ spanned! {
         fn record_alteration(&self, alteration: &Alteration) -> Result<(), StoreError>;
         fn record_illness(&self, illness: &Illness) -> Result<(), StoreError>;
         fn record_skip(&self, skip: &Skip) -> Result<(), StoreError>;
+    }
+}
+
+spanned! {
+    DrinkingStore where Input {
+    }
+    held {
+            fn evenings(&self) -> Result<Vec<Evening>, StoreError> on |adapter| declared(adapter);
+            fn own_drinks(&self) -> Result<Vec<OwnDrink>, StoreError> on |adapter| declared(adapter);
+    }
+}
+
+spanned! {
+    DrinkingAuthor {
+        fn record_evening(&self, evening: &Evening) -> Result<(), StoreError>;
+        fn remove_evening(&self, date: Date) -> Result<(), StoreError>;
+        fn record_own_drink(&self, drink: &OwnDrink) -> Result<(), StoreError>;
     }
 }
 

@@ -361,6 +361,19 @@ div.slots .past { opacity: 0.4; }
 .weekhead h2 { margin: 0; flex: 1; text-align: center; font-size: 18px; }
 .weekhead a { font-size: 26px; line-height: 1; text-decoration: none; color: var(--ink2); padding: 0 8px; }
 .actions { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
+/* Drinking (#873): each line a count of a drink with a step down and up; the
+   picker and its button on one row; the evenings reported, each a row. */
+.row.drinks { display: grid; grid-template-columns: minmax(0, 1fr) 44px 44px; gap: 4px; align-items: center; font-size: 16px; }
+.pick { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.pick select {
+  min-width: 0; font: inherit; font-size: 17px; color: var(--ink);
+  background: var(--raised); border: 1.5px solid transparent; border-radius: 12px; padding: 11px 12px;
+}
+form.input .pick button { padding: 11px 22px; }
+.own { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+a.evening { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; font-size: 15px; color: var(--ink); text-decoration: none; border-top: 1px solid var(--grid); }
+a.evening .amount { color: var(--ink2); }
+a.button { display: block; margin-top: 12px; text-align: center; font-weight: 600; font-size: 15px; padding: 11px; border-radius: 999px; background: var(--raised); color: var(--ink); text-decoration: none; }
 form.input button.quiet { background: var(--raised); color: var(--ink); }
 form.input button.unseen { position: absolute; left: -9999px; width: 1px; height: 1px; padding: 0; }
 

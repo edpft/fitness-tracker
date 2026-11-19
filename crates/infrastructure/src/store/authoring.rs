@@ -145,6 +145,7 @@ fn stored(node: &Node) -> Option<&'static str> {
         (Node::PRESCRIPTIONS, "prescriptions"),
         (Node::WORKOUTS, "workouts"),
         (Node::DIARY, "diary"),
+        (Node::DRINKING, "drinking"),
         (Node::Generation(Generation::Equipment), "equipment"),
         (Node::Generation(Generation::Classes), "classes"),
         (

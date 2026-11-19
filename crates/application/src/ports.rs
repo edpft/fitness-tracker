@@ -27,6 +27,7 @@ use domain::cycling::{
     CanonicalBikePlusRide, CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId,
     CyclingSession, DeliveredRide, Ftp, PublishedProgramme, RideVenue, Watts,
 };
+use domain::drinking::{Evening, OwnDrink};
 use domain::gym::{CanonicalGymSession, NormalisedGymSession, Performance, exercise::RepsExercise};
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
@@ -3657,6 +3658,58 @@ pub trait DiaryAuthor {
     ///
     /// [`StoreError`] if the store is unavailable.
     fn record_skip(&self, skip: &Skip) -> impl Future<Output = Result<(), StoreError>> + Send;
+}
+
+/// What the operator has reported drinking, and the drinks of his own he has
+/// named (#873).
+pub trait DrinkingStore {
+    /// Every evening with an entry, earliest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    fn evenings(&self) -> impl Future<Output = Result<Vec<Evening>, StoreError>> + Send;
+
+    /// His own drinks, by name.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something
+    /// unreadable.
+    fn own_drinks(&self) -> impl Future<Output = Result<Vec<OwnDrink>, StoreError>> + Send;
+}
+
+/// Record what the operator reports drinking.
+///
+/// Split from [`DrinkingStore`] as [`DiaryAuthor`] is from [`DiaryStore`].
+pub trait DrinkingAuthor {
+    /// Record an evening, replacing what was said about it before.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn record_evening(
+        &self,
+        evening: &Evening,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Remove an evening's entry, which leaves it an evening with no alcohol.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn remove_evening(&self, date: Date) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Record one of his own drinks, replacing one of the same name.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    fn record_own_drink(
+        &self,
+        drink: &OwnDrink,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// What a source's recordings say about the devices that made them (#427).

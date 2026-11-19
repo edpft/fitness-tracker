@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT evening, amount\n            FROM drinking_evening\n            ORDER BY evening\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "evening",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "drinking_evening",
+            "name": "evening"
+          }
+        }
+      },
+      {
+        "name": "amount",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "drinking_evening",
+            "name": "amount"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "91ebc2c41ea83cc66a84f81c47143822055bcfdb51b684acf81940c337af4bd1"
+}

@@ -14,10 +14,17 @@ pub enum Place {
     Progress,
     Plan,
     History,
+    Report,
 }
 
 impl Place {
-    pub const ALL: [Self; 4] = [Self::Today, Self::Progress, Self::Plan, Self::History];
+    pub const ALL: [Self; 5] = [
+        Self::Today,
+        Self::Progress,
+        Self::Plan,
+        Self::History,
+        Self::Report,
+    ];
 
     pub const fn path(self) -> &'static str {
         match self {
@@ -25,6 +32,7 @@ impl Place {
             Self::Progress => "/progress",
             Self::Plan => "/plan",
             Self::History => "/history",
+            Self::Report => "/report",
         }
     }
 
@@ -34,6 +42,7 @@ impl Place {
             Self::Progress => "Progress",
             Self::Plan => "Plan",
             Self::History => "History",
+            Self::Report => "Report",
         }
     }
 
@@ -111,7 +120,7 @@ const fn metric(path: &'static str, name: &'static str, group: Group) -> Page {
 }
 
 /// Every page, in the order its place shows them.
-pub const PAGES: [Page; 13] = [
+pub const PAGES: [Page; 15] = [
     page("/", "Today", Place::Today),
     metric("/ftp", "FTP tests", Group::Performance),
     metric(
@@ -129,6 +138,8 @@ pub const PAGES: [Page; 13] = [
     page("/workout", "Workout", Place::Plan),
     page("/schedule", "Schedule", Place::Plan),
     page("/equipment", "Equipment", Place::Plan),
+    page(crate::drinking::HERE, crate::drinking::TITLE, Place::Report),
+    page(crate::illness::HERE, crate::illness::TITLE, Place::Report),
 ];
 
 /// The bar fixed to the bottom of every page (#768), the place it is in
@@ -345,13 +356,13 @@ pub const STYLESHEET: &str = "/style.css";
 mod tests {
     use super::{PAGES, Place, bar, header};
 
-    /// **The bar is the four places, the one a page is under marked**, and
+    /// **The bar is the five places, the one a page is under marked**, and
     /// no pill (#768, #772).
     #[test]
     fn the_bar_marks_the_place_a_page_is_opened_from() {
         let shown = bar("/body").into_string();
 
-        assert_eq!(shown.matches("<a ").count(), 4, "{shown}");
+        assert_eq!(shown.matches("<a ").count(), 5, "{shown}");
         assert!(
             shown.contains(r#"<a href="/progress" aria-current="true">Progress</a>"#),
             "{shown}"
@@ -376,6 +387,12 @@ mod tests {
             "{weight}"
         );
 
+        let drinking = header("/drinking", "Drinking").into_string();
+        assert!(
+            drinking.contains(r#"<a href="/report" aria-label="Report">‹</a>"#),
+            "{drinking}"
+        );
+
         let schedule = header("/schedule", "Schedule").into_string();
         assert!(
             schedule.contains(r#"<a href="/plan" aria-label="Plan">‹</a>"#),
@@ -395,6 +412,7 @@ mod tests {
     #[test]
     fn every_plan_page_is_listed_by_plan() {
         let listed = crate::plan::page(&Ok(None)).into_string();
+        let reported = crate::reporting::page().into_string();
 
         for page in &PAGES {
             if page.place == Place::Today {
@@ -403,6 +421,12 @@ mod tests {
                 assert!(
                     listed.contains(&format!(r#"<a href="{}""#, page.path)),
                     "{} is on no place",
+                    page.path
+                );
+            } else if page.place == Place::Report {
+                assert!(
+                    reported.contains(&format!(r#"<a href="{}""#, page.path)),
+                    "{} is not listed by Report",
                     page.path
                 );
             }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO own_drink (name, authored_at, millilitres, strength)\n            VALUES (?, ?, ?, ?)\n            ON CONFLICT (name) DO UPDATE\n                SET authored_at = excluded.authored_at,\n                    millilitres = excluded.millilitres,\n                    strength    = excluded.strength\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "17605790436df36c2fbddde9727d5fb2538fa610468f4336a8cf6b8462829fdd"
+}
