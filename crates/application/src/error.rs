@@ -154,6 +154,15 @@ pub enum ScheduleError {
     NoWeeklyAvailability,
 }
 
+/// Reporting drinking (#873).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DrinkingError {
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    #[error("{day} has not come yet")]
+    NotYet { day: jiff::civil::Date },
+}
+
 /// Authoring a version of the programme or a primary progression (#192).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DesignError {

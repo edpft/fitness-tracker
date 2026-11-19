@@ -26,17 +26,17 @@ use application::drawing::{Drawing, DrawnFrom};
 use application::graph::Reads;
 use application::next::Canonicalising;
 use application::{
-    CanonicalGymSessionStore, CyclingDeliveryStore, DiaryAuthor, DiaryStore, EquipmentStore,
-    ExerciseHistory, FillChangeStore, FtpHistory, GenerationParameterStore, MesocycleStore,
-    PerformedGymSessions, PerformedSessionLog, PlanStore, PrescribedWorkoutStore,
-    PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore, RiddenSessionLog,
-    RiddenVenues, StoreError, WorkoutStore,
+    CanonicalGymSessionStore, CyclingDeliveryStore, DiaryAuthor, DiaryStore, DrinkingAuthor,
+    DrinkingStore, EquipmentStore, ExerciseHistory, FillChangeStore, FtpHistory,
+    GenerationParameterStore, MesocycleStore, PerformedGymSessions, PerformedSessionLog, PlanStore,
+    PrescribedWorkoutStore, PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore,
+    RiddenSessionLog, RiddenVenues, StoreError, WorkoutStore,
 };
 use domain::normalised::OperatorZone;
 use infrastructure::{
     FileRunLock, SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore,
-    SqliteCyclingDeliveryStore, SqliteDerivationLedger, SqliteDiaryStore, SqliteEquipmentStore,
-    SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
+    SqliteCyclingDeliveryStore, SqliteDerivationLedger, SqliteDiaryStore, SqliteDrinkingStore,
+    SqliteEquipmentStore, SqliteExerciseHistory, SqliteFtpHistory, SqliteGenerationParameterStore,
     SqliteGymMesocycleStore, SqliteKeptDrawings, SqliteOperatorSettingsStore,
     SqlitePelotonClassStore, SqlitePlanStore, SqlitePool, SqlitePrescribedWorkoutStore,
     SqlitePrescriptionDeliveryStore, SqliteRevisions, connect_counting,
@@ -182,6 +182,12 @@ impl Store {
     #[must_use]
     pub fn diary(&self) -> impl DiaryStore + DiaryAuthor + Send + Sync + use<> {
         self.adapter(SqliteDiaryStore::new)
+    }
+
+    /// What the operator has reported drinking (#873).
+    #[must_use]
+    pub fn drinking(&self) -> impl DrinkingStore + DrinkingAuthor + Send + Sync + use<> {
+        self.adapter(SqliteDrinkingStore::new)
     }
 
     /// The plans the operator has committed to, read in their zone.

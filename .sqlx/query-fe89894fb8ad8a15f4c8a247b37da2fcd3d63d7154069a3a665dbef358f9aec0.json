@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM drinking_day WHERE day = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "fe89894fb8ad8a15f4c8a247b37da2fcd3d63d7154069a3a665dbef358f9aec0"
+}

@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT name, millilitres, strength\n            FROM own_drink\n            ORDER BY name\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "name",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "own_drink",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "millilitres",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "own_drink",
+            "name": "millilitres"
+          }
+        }
+      },
+      {
+        "name": "strength",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "own_drink",
+            "name": "strength"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9e6dc7a2142332397936125a433254f135e1b3d0dbc977b9ef6d2869163afd2c"
+}

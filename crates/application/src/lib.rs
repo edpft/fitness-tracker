@@ -25,6 +25,7 @@ pub mod deliver;
 pub mod design;
 pub mod devices;
 pub mod drawing;
+pub mod drinking;
 pub mod equipment;
 pub mod error;
 pub mod extract;
@@ -54,9 +55,9 @@ pub mod working;
 /// What a port reads is part of the port (#809).
 pub use drawing::DrawnFrom;
 pub use error::{
-    ComparisonError, DeliveryError, DesignError, EquipmentError, ExtractionError, FillChangeError,
-    NormalisationError, PrescriptionError, RunLockError, ScheduleError, SourceError, StatusError,
-    StoreError,
+    ComparisonError, DeliveryError, DesignError, DrinkingError, EquipmentError, ExtractionError,
+    FillChangeError, NormalisationError, PrescriptionError, RunLockError, ScheduleError,
+    SourceError, StatusError, StoreError,
 };
 pub use graph::{Authors, Calendar, Generation, Input, Node, NotRaw, Output, Reads, Table};
 pub use ports::{
@@ -65,11 +66,11 @@ pub use ports::{
     ClassSource, ClassesHeld, ClassesListed, ClassesRead, Clock, CompositionHistory,
     CyclingDeliveryStore, CyclingMesocycleStore, Deliverable, Delivered, Delivery, DeliveryAttempt,
     DeliveryReference, DerivationLedger, DerivationStatus, DerivationStatusReporter, DerivedFrom,
-    DestinationName, DestinationReply, DiaryAuthor, DiaryStore, EquipmentStore, EventBatch,
-    ExerciseHistory, ExtractionRunLog, ExtractionStatusReporter, FetchLog, Fetched,
-    FillChangeStore, FtpHistory, FulfilledSession, GenerationParameterStore, HoldingRides,
-    HolidayCalendar, Issuance, Kept, LadderStanding, LandingStore, LastPerformance, Mark,
-    MesocycleInForce, MesocycleStore, NewestObservation, NextLock, NormalisationRunLog,
+    DestinationName, DestinationReply, DiaryAuthor, DiaryStore, DrinkingAuthor, DrinkingStore,
+    EquipmentStore, EventBatch, ExerciseHistory, ExtractionRunLog, ExtractionStatusReporter,
+    FetchLog, Fetched, FillChangeStore, FtpHistory, FulfilledSession, GenerationParameterStore,
+    HoldingRides, HolidayCalendar, Issuance, Kept, LadderStanding, LandingStore, LastPerformance,
+    Mark, MesocycleInForce, MesocycleStore, NewestObservation, NextLock, NormalisationRunLog,
     NormalisationSummary, NormalisedCyclingSessionReader, NormalisedEntityStore,
     NormalisedGymSessionReader, NormalisedLayers, NormalisedWeighInReader, Occupant,
     OvernightHrvHistory, Part, Performances, PerformedCyclingSessions, PerformedGymSessions,

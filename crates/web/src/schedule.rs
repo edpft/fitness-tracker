@@ -1,5 +1,6 @@
-//! The schedule page (#671): weekly availability, a calendar week altered from
-//! it, and illness, as `fitness schedule` records them in the terminal.
+//! The schedule page (#671): weekly availability, and a calendar week altered
+//! from it, as `fitness schedule` records them in the terminal. Illness is
+//! under Report (#873).
 //!
 //! **One grid, for the week commencing a date**: this week when the page
 //! opens, and the arrows step a week at a time. The operator, 2026-11-01:
@@ -113,10 +114,6 @@ pub enum Asked {
     ThisWeek(Tapped),
     /// The week as tapped, as the weekly availability from its Monday.
     FromNowOn(Tapped),
-    /// Ill from a date.
-    Ill(Date),
-    /// Better today.
-    Better,
 }
 
 /// Read a post.
@@ -131,17 +128,6 @@ pub fn asked(form: &[(String, String)]) -> Result<Asked, Refusal> {
             .map(|(_, value)| value.trim())
     };
     let act = field("act").unwrap_or_default();
-    match act {
-        "ill" => {
-            let typed = field("from").unwrap_or_default();
-            return typed
-                .parse()
-                .map(Asked::Ill)
-                .map_err(|_| Refusal::of("from", format!("{typed:?} is not a date")));
-        }
-        "better" => return Ok(Asked::Better),
-        _ => {}
-    }
 
     let typed = field("week").unwrap_or_default();
     let monday = typed
@@ -180,15 +166,11 @@ pub fn asked(form: &[(String, String)]) -> Result<Asked, Refusal> {
 pub fn refusal(error: &ScheduleError) -> Refusal {
     match error {
         ScheduleError::NoReason => Refusal::of("reason", error.to_string()),
-        ScheduleError::NoIllnessOpen | ScheduleError::Illness(_) => {
-            Refusal::of("illness", error.to_string())
-        }
         _ => Refusal::of("week", error.to_string()),
     }
 }
 
-/// The page: the week commencing `monday` as tapped or as it stands, and
-/// illness.
+/// The page: the week commencing `monday` as tapped or as it stands.
 pub fn page(
     diary: &Diary,
     today: Date,
@@ -202,7 +184,6 @@ pub fn page(
         TITLE,
         &html! {
             (week(diary, today, &tapped, refused))
-            (illness(diary, today, refused))
         },
     )
 }
@@ -297,34 +278,6 @@ fn week(diary: &Diary, today: Date, tapped: &Tapped, refused: Option<&Refusal>) 
                     button type="submit" name="act" value="this-week" { "This week" }
                 }
                 button.quiet type="submit" name="act" value="from-now-on" { "From now on" }
-            }
-        }
-    }
-}
-
-/// Ill from a date, or better today.
-fn illness(diary: &Diary, today: Date, refused: Option<&Refusal>) -> Markup {
-    let whole = refused
-        .filter(|refusal| refusal.field == Some("illness"))
-        .map(|refusal| refusal.reason.as_str());
-    html! {
-        section.card {
-            h2 { "Illness" }
-            form.input method="post" action=(HERE) {
-                @match diary.open_illness() {
-                    Some(open) => {
-                        p.held { "Ill from " (detail::day(open.from(), today)) }
-                        @if let Some(reason) = whole { p.reason { (reason) } }
-                        button type="submit" name="act" value="better" { "Better" }
-                    }
-                    None => {
-                        (input::field("ill-from", "from", "Ill from", &html! {
-                            input id="ill-from" type="date" name="from" value=(today);
-                        }, refused))
-                        @if let Some(reason) = whole { p.reason { (reason) } }
-                        button type="submit" name="act" value="ill" { "Ill" }
-                    }
-                }
             }
         }
     }

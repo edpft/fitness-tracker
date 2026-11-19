@@ -18,6 +18,7 @@ pub mod corrections;
 pub mod cycling;
 pub mod design;
 pub mod devices;
+pub mod drinking;
 pub mod equipment;
 pub mod fills;
 pub mod ftp_tests;

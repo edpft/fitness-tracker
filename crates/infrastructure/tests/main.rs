@@ -23,6 +23,7 @@ mod cycling_session;
 mod delivery;
 mod derivation_ledger;
 mod devices;
+mod drinking;
 mod edit_overlay;
 mod exercise_history;
 mod failed_attempt;

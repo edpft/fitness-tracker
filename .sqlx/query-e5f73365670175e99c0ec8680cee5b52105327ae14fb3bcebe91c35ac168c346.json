@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT day, count, name, millilitres, strength\n            FROM drinking_drinks\n            ORDER BY day, position\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "day",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "drinking_drinks",
+            "name": "day"
+          }
+        }
+      },
+      {
+        "name": "count",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "drinking_drinks",
+            "name": "count"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "drinking_drinks",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "millilitres",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "drinking_drinks",
+            "name": "millilitres"
+          }
+        }
+      },
+      {
+        "name": "strength",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "drinking_drinks",
+            "name": "strength"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e5f73365670175e99c0ec8680cee5b52105327ae14fb3bcebe91c35ac168c346"
+}

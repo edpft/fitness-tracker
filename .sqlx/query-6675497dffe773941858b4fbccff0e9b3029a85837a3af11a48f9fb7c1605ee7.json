@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT day, amount\n            FROM drinking_day\n            ORDER BY day\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "day",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "drinking_day",
+            "name": "day"
+          }
+        }
+      },
+      {
+        "name": "amount",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "drinking_day",
+            "name": "amount"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "6675497dffe773941858b4fbccff0e9b3029a85837a3af11a48f9fb7c1605ee7"
+}

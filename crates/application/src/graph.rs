@@ -216,6 +216,7 @@ impl Node {
     pub const PRESCRIPTIONS: Self = Self::Authored(Authored::Prescriptions);
     pub const WORKOUTS: Self = Self::Authored(Authored::Workouts);
     pub const DIARY: Self = Self::Authored(Authored::Diary);
+    pub const DRINKING: Self = Self::Authored(Authored::Drinking);
 }
 
 /// What the operator authors (§ 12).
@@ -230,6 +231,8 @@ pub enum Authored {
     Workouts,
     /// When there is room to train, and what departs from it.
     Diary,
+    /// What the operator has reported drinking (#873).
+    Drinking,
 }
 
 /// What observations are interpreted under (§ 13).

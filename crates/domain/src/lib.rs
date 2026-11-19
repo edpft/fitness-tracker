@@ -14,6 +14,7 @@ pub mod canonical;
 pub mod curve;
 pub mod cycling;
 pub mod device;
+pub mod drinking;
 pub mod gym;
 pub mod landing;
 pub mod macrocycle;

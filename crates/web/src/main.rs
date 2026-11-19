@@ -14,6 +14,7 @@ mod composition;
 mod curves;
 mod detail;
 mod drawn;
+mod drinking;
 #[cfg(test)]
 mod drive;
 mod equipment;
@@ -21,6 +22,7 @@ mod ftp;
 mod history;
 mod home;
 mod hrv;
+mod illness;
 mod input;
 mod one_rep_max;
 mod page;
@@ -30,6 +32,7 @@ mod progression;
 mod pulse_wave_velocity;
 mod range;
 mod report;
+mod reporting;
 mod resting;
 mod run;
 mod schedule;
@@ -211,6 +214,16 @@ fn pages() -> Pages {
         .form("/equipment", get(equipment_page).post(equipment_post))
         .form(schedule::HERE, get(schedule_page).post(schedule_post))
         .form(workout::HERE, get(workout_page).post(workout_post))
+        .form(
+            page::Place::Report.path(),
+            get(|| async { reporting::page() }),
+        )
+        .form(drinking::HERE, get(drinking_page).post(drinking_post))
+        .form(
+            drinking::DAY,
+            get(drinking_day_page).post(drinking_day_post),
+        )
+        .form(illness::HERE, get(illness_page).post(illness_post))
         .live("/run/events", get(events))
         .live("/run/step", get(step))
         .file("/htmx.min.js", get(htmx))
@@ -318,7 +331,7 @@ async fn schedule_page(
     schedule_shown(&runs, week, None, None).await
 }
 
-/// Tap, clear or save the week, or start or end an illness, then show the
+/// Tap, clear or save the week, then show the
 /// page again: redirected on a save, so a reload does not post it twice, and
 /// drawn as tapped otherwise.
 async fn schedule_post(
@@ -333,47 +346,218 @@ async fn schedule_post(
                 .into_response();
         }
     };
-    let tapped = match &asked {
+    let store = &runs.setting().store;
+    let (tapped, done) = match &asked {
         schedule::Asked::Redrawn(tapped) => {
             return schedule_shown(&runs, Some(tapped.monday), Some(tapped), None)
                 .await
                 .into_response();
         }
-        schedule::Asked::ThisWeek(tapped) | schedule::Asked::FromNowOn(tapped) => Some(tapped),
-        schedule::Asked::Ill(_) | schedule::Asked::Better => None,
+        schedule::Asked::ThisWeek(tapped) => (
+            tapped,
+            configurator::scheduling::alter_week(
+                store,
+                tapped.monday,
+                &tapped.slots,
+                &tapped.reason,
+            )
+            .await
+            .map(drop),
+        ),
+        schedule::Asked::FromNowOn(tapped) => (
+            tapped,
+            configurator::scheduling::from_week(store, tapped.monday, tapped.slots.clone())
+                .await
+                .map(drop),
+        ),
+    };
+    match done {
+        Ok(()) => {
+            Redirect::to(&format!("{}?week={}", schedule::HERE, tapped.monday)).into_response()
+        }
+        Err(error) => schedule_shown(
+            &runs,
+            Some(tapped.monday),
+            Some(tapped),
+            Some(&schedule::refusal(&error)),
+        )
+        .await
+        .into_response(),
+    }
+}
+
+/// Illness, read afresh, with the last post if it was refused.
+async fn illness_shown(runs: &Runs, refused: Option<&input::Refusal>) -> Markup {
+    let store = &runs.setting().store;
+    let today = configurator::equipment::today(&runs.setting().zone);
+    match configurator::scheduling::diary(store).await {
+        Ok(diary) => illness::page(&diary, today, refused),
+        Err(error) => illness::unreadable(&error.to_string()),
+    }
+}
+
+async fn illness_page(State(runs): State<Arc<Runs>>) -> Markup {
+    illness_shown(&runs, None).await
+}
+
+/// Start or end an illness, then show the page again, redirected so a reload
+/// does not post it twice.
+async fn illness_post(
+    State(runs): State<Arc<Runs>>,
+    Form(form): Form<Vec<(String, String)>>,
+) -> Response {
+    let store = &runs.setting().store;
+    let today = configurator::equipment::today(&runs.setting().zone);
+    let refusal = match illness::asked(&form) {
+        Err(refusal) => Some(refusal),
+        Ok(illness::Asked::Ill(from)) => configurator::scheduling::ill(store, from)
+            .await
+            .err()
+            .map(|error| illness::refusal(&error)),
+        Ok(illness::Asked::Better) => configurator::scheduling::better(store, today)
+            .await
+            .err()
+            .map(|error| illness::refusal(&error)),
+    };
+    match refusal {
+        None => Redirect::to(illness::HERE).into_response(),
+        Some(refusal) => illness_shown(&runs, Some(&refusal)).await.into_response(),
+    }
+}
+
+/// Which of drinking's two pages.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DrinkingPage {
+    Today,
+    Day,
+}
+
+/// Drinking, read afresh: today, or another day as it stands or as
+/// counted.
+async fn drinking_shown(
+    runs: &Runs,
+    which: DrinkingPage,
+    day: Option<jiff::civil::Date>,
+    counting: Option<&drinking::Counting>,
+    refused: Option<&input::Refusal>,
+) -> Markup {
+    let store = &runs.setting().store;
+    let today = configurator::equipment::today(&runs.setting().zone);
+    let days = configurator::drinking::days(store).await;
+    let choices = configurator::drinking::choices(store).await;
+    match (days, choices) {
+        (Ok(days), Ok(choices)) => {
+            let date = match which {
+                DrinkingPage::Today => today,
+                DrinkingPage::Day => day.or_else(|| today.yesterday().ok()).unwrap_or(today),
+            };
+            let counting = counting
+                .cloned()
+                .unwrap_or_else(|| drinking::Counting::standing(&days, date));
+            match which {
+                DrinkingPage::Today => {
+                    drinking::opening(&days, &choices, today, &counting, refused)
+                }
+                DrinkingPage::Day => drinking::another(&days, &choices, today, &counting, refused),
+            }
+        }
+        (Err(error), _) | (_, Err(error)) => drinking::unreadable(&error.to_string()),
+    }
+}
+
+async fn drinking_page(State(runs): State<Arc<Runs>>) -> Markup {
+    drinking_shown(&runs, DrinkingPage::Today, None, None, None).await
+}
+
+async fn drinking_day_page(
+    State(runs): State<Arc<Runs>>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Markup {
+    let day = query.get("day").and_then(|typed| typed.parse().ok());
+    drinking_shown(&runs, DrinkingPage::Day, day, None, None).await
+}
+
+async fn drinking_post(
+    State(runs): State<Arc<Runs>>,
+    Form(form): Form<Vec<(String, String)>>,
+) -> Response {
+    drinking_posted(&runs, DrinkingPage::Today, &form).await
+}
+
+async fn drinking_day_post(
+    State(runs): State<Arc<Runs>>,
+    Form(form): Form<Vec<(String, String)>>,
+) -> Response {
+    drinking_posted(&runs, DrinkingPage::Day, &form).await
+}
+
+/// What a post to either page does. **Today saves each drink as it is
+/// counted**, and a count of none removes the entry; another day draws
+/// what is counted until it is saved. A save, unknown or removal goes back
+/// to the page Drinking opens on, where the day is listed.
+async fn drinking_posted(runs: &Runs, which: DrinkingPage, form: &[(String, String)]) -> Response {
+    let asked = match drinking::asked(form) {
+        Ok(asked) => asked,
+        Err(refusal) => {
+            return drinking_shown(runs, which, None, None, Some(&refusal))
+                .await
+                .into_response();
+        }
     };
     let store = &runs.setting().store;
     let today = configurator::equipment::today(&runs.setting().zone);
-    let done = match &asked {
-        schedule::Asked::ThisWeek(tapped) => configurator::scheduling::alter_week(
+    let saved = |counting: &drinking::Counting| {
+        let counting = counting.clone();
+        async move {
+            match counting.counted() {
+                Some(day) => configurator::drinking::record(store, day, today)
+                    .await
+                    .map(drop),
+                None => configurator::drinking::remove(store, counting.day).await,
+            }
+        }
+    };
+    let done = match asked {
+        drinking::Asked::Redrawn(counting) => {
+            return drinking_shown(runs, which, None, Some(&counting), None)
+                .await
+                .into_response();
+        }
+        drinking::Asked::Counted(counting) if which == DrinkingPage::Day => {
+            return drinking_shown(runs, which, None, Some(&counting), None)
+                .await
+                .into_response();
+        }
+        drinking::Asked::Counted(counting) => saved(&counting).await,
+        drinking::Asked::Name(counting, own) => {
+            match configurator::drinking::name(store, own).await {
+                Err(error) => Err(error),
+                Ok(_) if which == DrinkingPage::Day => {
+                    return drinking_shown(runs, which, None, Some(&counting), None)
+                        .await
+                        .into_response();
+                }
+                Ok(_) => saved(&counting).await,
+            }
+        }
+        drinking::Asked::Save(day) => configurator::drinking::record(store, day, today)
+            .await
+            .map(drop),
+        drinking::Asked::Unknown(date) => configurator::drinking::record(
             store,
-            tapped.monday,
-            &tapped.slots,
-            &tapped.reason,
+            domain::drinking::Day {
+                date,
+                drinking: domain::drinking::Drinking::AmountUnknown,
+            },
+            today,
         )
         .await
         .map(drop),
-        schedule::Asked::FromNowOn(tapped) => {
-            configurator::scheduling::from_week(store, tapped.monday, tapped.slots.clone())
-                .await
-                .map(drop)
-        }
-        schedule::Asked::Ill(from) => configurator::scheduling::ill(store, *from).await.map(drop),
-        schedule::Asked::Better | schedule::Asked::Redrawn(_) => {
-            configurator::scheduling::better(store, today)
-                .await
-                .map(drop)
-        }
+        drinking::Asked::Remove(date) => configurator::drinking::remove(store, date).await,
     };
-    let refused = done.err().map(|error| schedule::refusal(&error));
-    let week = tapped.map(|tapped| tapped.monday);
-    match refused {
-        None => Redirect::to(&week.map_or_else(
-            || schedule::HERE.to_owned(),
-            |week| format!("{}?week={week}", schedule::HERE),
-        ))
-        .into_response(),
-        Some(refusal) => schedule_shown(&runs, week, tapped, Some(&refusal))
+    match done {
+        Ok(()) => Redirect::to(drinking::HERE).into_response(),
+        Err(error) => drinking_shown(runs, which, None, None, Some(&drinking::refusal(&error)))
             .await
             .into_response(),
     }
