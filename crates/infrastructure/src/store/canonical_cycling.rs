@@ -1293,3 +1293,5 @@ impl application::Input for SqliteCanonicalCyclingSessionStore {
         )])
     }
 }
+
+impl application::NotRaw for SqliteCanonicalCyclingSessionStore {}

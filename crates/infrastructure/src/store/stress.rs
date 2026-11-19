@@ -299,6 +299,8 @@ impl application::Input for SqliteStressHistory {
     }
 }
 
+impl application::NotRaw for SqliteStressHistory {}
+
 /// Garmin's daily stress (#809).
 impl application::Output for SqliteStressStore {
     fn writes() -> std::collections::BTreeSet<application::Table> {

@@ -856,6 +856,8 @@ impl application::Input for SqliteFtpHistory {
     }
 }
 
+impl application::NotRaw for SqliteFtpHistory {}
+
 /// Peloton's rides, and the FTP each was ridden at (#809).
 impl application::Output for SqliteCyclingSessionStore {
     fn writes() -> std::collections::BTreeSet<application::Table> {

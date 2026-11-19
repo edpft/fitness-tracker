@@ -130,3 +130,5 @@ impl application::Input for SqliteTrainingDone {
         .and(super::tables(&[super::table::PADEL_MATCH]))
     }
 }
+
+impl application::NotRaw for SqliteTrainingDone {}

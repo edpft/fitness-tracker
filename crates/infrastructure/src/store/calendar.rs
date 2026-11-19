@@ -182,3 +182,5 @@ impl application::Input for SqliteCalendarStore {
             .collect()
     }
 }
+
+impl application::NotRaw for SqliteCalendarStore {}

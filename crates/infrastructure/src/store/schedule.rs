@@ -471,6 +471,8 @@ impl application::Input for SqliteDiaryStore {
     }
 }
 
+impl application::NotRaw for SqliteDiaryStore {}
+
 impl application::Authors for SqliteDiaryStore {
     fn authors() -> std::collections::BTreeSet<application::Node> {
         [application::Node::DIARY].into()

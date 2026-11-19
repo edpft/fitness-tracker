@@ -368,6 +368,8 @@ impl application::Input for SqlitePrescriptionDeliveryStore {
     }
 }
 
+impl application::NotRaw for SqlitePrescriptionDeliveryStore {}
+
 impl application::Authors for SqlitePrescriptionDeliveryStore {
     fn authors() -> std::collections::BTreeSet<application::Node> {
         [application::Node::PRESCRIPTIONS].into()

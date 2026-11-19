@@ -367,6 +367,19 @@ pub trait Input {
     fn reads() -> Reads;
 }
 
+/// An [`Input`] that reads no landing table (#822): what an analysis and a
+/// page may be built from.
+///
+/// The operator, 2026-11-14: *"we don't read from raw and that, after that,
+/// we read from the highest level that makes sense for our use case."* A port
+/// declaring [`Node::Landing`] does not implement it, and what is built from
+/// several ports implements it only where each of them does, so a page or an
+/// analysis built from a reader of raw does not compile.
+///
+/// The derivations that read raw, a stream's normalisation, are built from
+/// readers of landing tables, and are not built from this.
+pub trait NotRaw: Input {}
+
 /// A port that writes the normalised layer, and the tables it writes (#809).
 ///
 /// **Named beside the SQL that writes them**, as [`Input`] is beside the SQL
@@ -395,6 +408,8 @@ impl Input for () {
     }
 }
 
+impl NotRaw for () {}
+
 macro_rules! tuple_input {
     ($($name:ident),+) => {
         /// What each reads.
@@ -403,6 +418,8 @@ macro_rules! tuple_input {
                 Reads::default()$(.and($name::reads()))+
             }
         }
+
+        impl<$($name: NotRaw),+> NotRaw for ($($name,)+) {}
     };
 }
 
@@ -424,6 +441,8 @@ macro_rules! through {
                 $crate::graph::Reads::default()$(.and($port::reads()))+
             }
         }
+
+        impl<$($port: $crate::graph::NotRaw),+> $crate::graph::NotRaw for $use_case<$($port),+> {}
     )+};
 }
 pub(crate) use through;
@@ -435,11 +454,15 @@ impl Input for domain::analytical::Rts {
     }
 }
 
+impl NotRaw for domain::analytical::Rts {}
+
 impl<T: Input> Input for &T {
     fn reads() -> Reads {
         T::reads()
     }
 }
+
+impl<T: NotRaw> NotRaw for &T {}
 
 impl<T: Input> Input for Option<T> {
     fn reads() -> Reads {
@@ -447,11 +470,15 @@ impl<T: Input> Input for Option<T> {
     }
 }
 
+impl<T: NotRaw> NotRaw for Option<T> {}
+
 impl<T: Input, E> Input for Result<T, E> {
     fn reads() -> Reads {
         T::reads()
     }
 }
+
+impl<T: NotRaw, E> NotRaw for Result<T, E> {}
 
 /// A derived node, and the only nodes it may read.
 #[derive(Debug, Clone, PartialEq, Eq)]

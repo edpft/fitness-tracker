@@ -189,6 +189,8 @@ impl application::Input for SqliteCyclingDeliveryStore {
     }
 }
 
+impl application::NotRaw for SqliteCyclingDeliveryStore {}
+
 impl application::Authors for SqliteCyclingDeliveryStore {
     fn authors() -> std::collections::BTreeSet<application::Node> {
         [application::Node::PRESCRIPTIONS].into()

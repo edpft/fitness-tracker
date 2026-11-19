@@ -24,8 +24,8 @@ use application::{
     FillChangeStore, FtpHistory, FulfilledSession, GenerationParameterStore, HoldingRides,
     HolidayCalendar, Input, Kept, LandingStore, LastPerformance, Mark, MesocycleInForce,
     MesocycleStore, NewestObservation, NormalisationRunLog, NormalisedCyclingSessionReader,
-    NormalisedEntityStore, NormalisedGymSessionReader, NormalisedWeighInReader, Occupant, Output,
-    OvernightHrvHistory, Performances, PerformedCyclingSessions, PerformedGymSessions,
+    NormalisedEntityStore, NormalisedGymSessionReader, NormalisedWeighInReader, NotRaw, Occupant,
+    Output, OvernightHrvHistory, Performances, PerformedCyclingSessions, PerformedGymSessions,
     PerformedSessionLog, PlanStore, PlayedPadelMatch, PlayedPadelMatches, PrescribedWorkoutId,
     PrescribedWorkoutStore, PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore,
     PublishedCycling, PublishedProgrammes, PublishedRead, PulseWaveVelocityHistory, RawExtent,
@@ -353,6 +353,8 @@ impl<A: Input> Input for Spanned<A> {
         A::reads()
     }
 }
+
+impl<A: NotRaw> NotRaw for Spanned<A> {}
 
 impl<A: Output> Output for Spanned<A> {
     fn writes() -> BTreeSet<Table> {

@@ -1311,6 +1311,8 @@ impl application::Input for SqliteGymMesocycleStore {
     }
 }
 
+impl application::NotRaw for SqliteGymMesocycleStore {}
+
 impl application::Authors for SqliteGymMesocycleStore {
     fn authors() -> std::collections::BTreeSet<application::Node> {
         [application::Node::PLAN].into()

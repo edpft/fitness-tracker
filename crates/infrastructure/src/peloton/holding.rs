@@ -99,6 +99,8 @@ impl application::Input for PelotonHoldingRides<'_> {
     }
 }
 
+impl application::NotRaw for PelotonHoldingRides<'_> {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

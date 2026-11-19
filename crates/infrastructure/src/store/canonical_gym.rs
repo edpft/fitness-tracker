@@ -1504,3 +1504,5 @@ impl application::Input for SqliteCanonicalGymSessionStore {
         .and(super::tables(&[super::table::GYM_SESSION]))
     }
 }
+
+impl application::NotRaw for SqliteCanonicalGymSessionStore {}

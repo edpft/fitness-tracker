@@ -254,6 +254,8 @@ impl application::Input for PelotonProgrammes<'_> {
     }
 }
 
+impl application::NotRaw for PelotonProgrammes<'_> {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

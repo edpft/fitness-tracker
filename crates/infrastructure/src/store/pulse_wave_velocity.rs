@@ -68,3 +68,5 @@ impl application::Input for SqlitePulseWaveVelocityHistory {
         super::tables(&[super::table::BODY_SCAN, super::table::WEIGH_IN])
     }
 }
+
+impl application::NotRaw for SqlitePulseWaveVelocityHistory {}

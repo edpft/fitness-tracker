@@ -1007,6 +1007,8 @@ impl application::Input for SqlitePrescribedWorkoutStore {
     }
 }
 
+impl application::NotRaw for SqlitePrescribedWorkoutStore {}
+
 impl application::Authors for SqlitePrescribedWorkoutStore {
     fn authors() -> std::collections::BTreeSet<application::Node> {
         [application::Node::PRESCRIPTIONS].into()

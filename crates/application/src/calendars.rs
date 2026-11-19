@@ -43,6 +43,8 @@ impl<S: crate::graph::Input, A, B> crate::graph::Input for Calendars<S, A, B> {
     }
 }
 
+impl<S: crate::graph::NotRaw, A, B> crate::graph::NotRaw for Calendars<S, A, B> {}
+
 /// Asking whether a calendar has changed, as a step of a run.
 pub trait KeptCalendars {
     /// Ask `calendar`'s publisher at `at` whether it has changed since it was

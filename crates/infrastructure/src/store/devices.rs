@@ -463,12 +463,16 @@ impl application::Input for GarminRecordedDevices {
     }
 }
 
+impl application::NotRaw for GarminRecordedDevices {}
+
 /// `wear_day` (#809).
 impl application::Input for GarminWear {
     fn reads() -> application::Reads {
         super::tables(&[super::table::WEAR_DAY])
     }
 }
+
+impl application::NotRaw for GarminWear {}
 
 /// The watch's gym sessions, its padel matches, and the devices each activity names (#809).
 impl application::Output for SqliteGarminActivityStore {

@@ -125,3 +125,5 @@ impl application::Input for SqlitePadelMatches {
         super::tables(&[super::table::PADEL_MATCH])
     }
 }
+
+impl application::NotRaw for SqlitePadelMatches {}
