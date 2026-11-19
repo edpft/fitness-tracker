@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO drinking_drinks (day, position, count, name, millilitres, strength)\n                VALUES (?, ?, ?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "058bd9eaed11340deb4c79a44df56a6e68338355613882192cdede35183e24dc"
+}

@@ -27,7 +27,7 @@ use domain::cycling::{
     CanonicalBikePlusRide, CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId,
     CyclingSession, DeliveredRide, Ftp, PublishedProgramme, RideVenue, Watts,
 };
-use domain::drinking::{Evening, OwnDrink};
+use domain::drinking::{Day, OwnDrink};
 use domain::gym::{CanonicalGymSession, NormalisedGymSession, Performance, exercise::RepsExercise};
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
@@ -3663,13 +3663,13 @@ pub trait DiaryAuthor {
 /// What the operator has reported drinking, and the drinks of his own he has
 /// named (#873).
 pub trait DrinkingStore {
-    /// Every evening with an entry, earliest first.
+    /// Every day with an entry, earliest first.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable or holds something
     /// unreadable.
-    fn evenings(&self) -> impl Future<Output = Result<Vec<Evening>, StoreError>> + Send;
+    fn days(&self) -> impl Future<Output = Result<Vec<Day>, StoreError>> + Send;
 
     /// His own drinks, by name.
     ///
@@ -3684,22 +3684,19 @@ pub trait DrinkingStore {
 ///
 /// Split from [`DrinkingStore`] as [`DiaryAuthor`] is from [`DiaryStore`].
 pub trait DrinkingAuthor {
-    /// Record an evening, replacing what was said about it before.
+    /// Record a day, replacing what was said about it before.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
-    fn record_evening(
-        &self,
-        evening: &Evening,
-    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+    fn record_day(&self, day: &Day) -> impl Future<Output = Result<(), StoreError>> + Send;
 
-    /// Remove an evening's entry, which leaves it an evening with no alcohol.
+    /// Remove a day's entry, which leaves it a day with no alcohol.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable.
-    fn remove_evening(&self, date: Date) -> impl Future<Output = Result<(), StoreError>> + Send;
+    fn remove_day(&self, date: Date) -> impl Future<Output = Result<(), StoreError>> + Send;
 
     /// Record one of his own drinks, replacing one of the same name.
     ///

@@ -159,8 +159,8 @@ pub enum ScheduleError {
 pub enum DrinkingError {
     #[error(transparent)]
     Store(#[from] StoreError),
-    #[error("{evening} has not come yet")]
-    NotYet { evening: jiff::civil::Date },
+    #[error("{day} has not come yet")]
+    NotYet { day: jiff::civil::Date },
 }
 
 /// Authoring a version of the programme or a primary progression (#192).

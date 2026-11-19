@@ -1,16 +1,16 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT evening, count, name, millilitres, strength\n            FROM drinking_drinks\n            ORDER BY evening, position\n            ",
+  "query": "\n            SELECT day, count, name, millilitres, strength\n            FROM drinking_drinks\n            ORDER BY day, position\n            ",
   "describe": {
     "columns": [
       {
-        "name": "evening",
+        "name": "day",
         "ordinal": 0,
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "drinking_drinks",
-            "name": "evening"
+            "name": "day"
           }
         }
       },
@@ -70,5 +70,5 @@
       false
     ]
   },
-  "hash": "2e74aca02dd7d32d54e20875d0cc309c733f385b10469527aca0f5d10866addc"
+  "hash": "e5f73365670175e99c0ec8680cee5b52105327ae14fb3bcebe91c35ac168c346"
 }

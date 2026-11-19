@@ -1,12 +1,13 @@
-//! Drinking (#873), under Report: an evening's drinking, at whatever accuracy
+//! Drinking (#873), under Report: a day's drinking, at whatever accuracy
 //! is known.
 //!
 //! **A screen for each way it is used** (operator, 2026-11-19: *"some things
-//! are only relevant for certain use cases"*). The page opens on tonight,
-//! where each drink is saved as it is added, with the evenings reported
-//! below. A past evening is a page of its own, for a night whose drinks are
-//! known exactly or not at all, and for saying afterwards that some were not
-//! counted, or removing it.
+//! are only relevant for certain use cases"*). The page opens on today,
+//! where each drink is saved as it is added, with the days reported below.
+//! Another day is a page of its own, for a day whose drinks are known
+//! exactly or not at all, and for saying afterwards that some were not
+//! counted, or removing it. A day rather than an evening: drinking is
+//! usually at night but not always (operator, 2026-11-19).
 //!
 //! **Ease is the requirement.** The operator: *"If we make this hard to use, I
 //! won't use it."*
@@ -15,7 +16,7 @@ use std::num::{NonZeroU8, NonZeroU16};
 
 use application::{DrinkingError, drinking::Choices};
 use domain::{
-    drinking::{Drink, DrinkName, Drinking, Drinks, Evening, Millilitres, OwnDrink, Strength},
+    drinking::{Day, Drink, DrinkName, Drinking, Drinks, Millilitres, OwnDrink, Strength},
     sequence::NonEmpty,
 };
 use jiff::civil::Date;
@@ -31,36 +32,36 @@ pub const TITLE: &str = "Drinking";
 
 pub const HERE: &str = "/drinking";
 
-/// A past evening.
-pub const EVENING: &str = "/drinking/evening";
+/// Another day.
+pub const DAY: &str = "/drinking/day";
 
 /// What the picker posts for one of his own not yet named.
 const OWN: &str = "own";
 
-/// How many evenings the page lists.
+/// How many days the page lists.
 const LISTED: usize = 10;
 
-/// An evening as it is being counted: its date, the drinks so far, whether
+/// A day as it is being counted: its date, the drinks so far, whether
 /// more were drunk than counted, and the drink picked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Counting {
-    pub evening: Date,
+    pub day: Date,
     pub drinks: Vec<Drinks>,
     pub more: bool,
     pub picked: String,
 }
 
 impl Counting {
-    /// The evening as it stands: what was recorded, or nothing counted yet.
-    pub fn standing(evenings: &[Evening], date: Date) -> Self {
-        let recorded = evenings.iter().find(|evening| evening.date == date);
+    /// The day as it stands: what was recorded, or nothing counted yet.
+    pub fn standing(days: &[Day], date: Date) -> Self {
+        let recorded = days.iter().find(|day| day.date == date);
         Self {
-            evening: date,
+            day: date,
             drinks: recorded
-                .map(|evening| evening.drinking.counted().cloned().collect())
+                .map(|day| day.drinking.counted().cloned().collect())
                 .unwrap_or_default(),
             more: matches!(
-                recorded.map(|evening| &evening.drinking),
+                recorded.map(|day| &day.drinking),
                 Some(Drinking::AtLeast(_))
             ),
             picked: String::new(),
@@ -105,11 +106,11 @@ impl Counting {
         self
     }
 
-    /// The evening as counted, or `None` with nothing counted.
-    pub fn counted(&self) -> Option<Evening> {
+    /// The day as counted, or `None` with nothing counted.
+    pub fn counted(&self) -> Option<Day> {
         let drinks = NonEmpty::new(self.drinks.clone()).ok()?;
-        Some(Evening {
-            date: self.evening,
+        Some(Day {
+            date: self.day,
             drinking: if self.more {
                 Drinking::AtLeast(drinks)
             } else {
@@ -127,16 +128,16 @@ impl Counting {
 /// What a post asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Asked {
-    /// The evening drawn again as posted: nothing is counted or recorded.
+    /// The day drawn again as posted: nothing is counted or recorded.
     Redrawn(Counting),
-    /// A drink added or taken off. Tonight saves it; a past evening draws it
+    /// A drink added or taken off. Today saves it; another day draws it
     /// to be saved.
     Counted(Counting),
-    /// The evening as counted.
-    Save(Evening),
-    /// Drinking that evening, amount unknown.
+    /// The day as counted.
+    Save(Day),
+    /// Drinking that day, amount unknown.
     Unknown(Date),
-    /// The evening's entry removed.
+    /// The day's entry removed.
     Remove(Date),
     /// One of his own drinks named, and one of it counted.
     Name(Counting, OwnDrink),
@@ -198,10 +199,10 @@ pub fn asked(form: &[(String, String)]) -> Result<Asked, Refusal> {
             .find(|(key, _)| key == name)
             .map(|(_, value)| value.trim())
     };
-    let typed = field("evening").unwrap_or_default();
-    let evening: Date = typed
+    let typed = field("day").unwrap_or_default();
+    let day: Date = typed
         .parse()
-        .map_err(|_| Refusal::of("evening", format!("{typed:?} is not a date")))?;
+        .map_err(|_| Refusal::of("day", format!("{typed:?} is not a date")))?;
     let mut drinks = Vec::new();
     for (name, value) in form {
         if name != "line" {
@@ -218,7 +219,7 @@ pub fn asked(form: &[(String, String)]) -> Result<Asked, Refusal> {
         });
     }
     let counting = Counting {
-        evening,
+        day,
         drinks,
         more: field("more").is_some(),
         picked: field("drink").unwrap_or_default().to_owned(),
@@ -247,8 +248,8 @@ pub fn asked(form: &[(String, String)]) -> Result<Asked, Refusal> {
                 "nothing is counted: add a drink, or say the amount is unknown".to_owned(),
             )
         }),
-        "unknown" => Ok(Asked::Unknown(evening)),
-        "remove" => Ok(Asked::Remove(evening)),
+        "unknown" => Ok(Asked::Unknown(day)),
+        "remove" => Ok(Asked::Remove(day)),
         _ => Ok(Asked::Redrawn(counting)),
     }
 }
@@ -256,7 +257,7 @@ pub fn asked(form: &[(String, String)]) -> Result<Asked, Refusal> {
 /// A save the use case refused, where the page says it.
 pub fn refusal(error: &DrinkingError) -> Refusal {
     match error {
-        DrinkingError::NotYet { .. } => Refusal::of("evening", error.to_string()),
+        DrinkingError::NotYet { .. } => Refusal::of("day", error.to_string()),
         DrinkingError::Store(_) => Refusal::whole(error.to_string()),
     }
 }
@@ -271,10 +272,10 @@ fn amount(drinking: &Drinking) -> String {
     }
 }
 
-/// The page Drinking opens on: tonight, saved a drink at a time, and the
-/// evenings reported.
-pub fn tonight(
-    evenings: &[Evening],
+/// The page Drinking opens on: today, saved a drink at a time, and the
+/// days reported.
+pub fn opening(
+    days: &[Day],
     choices: &Choices,
     today: Date,
     counting: &Counting,
@@ -284,10 +285,10 @@ pub fn tonight(
         HERE,
         TITLE,
         &html! {
-            section.card #tonight {
-                h2 { "Tonight" }
+            section.card #today {
+                h2 { "Today" }
                 form.input method="post" action=(HERE) hx-post=(HERE) hx-target="main" hx-select="main" hx-swap="outerHTML" {
-                    input type="hidden" name="evening" value=(counting.evening);
+                    input type="hidden" name="day" value=(counting.day);
                     @if counting.more { input type="hidden" name="more" value="on"; }
                     @for (line, drinks) in counting.drinks.iter().enumerate() { (line_of(line, drinks)) }
                     (total(counting))
@@ -297,34 +298,33 @@ pub fn tonight(
             }
             section.card {
                 h2 { "Reported" }
-                @let past: Vec<_> = evenings.iter().filter(|evening| evening.date != today).take(LISTED).collect();
+                @let past: Vec<_> = days.iter().filter(|day| day.date != today).take(LISTED).collect();
                 @if past.is_empty() {
-                    p.sub { "No past evening has an entry." }
+                    p.sub { "No other day has an entry." }
                 }
-                @for evening in past {
-                    a.evening href=(format!("{EVENING}?evening={}", evening.date)) {
-                        span { (detail::day(evening.date, today)) }
-                        span.amount { (amount(&evening.drinking)) }
+                @for day in past {
+                    a.day href=(format!("{DAY}?day={}", day.date)) {
+                        span { (detail::day(day.date, today)) }
+                        span.amount { (amount(&day.drinking)) }
                     }
                 }
-                a.button href=(EVENING) { "Add a past evening" }
+                a.button href=(DAY) { "Add another day" }
             }
         },
     )
 }
 
-/// A past evening: counted and saved, or the amount unknown; and once
+/// Another day: counted and saved, or the amount unknown; and once
 /// reported, some not counted, or removed.
-pub fn evening(
-    evenings: &[Evening],
+pub fn another(
+    days: &[Day],
     choices: &Choices,
     today: Date,
     counting: &Counting,
     refused: Option<&Refusal>,
 ) -> Markup {
-    let recorded = evenings
-        .iter()
-        .find(|evening| evening.date == counting.evening);
+    let recorded = days.iter().find(|day| day.date == counting.day);
+    let unknown = recorded.is_some_and(|day| matches!(day.drinking, Drinking::AmountUnknown));
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -334,16 +334,16 @@ pub fn evening(
                     (page::bar(HERE))
                     header.detail {
                         a href=(HERE) aria-label=(TITLE) { "‹" }
-                        div { h1 { "A past evening" } }
+                        div { h1 { "Another day" } }
                     }
                     section.card {
-                        form.input method="post" action=(EVENING) hx-post=(EVENING) hx-target="main" hx-select="main" hx-swap="outerHTML" {
+                        form.input method="post" action=(DAY) hx-post=(DAY) hx-target="main" hx-select="main" hx-swap="outerHTML" {
                             button.unseen type="submit" name="act" value="redraw" tabindex="-1" aria-hidden="true" {}
-                            (input::field("evening", "evening", "Evening", &html! {
-                                input id="evening" type="date" name="evening" value=(counting.evening) max=(today)
-                                    hx-get=(EVENING) hx-trigger="change" hx-target="main" hx-select="main" hx-swap="outerHTML" hx-include="this";
+                            (input::field("day", "day", "Date", &html! {
+                                input id="day" type="date" name="day" value=(counting.day) max=(today)
+                                    hx-get=(DAY) hx-trigger="change" hx-target="main" hx-select="main" hx-swap="outerHTML" hx-include="this";
                             }, refused))
-                            @if let Some(Evening { drinking: Drinking::AmountUnknown, .. }) = recorded {
+                            @if unknown {
                                 p.held { "Amount unknown" }
                             }
                             @for (line, drinks) in counting.drinks.iter().enumerate() { (line_of(line, drinks)) }
@@ -358,11 +358,19 @@ pub fn evening(
                             }
                             (total(counting))
                             (input::whole(refused))
-                            button type="submit" name="act" value="save" { "Save" }
+                            // **Each button only where it does something**: Save
+                            // once a drink is counted, Amount unknown while none
+                            // is and the day is not already unknown, Remove once
+                            // the day has an entry.
+                            @if counting.drinks.is_empty() {
+                                @if !unknown {
+                                    button type="submit" name="act" value="unknown" { "Amount unknown" }
+                                }
+                            } @else {
+                                button type="submit" name="act" value="save" { "Save" }
+                            }
                             @if recorded.is_some() {
                                 button.quiet type="submit" name="act" value="remove" { "Remove" }
-                            } @else {
-                                button.quiet type="submit" name="act" value="unknown" { "Amount unknown" }
                             }
                         }
                     }
@@ -390,8 +398,8 @@ fn line_of(line: usize, drinks: &Drinks) -> Markup {
 
 fn total(counting: &Counting) -> Markup {
     html! {
-        @if let Some(evening) = counting.counted() {
-            p.foot { (amount(&evening.drinking)) }
+        @if let Some(day) = counting.counted() {
+            p.foot { (amount(&day.drinking)) }
         }
     }
 }
@@ -450,10 +458,10 @@ pub fn unreadable(error: &str) -> Markup {
 #[cfg(test)]
 mod tests {
     use application::drinking::Choices;
-    use domain::drinking::{Drinking, StandardServing};
+    use domain::drinking::{Day, Drinking, StandardServing};
     use jiff::civil::date;
 
-    use super::{Asked, Counting, asked, encoded, evening, tonight};
+    use super::{Asked, Counting, another, asked, encoded, opening};
 
     fn posted(fields: &[(&str, &str)]) -> Vec<(String, String)> {
         fields
@@ -480,7 +488,7 @@ mod tests {
 
     fn nothing(on: jiff::civil::Date) -> Counting {
         Counting {
-            evening: on,
+            day: on,
             drinks: Vec::new(),
             more: false,
             picked: String::new(),
@@ -492,7 +500,7 @@ mod tests {
     fn adding_a_drink_again_counts_it_again() {
         let line = format!("1×{}", pint());
         let twice = asked(&posted(&[
-            ("evening", "2026-11-14"),
+            ("day", "2026-11-14"),
             ("line", &line),
             ("drink", &pint()),
             ("act", "add"),
@@ -511,19 +519,19 @@ mod tests {
     fn some_not_counted_saves_at_least() {
         let line = format!("3×{}", pint());
         let saved = asked(&posted(&[
-            ("evening", "2026-11-14"),
+            ("day", "2026-11-14"),
             ("line", &line),
             ("more", "on"),
             ("act", "save"),
         ]))
         .expect("a save reads");
-        let Asked::Save(evening) = saved else {
+        let Asked::Save(day) = saved else {
             panic!("a save with drinks saves: {saved:?}")
         };
 
-        assert!(matches!(evening.drinking, Drinking::AtLeast(_)));
+        assert!(matches!(day.drinking, Drinking::AtLeast(_)));
         assert_eq!(
-            evening.drinking.units().map(|units| units.to_string()),
+            day.drinking.units().map(|units| units.to_string()),
             Some("8.9".to_owned())
         );
     }
@@ -531,7 +539,7 @@ mod tests {
     /// **Saving nothing counted is refused**, rather than read as no alcohol.
     #[test]
     fn saving_nothing_is_refused() {
-        let refused = asked(&posted(&[("evening", "2026-11-14"), ("act", "save")]));
+        let refused = asked(&posted(&[("day", "2026-11-14"), ("act", "save")]));
         assert!(refused.is_err(), "{refused:?}");
     }
 
@@ -540,7 +548,7 @@ mod tests {
     fn one_fewer_of_one_removes_the_line() {
         let line = format!("1×{}", pint());
         let fewer = asked(&posted(&[
-            ("evening", "2026-11-14"),
+            ("day", "2026-11-14"),
             ("line", &line),
             ("act", "less-0"),
         ]));
@@ -552,7 +560,7 @@ mod tests {
     #[test]
     fn adding_ones_own_names_it() {
         let named = asked(&posted(&[
-            ("evening", "2026-11-14"),
+            ("day", "2026-11-14"),
             ("drink", "own"),
             ("own-name", "house red"),
             ("own-volume", "175"),
@@ -567,7 +575,7 @@ mod tests {
         assert_eq!(counting.drinks.len(), 1);
 
         let unnamed = asked(&posted(&[
-            ("evening", "2026-11-14"),
+            ("day", "2026-11-14"),
             ("drink", "own"),
             ("act", "add"),
         ]));
@@ -577,12 +585,12 @@ mod tests {
         );
     }
 
-    /// **Tonight offers every NHS serving and has no Save**: each drink is
+    /// **Today offers every NHS serving and has no Save**: each drink is
     /// saved as it is added.
     #[test]
-    fn tonight_offers_the_nhs_servings_and_saves_as_it_goes() {
+    fn today_offers_the_nhs_servings_and_saves_as_it_goes() {
         let today = date(2026, 11, 19);
-        let shown = tonight(&[], &choices(), today, &nothing(today), None).into_string();
+        let shown = opening(&[], &choices(), today, &nothing(today), None).into_string();
 
         for serving in StandardServing::ALL {
             assert!(
@@ -595,29 +603,46 @@ mod tests {
         assert!(!shown.contains(r#"value="unknown""#), "{shown}");
     }
 
-    /// **A new past evening is saved or unknown; one already reported can
+    /// **A new day is saved or unknown; one already reported can
     /// be marked as not all counted, or removed.**
     #[test]
-    fn a_past_evening_offers_what_its_use_needs() {
+    fn a_past_day_offers_what_its_use_needs() {
         let today = date(2026, 11, 19);
         let on = date(2026, 10, 28);
-        let fresh = evening(&[], &choices(), today, &nothing(on), None).into_string();
+        let fresh = another(&[], &choices(), today, &nothing(on), None).into_string();
         assert!(fresh.contains(r#"value="unknown""#), "{fresh}");
+        assert!(!fresh.contains(r#"value="save""#), "{fresh}");
         assert!(!fresh.contains(r#"value="remove""#), "{fresh}");
         assert!(!fresh.contains("Some not counted"), "{fresh}");
 
         let line = format!("2×{}", pint());
         let Ok(Asked::Save(reported)) = asked(&posted(&[
-            ("evening", "2026-10-28"),
+            ("day", "2026-10-28"),
             ("line", &line),
             ("act", "save"),
         ])) else {
             panic!("a save reads")
         };
         let standing = Counting::standing(std::slice::from_ref(&reported), on);
-        let again = evening(&[reported], &choices(), today, &standing, None).into_string();
+        let again = another(&[reported], &choices(), today, &standing, None).into_string();
         assert!(again.contains(r#"value="remove""#), "{again}");
         assert!(again.contains("Some not counted"), "{again}");
         assert!(!again.contains(r#"value="unknown""#), "{again}");
+
+        let unknown = Day {
+            date: on,
+            drinking: Drinking::AmountUnknown,
+        };
+        let standing = Counting::standing(std::slice::from_ref(&unknown), on);
+        let shown = another(&[unknown], &choices(), today, &standing, None).into_string();
+        assert!(
+            !shown.contains(r#"value="save""#),
+            "nothing counted to save: {shown}"
+        );
+        assert!(
+            !shown.contains(r#"value="unknown""#),
+            "already unknown: {shown}"
+        );
+        assert!(shown.contains(r#"value="remove""#), "{shown}");
     }
 }

@@ -43,7 +43,7 @@ use domain::cycling::{
     CanonicalBikePlusRide, CanonicalCyclingSession, CyclingMesocycle, CyclingMesocycleId,
     CyclingSession, DeliveredRide, Ftp, RideVenue,
 };
-use domain::drinking::{Evening, OwnDrink};
+use domain::drinking::{Day, OwnDrink};
 use domain::gym::{CanonicalGymSession, NormalisedGymSession, Performance, exercise::RepsExercise};
 use domain::landing::{
     ExtractionRun, FetchedAt, LandingRecord, LandingRecordId, LandingStream, PayloadDigest,
@@ -788,15 +788,15 @@ spanned! {
     DrinkingStore where Input {
     }
     held {
-            fn evenings(&self) -> Result<Vec<Evening>, StoreError> on |adapter| declared(adapter);
+            fn days(&self) -> Result<Vec<Day>, StoreError> on |adapter| declared(adapter);
             fn own_drinks(&self) -> Result<Vec<OwnDrink>, StoreError> on |adapter| declared(adapter);
     }
 }
 
 spanned! {
     DrinkingAuthor {
-        fn record_evening(&self, evening: &Evening) -> Result<(), StoreError>;
-        fn remove_evening(&self, date: Date) -> Result<(), StoreError>;
+        fn record_day(&self, day: &Day) -> Result<(), StoreError>;
+        fn remove_day(&self, date: Date) -> Result<(), StoreError>;
         fn record_own_drink(&self, drink: &OwnDrink) -> Result<(), StoreError>;
     }
 }

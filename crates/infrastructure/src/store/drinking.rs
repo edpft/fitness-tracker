@@ -1,22 +1,22 @@
 //! What the operator has reported drinking, in SQLite (#873).
 //!
-//! **Kept like an illness**: one row per evening, and recording an evening
+//! **Kept like an illness**: one row per day, and recording a day
 //! again replaces it. When it was last written is kept beside it, which is
-//! where the evenings reported as they happened can be told from those
+//! where the days reported as they happened can be told from those
 //! recalled afterwards.
 
 use std::num::{NonZeroU8, NonZeroU16};
 
 use application::{DrinkingAuthor, DrinkingStore, StoreError};
 use domain::{
-    drinking::{Drink, DrinkName, Drinking, Drinks, Evening, Millilitres, OwnDrink, Strength},
+    drinking::{Day, Drink, DrinkName, Drinking, Drinks, Millilitres, OwnDrink, Strength},
     sequence::NonEmpty,
 };
 use jiff::{Timestamp, civil::Date};
 
 use super::{authoring::Authoring, corrupt, store_error};
 
-/// The evenings and his own drinks, in SQLite.
+/// The days and his own drinks, in SQLite.
 pub struct SqliteDrinkingStore {
     store: Authoring,
 }
@@ -52,13 +52,13 @@ fn name_of(name: String) -> Result<DrinkName, StoreError> {
 }
 
 impl DrinkingStore for SqliteDrinkingStore {
-    async fn evenings(&self) -> Result<Vec<Evening>, StoreError> {
+    async fn days(&self) -> Result<Vec<Day>, StoreError> {
         let mut reading = self.store.reading().await?;
-        let evenings = sqlx::query!(
+        let days = sqlx::query!(
             r"
-            SELECT evening, amount
-            FROM drinking_evening
-            ORDER BY evening
+            SELECT day, amount
+            FROM drinking_day
+            ORDER BY day
             "
         )
         .fetch_all(&mut *reading)
@@ -66,25 +66,24 @@ impl DrinkingStore for SqliteDrinkingStore {
         .map_err(|error| store_error(&error))?;
         let drinks = sqlx::query!(
             r"
-            SELECT evening, count, name, millilitres, strength
+            SELECT day, count, name, millilitres, strength
             FROM drinking_drinks
-            ORDER BY evening, position
+            ORDER BY day, position
             "
         )
         .fetch_all(&mut *reading)
         .await
         .map_err(|error| store_error(&error))?;
 
-        evenings
-            .into_iter()
+        days.into_iter()
             .map(|row| {
                 let date: Date = row
-                    .evening
+                    .day
                     .parse()
-                    .map_err(|_| corrupt(&format!("{:?} is not a date", row.evening)))?;
+                    .map_err(|_| corrupt(&format!("{:?} is not a date", row.day)))?;
                 let counted = drinks
                     .iter()
-                    .filter(|drink| drink.evening == row.evening)
+                    .filter(|drink| drink.day == row.day)
                     .map(|drink| {
                         Ok(Drinks {
                             count: u8::try_from(drink.count)
@@ -108,7 +107,7 @@ impl DrinkingStore for SqliteDrinkingStore {
                     EXACTLY => Drinking::Exactly(counted()?),
                     other => return Err(corrupt(&format!("{other:?} is not an amount"))),
                 };
-                Ok(Evening { date, drinking })
+                Ok(Day { date, drinking })
             })
             .collect()
     }
@@ -137,22 +136,22 @@ impl DrinkingStore for SqliteDrinkingStore {
 }
 
 impl DrinkingAuthor for SqliteDrinkingStore {
-    async fn record_evening(&self, evening: &Evening) -> Result<(), StoreError> {
+    async fn record_day(&self, day: &Day) -> Result<(), StoreError> {
         let authored_at = Timestamp::now().to_string();
-        let date = evening.date.to_string();
-        let amount = match evening.drinking {
+        let date = day.date.to_string();
+        let amount = match day.drinking {
             Drinking::AmountUnknown => UNKNOWN,
             Drinking::AtLeast(_) => AT_LEAST,
             Drinking::Exactly(_) => EXACTLY,
         };
         let mut tx = self.store.writing::<Self>().await?;
-        sqlx::query!("DELETE FROM drinking_evening WHERE evening = ?", date)
+        sqlx::query!("DELETE FROM drinking_day WHERE day = ?", date)
             .execute(&mut **tx)
             .await
             .map_err(|error| store_error(&error))?;
         sqlx::query!(
             r"
-            INSERT INTO drinking_evening (evening, authored_at, amount)
+            INSERT INTO drinking_day (day, authored_at, amount)
             VALUES (?, ?, ?)
             ",
             date,
@@ -162,14 +161,14 @@ impl DrinkingAuthor for SqliteDrinkingStore {
         .execute(&mut **tx)
         .await
         .map_err(|error| store_error(&error))?;
-        for (position, drinks) in (0_i64..).zip(evening.drinking.counted()) {
+        for (position, drinks) in (0_i64..).zip(day.drinking.counted()) {
             let count = drinks.count.get();
             let name = drinks.name.as_str();
             let millilitres = drinks.drink.volume.get();
             let strength = drinks.drink.strength.as_tenths();
             sqlx::query!(
                 r"
-                INSERT INTO drinking_drinks (evening, position, count, name, millilitres, strength)
+                INSERT INTO drinking_drinks (day, position, count, name, millilitres, strength)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ",
                 date,
@@ -186,10 +185,10 @@ impl DrinkingAuthor for SqliteDrinkingStore {
         tx.commit().await
     }
 
-    async fn remove_evening(&self, date: Date) -> Result<(), StoreError> {
+    async fn remove_day(&self, date: Date) -> Result<(), StoreError> {
         let date = date.to_string();
         let mut tx = self.store.writing::<Self>().await?;
-        sqlx::query!("DELETE FROM drinking_evening WHERE evening = ?", date)
+        sqlx::query!("DELETE FROM drinking_day WHERE day = ?", date)
             .execute(&mut **tx)
             .await
             .map_err(|error| store_error(&error))?;

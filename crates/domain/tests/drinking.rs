@@ -1,4 +1,4 @@
-//! An evening's drinking, at whatever accuracy is known (#873).
+//! A day's drinking, at whatever accuracy is known (#873).
 
 use std::num::{NonZeroU8, NonZeroU16};
 

@@ -2,64 +2,60 @@
 
 use application::{
     DrinkingError,
-    drinking::{Choices, Evenings},
+    drinking::{Choices, Days},
 };
-use domain::drinking::{Evening, OwnDrink};
+use domain::drinking::{Day, OwnDrink};
 use jiff::civil::Date;
 
 use crate::store::Store;
 
-fn evenings_of(
+fn days_of(
     store: &Store,
-) -> Evenings<impl application::DrinkingStore + application::DrinkingAuthor + Sync + use<>> {
-    Evenings::new(store.drinking())
+) -> Days<impl application::DrinkingStore + application::DrinkingAuthor + Sync + use<>> {
+    Days::new(store.drinking())
 }
 
-/// Every evening with an entry, latest first.
+/// Every day with an entry, latest first.
 ///
 /// # Errors
 ///
-/// See [`Evenings::evenings`].
-pub async fn evenings(store: &Store) -> Result<Vec<Evening>, DrinkingError> {
-    evenings_of(store).evenings().await
+/// See [`Days::days`].
+pub async fn days(store: &Store) -> Result<Vec<Day>, DrinkingError> {
+    days_of(store).days().await
 }
 
-/// Record an evening, replacing what was said about it before.
+/// Record a day, replacing what was said about it before.
 ///
 /// # Errors
 ///
-/// See [`Evenings::record`].
-pub async fn record(
-    store: &Store,
-    evening: Evening,
-    today: Date,
-) -> Result<Evening, DrinkingError> {
-    evenings_of(store).record(evening, today).await
+/// See [`Days::record`].
+pub async fn record(store: &Store, day: Day, today: Date) -> Result<Day, DrinkingError> {
+    days_of(store).record(day, today).await
 }
 
-/// Remove an evening's entry.
+/// Remove a day's entry.
 ///
 /// # Errors
 ///
-/// See [`Evenings::remove`].
+/// See [`Days::remove`].
 pub async fn remove(store: &Store, date: Date) -> Result<(), DrinkingError> {
-    evenings_of(store).remove(date).await
+    days_of(store).remove(date).await
 }
 
 /// Name one of his own drinks.
 ///
 /// # Errors
 ///
-/// See [`Evenings::name`].
+/// See [`Days::name`].
 pub async fn name(store: &Store, drink: OwnDrink) -> Result<OwnDrink, DrinkingError> {
-    evenings_of(store).name(drink).await
+    days_of(store).name(drink).await
 }
 
 /// The drinks to offer.
 ///
 /// # Errors
 ///
-/// See [`Evenings::choices`].
+/// See [`Days::choices`].
 pub async fn choices(store: &Store) -> Result<Choices, DrinkingError> {
-    evenings_of(store).choices().await
+    days_of(store).choices().await
 }

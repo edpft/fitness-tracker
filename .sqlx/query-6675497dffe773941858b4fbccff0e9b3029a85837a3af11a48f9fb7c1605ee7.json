@@ -1,16 +1,16 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT evening, amount\n            FROM drinking_evening\n            ORDER BY evening\n            ",
+  "query": "\n            SELECT day, amount\n            FROM drinking_day\n            ORDER BY day\n            ",
   "describe": {
     "columns": [
       {
-        "name": "evening",
+        "name": "day",
         "ordinal": 0,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "drinking_evening",
-            "name": "evening"
+            "table": "drinking_day",
+            "name": "day"
           }
         }
       },
@@ -20,7 +20,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "drinking_evening",
+            "table": "drinking_day",
             "name": "amount"
           }
         }
@@ -34,5 +34,5 @@
       false
     ]
   },
-  "hash": "91ebc2c41ea83cc66a84f81c47143822055bcfdb51b684acf81940c337af4bd1"
+  "hash": "6675497dffe773941858b4fbccff0e9b3029a85837a3af11a48f9fb7c1605ee7"
 }

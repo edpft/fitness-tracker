@@ -2,11 +2,10 @@
 
 use std::num::{NonZeroU8, NonZeroU16};
 
-use application::{DrinkingError, Node, Revisions, drinking::Evenings};
+use application::{DrinkingError, Node, Revisions, drinking::Days};
 use domain::{
     drinking::{
-        Drink, DrinkName, Drinking, Drinks, Evening, Millilitres, OwnDrink, StandardServing,
-        Strength,
+        Day, Drink, DrinkName, Drinking, Drinks, Millilitres, OwnDrink, StandardServing, Strength,
     },
     sequence::NonEmpty,
 };
@@ -46,10 +45,10 @@ fn stronger(drink: OwnDrink) -> Option<OwnDrink> {
 }
 
 /// **Each of the three forms comes back as it was reported; reporting an
-/// evening again replaces it, and removing it leaves no entry.** The drinks
+/// day again replaces it, and removing it leaves no entry.** The drinks
 /// written move the drinking node and nothing else.
 #[test]
-fn an_evening_is_kept_replaced_and_removed() {
+fn an_day_is_kept_replaced_and_removed() {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -59,20 +58,20 @@ fn an_evening_is_kept_replaced_and_removed() {
             let pool = connect(&directory.path().join("test.db"))
                 .await
                 .expect("a store");
-            let evenings = Evenings::new(SqliteDrinkingStore::new(pool.clone()));
+            let days = Days::new(SqliteDrinkingStore::new(pool.clone()));
             let revisions = SqliteRevisions::new(pool);
             let today = date(2026, 11, 19);
             let red = house_red().expect("a glass of house red");
 
-            let christmas_eve = Evening {
+            let christmas_eve = Day {
                 date: date(2025, 12, 24),
                 drinking: Drinking::AmountUnknown,
             };
-            let friday = Evening {
+            let friday = Day {
                 date: date(2026, 11, 14),
                 drinking: Drinking::AtLeast(NonEmpty::of(pints(3).expect("three"), Vec::new())),
             };
-            let tonight = Evening {
+            let tonight = Day {
                 date: today,
                 drinking: Drinking::Exactly(NonEmpty::of(
                     pints(2).expect("two"),
@@ -83,31 +82,24 @@ fn an_evening_is_kept_replaced_and_removed() {
                     }],
                 )),
             };
-            for evening in [&christmas_eve, &friday, &tonight] {
-                evenings
-                    .record(evening.clone(), today)
-                    .await
-                    .expect("recorded");
+            for day in [&christmas_eve, &friday, &tonight] {
+                days.record(day.clone(), today).await.expect("recorded");
             }
             assert_eq!(
-                evenings.evenings().await.expect("read"),
+                days.days().await.expect("read"),
                 vec![tonight.clone(), friday.clone(), christmas_eve.clone()],
                 "latest first, each as reported"
             );
 
-            let corrected = Evening {
+            let corrected = Day {
                 date: friday.date,
                 drinking: Drinking::Exactly(NonEmpty::of(pints(4).expect("four"), Vec::new())),
             };
-            evenings
-                .record(corrected.clone(), today)
+            days.record(corrected.clone(), today)
                 .await
                 .expect("recorded again");
-            evenings.remove(christmas_eve.date).await.expect("removed");
-            assert_eq!(
-                evenings.evenings().await.expect("read"),
-                vec![tonight, corrected]
-            );
+            days.remove(christmas_eve.date).await.expect("removed");
+            assert_eq!(days.days().await.expect("read"), vec![tonight, corrected]);
 
             assert_eq!(
                 revisions
@@ -128,7 +120,7 @@ fn an_evening_is_kept_replaced_and_removed() {
         });
 }
 
-/// **An evening that has not come yet is refused**, and nothing is written.
+/// **A day that has not come yet is refused**, and nothing is written.
 #[test]
 fn tomorrow_is_refused() {
     tokio::runtime::Builder::new_current_thread()
@@ -140,11 +132,11 @@ fn tomorrow_is_refused() {
             let pool = connect(&directory.path().join("test.db"))
                 .await
                 .expect("a store");
-            let evenings = Evenings::new(SqliteDrinkingStore::new(pool));
+            let days = Days::new(SqliteDrinkingStore::new(pool));
 
-            let refused = evenings
+            let refused = days
                 .record(
-                    Evening {
+                    Day {
                         date: date(2026, 11, 20),
                         drinking: Drinking::AmountUnknown,
                     },
@@ -156,7 +148,7 @@ fn tomorrow_is_refused() {
                 matches!(refused, Err(DrinkingError::NotYet { .. })),
                 "{refused:?}"
             );
-            assert!(evenings.evenings().await.expect("read").is_empty());
+            assert!(days.days().await.expect("read").is_empty());
         });
 }
 
@@ -174,27 +166,23 @@ fn the_choices_offer_recent_then_own_then_the_nhs() {
             let pool = connect(&directory.path().join("test.db"))
                 .await
                 .expect("a store");
-            let evenings = Evenings::new(SqliteDrinkingStore::new(pool));
+            let days = Days::new(SqliteDrinkingStore::new(pool));
 
-            evenings
-                .record(
-                    Evening {
-                        date: date(2026, 11, 14),
-                        drinking: Drinking::Exactly(NonEmpty::of(
-                            pints(3).expect("three"),
-                            Vec::new(),
-                        )),
-                    },
-                    date(2026, 11, 19),
-                )
-                .await
-                .expect("recorded");
+            days.record(
+                Day {
+                    date: date(2026, 11, 14),
+                    drinking: Drinking::Exactly(NonEmpty::of(pints(3).expect("three"), Vec::new())),
+                },
+                date(2026, 11, 19),
+            )
+            .await
+            .expect("recorded");
             let red = house_red().expect("a glass of house red");
-            evenings.name(red.clone()).await.expect("named");
+            days.name(red.clone()).await.expect("named");
             let stronger = stronger(red).expect("a stronger pour");
-            evenings.name(stronger.clone()).await.expect("named again");
+            days.name(stronger.clone()).await.expect("named again");
 
-            let choices = evenings.choices().await.expect("read");
+            let choices = days.choices().await.expect("read");
 
             assert_eq!(
                 choices.recent,

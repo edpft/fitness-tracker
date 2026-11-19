@@ -220,8 +220,8 @@ fn pages() -> Pages {
         )
         .form(drinking::HERE, get(drinking_page).post(drinking_post))
         .form(
-            drinking::EVENING,
-            get(drinking_evening_page).post(drinking_evening_post),
+            drinking::DAY,
+            get(drinking_day_page).post(drinking_day_post),
         )
         .form(illness::HERE, get(illness_page).post(illness_post))
         .live("/run/events", get(events))
@@ -428,41 +428,37 @@ async fn illness_post(
 /// Which of drinking's two pages.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DrinkingPage {
-    Tonight,
-    Evening,
+    Today,
+    Day,
 }
 
-/// Drinking, read afresh: tonight, or a past evening as it stands or as
+/// Drinking, read afresh: today, or another day as it stands or as
 /// counted.
 async fn drinking_shown(
     runs: &Runs,
     which: DrinkingPage,
-    evening: Option<jiff::civil::Date>,
+    day: Option<jiff::civil::Date>,
     counting: Option<&drinking::Counting>,
     refused: Option<&input::Refusal>,
 ) -> Markup {
     let store = &runs.setting().store;
     let today = configurator::equipment::today(&runs.setting().zone);
-    let evenings = configurator::drinking::evenings(store).await;
+    let days = configurator::drinking::days(store).await;
     let choices = configurator::drinking::choices(store).await;
-    match (evenings, choices) {
-        (Ok(evenings), Ok(choices)) => {
+    match (days, choices) {
+        (Ok(days), Ok(choices)) => {
             let date = match which {
-                DrinkingPage::Tonight => today,
-                DrinkingPage::Evening => {
-                    evening.or_else(|| today.yesterday().ok()).unwrap_or(today)
-                }
+                DrinkingPage::Today => today,
+                DrinkingPage::Day => day.or_else(|| today.yesterday().ok()).unwrap_or(today),
             };
             let counting = counting
                 .cloned()
-                .unwrap_or_else(|| drinking::Counting::standing(&evenings, date));
+                .unwrap_or_else(|| drinking::Counting::standing(&days, date));
             match which {
-                DrinkingPage::Tonight => {
-                    drinking::tonight(&evenings, &choices, today, &counting, refused)
+                DrinkingPage::Today => {
+                    drinking::opening(&days, &choices, today, &counting, refused)
                 }
-                DrinkingPage::Evening => {
-                    drinking::evening(&evenings, &choices, today, &counting, refused)
-                }
+                DrinkingPage::Day => drinking::another(&days, &choices, today, &counting, refused),
             }
         }
         (Err(error), _) | (_, Err(error)) => drinking::unreadable(&error.to_string()),
@@ -470,35 +466,35 @@ async fn drinking_shown(
 }
 
 async fn drinking_page(State(runs): State<Arc<Runs>>) -> Markup {
-    drinking_shown(&runs, DrinkingPage::Tonight, None, None, None).await
+    drinking_shown(&runs, DrinkingPage::Today, None, None, None).await
 }
 
-async fn drinking_evening_page(
+async fn drinking_day_page(
     State(runs): State<Arc<Runs>>,
     Query(query): Query<HashMap<String, String>>,
 ) -> Markup {
-    let evening = query.get("evening").and_then(|typed| typed.parse().ok());
-    drinking_shown(&runs, DrinkingPage::Evening, evening, None, None).await
+    let day = query.get("day").and_then(|typed| typed.parse().ok());
+    drinking_shown(&runs, DrinkingPage::Day, day, None, None).await
 }
 
 async fn drinking_post(
     State(runs): State<Arc<Runs>>,
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
-    drinking_posted(&runs, DrinkingPage::Tonight, &form).await
+    drinking_posted(&runs, DrinkingPage::Today, &form).await
 }
 
-async fn drinking_evening_post(
+async fn drinking_day_post(
     State(runs): State<Arc<Runs>>,
     Form(form): Form<Vec<(String, String)>>,
 ) -> Response {
-    drinking_posted(&runs, DrinkingPage::Evening, &form).await
+    drinking_posted(&runs, DrinkingPage::Day, &form).await
 }
 
-/// What a post to either page does. **Tonight saves each drink as it is
-/// counted**, and a count of none removes the entry; a past evening draws
+/// What a post to either page does. **Today saves each drink as it is
+/// counted**, and a count of none removes the entry; another day draws
 /// what is counted until it is saved. A save, unknown or removal goes back
-/// to the page Drinking opens on, where the evening is listed.
+/// to the page Drinking opens on, where the day is listed.
 async fn drinking_posted(runs: &Runs, which: DrinkingPage, form: &[(String, String)]) -> Response {
     let asked = match drinking::asked(form) {
         Ok(asked) => asked,
@@ -514,10 +510,10 @@ async fn drinking_posted(runs: &Runs, which: DrinkingPage, form: &[(String, Stri
         let counting = counting.clone();
         async move {
             match counting.counted() {
-                Some(evening) => configurator::drinking::record(store, evening, today)
+                Some(day) => configurator::drinking::record(store, day, today)
                     .await
                     .map(drop),
-                None => configurator::drinking::remove(store, counting.evening).await,
+                None => configurator::drinking::remove(store, counting.day).await,
             }
         }
     };
@@ -527,7 +523,7 @@ async fn drinking_posted(runs: &Runs, which: DrinkingPage, form: &[(String, Stri
                 .await
                 .into_response();
         }
-        drinking::Asked::Counted(counting) if which == DrinkingPage::Evening => {
+        drinking::Asked::Counted(counting) if which == DrinkingPage::Day => {
             return drinking_shown(runs, which, None, Some(&counting), None)
                 .await
                 .into_response();
@@ -536,7 +532,7 @@ async fn drinking_posted(runs: &Runs, which: DrinkingPage, form: &[(String, Stri
         drinking::Asked::Name(counting, own) => {
             match configurator::drinking::name(store, own).await {
                 Err(error) => Err(error),
-                Ok(_) if which == DrinkingPage::Evening => {
+                Ok(_) if which == DrinkingPage::Day => {
                     return drinking_shown(runs, which, None, Some(&counting), None)
                         .await
                         .into_response();
@@ -544,12 +540,12 @@ async fn drinking_posted(runs: &Runs, which: DrinkingPage, form: &[(String, Stri
                 Ok(_) => saved(&counting).await,
             }
         }
-        drinking::Asked::Save(evening) => configurator::drinking::record(store, evening, today)
+        drinking::Asked::Save(day) => configurator::drinking::record(store, day, today)
             .await
             .map(drop),
         drinking::Asked::Unknown(date) => configurator::drinking::record(
             store,
-            domain::drinking::Evening {
+            domain::drinking::Day {
                 date,
                 drinking: domain::drinking::Drinking::AmountUnknown,
             },

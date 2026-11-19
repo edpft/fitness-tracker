@@ -1,9 +1,9 @@
-//! What the operator drank on an evening, at whatever accuracy he knows it
+//! What the operator drank on a day, at whatever accuracy he knows it
 //! (#873).
 //!
-//! **An evening with no entry is no alcohol** (operator, 2026-11-19). An entry
+//! **A day with no entry is no alcohol** (operator, 2026-11-19). An entry
 //! is kept like an illness rather than as an observation: changing one replaces
-//! it, because only what is now thought about an evening matters.
+//! it, because only what is now thought about a day matters.
 
 use std::{fmt, num::NonZeroU8, num::NonZeroU16};
 
@@ -14,9 +14,9 @@ use crate::{
     sequence::NonEmpty,
 };
 
-/// One evening's drinking.
+/// One day's drinking.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Evening {
+pub struct Day {
     pub date: Date,
     pub drinking: Drinking,
 }
@@ -55,7 +55,7 @@ impl Drinking {
 /// "3 × house red": a count of one drink.
 ///
 /// The name, volume and strength are copied in, so changing one of the
-/// operator's own drinks later leaves the evenings already recorded as they
+/// operator's own drinks later leaves the days already recorded as they
 /// were drunk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Drinks {
@@ -161,7 +161,7 @@ pub struct InvalidStrength {
 /// Alcohol by volume, in tenths of a percent: above 0 and at most 100 %.
 ///
 /// **Above zero because a drink with no alcohol is not drinking**, and an
-/// evening of it is an evening with no entry.
+/// day of it is a day with no entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Strength(NonZeroU16);
 

@@ -1,10 +1,10 @@
-//! Reporting drinking, an evening at a time, at whatever accuracy is known
+//! Reporting drinking, a day at a time, at whatever accuracy is known
 //! (#873).
 //!
 //! **What each asks and refuses is here**, so the page reporting it has
 //! nothing to implement again.
 
-use domain::drinking::{Drink, Evening, OwnDrink, StandardServing};
+use domain::drinking::{Day, Drink, OwnDrink, StandardServing};
 use jiff::civil::Date;
 
 use crate::{DrinkingAuthor, DrinkingError, DrinkingStore};
@@ -17,7 +17,7 @@ const RECENT: usize = 5;
 /// Each drink is offered once, in the first group that has it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Choices {
-    /// Those counted on the latest evenings, latest first.
+    /// Those counted on the latest days, latest first.
     pub recent: Vec<OwnDrink>,
     /// His own, by name.
     pub own: Vec<OwnDrink>,
@@ -25,50 +25,48 @@ pub struct Choices {
     pub standard: Vec<OwnDrink>,
 }
 
-/// The use case, over the store that keeps the evenings.
-pub struct Evenings<S> {
+/// The use case, over the store that keeps the days.
+pub struct Days<S> {
     store: S,
 }
 
-impl<S: DrinkingStore + DrinkingAuthor + Sync> Evenings<S> {
+impl<S: DrinkingStore + DrinkingAuthor + Sync> Days<S> {
     pub const fn new(store: S) -> Self {
         Self { store }
     }
 
-    /// Every evening with an entry, latest first.
+    /// Every day with an entry, latest first.
     ///
     /// # Errors
     ///
     /// [`DrinkingError::Store`] if the store cannot be read.
-    pub async fn evenings(&self) -> Result<Vec<Evening>, DrinkingError> {
-        let mut evenings = self.store.evenings().await?;
-        evenings.reverse();
-        Ok(evenings)
+    pub async fn days(&self) -> Result<Vec<Day>, DrinkingError> {
+        let mut days = self.store.days().await?;
+        days.reverse();
+        Ok(days)
     }
 
-    /// Record an evening, replacing what was said about it before.
+    /// Record a day, replacing what was said about it before.
     ///
     /// # Errors
     ///
-    /// [`DrinkingError::NotYet`] for an evening after `today`, and
+    /// [`DrinkingError::NotYet`] for a day after `today`, and
     /// [`DrinkingError::Store`] if the store cannot be written.
-    pub async fn record(&self, evening: Evening, today: Date) -> Result<Evening, DrinkingError> {
-        if evening.date > today {
-            return Err(DrinkingError::NotYet {
-                evening: evening.date,
-            });
+    pub async fn record(&self, day: Day, today: Date) -> Result<Day, DrinkingError> {
+        if day.date > today {
+            return Err(DrinkingError::NotYet { day: day.date });
         }
-        self.store.record_evening(&evening).await?;
-        Ok(evening)
+        self.store.record_day(&day).await?;
+        Ok(day)
     }
 
-    /// Remove an evening's entry: no alcohol that evening after all.
+    /// Remove a day's entry: no alcohol that day after all.
     ///
     /// # Errors
     ///
     /// [`DrinkingError::Store`] if the store cannot be written.
     pub async fn remove(&self, date: Date) -> Result<(), DrinkingError> {
-        Ok(self.store.remove_evening(date).await?)
+        Ok(self.store.remove_day(date).await?)
     }
 
     /// Name one of his own drinks, replacing one of the same name.
@@ -87,7 +85,7 @@ impl<S: DrinkingStore + DrinkingAuthor + Sync> Evenings<S> {
     ///
     /// [`DrinkingError::Store`] if the store cannot be read.
     pub async fn choices(&self) -> Result<Choices, DrinkingError> {
-        let evenings = self.store.evenings().await?;
+        let days = self.store.days().await?;
         let own = self.store.own_drinks().await?;
 
         let mut offered: Vec<(String, Drink)> = Vec::new();
@@ -101,11 +99,7 @@ impl<S: DrinkingStore + DrinkingAuthor + Sync> Evenings<S> {
         };
 
         let mut recent = Vec::new();
-        for drinks in evenings
-            .iter()
-            .rev()
-            .flat_map(|evening| evening.drinking.counted())
-        {
+        for drinks in days.iter().rev().flat_map(|day| day.drinking.counted()) {
             if recent.len() == RECENT {
                 break;
             }
