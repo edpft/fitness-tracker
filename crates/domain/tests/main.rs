@@ -15,6 +15,7 @@ mod composition;
 mod cycling;
 mod device;
 mod digest;
+mod drinking;
 mod equipment;
 mod ftp_test;
 mod gym_entity;
