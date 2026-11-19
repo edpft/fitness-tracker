@@ -112,7 +112,7 @@ fn judged(readings: &BTreeMap<Date, f64>, line: &[(Date, f64)]) -> Option<Vec<St
         .windows(2)
         .map(|pair| {
             let (&from, &to) = (pair.first()?, pair.last()?);
-            let (slope, error) = fit.slope(from)?;
+            let error = fit.slope_error(from)?;
             // How much further from the line the stretch ends than it began,
             // against the noise of its slope over its days: a reading that
             // crosses the line ends about as far from it as it began.
@@ -311,9 +311,9 @@ impl Fit {
             .sum()
     }
 
-    /// The slope of the stretch that starts on day `from`, and its standard
-    /// error: the day's coefficient and every turn's up to `from`.
-    fn slope(&self, from: i32) -> Option<(f64, f64)> {
+    /// The standard error of the slope of the stretch that starts on day
+    /// `from`, which is the day's coefficient and every turn's up to `from`.
+    fn slope_error(&self, from: i32) -> Option<f64> {
         let from = f64::from(from);
         let weights: Vec<f64> = self
             .columns
@@ -329,14 +329,13 @@ impl Fit {
                 }
             })
             .collect();
-        let slope = dot(&weights, &self.coefficients);
         let spread: f64 = self
             .inverse
             .iter()
             .zip(&weights)
             .map(|(row, weight)| weight * dot(row, &weights))
             .sum();
-        (spread >= 0.0).then(|| (slope, (spread * self.variance).sqrt()))
+        (spread >= 0.0).then(|| (spread * self.variance).sqrt())
     }
 }
 
