@@ -395,6 +395,8 @@ impl application::Input for SqliteExerciseHistory {
     }
 }
 
+impl application::NotRaw for SqliteExerciseHistory {}
+
 /// The performances of some lifts over some days, read for a chart (#817).
 #[derive(Debug, Clone)]
 pub struct SqlitePerformances {
@@ -483,3 +485,5 @@ impl application::Input for SqlitePerformances {
         .and(super::tables(&[super::table::GYM_SESSION]))
     }
 }
+
+impl application::NotRaw for SqlitePerformances {}

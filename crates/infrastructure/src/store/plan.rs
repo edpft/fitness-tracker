@@ -341,6 +341,8 @@ impl application::Input for SqlitePlanStore {
     }
 }
 
+impl application::NotRaw for SqlitePlanStore {}
+
 impl application::Authors for SqlitePlanStore {
     fn authors() -> std::collections::BTreeSet<application::Node> {
         [application::Node::PLAN].into()

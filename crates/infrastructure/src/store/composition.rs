@@ -145,3 +145,5 @@ impl application::Input for SqliteCompositionHistory {
         ])
     }
 }
+
+impl application::NotRaw for SqliteCompositionHistory {}

@@ -438,12 +438,16 @@ impl application::Input for SqliteOvernightHrvHistory {
     }
 }
 
+impl application::NotRaw for SqliteOvernightHrvHistory {}
+
 /// `resting_heart_rate` (#809).
 impl application::Input for SqliteRestingHeartRateHistory {
     fn reads() -> application::Reads {
         super::tables(&[super::table::RESTING_HEART_RATE])
     }
 }
+
+impl application::NotRaw for SqliteRestingHeartRateHistory {}
 
 /// Garmin's days: each one's resting heart rate, and whether a watch was worn (#809).
 impl application::Output for SqliteDailyHeartRateStore {

@@ -62,10 +62,7 @@ pub fn reads() -> Reads {
 
 /// What planning the macrocycle among the walk's plans reads: what the
 /// committer does, and the calendars where the walk could not read them.
-#[must_use]
-pub fn planning() -> Reads {
-    <Committer<'static> as Input>::reads().and(Calendars::reads())
-}
+pub type Planning = (Committer<'static>, Calendars);
 
 /// The parts a run collecting what Plan reads takes (#809).
 #[must_use]

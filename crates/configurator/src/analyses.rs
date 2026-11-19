@@ -757,14 +757,9 @@ impl<I: application::graph::Input> application::graph::Input for Over<I> {
     }
 }
 
-/// What planning the macrocycle reads, besides the walk, as a type.
-pub struct Planning;
-
-impl application::graph::Input for Planning {
-    fn reads() -> application::graph::Reads {
-        crate::macrocycle::planning()
-    }
-}
+/// **What `I` reads is what it is read through** (#822), so the store is not
+/// read raw through it unless `I` is.
+impl<I: application::graph::NotRaw> application::graph::NotRaw for Over<I> {}
 
 /// Where the plan stands now: the macrocycle's week and its curves, and the
 /// microcycle's sessions, as the one walk says.
@@ -775,7 +770,7 @@ pub struct Standing;
 
 impl Analysed for Standing {
     const ANALYSIS: Analysis = Analysis::Standing;
-    type Ports = Over<Planning>;
+    type Ports = Over<crate::macrocycle::Planning>;
     type Reads = Of<Plans>;
     type Value = PlanStanding;
 
@@ -811,14 +806,10 @@ composed!(
 );
 
 /// What prescribing either discipline reads.
-pub struct Prescribers;
-
-impl application::graph::Input for Prescribers {
-    fn reads() -> application::graph::Reads {
-        <crate::prescribing::Prescriber as application::graph::Input>::reads()
-            .and(<crate::cycling::Prescriber<'static> as application::graph::Input>::reads())
-    }
-}
+pub type Prescribers = (
+    crate::prescribing::Prescriber,
+    crate::cycling::Prescriber<'static>,
+);
 
 /// What is next, and the session derived for it, written nowhere: what the
 /// home page shows, and what a run issues and delivers.

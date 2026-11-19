@@ -304,6 +304,8 @@ impl application::Input for SqliteSleepHistory {
     }
 }
 
+impl application::NotRaw for SqliteSleepHistory {}
+
 /// Garmin's sleep (#809).
 impl application::Output for SqliteSleepStore {
     fn writes() -> std::collections::BTreeSet<application::Table> {

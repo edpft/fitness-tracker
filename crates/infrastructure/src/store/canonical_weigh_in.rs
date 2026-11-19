@@ -488,3 +488,5 @@ impl application::Input for SqliteCanonicalWeighInStore {
         ]))
     }
 }
+
+impl application::NotRaw for SqliteCanonicalWeighInStore {}

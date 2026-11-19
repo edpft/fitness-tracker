@@ -409,6 +409,8 @@ mod tests {
         }
     }
 
+    impl<D: application::graph::NotRaw> application::graph::NotRaw for Counting<D> {}
+
     impl<D: Send + Sync> FtpHistory for Counting<D> {
         async fn in_force_on(&self, _: Date) -> Result<Option<Ftp>, StoreError> {
             self.asked();

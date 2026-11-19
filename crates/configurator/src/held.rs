@@ -23,7 +23,7 @@ use std::{
 use application::{
     StoreError,
     drawing::{Drawing, DrawnFrom},
-    graph::{Analysis, Derivation, Input, Node, Reads},
+    graph::{Analysis, Derivation, Input, Node, NotRaw, Reads},
 };
 use domain::{normalised::OperatorZone, schedule::DayPart};
 use infrastructure::{SqliteDerivationLedger, SqliteRevisions};
@@ -42,8 +42,30 @@ pub trait Analysed: Send + Sync + 'static {
     /// The node it is.
     const ANALYSIS: Analysis;
 
-    /// What it reads the store through.
-    type Ports: Input + Send + Sync;
+    /// What it reads the store through: no landing table (#822).
+    ///
+    /// ```compile_fail
+    /// use configurator::{held::{Analysed, Fetch}, next::NextFailure, store::Store};
+    /// use domain::normalised::OperatorZone;
+    ///
+    /// struct Landed;
+    ///
+    /// impl Analysed for Landed {
+    ///     const ANALYSIS: application::graph::Analysis = application::graph::Analysis::BodyWeight;
+    ///     type Ports = infrastructure::HevySessionAccountReader;
+    ///     type Reads = ();
+    ///     type Value = ();
+    ///
+    ///     async fn open(_: &Store, _: &OperatorZone) -> Result<Self::Ports, NextFailure> {
+    ///         unimplemented!()
+    ///     }
+    ///
+    ///     async fn derive(_: Self::Ports, (): ()) -> Result<(), NextFailure> {
+    ///         Ok(())
+    ///     }
+    /// }
+    /// ```
+    type Ports: NotRaw + Send + Sync;
 
     /// What else it reads: other analyses, and the date.
     type Reads: Fetch;

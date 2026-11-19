@@ -33,6 +33,8 @@ impl Input for Today {
     }
 }
 
+impl application::graph::NotRaw for Today {}
+
 /// The part of the day it is now, in the operator's zone.
 #[derive(Debug, Clone)]
 pub struct Now(OperatorZone);
@@ -59,3 +61,5 @@ impl Input for Now {
         Reads::of([Node::DayPart])
     }
 }
+
+impl application::graph::NotRaw for Now {}

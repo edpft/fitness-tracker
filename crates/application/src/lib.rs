@@ -58,7 +58,7 @@ pub use error::{
     NormalisationError, PrescriptionError, RunLockError, ScheduleError, SourceError, StatusError,
     StoreError,
 };
-pub use graph::{Authors, Calendar, Generation, Input, Node, Output, Reads, Table};
+pub use graph::{Authors, Calendar, Generation, Input, Node, NotRaw, Output, Reads, Table};
 pub use ports::{
     AccountReader, Activities, Activity, Authored, ByReason, CalendarPublisher, CalendarStore,
     CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalLayer, CanonicalWeighInStore,

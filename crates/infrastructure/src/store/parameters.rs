@@ -912,6 +912,8 @@ impl application::Input for SqliteGenerationParameterStore {
     }
 }
 
+impl application::NotRaw for SqliteGenerationParameterStore {}
+
 impl application::Authors for SqliteGenerationParameterStore {
     fn authors() -> std::collections::BTreeSet<application::Node> {
         [application::Node::WORKOUTS].into()

@@ -42,6 +42,8 @@ use crate::wiring::SystemClock;
 ///
 /// **Its fields are its declaration**: a struct built as one has nothing to
 /// read with but them, so what it reads and what it declares cannot differ.
+/// It reads no raw (#822), and a field reading a landing table does not
+/// compile.
 macro_rules! reads {
     (
         $(#[$meta:meta])*
@@ -60,12 +62,21 @@ macro_rules! reads {
                     $(.and(<$type as application::graph::Input>::reads()))+
             }
         }
+
+        impl application::graph::NotRaw for $name
+        where
+            $($type: application::graph::NotRaw),+
+        {
+        }
     };
 }
 pub(crate) use reads;
 
 /// What a page reads, declared as [`reads!`] declares it, and each field
 /// read only through [`read!`], which spans the read (#804).
+///
+/// **A page cannot read raw** (#822): a field reading a landing table is
+/// not [`NotRaw`](application::graph::NotRaw), and the page does not compile.
 ///
 /// **A page cannot read unrecorded**: its fields are
 /// [`Read`](crate::telemetry::Read)s, which give up what they hold only as a
@@ -87,6 +98,12 @@ macro_rules! page {
                 application::graph::Reads::default()
                     $(.and(<$type as application::graph::Input>::reads()))+
             }
+        }
+
+        impl application::graph::NotRaw for $name
+        where
+            $($type: application::graph::NotRaw),+
+        {
         }
     };
 }
@@ -253,6 +270,35 @@ mod tests {
                 super::graph().reads(&Node::Analysis(analysis)).is_some(),
                 "{analysis:?} is not in the graph"
             );
+        }
+    }
+
+    /// **Nothing an analysis or a page reads is a landing table** (#822).
+    ///
+    /// [`NotRaw`](application::graph::NotRaw) refuses one built from a
+    /// reader of raw at compile time; this is what each of them declares,
+    /// should a reader of raw ever be marked as not one.
+    #[test]
+    fn no_analysis_or_page_reads_raw() {
+        let raw = |reads: &application::graph::Reads| {
+            reads
+                .nodes()
+                .chain(reads.consulted())
+                .filter(|node| matches!(node, Node::Landing(_)))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        for analysis in application::graph::Analysis::ALL {
+            let reads = super::graph()
+                .reads(&Node::Analysis(analysis))
+                .expect("every analysis is in the graph");
+            assert_eq!(raw(reads), [], "{analysis:?} reads raw");
+        }
+        for (page, reads) in [
+            ("History", crate::history::reads()),
+            ("an opened activity", crate::history::opened_reads()),
+        ] {
+            assert_eq!(raw(&reads), [], "{page} reads raw");
         }
     }
 

@@ -506,6 +506,8 @@ impl application::Input for SqliteCyclingMesocycleStore {
     }
 }
 
+impl application::NotRaw for SqliteCyclingMesocycleStore {}
+
 impl application::Authors for SqliteCyclingMesocycleStore {
     fn authors() -> std::collections::BTreeSet<application::Node> {
         [application::Node::PLAN].into()
