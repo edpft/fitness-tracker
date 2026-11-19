@@ -472,12 +472,12 @@ mod tests {
                 Stretch {
                     from: BEGAN,
                     to: date(2026, 11, 5),
-                    moving: Moving::Further,
+                    moving: Moving::Diverging,
                 },
                 Stretch {
                     from: date(2026, 11, 5),
                     to: TODAY,
-                    moving: Moving::Closer,
+                    moving: Moving::Converging,
                 },
             ],
         }
@@ -584,25 +584,25 @@ mod tests {
         );
     }
 
-    /// **Each says whether it is getting closer to expected** (#874): the
-    /// latest stretch above its chart, and each stretch beneath it.
+    /// **Each says whether it is tracking expected** (#874): the latest
+    /// stretch above its chart, and each stretch beneath it.
     #[test]
-    fn each_response_says_whether_it_is_getting_closer_to_expected() {
+    fn each_response_says_whether_it_is_tracking_expected() {
         let page = body(&autumn()).into_string();
 
         assert_eq!(
-            page.matches("<b>Getting closer to expected</b><span>since 5 Nov</span>")
+            page.matches("<b>Converging on expected</b><span>since 5 Nov</span>")
                 .count(),
             3,
             "{page}"
         );
         assert_eq!(
-            page.matches(r#"class="stretch further""#).count(),
+            page.matches(r#"class="stretch diverging""#).count(),
             3,
             "{page}"
         );
         assert_eq!(
-            page.matches(r#"class="stretch closer""#).count(),
+            page.matches(r#"class="stretch converging""#).count(),
             3,
             "{page}"
         );

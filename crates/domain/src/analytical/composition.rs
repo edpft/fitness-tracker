@@ -61,8 +61,7 @@ use jiff::civil::Date;
 use super::{
     body_weight::Aim,
     confidence::Noise,
-    expected::{Expected, each_mesocycle, lines},
-    gap::{Stretch, stretches},
+    expected::{Expected, each_mesocycle},
     range::{Range, runs_within},
 };
 use crate::{
@@ -207,17 +206,6 @@ impl MethodSeries {
             .map(|run| run.iter().map(|day| (day.on, day.value)).collect())
             .collect();
         each_mesocycle(&line, aims, began, today, |aim| aimed(component, aim))
-    }
-
-    /// Whether each day's readings have got closer to `aimed` or further
-    /// from it (#874), judged against each line it draws.
-    #[must_use]
-    pub fn moving(&self, aimed: &[Vec<Expected>]) -> Vec<Stretch> {
-        let each_day = by_day(&self.readings)
-            .into_iter()
-            .filter_map(|(on, values)| Some((on, mean(&values)?)))
-            .collect();
-        stretches(&each_day, &lines(aimed))
     }
 }
 

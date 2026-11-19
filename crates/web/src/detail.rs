@@ -268,9 +268,9 @@ pub enum Layer {
     Bars(Vec<(Date, f64, f64)>),
     /// What was intended, dashed, one line per stretch a plan states it.
     Aim(Vec<Vec<(Date, f64)>>),
-    /// Whether the reading got closer to the expected line or further from
-    /// it (#874): the latest stretch said above the chart, and every stretch
-    /// in a strip beneath it.
+    /// Whether the reading is tracking the expected line, diverging from it
+    /// or converging on it (#874): the latest stretch said above the chart,
+    /// and every stretch in a strip beneath it.
     Moving(Vec<Stretch>),
 }
 
@@ -437,9 +437,9 @@ pub fn drawn(chart: &Chart<'_>) -> Markup {
 /// What a stretch is called, beneath the chart.
 const fn called(moving: Moving) -> &'static str {
     match moving {
-        Moving::Closer => "closer",
-        Moving::Further => "further",
-        Moving::NoChange => "no change",
+        Moving::Tracking => "tracking",
+        Moving::Diverging => "diverging",
+        Moving::Converging => "converging",
     }
 }
 
@@ -447,9 +447,9 @@ const fn called(moving: Moving) -> &'static str {
 /// where the line stopped more than a week before `today`.
 fn headline(latest: &Stretch, today: Date) -> Markup {
     let said = match latest.moving {
-        Moving::Closer => "Getting closer to expected",
-        Moving::Further => "Getting further from expected",
-        Moving::NoChange => "No change that can be told from noise",
+        Moving::Tracking => "Tracking expected",
+        Moving::Diverging => "Diverging from expected",
+        Moving::Converging => "Converging on expected",
     };
     let when = if days_between(latest.to, today) > 7 {
         format!("{} to {}", day(latest.from, today), day(latest.to, today))
@@ -472,7 +472,7 @@ fn strip(stretches: &[Stretch], frame: &Frame) -> Markup {
             @for stretch in stretches.iter().filter(|one| one.to >= range.from && one.from <= range.to) {
                 @let (left, right) = (frame.x(stretch.from.max(range.from)), frame.x(stretch.to.min(range.to)));
                 @let width = (right - left - 2.0).max(1.0);
-                rect class=(format!("stretch {}", called(stretch.moving).replace(' ', "-"))) x=(format!("{left:.1}")) y="2" width=(format!("{width:.1}")) height="10" rx="3" {}
+                rect class=(format!("stretch {}", called(stretch.moving))) x=(format!("{left:.1}")) y="2" width=(format!("{width:.1}")) height="10" rx="3" {}
                 @if width > 44.0 {
                     text.tick x=(format!("{:.1}", f64::midpoint(left, right))) y=(STRIP - 4.0) text-anchor="middle" { (called(stretch.moving)) }
                 }

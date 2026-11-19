@@ -1,13 +1,19 @@
-//! Whether a reading is getting closer to expected or further from it (#874).
+//! Whether a response reading is tracking its expected result, diverging
+//! from it or converging on it (#874).
 //!
-//! The operator, 2026-11-19: *"am I moving towards or away from that?"* Body
-//! weight and composition against the plan's aims, and the response readings
-//! against the training done.
+//! The operator, 2026-11-19: *"am I moving towards or away from that?"*, and
+//! of the response readings, *"we have the right model for response metrics
+//! with tracking, diverging, or converging"*. **Neither side of the line is
+//! better**: the expectation is a hypothesis, not a goal. Body weight and
+//! composition, which are progress towards a goal, are #881.
 //!
 //! **Joinpoint regression on each day's reading less expected**: the gap is
-//! split where its direction turned, the stretches meeting at each turn, and
-//! each stretch is closer, further, or no change that can be told from noise.
-//! The stretch since the last turn is the answer now. A fixed window was
+//! split where its direction turned, the stretches meeting at each turn. A
+//! stretch that ends nearer the line than it began, by more than its slope's
+//! noise, is converging; one that ends further from it is diverging; anything
+//! else is tracking: a gap that holds, or a reading that wavers across the
+//! line and ends about as far from it as it began. The stretch since the last turn is
+//! the answer now. A fixed window was
 //! mocked and rejected: a straight line through a window averages away a
 //! turn.
 //!
@@ -31,13 +37,15 @@ const MOST_TURNS: usize = 3;
 /// noise: its 95% band.
 const Z: f64 = 1.96;
 
-/// Which way the gap between a reading and its expectation went.
+/// How a reading moved against its expectation over a stretch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Moving {
-    Closer,
-    Further,
-    /// Neither, as far as can be told from noise.
-    NoChange,
+    /// The gap neither grew nor shrank by more than noise.
+    Tracking,
+    /// The gap grew.
+    Diverging,
+    /// The gap shrank.
+    Converging,
 }
 
 /// Days over which the gap went one way, the last day of one the first of
@@ -105,14 +113,19 @@ fn judged(readings: &BTreeMap<Date, f64>, line: &[(Date, f64)]) -> Option<Vec<St
         .map(|pair| {
             let (&from, &to) = (pair.first()?, pair.last()?);
             let (slope, error) = fit.slope(from)?;
-            let middle = fit.level(f64::midpoint(f64::from(from), f64::from(to)));
-            let closing = if middle > 0.0 { -slope } else { slope };
-            let moving = if closing > Z * error {
-                Moving::Closer
-            } else if closing < -Z * error {
-                Moving::Further
+            // How much further from the line the stretch ends than it began,
+            // against the noise of its slope over its days: a reading that
+            // crosses the line ends about as far from it as it began.
+            let across = f64::from(to - from);
+            let (first, last) = (fit.level(f64::from(from)), fit.level(f64::from(to)));
+            let grew = last.abs() - first.abs();
+            let noise = Z * error * across;
+            let moving = if grew < -noise {
+                Moving::Converging
+            } else if grew > noise {
+                Moving::Diverging
             } else {
-                Moving::NoChange
+                Moving::Tracking
             };
             Some(Stretch {
                 from: on(start, from)?,
@@ -414,9 +427,9 @@ mod tests {
     fn a_gap_that_turns_is_two_stretches() {
         let (readings, line) = read(42, |index| {
             if index < 21 {
-                0.1 * f64::from(index)
+                0.1f64.mul_add(f64::from(index), 0.5)
             } else {
-                0.1f64.mul_add(-f64::from(index - 21), 2.1)
+                0.1f64.mul_add(-f64::from(index - 21), 2.6)
             }
         });
         let found = stretches(&readings, &[line]);
@@ -426,40 +439,65 @@ mod tests {
                 Stretch {
                     from: day(0),
                     to: day(21),
-                    moving: Moving::Further,
+                    moving: Moving::Diverging,
                 },
                 Stretch {
                     from: day(21),
                     to: day(41),
-                    moving: Moving::Closer,
+                    moving: Moving::Converging,
                 },
             ]
         );
     }
 
-    /// **Noise alone is no change**, and no turn.
+    /// **A gap that holds is tracking**, and noise alone finds no turn.
     #[test]
     fn noise_alone_is_no_change() {
         let (readings, line) = read(28, |_| 0.5);
         let found = stretches(&readings, &[line]);
         assert_eq!(found.len(), 1, "{found:?}");
-        assert_eq!(found.first().map(|one| one.moving), Some(Moving::NoChange));
+        assert_eq!(found.first().map(|one| one.moving), Some(Moving::Tracking));
     }
 
-    /// **Below expected and rising is closer**: which way is closer depends
-    /// on which side of the line the reading is.
+    /// **Below expected and rising is converging**: which way converges
+    /// depends on which side of the line the reading is.
     #[test]
-    fn closer_is_towards_the_line_from_either_side() {
+    fn converging_is_towards_the_line_from_either_side() {
         let (readings, line) = read(21, |index| 0.1f64.mul_add(f64::from(index), -3.0));
         let found = stretches(&readings, &[line]);
-        assert_eq!(found.first().map(|one| one.moving), Some(Moving::Closer));
+        assert_eq!(
+            found.first().map(|one| one.moving),
+            Some(Moving::Converging)
+        );
+    }
+
+    /// **A reading that crosses the line and ends as far from it is
+    /// tracking it**, however steep: stress wavering about its expected
+    /// result read as converging on it.
+    #[test]
+    fn crossing_the_line_is_tracking_it() {
+        let (readings, line) = read(21, |index| 0.1f64.mul_add(f64::from(index), -1.0));
+        let found = stretches(&readings, &[line]);
+        assert_eq!(found.first().map(|one| one.moving), Some(Moving::Tracking));
+    }
+
+    /// **A reading that overshoots the line has still converged**: resting
+    /// heart rate coming back after 4 November ends just past its line.
+    #[test]
+    fn overshooting_the_line_is_converging() {
+        let (readings, line) = read(21, |index| 0.2f64.mul_add(-f64::from(index), 3.0));
+        let found = stretches(&readings, &[line]);
+        assert_eq!(
+            found.first().map(|one| one.moving),
+            Some(Moving::Converging)
+        );
     }
 
     /// **Each line is judged on its own**, so a stretch never runs across
     /// a restart, and a line too short to judge has none.
     #[test]
     fn each_line_is_judged_on_its_own() {
-        let (readings, line) = read(30, |index| 0.1 * f64::from(index));
+        let (readings, line) = read(30, |index| 0.1f64.mul_add(f64::from(index), 0.5));
         let (early, late) = line.split_at(5);
         let found = stretches(&readings, &[early.to_vec(), late.to_vec()]);
         assert_eq!(found.len(), 1, "{found:?}");
