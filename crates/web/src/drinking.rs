@@ -303,7 +303,7 @@ pub fn opening(
                     p.sub { "No other day has an entry." }
                 }
                 @for day in past {
-                    a.day href=(format!("{DAY}?day={}", day.date)) {
+                    a.reported href=(format!("{DAY}?day={}", day.date)) {
                         span { (detail::day(day.date, today)) }
                         span.amount { (amount(&day.drinking)) }
                     }
@@ -601,6 +601,21 @@ mod tests {
         }
         assert!(!shown.contains(r#"value="save""#), "{shown}");
         assert!(!shown.contains(r#"value="unknown""#), "{shown}");
+    }
+
+    /// **Each day reported is a row the stylesheet draws as one**: the class
+    /// the page writes is the class the stylesheet styles.
+    #[test]
+    fn the_days_reported_are_styled_rows() {
+        let today = date(2026, 11, 19);
+        let reported = Day {
+            date: date(2026, 11, 18),
+            drinking: Drinking::AmountUnknown,
+        };
+        let shown = opening(&[reported], &choices(), today, &nothing(today), None).into_string();
+
+        assert!(shown.contains(r#"<a class="reported""#), "{shown}");
+        assert!(include_str!("../assets/style.css").contains("a.reported {"));
     }
 
     /// **A new day is saved or unknown; one already reported can
