@@ -29,8 +29,6 @@ fn chart(path: &str) -> Option<Scope> {
         crate::at_power::PATH => scope(&reads::<crate::at_power::Page>()),
         crate::ftp::PATH => scope(&reads::<crate::ftp::Page>()),
         crate::body::PATH => scope(&reads::<crate::body::Page>()),
-        crate::resting::PATH => scope(&reads::<crate::resting::Page>()),
-        crate::hrv::PATH => scope(&reads::<crate::hrv::Page>()),
         crate::pulse_wave_velocity::PATH => scope(&reads::<crate::pulse_wave_velocity::Page>()),
         crate::sleep::PATH => scope(&reads::<crate::sleep::Page>()),
         crate::one_rep_max::PATH => scope(&reads::<crate::one_rep_max::Page>()),
@@ -132,7 +130,7 @@ mod tests {
                 .filter(|page| chart(page.path).is_some())
                 .count()
         );
-        assert_eq!(rows.len(), 11, "{names:?}");
+        assert_eq!(rows.len(), 9, "{names:?}");
     }
 
     /// **On a store with no credentials every fetch is red**, and a stage the
@@ -151,7 +149,7 @@ mod tests {
         let shown = matrix(&steps.iter().copied(), true).into_string();
 
         let rows: Vec<&str> = shown.split(r#"<div class="row">"#).skip(1).collect();
-        assert_eq!(rows.len(), 11, "{shown}");
+        assert_eq!(rows.len(), 9, "{shown}");
         for row in &rows {
             let dots: Vec<&str> = row.split(r#"<i class="dot "#).skip(1).collect();
             assert!(dots[0].starts_with("failed"), "{row}");

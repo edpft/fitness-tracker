@@ -258,8 +258,6 @@ pub enum Layer {
     /// other one, with the name above: the device a stretch was recorded by
     /// (#548).
     Spans(Vec<(Date, Date, String)>),
-    /// Observations singled out, ringed around their dots.
-    Rings(Vec<(Date, f64)>),
     /// The trend: one line per unbroken run, and its band where it has one.
     Trend(Vec<Vec<Traced>>),
     /// A reference region, from low to high on each day, in neutral grey.
@@ -277,7 +275,7 @@ pub enum Layer {
 impl Layer {
     fn values(&self) -> Vec<f64> {
         match self {
-            Self::Dots(dots) | Self::Hollow(dots) | Self::Rings(dots) | Self::Solid(dots) => {
+            Self::Dots(dots) | Self::Hollow(dots) | Self::Solid(dots) => {
                 dots.iter().map(|(_, value)| *value).collect()
             }
             Self::Spans(_) | Self::Moving(_) => Vec::new(),
@@ -566,11 +564,6 @@ fn plotted(chart: &Chart<'_>, frame: &Frame) -> Markup {
                         Layer::Dots(dots) => { (marks(dots, "dot", frame, radius)) }
                         Layer::Hollow(dots) => { (marks(dots, "hollow", frame, radius)) }
                         Layer::Solid(dots) => { (marks(dots, "solid", frame, radius)) }
-                        Layer::Rings(dots) => {
-                            @for (on, value) in dots {
-                                circle.ring cx=(format!("{:.1}", frame.x(*on))) cy=(format!("{:.1}", frame.y(*value))) r=(radius + 3.0) {}
-                            }
-                        }
                         Layer::Bars(bars) => {
                             @for (on, low, high) in bars {
                                 @let x = format!("{:.1}", frame.x(*on));

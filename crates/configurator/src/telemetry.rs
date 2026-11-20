@@ -1128,7 +1128,7 @@ mod tests {
 
         let (recorder, recording) = ::telemetry::record(&database, None);
         tracing::subscriber::with_default(tracing_subscriber::registry().with(recorder), || {
-            let request = super::request("/hrv", false);
+            let request = super::request("/response", false);
             let run = request.in_scope(|| {
                 super::ranged("macrocycle");
                 super::served(Served::Kept);
@@ -1154,7 +1154,7 @@ mod tests {
         assert_eq!(
             request.fields,
             serde_json::json!({
-                "page": "/hrv",
+                "page": "/response",
                 "range": "macrocycle",
                 "served": "kept",
                 "redraw": false,

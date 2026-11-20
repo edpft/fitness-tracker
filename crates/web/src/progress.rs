@@ -541,18 +541,13 @@ mod tests {
     }
 
     /// **Every page under Progress is opened from it**, now its list of links
-    /// is gone (#768), or from its group's page, which is (#787).
+    /// is gone (#768).
     #[test]
     fn every_page_under_progress_is_opened_from_it() {
         let page = body(&autumn());
-        let opened = |path: &str| page.contains(&format!(r#"href="{path}""#));
         for one in PAGES.iter().filter(|one| one.place == Place::Progress) {
-            let group_page = PAGES.iter().find(|page| {
-                one.group
-                    .is_some_and(|group| page.group == Some(group) && page.name == group.heading())
-            });
             assert!(
-                opened(one.path) || group_page.is_some_and(|page| opened(page.path)),
+                page.contains(&format!(r#"href="{}""#, one.path)),
                 "{} is not opened from Progress: {page}",
                 one.path
             );

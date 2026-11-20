@@ -21,7 +21,6 @@ mod equipment;
 mod ftp;
 mod history;
 mod home;
-mod hrv;
 mod illness;
 mod input;
 mod one_rep_max;
@@ -34,7 +33,6 @@ mod range;
 mod report;
 mod reporting;
 mod response;
-mod resting;
 mod run;
 mod schedule;
 mod sleep;
@@ -201,8 +199,6 @@ fn pages() -> Pages {
         .cards::<ftp::Page>()
         .cards::<body::Page>()
         .cards::<pulse_wave_velocity::Page>()
-        .cards::<hrv::Page>()
-        .cards::<resting::Page>()
         .cards::<sleep::Page>()
         .cards::<one_rep_max::Page>()
         .cards::<response::Page>()
@@ -858,15 +854,7 @@ mod tests {
             .filter(|(_, reads)| graph.moved_by(reads).contains(&night))
             .map(|(name, _)| *name)
             .collect();
-        assert_eq!(
-            redrawn,
-            [
-                "hrv-latest",
-                "hrv-nights",
-                "response-each-week",
-                "summary-overnight-hrv",
-            ]
-        );
+        assert_eq!(redrawn, ["response-each-week", "summary-overnight-hrv",]);
     }
 
     /// **A gym session made canonical redraws the home page's cards** (#830):
@@ -999,7 +987,12 @@ mod tests {
                 .expect("a port");
             let address = listener.local_addr().expect("an address");
             tokio::spawn(async move { axum::serve(listener, super::app(runs)).await });
-            for path in ["/equipment", "/nowhere", "/history/2026-11-02/1", "/hrv"] {
+            for path in [
+                "/equipment",
+                "/nowhere",
+                "/history/2026-11-02/1",
+                "/response",
+            ] {
                 let mut stream = tokio::net::TcpStream::connect(address)
                     .await
                     .expect("a connection");
@@ -1047,7 +1040,7 @@ mod tests {
                 "{part}: {session:?}"
             );
         }
-        let chart = parts("/hrv");
+        let chart = parts("/response");
         assert!(chart.iter().any(|seen| seen == "checking"), "{chart:?}");
         // **No page load opens the store** (#663), neither drawing the page nor
         // checking whether a run is due: it was opened once, before serving.

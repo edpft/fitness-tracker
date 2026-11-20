@@ -29,10 +29,9 @@ use std::collections::BTreeMap;
 use domain::{
     analytical::{
         composition::{ComponentSeries, Unit},
-        ftp_test, heart_rate_at_power, hrv, one_rep_max,
+        ftp_test, heart_rate_at_power, one_rep_max,
         per_device::{DeviceSeries, SentBy},
         response::{Response, response},
-        resting,
         since_entry::{SinceEntry, since_entry},
         since_start::{SinceStart, since_start},
         stress,
@@ -40,6 +39,7 @@ use domain::{
     },
     body::Component,
     gym::exercise::RepsExercise,
+    measure::{BeatsPerMinute, HeartRateVariability},
     plan::{Plan, Span},
     planner::Discipline,
 };
@@ -139,14 +139,14 @@ pub struct Responding {
 /// against the training `carried`.
 #[must_use]
 pub fn resting(
-    trended: &[resting::Trended],
+    series: &[DeviceSeries<BeatsPerMinute>],
     carried: &Carried,
     began: Date,
     today: Date,
 ) -> Responding {
     responding(
         Answering::RestingHeartRate,
-        trended.iter().map(|one| &one.series),
+        series,
         |reading| f64::from(reading.as_u32()),
         carried,
         began,
@@ -158,14 +158,14 @@ pub fn resting(
 /// the training `carried`.
 #[must_use]
 pub fn overnight_hrv(
-    trended: &[hrv::Trended],
+    series: &[DeviceSeries<HeartRateVariability>],
     carried: &Carried,
     began: Date,
     today: Date,
 ) -> Responding {
     responding(
         Answering::OvernightHrv,
-        trended.iter().map(|one| &one.series),
+        series,
         |reading| f64::from(reading.as_milliseconds()),
         carried,
         began,

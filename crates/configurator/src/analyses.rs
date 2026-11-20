@@ -27,9 +27,9 @@ use domain::{
         composition::ComponentSeries,
         ftp_test,
         heart_rate::RideHeartRate,
-        heart_rate_at_power, hrv,
+        heart_rate_at_power,
         per_device::{DeviceSeries, per_device},
-        pulse_wave_velocity, range, resting,
+        pulse_wave_velocity, range,
         since_entry::SinceEntry,
         since_start::SinceStart,
         sleep, stress,
@@ -38,6 +38,7 @@ use domain::{
     body::Component,
     cycling::Ftp,
     device::{self, Measurand},
+    measure::{BeatsPerMinute, HeartRateVariability},
     normalised::OperatorZone,
     schedule::DayPart,
 };
@@ -396,7 +397,7 @@ response!(
     working::stress
 );
 
-/// Last night's average HRV, one series per watch, and the trend through each.
+/// Last night's average HRV, one series per watch.
 pub struct OvernightHrv;
 
 impl Analysed for OvernightHrv {
@@ -408,7 +409,7 @@ impl Analysed for OvernightHrv {
         Spanned<GarminWear>,
     >;
     type Reads = ();
-    type Value = Vec<hrv::Trended>;
+    type Value = Vec<DeviceSeries<HeartRateVariability>>;
 
     async fn open(store: &Store, _: &OperatorZone) -> Result<Self::Ports, NextFailure> {
         Ok(PerDevice::new(
@@ -419,12 +420,11 @@ impl Analysed for OvernightHrv {
     }
 
     async fn derive(ports: Self::Ports, (): ()) -> Result<Self::Value, NextFailure> {
-        Ok(ports.overnight_hrv_trend().await?)
+        Ok(ports.overnight_hrv().await?)
     }
 }
 
-/// Each day's resting heart rate, one series per watch, with its slow line and
-/// the nights it flags.
+/// Each day's resting heart rate, one series per watch.
 pub struct RestingHeartRate;
 
 impl Analysed for RestingHeartRate {
@@ -436,7 +436,7 @@ impl Analysed for RestingHeartRate {
         Spanned<GarminWear>,
     >;
     type Reads = ();
-    type Value = Vec<resting::Trended>;
+    type Value = Vec<DeviceSeries<BeatsPerMinute>>;
 
     async fn open(store: &Store, _: &OperatorZone) -> Result<Self::Ports, NextFailure> {
         Ok(PerDevice::new(
@@ -447,7 +447,7 @@ impl Analysed for RestingHeartRate {
     }
 
     async fn derive(ports: Self::Ports, (): ()) -> Result<Self::Value, NextFailure> {
-        Ok(ports.resting_heart_rate_trend().await?)
+        Ok(ports.resting_heart_rate().await?)
     }
 }
 

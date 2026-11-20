@@ -6,13 +6,15 @@
 //! answers whether each is where the training done expects it to be, and
 //! whether it is moving towards that or away from it.
 //!
-//! **It opens on the three summaries Progress shows** ([`crate::summary`],
-//! #830), each opening its reading's own page where it has one; stress has
-//! none. Then **each week against the expected result**: each reading as the
-//! mean of the week to each day since the macrocycle began, its noise as a
-//! band, the expected result as a dashed line, and whether it is tracking,
-//! diverging from or converging on it (#874), with the mesocycles marked
-//! behind.
+//! **Each week against the expected result**: each reading as the mean of
+//! the week to each day since the macrocycle began, its noise as a band, the
+//! expected result as a dashed line, and whether it is tracking, diverging
+//! from or converging on it (#874), with the mesocycles marked behind.
+//!
+//! **The charts here, their summaries on Progress** (operator, 2026-11-20):
+//! Progress's three cards are simplifications of these charts, read from the
+//! same analysis, so they are not repeated above them. This page replaced
+//! `/working`, `/resting-heart-rate` and `/hrv`.
 //!
 //! **The mesocycles are numbered from 0** (operator, 2026-11-11): the entry
 //! tests are Mesocycle 0, so *"the first non-test mesocycle would be
@@ -31,7 +33,7 @@ use crate::{
     detail::{self, Axis, Chart, Layer, Traced},
     page::Group,
     progress::NoMacrocycle,
-    summary::{self, Written, answering},
+    summary::{Written, answering},
 };
 
 pub const PATH: &str = "/response";
@@ -39,24 +41,11 @@ pub const PATH: &str = "/response";
 /// What the page is called: its group's heading, since it is the whole group.
 pub const TITLE: &str = Group::Response.heading();
 
-/// The page: why there is nothing to read, or the summaries, each opening its
-/// reading's own page, then each week against the expected result.
-fn laid_out(cards: [Markup; 5]) -> Markup {
-    let [none, resting, hrv, stress, each_week] = cards;
-    detail::page(
-        PATH,
-        TITLE,
-        None,
-        &html! {
-            (none)
-            section.card.tile.summary-of {
-                a.row href=(crate::resting::PATH) { (resting) }
-                a.row href=(crate::hrv::PATH) { (hrv) }
-                div.row { (stress) }
-            }
-            (each_week)
-        },
-    )
+/// The page: why there is nothing to read, or each week against the
+/// expected result.
+fn laid_out(cards: [Markup; 2]) -> Markup {
+    let [none, each_week] = cards;
+    detail::page(PATH, TITLE, None, &html! { (none) (each_week) })
 }
 
 /// Each response reading week by week against the expected result.
@@ -187,13 +176,7 @@ pub struct Page;
 
 impl crate::card::Page for Page {
     const ROUTE: &'static str = PATH;
-    type Cards = (
-        NoMacrocycle,
-        summary::RestingHeartRate,
-        summary::OvernightHrv,
-        summary::Stress,
-        EachWeek,
-    );
+    type Cards = (NoMacrocycle, EachWeek);
 
     fn asked(
         _path: &axum::extract::RawPathParams,
@@ -202,7 +185,7 @@ impl crate::card::Page for Page {
         Ok(Self)
     }
 
-    fn layout(&self, cards: [Markup; 5]) -> Markup {
+    fn layout(&self, cards: [Markup; 2]) -> Markup {
         laid_out(cards)
     }
 }
@@ -221,7 +204,7 @@ mod tests {
     use jiff::civil::{Date, date};
 
     use super::{each_week, laid_out};
-    use crate::{progress::no_macrocycle, summary};
+    use crate::progress::no_macrocycle;
 
     /// What the page's cards read, on a day.
     struct Shown {
@@ -232,17 +215,8 @@ mod tests {
     /// The page as its cards draw it from `shown`.
     fn body(shown: &Shown) -> String {
         let frame = shown.frame.as_ref();
-        let summary = |at: usize| {
-            frame
-                .zip(shown.responses.get(at))
-                .and_then(|(frame, one)| summary::responding(one, frame.began, TODAY))
-                .unwrap_or_default()
-        };
         laid_out([
             no_macrocycle(frame),
-            summary(0),
-            summary(1),
-            summary(2),
             frame
                 .map(|frame| each_week(&shown.responses, frame, TODAY))
                 .unwrap_or_default(),
@@ -325,35 +299,22 @@ mod tests {
         }
     }
 
-    /// **It opens on Progress's three summaries** (#787), each opening its
-    /// reading's own page where it has one, then the weeks.
+    /// **The charts, not their summaries** (operator, 2026-11-20): Progress's
+    /// cards simplify these charts, so they are not repeated above them.
     #[test]
-    fn it_opens_on_the_summaries_each_opening_its_page() {
+    fn it_is_the_charts_and_not_their_summaries() {
         let page = body(&autumn());
-        let order = [
-            "<h1>Resting heart rate, HRV and stress</h1>",
-            r#"<a class="row" href="/resting-heart-rate">"#,
-            "<b>+1.2 bpm</b><span>since the start</span>",
-            "expected −1.5 bpm",
-            r#"<a class="row" href="/hrv">"#,
-            "<b>−3.8 ms</b>",
-            "expected +5.2 ms",
-            r#"<div class="row">"#,
-            ">Stress<",
-            "expected −2.6",
-            "Each week against the expected result",
-        ];
-        let mut from = 0;
-        for said in order {
-            let at = page[from..]
-                .find(said)
-                .unwrap_or_else(|| panic!("{said} after {from}: {page}"));
-            from += at + said.len();
-        }
+        assert!(
+            page.contains("<h1>Resting heart rate, HRV and stress</h1>"),
+            "{page}"
+        );
         assert!(
             !page.contains(r#"<p class="group">"#),
             "the page is the whole group: {page}"
         );
+        for gone in [r#"class="reading"#, r#"class="trace""#, "since the start"] {
+            assert!(!page.contains(gone), "{gone}: {page}");
+        }
     }
 
     #[test]
@@ -405,8 +366,7 @@ mod tests {
         );
     }
 
-    /// **A reading with nothing to show is left out**, its summary and its
-    /// chart both.
+    /// **A reading with nothing to show is left out.**
     #[test]
     fn a_reading_with_nothing_to_show_is_left_out() {
         let mut shown = autumn();
@@ -414,7 +374,6 @@ mod tests {
             stress.response = None;
         }
         let page = body(&shown);
-        assert!(!page.contains(">Stress<"), "{page}");
         assert_eq!(
             page.matches("<svg viewBox=\"0 0 412 230\"").count(),
             2,

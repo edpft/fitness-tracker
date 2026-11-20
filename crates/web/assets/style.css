@@ -206,7 +206,7 @@ main.progress h2.group, main.plan h2.group { font-size: 13px; font-weight: 600; 
 .card.tile { margin-bottom: 12px; }
 .card.tile h3 { font-size: 15px; font-weight: 600; margin: 0 0 2px; }
 a.row { display: block; color: inherit; text-decoration: none; }
-.card.tile > .row:has(.reading) ~ .row .reading { border-top: 1px solid var(--grid); }
+a.row:has(.reading) ~ a.row .reading { border-top: 1px solid var(--grid); }
 /* A tile is laid out around its readings' summary cards (#830), so one none
    of them drew anything for is hidden, as is a group with nothing left. */
 section.card.tile:not(:has(.reading)) { display: none; }
@@ -253,8 +253,6 @@ p.test { display: inline-block; margin: 0 0 8px; }
 ol.sets { margin: 0; font-variant-numeric: tabular-nums; }
 main.history p.sub + section.card { margin-top: 14px; }
 
-/* Observations singled out, ringed. */
-.plotted .ring { fill: none; stroke: var(--ink); stroke-width: 1.5; }
 
 /* One figure in more than one unit: one chart card, its unit a choice. */
 .card.choice .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }

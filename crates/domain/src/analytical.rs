@@ -19,7 +19,6 @@ pub mod ftp_test;
 pub mod gap;
 pub mod heart_rate;
 pub mod heart_rate_at_power;
-pub mod hrv;
 pub mod nutrition_phase;
 pub mod one_rep_max;
 pub mod per_device;
