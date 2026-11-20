@@ -31,7 +31,7 @@ use configurator::{
     analyses::{FitnessSoFar, Macrocycle, Responses},
     held::Of,
 };
-use domain::analytical::{range::Range, response::Week};
+use domain::analytical::{range::Range, response::Response};
 use jiff::civil::Date;
 use maud::{Markup, html};
 
@@ -274,7 +274,7 @@ fn each_week(responses: &[Responding], frame: &Frame, today: Date) -> Markup {
                 @if let Some(response) = &one.response {
                     @let (label, written) = answering(one.reading);
                     div class=(written.metric.class()) {
-                        (detail::drawn(&weeks(one.reading, label, written, &response.weeks, &mesocycles, range, today)))
+                        (detail::drawn(&weeks(one.reading, label, written, response, &mesocycles, range, today)))
                     }
                 }
             }
@@ -290,11 +290,12 @@ fn weeks(
     reading: Answering,
     label: &'static str,
     written: Written,
-    runs: &[Vec<Week>],
+    response: &Response,
     mesocycles: &[(Date, Date, String)],
     range: Range,
     today: Date,
 ) -> Chart<'static> {
+    let runs = &response.weeks;
     let traced = runs
         .iter()
         .map(|run| {
@@ -354,6 +355,7 @@ fn weeks(
             Layer::Spans(mesocycles.to_vec()),
             Layer::Trend(traced),
             Layer::Aim(expected),
+            Layer::Moving(response.moving.clone()),
         ],
         days,
     }
@@ -400,6 +402,7 @@ mod tests {
     use application::working::{Answering, Frame, Performance, Responding, Tested};
     use domain::{
         analytical::{
+            gap::{Moving, Stretch},
             range::Range,
             response::{Change, Response, Week},
             since_entry::SinceEntry,
@@ -464,6 +467,18 @@ mod tests {
                         expected: Some(before + expected),
                     })
                     .collect(),
+            ],
+            moving: vec![
+                Stretch {
+                    from: BEGAN,
+                    to: date(2026, 11, 5),
+                    moving: Moving::Diverging,
+                },
+                Stretch {
+                    from: date(2026, 11, 5),
+                    to: TODAY,
+                    moving: Moving::Converging,
+                },
             ],
         }
     }
@@ -565,6 +580,30 @@ mod tests {
         assert!(page.contains("week to 20 Sep"), "{page}");
         assert!(
             page.contains("52.2 bpm ± 2.1 · expected 49.5 bpm"),
+            "{page}"
+        );
+    }
+
+    /// **Each says whether it is tracking expected** (#874): the latest
+    /// stretch above its chart, and each stretch beneath it.
+    #[test]
+    fn each_response_says_whether_it_is_tracking_expected() {
+        let page = body(&autumn()).into_string();
+
+        assert_eq!(
+            page.matches("<b>Converging on expected</b><span>since 5 Nov</span>")
+                .count(),
+            3,
+            "{page}"
+        );
+        assert_eq!(
+            page.matches(r#"class="stretch diverging""#).count(),
+            3,
+            "{page}"
+        );
+        assert_eq!(
+            page.matches(r#"class="stretch converging""#).count(),
+            3,
             "{page}"
         );
     }

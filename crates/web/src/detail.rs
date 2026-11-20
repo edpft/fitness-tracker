@@ -16,6 +16,7 @@
 
 use domain::analytical::{
     body_weight::Direction,
+    gap::{Moving, Stretch},
     per_device::SentBy,
     range::{Over, Range},
 };
@@ -267,6 +268,10 @@ pub enum Layer {
     Bars(Vec<(Date, f64, f64)>),
     /// What was intended, dashed, one line per stretch a plan states it.
     Aim(Vec<Vec<(Date, f64)>>),
+    /// Whether the reading is tracking the expected line, diverging from it
+    /// or converging on it (#874): the latest stretch said above the chart,
+    /// and every stretch in a strip beneath it.
+    Moving(Vec<Stretch>),
 }
 
 impl Layer {
@@ -275,7 +280,7 @@ impl Layer {
             Self::Dots(dots) | Self::Hollow(dots) | Self::Rings(dots) | Self::Solid(dots) => {
                 dots.iter().map(|(_, value)| *value).collect()
             }
-            Self::Spans(_) => Vec::new(),
+            Self::Spans(_) | Self::Moving(_) => Vec::new(),
             Self::Trend(runs) => runs
                 .iter()
                 .flatten()
@@ -405,13 +410,74 @@ pub fn drawn(chart: &Chart<'_>) -> Markup {
     let values: Vec<f64> = chart.layers.iter().flat_map(Layer::values).collect();
     let low = values.iter().copied().reduce(f64::min).filter(|_| recorded);
     let high = values.iter().copied().reduce(f64::max);
-    let body = low.zip(high).map_or_else(
-        || html! { p.sub { "Nothing in this range." } },
-        |(low, high)| plotted(chart, &framed(chart.range, chart.axis, low, high)),
-    );
+    let frame = low
+        .zip(high)
+        .map(|(low, high)| framed(chart.range, chart.axis, low, high));
+    let moving = chart.layers.iter().find_map(|layer| match layer {
+        Layer::Moving(stretches) => Some(stretches.as_slice()),
+        _ => None,
+    });
     html! {
         p.sub { (chart.sub) }
-        (body)
+        @if let Some(latest) = moving.and_then(<[Stretch]>::last) {
+            (headline(latest, chart.range.to))
+        }
+        @match &frame {
+            None => p.sub { "Nothing in this range." },
+            Some(frame) => {
+                (plotted(chart, frame))
+                @if let Some(stretches) = moving {
+                    (strip(stretches, frame))
+                }
+            }
+        }
+    }
+}
+
+/// What a stretch is called, beneath the chart.
+const fn called(moving: Moving) -> &'static str {
+    match moving {
+        Moving::Tracking => "tracking",
+        Moving::Diverging => "diverging",
+        Moving::Converging => "converging",
+    }
+}
+
+/// The latest stretch, as the answer now: since its turn, or over its days
+/// where the line stopped more than a week before `today`.
+fn headline(latest: &Stretch, today: Date) -> Markup {
+    let said = match latest.moving {
+        Moving::Tracking => "Tracking expected",
+        Moving::Diverging => "Diverging from expected",
+        Moving::Converging => "Converging on expected",
+    };
+    let when = if days_between(latest.to, today) > 7 {
+        format!("{} to {}", day(latest.from, today), day(latest.to, today))
+    } else {
+        format!("since {}", day(latest.from, today))
+    };
+    html! {
+        div.moving { b { (said) } span { (when) } }
+    }
+}
+
+const STRIP: f64 = 30.0;
+
+/// Each stretch in the chart's range, a bar coloured by which way it went
+/// under the days it covers, named where there is room.
+fn strip(stretches: &[Stretch], frame: &Frame) -> Markup {
+    let range = frame.range;
+    html! {
+        svg.strip viewBox=(format!("0 0 {WIDTH} {STRIP}")) aria-hidden="true" {
+            @for stretch in stretches.iter().filter(|one| one.to >= range.from && one.from <= range.to) {
+                @let (left, right) = (frame.x(stretch.from.max(range.from)), frame.x(stretch.to.min(range.to)));
+                @let width = (right - left - 2.0).max(1.0);
+                rect class=(format!("stretch {}", called(stretch.moving))) x=(format!("{left:.1}")) y="2" width=(format!("{width:.1}")) height="10" rx="3" {}
+                @if width > 44.0 {
+                    text.tick x=(format!("{:.1}", f64::midpoint(left, right))) y=(STRIP - 4.0) text-anchor="middle" { (called(stretch.moving)) }
+                }
+            }
+        }
     }
 }
 
@@ -517,7 +583,7 @@ fn plotted(chart: &Chart<'_>, frame: &Frame) -> Markup {
                                 polyline.aim points=(run.iter().map(|(on, value)| format!("{:.1},{:.1}", frame.x(*on), frame.y(*value))).collect::<Vec<_>>().join(" ")) {}
                             }
                         }
-                        Layer::Reference(_) | Layer::Spans(_) => {}
+                        Layer::Reference(_) | Layer::Spans(_) | Layer::Moving(_) => {}
                     }
                 }
             }

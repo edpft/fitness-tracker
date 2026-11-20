@@ -349,6 +349,7 @@ mod tests {
                     })
                     .collect(),
             ],
+            moving: Vec::new(),
         }
     }
 

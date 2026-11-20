@@ -150,6 +150,19 @@ svg.reference { margin-top: 12px; }
 .plotted .day:hover .tip, .plotted .day:hover .cross,
 .plotted .day input:checked ~ .tip, .plotted .day input:checked ~ .cross { display: block; }
 
+/* Tracking expected, diverging from it or converging on it (#874): the
+   latest said above the chart, every stretch in a strip beneath it. Nothing
+   marks which is good, since the expectation is a hypothesis: the reading's
+   own colour, faint where it converges, and grey where it tracks. */
+.moving { margin: 2px 0 4px; }
+.moving b { display: block; font-size: 17px; font-weight: 600; }
+.moving span { font-size: 14px; color: var(--ink2); }
+svg.strip { display: block; width: calc(100% + 36px); height: auto; margin: 0 -18px; }
+svg.strip .tick { fill: var(--muted); font-size: 12px; }
+svg.strip .stretch.diverging { fill: var(--c); }
+svg.strip .stretch.converging { fill: var(--c); fill-opacity: 0.45; }
+svg.strip .stretch.tracking { fill: var(--muted); fill-opacity: 0.5; }
+
 /* The latest entries. */
 .latest .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .latest .head h2 { margin: 0; }
