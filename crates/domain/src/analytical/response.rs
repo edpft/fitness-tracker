@@ -42,7 +42,7 @@ use jiff::civil::Date;
 use super::{
     composition::mean,
     confidence::Noise,
-    gap::{Stretch, stretches},
+    gap::{Gap, Stretch, stretches},
     range::Range,
     training_done::Carried,
 };
@@ -153,8 +153,9 @@ pub struct Response {
     pub change: Option<Change>,
     /// The week to each day since the start, oldest first, as unbroken runs.
     pub weeks: Vec<Vec<Week>>,
-    /// Whether each day's reading has got closer to the weeks' expected
-    /// result or further from it (#874), one line since the start.
+    /// Whether the weeks have tracked their expected result, diverged from
+    /// it, or are diverging from or converging on it (#874, #888), one line
+    /// since the start.
     pub moving: Vec<Stretch>,
 }
 
@@ -223,12 +224,18 @@ pub fn response(
     if !run.is_empty() {
         weeks.push(run);
     }
-    let line: Vec<(Date, f64)> = weeks
+    let line: Vec<Gap> = weeks
         .iter()
         .flatten()
-        .filter_map(|week| Some((week.to, week.expected?)))
+        .filter_map(|week| {
+            Some(Gap {
+                on: week.to,
+                by: week.read - week.expected?,
+                margin: week.margin?,
+            })
+        })
         .collect();
-    let moving = stretches(days, &[line]);
+    let moving = stretches(&[line], i32::try_from(WEEK_DAYS).ok()?);
 
     Some(Response {
         before,

@@ -1,38 +1,48 @@
-//! Whether a response reading is tracking its expected result, diverging
-//! from it or converging on it (#874).
+//! Whether a response reading is tracking its expected result, has diverged
+//! from it, is diverging from it or is converging on it (#874, #888).
 //!
 //! The operator, 2026-11-19: *"am I moving towards or away from that?"*, and
 //! of the response readings, *"we have the right model for response metrics
-//! with tracking, diverging, or converging"*. **Neither side of the line is
-//! better**: the expectation is a hypothesis, not a goal. Body weight and
-//! composition, which are progress towards a goal, are #881.
+//! with tracking, diverging, or converging"*; 2026-11-20: *"we're missing a
+//! diverged state where the outcome isn't tracking but also isn't diverging
+//! or converging"*. **Neither side of the line is better**: the expectation
+//! is a hypothesis, not a goal. Body weight and composition, which are
+//! progress towards a goal, are #881.
 //!
-//! **Joinpoint regression on each day's reading less expected**: the gap is
-//! split where its direction turned, the stretches meeting at each turn. A
-//! stretch that ends nearer the line than it began, by more than its slope's
-//! noise, is converging; one that ends further from it is diverging; anything
-//! else is tracking: a gap that holds, or a reading that wavers across the
-//! line and ends about as far from it as it began. The stretch since the last turn is
-//! the answer now. A fixed window was
-//! mocked and rejected: a straight line through a window averages away a
-//! turn.
+//! **Judged on the line the page draws**: the mean of the week to each day
+//! less where the expected line puts it, split wherever that line restarts
+//! (operator, 2026-11-19), so that a choice of where the line starts (#875)
+//! changes what is judged with it. Nightly readings were judged until #888,
+//! and their noise hid every turn the weekly line shows.
 //!
-//! **Judged against the line the page draws**, split wherever that line
-//! restarts (operator, 2026-11-19), so that a choice of where the line starts
-//! (#875) changes what is judged with it.
+//! **Segmented regression on that gap**: the days are split into stretches,
+//! each its own straight line, by the least squares over every way of
+//! splitting them (dynamic programming, so no limit on the turns), and the
+//! number of stretches is the one the Bayesian information criterion
+//! prefers. The criterion finds where the line bends; whether a bend is told
+//! from noise is each stretch's slope, and a week's mean shares its days with
+//! the six before it, so a slope's noise counts a week of readings as one.
+//! Counting them as one in the criterion too found no turn at all in
+//! overnight HRV's weekly line. Then each stretch:
 //!
-//! **Not ruled by the operator**: a stretch is at least [`LEAST_DAYS`], at
-//! most [`MOST_TURNS`] turns are looked for, and a turn is kept only where the
-//! Bayesian information criterion prefers it.
-
-use std::collections::BTreeMap;
+//! - **converging** where it ends nearer the line than it began, by more than
+//!   its slope's noise, and **diverging** where it ends further from it;
+//! - otherwise **diverged** where it is off the line by more than the band
+//!   drawn about the reading at both ends, on the same side;
+//! - otherwise **tracking**: on the line within noise, or wavering across it
+//!   and ending about as far from it as it began.
+//!
+//! Neighbouring stretches in the same state are one stretch. The stretch since
+//! the last turn is the answer now. A fixed window was mocked and rejected: a
+//! straight line through a window averages away a turn.
+//!
+//! **Not ruled by the operator**: a stretch is at least [`LEAST_DAYS`], and
+//! its slope must clear its 95% band to be told from noise.
 
 use jiff::civil::Date;
 
 /// The shortest stretch, in days.
 const LEAST_DAYS: i32 = 7;
-/// The most turns looked for along one line.
-const MOST_TURNS: usize = 3;
 /// How many standard errors a stretch's slope must clear to be told from
 /// noise: its 95% band.
 const Z: f64 = 1.96;
@@ -40,12 +50,25 @@ const Z: f64 = 1.96;
 /// How a reading moved against its expectation over a stretch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Moving {
-    /// The gap neither grew nor shrank by more than noise.
+    /// On the line within noise, the gap neither growing nor shrinking.
     Tracking,
+    /// Off the line by more than noise, the gap neither growing nor
+    /// shrinking.
+    Diverged,
     /// The gap grew.
     Diverging,
     /// The gap shrank.
     Converging,
+}
+
+/// One day's reading against where the expected line puts it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Gap {
+    pub on: Date,
+    /// The reading less expected.
+    pub by: f64,
+    /// How far either side of the reading its band runs.
+    pub margin: f64,
 }
 
 /// Days over which the gap went one way, the last day of one the first of
@@ -57,81 +80,139 @@ pub struct Stretch {
     pub moving: Moving,
 }
 
-/// Each stretch of each line, oldest first: `readings` one figure a day, and
-/// `lines` the expectation, one entry per line drawn, each from where it
-/// starts.
+/// Each stretch of each line, oldest first: `lines` one gap a day, one entry
+/// per line drawn, each from where it starts, and each reading the mean of
+/// `spanning` days to its own.
 ///
 /// A line with fewer than [`LEAST_DAYS`] between its first and last reading
 /// is not judged.
-pub fn stretches(readings: &BTreeMap<Date, f64>, lines: &[Vec<(Date, f64)>]) -> Vec<Stretch> {
+pub fn stretches(lines: &[Vec<Gap>], spanning: i32) -> Vec<Stretch> {
     lines
         .iter()
-        .flat_map(|line| judged(readings, line).unwrap_or_default())
+        .flat_map(|line| merged(judged(line, spanning).unwrap_or_default()))
         .collect()
 }
 
-/// One line's stretches.
-fn judged(readings: &BTreeMap<Date, f64>, line: &[(Date, f64)]) -> Option<Vec<Stretch>> {
-    let (start, _) = *line.first()?;
-    let points: Vec<(i32, f64)> = line
+/// Neighbouring stretches in the same state as one.
+fn merged(stretches: Vec<Stretch>) -> Vec<Stretch> {
+    let mut into: Vec<Stretch> = Vec::with_capacity(stretches.len());
+    for stretch in stretches {
+        match into.last_mut() {
+            Some(last) if last.moving == stretch.moving => last.to = stretch.to,
+            _ => into.push(stretch),
+        }
+    }
+    into
+}
+
+/// One line's stretches, before merging.
+fn judged(line: &[Gap], spanning: i32) -> Option<Vec<Stretch>> {
+    let start = line.first()?.on;
+    let points: Vec<(f64, &Gap)> = line
         .iter()
-        .filter_map(|(on, expected)| {
-            let read = readings.get(on)?;
-            Some((days(start, *on)?, read - expected))
-        })
-        .collect();
+        .map(|gap| Some((f64::from(days(start, gap.on)?), gap)))
+        .collect::<Option<_>>()?;
     let (first, _) = *points.first()?;
     let (last, _) = *points.last()?;
-    if last - first < LEAST_DAYS - 1 {
+    if last - first < f64::from(LEAST_DAYS - 1) {
         return None;
     }
     let sums = Sums::of(&points);
-    let candidates: Vec<i32> = (first + LEAST_DAYS..=last - LEAST_DAYS).collect();
-    let mut best: Option<(f64, Fit)> = None;
-    for turns in sets(&candidates, MOST_TURNS) {
-        let Some(fit) = Fit::of(&sums, &turns) else {
-            continue;
-        };
-        let count = sums.count;
-        // A slope and a level, and a day and a change of slope for each turn.
-        let parameters = turns.iter().fold(2.0, |sum, _| sum + 2.0);
-        let criterion = count.mul_add(
-            (fit.residual.max(f64::MIN_POSITIVE) / count).ln(),
-            parameters * count.ln(),
-        );
-        if best.as_ref().is_none_or(|(least, _)| criterion < *least) {
-            best = Some((criterion, fit));
+    let count = points.len();
+    let shortest = f64::from(LEAST_DAYS - 1);
+    // A stretch from point `from` to point `to`, both included, where it is
+    // long enough.
+    let fits = |from: usize, to: usize| {
+        let (&(begin, _), &(end, _)) = (points.get(from)?, points.get(to)?);
+        (end - begin >= shortest).then(|| sums.between(from, to).residual())
+    };
+
+    // best[k][to]: the least residual splitting points 0..=to into k + 1
+    // stretches, and where the last of them starts.
+    let mut best: Vec<Vec<Option<(f64, usize)>>> = Vec::new();
+    best.push((0..count).map(|to| fits(0, to).map(|r| (r, 0))).collect());
+    loop {
+        let before = best.last()?;
+        let next: Vec<Option<(f64, usize)>> = (0..count)
+            .map(|to| {
+                (1..=to)
+                    .filter_map(|from| {
+                        let (earlier, _) = (*before.get(from - 1)?)?;
+                        Some((earlier + fits(from, to)?, from))
+                    })
+                    .min_by(|(one, _), (other, _)| one.total_cmp(other))
+            })
+            .collect();
+        if next.last()?.is_none() {
+            break;
         }
+        best.push(next);
     }
-    let (_, fit) = best?;
-    let bounds: Vec<i32> = std::iter::once(first)
-        .chain(fit.turns.iter().copied())
-        .chain(std::iter::once(last))
-        .collect();
+
+    // A level and a slope for each stretch, and a day for each turn.
+    let criterion = |stretches: usize, residual: f64| {
+        let parameters = f64::from(u32::try_from(3 * stretches - 1).ok()?);
+        Some(sums.count.mul_add(
+            (residual.max(f64::MIN_POSITIVE) / sums.count).ln(),
+            parameters * sums.count.ln(),
+        ))
+    };
+    let (chosen, residual) = best
+        .iter()
+        .enumerate()
+        .filter_map(|(k, row)| {
+            let (residual, _) = (*row.last()?)?;
+            Some((k, residual, criterion(k + 1, residual)?))
+        })
+        .min_by(|(_, _, one), (_, _, other)| one.total_cmp(other))
+        .map(|(k, residual, _)| (k, residual))?;
+
+    let mut bounds = vec![count];
+    let mut to = count - 1;
+    for row in best.iter().take(chosen + 1).rev() {
+        let (_, from) = (*row.get(to)?)?;
+        bounds.push(from);
+        to = from.saturating_sub(1);
+    }
+    bounds.reverse();
+
+    let stretches = chosen + 1;
+    let free = sums.count - f64::from(u32::try_from(2 * stretches).ok()?);
+    let variance = if free > 0.0 { residual / free } else { 0.0 } * f64::from(spanning.max(1));
+    let mut met = start;
     bounds
         .windows(2)
         .map(|pair| {
-            let (&from, &to) = (pair.first()?, pair.last()?);
-            let error = fit.slope_error(from)?;
+            let (&from, &until) = (pair.first()?, pair.last()?);
+            let to = until - 1;
+            let segment = sums.between(from, to);
+            let (&(begin, open), &(end, close)) = (points.get(from)?, points.get(to)?);
+            let (level, slope) = segment.line()?;
+            let (opened, closed) = (slope.mul_add(begin, level), slope.mul_add(end, level));
             // How much further from the line the stretch ends than it began,
             // against the noise of its slope over its days: a reading that
             // crosses the line ends about as far from it as it began.
-            let across = f64::from(to - from);
-            let (first, last) = (fit.level(f64::from(from)), fit.level(f64::from(to)));
-            let grew = last.abs() - first.abs();
-            let noise = Z * error * across;
+            let grew = closed.abs() - opened.abs();
+            let noise = Z * (variance / segment.spread()).sqrt() * (end - begin);
             let moving = if grew < -noise {
                 Moving::Converging
             } else if grew > noise {
                 Moving::Diverging
+            } else if opened.signum() == closed.signum()
+                && opened.abs() > open.margin
+                && closed.abs() > close.margin
+            {
+                Moving::Diverged
             } else {
                 Moving::Tracking
             };
-            Some(Stretch {
-                from: on(start, from)?,
-                to: on(start, to)?,
+            let stretch = Stretch {
+                from: if from == 0 { open.on } else { met },
+                to: close.on,
                 moving,
-            })
+            };
+            met = close.on;
+            Some(stretch)
         })
         .collect()
 }
@@ -140,264 +221,98 @@ fn days(from: Date, to: Date) -> Option<i32> {
     from.until(to).ok().map(|span| span.get_days())
 }
 
-fn on(start: Date, day: i32) -> Option<Date> {
-    start.checked_add(jiff::Span::new().days(day)).ok()
-}
-
-/// Every set of up to `most` turns from `candidates`, each at least
-/// [`LEAST_DAYS`] after the one before, the empty set first.
-fn sets(candidates: &[i32], most: usize) -> Vec<Vec<i32>> {
-    fn grow(candidates: &[i32], most: usize, from: &[i32], into: &mut Vec<Vec<i32>>) {
-        into.push(from.to_vec());
-        if from.len() == most {
-            return;
-        }
-        let after = from.last().map(|last| last + LEAST_DAYS);
-        for (index, at) in candidates.iter().enumerate() {
-            if after.is_some_and(|after| *at < after) {
-                continue;
-            }
-            let mut next = from.to_vec();
-            next.push(*at);
-            grow(
-                candidates.get(index + 1..).unwrap_or_default(),
-                most,
-                &next,
-                into,
-            );
-        }
-    }
-    let mut into = Vec::new();
-    grow(candidates, most, &[], &mut into);
-    into
-}
-
-/// Sums over the points from each one on, so that a fit is a handful of
-/// sums rather than a pass over every day.
+/// Running sums of the points, so that any stretch's fit is a difference of
+/// two entries rather than a pass over its days.
 struct Sums {
-    /// The points' days, ascending.
-    days: Vec<f64>,
-    /// From each point on: its count, Σx, Σx², Σy and Σxy; one more entry,
-    /// all zero, past the last.
-    from: Vec<[f64; 5]>,
+    /// Up to each point: its count, Σx, Σx², Σy, Σxy and Σy²; one more
+    /// entry, all zero, before the first.
+    upto: Vec<Moments>,
     count: f64,
-    squares: f64,
+}
+
+/// The sums one stretch's straight line is fitted from.
+#[derive(Clone, Copy, Default)]
+struct Moments {
+    count: f64,
+    xs: f64,
+    xxs: f64,
+    ys: f64,
+    xys: f64,
+    yys: f64,
 }
 
 impl Sums {
-    fn of(points: &[(i32, f64)]) -> Self {
-        let mut from = vec![[0.0; 5]];
-        for (day, y) in points.iter().rev() {
-            let x = f64::from(*day);
-            let [count, xs, squares, ys, products] = from.last().copied().unwrap_or_default();
-            from.push([
-                count + 1.0,
-                xs + x,
-                x.mul_add(x, squares),
-                ys + y,
-                x.mul_add(*y, products),
-            ]);
-        }
-        from.reverse();
-        let [count, ..] = from.first().copied().unwrap_or_default();
-        Self {
-            days: points.iter().map(|(x, _)| f64::from(*x)).collect(),
-            from,
-            count,
-            squares: points.iter().map(|(_, y)| y * y).sum(),
-        }
-    }
-
-    /// The sums over the points after day `after`.
-    fn after(&self, after: f64) -> [f64; 5] {
-        let index = self.days.partition_point(|x| *x <= after);
-        self.from.get(index).copied().unwrap_or_default()
-    }
-}
-
-/// One column of the fit: a constant, or a hinge rising one a day from a day.
-#[derive(Clone, Copy)]
-enum Column {
-    Constant,
-    /// Zero up to its day, then the days since. From day zero, the day itself.
-    Hinge(f64),
-}
-
-impl Column {
-    /// The sum of this column times `other` over every point.
-    fn with(self, other: Self, sums: &Sums) -> f64 {
-        match (self, other) {
-            (Self::Constant, Self::Constant) => sums.count,
-            (Self::Constant, Self::Hinge(at)) | (Self::Hinge(at), Self::Constant) => {
-                let [count, xs, ..] = sums.after(at);
-                at.mul_add(-count, xs)
-            }
-            (Self::Hinge(one), Self::Hinge(other)) => {
-                let [count, xs, squares, ..] = sums.after(one.max(other));
-                (one * other).mul_add(count, (one + other).mul_add(-xs, squares))
-            }
-        }
-    }
-
-    /// The sum of this column times the gap over every point.
-    fn with_gap(self, sums: &Sums) -> f64 {
-        match self {
-            Self::Constant => {
-                let [_, _, _, ys, _] = sums.after(f64::NEG_INFINITY);
-                ys
-            }
-            Self::Hinge(at) => {
-                let [_, _, _, ys, products] = sums.after(at);
-                at.mul_add(-ys, products)
-            }
-        }
-    }
-
-    fn at(self, day: f64) -> f64 {
-        match self {
-            Self::Constant => 1.0,
-            Self::Hinge(at) => (day - at).max(0.0),
-        }
-    }
-}
-
-/// Least squares through the gap, continuous, its slope changing at each
-/// turn.
-struct Fit {
-    turns: Vec<i32>,
-    columns: Vec<Column>,
-    coefficients: Vec<f64>,
-    /// The coefficients' covariance, less the residual variance.
-    inverse: Vec<Vec<f64>>,
-    residual: f64,
-    /// The residual variance.
-    variance: f64,
-}
-
-impl Fit {
-    fn of(sums: &Sums, turns: &[i32]) -> Option<Self> {
-        let columns: Vec<Column> = [Column::Constant, Column::Hinge(0.0)]
-            .into_iter()
-            .chain(turns.iter().map(|at| Column::Hinge(f64::from(*at))))
-            .collect();
-        let free = columns.iter().fold(sums.count, |left, _| left - 1.0);
-        if free < 1.0 {
-            return None;
-        }
-        let crossed: Vec<Vec<f64>> = columns
-            .iter()
-            .map(|one| columns.iter().map(|other| one.with(*other, sums)).collect())
-            .collect();
-        let inverse = inverted(crossed)?;
-        let against: Vec<f64> = columns.iter().map(|one| one.with_gap(sums)).collect();
-        let coefficients: Vec<f64> = inverse.iter().map(|row| dot(row, &against)).collect();
-        let residual = (sums.squares - dot(&coefficients, &against)).max(0.0);
-        Some(Self {
-            turns: turns.to_vec(),
-            columns,
-            coefficients,
-            inverse,
-            residual,
-            variance: residual / free,
-        })
-    }
-
-    /// The fitted gap on a day.
-    fn level(&self, day: f64) -> f64 {
-        self.columns
-            .iter()
-            .zip(&self.coefficients)
-            .map(|(column, coefficient)| coefficient * column.at(day))
-            .sum()
-    }
-
-    /// The standard error of the slope of the stretch that starts on day
-    /// `from`, which is the day's coefficient and every turn's up to `from`.
-    fn slope_error(&self, from: i32) -> Option<f64> {
-        let from = f64::from(from);
-        let weights: Vec<f64> = self
-            .columns
-            .iter()
-            .map(|column| match column {
-                Column::Constant => 0.0,
-                Column::Hinge(at) => {
-                    if *at <= from {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
-            })
-            .collect();
-        let spread: f64 = self
-            .inverse
-            .iter()
-            .zip(&weights)
-            .map(|(row, weight)| weight * dot(row, &weights))
-            .sum();
-        (spread >= 0.0).then(|| (spread * self.variance).sqrt())
-    }
-}
-
-fn dot(one: &[f64], other: &[f64]) -> f64 {
-    one.iter().zip(other).map(|(a, b)| a * b).sum()
-}
-
-/// The inverse by Gauss–Jordan elimination; `None` where it is singular.
-fn inverted(mut matrix: Vec<Vec<f64>>) -> Option<Vec<Vec<f64>>> {
-    let size = matrix.len();
-    let mut inverse: Vec<Vec<f64>> = (0..size)
-        .map(|row| {
-            (0..size)
-                .map(|column| f64::from(u8::from(row == column)))
-                .collect()
-        })
-        .collect();
-    for column in 0..size {
-        let pivot = (column..size).max_by(|one, other| {
-            let size = |row: &usize| {
-                matrix
-                    .get(*row)
-                    .and_then(|row| row.get(column))
-                    .map_or(0.0, |value| value.abs())
+    fn of(points: &[(f64, &Gap)]) -> Self {
+        let mut upto = vec![Moments::default()];
+        let mut running = Moments::default();
+        for (x, gap) in points {
+            let y = gap.by;
+            running = Moments {
+                count: running.count + 1.0,
+                xs: running.xs + x,
+                xxs: x.mul_add(*x, running.xxs),
+                ys: running.ys + y,
+                xys: x.mul_add(y, running.xys),
+                yys: y.mul_add(y, running.yys),
             };
-            size(one).total_cmp(&size(other))
-        })?;
-        matrix.swap(column, pivot);
-        inverse.swap(column, pivot);
-        let scale = *matrix.get(column)?.get(column)?;
-        if scale.abs() < 1e-9 {
-            return None;
+            upto.push(running);
         }
-        for row in [matrix.get_mut(column)?, inverse.get_mut(column)?] {
-            for value in row.iter_mut() {
-                *value /= scale;
-            }
-        }
-        let (by_matrix, by_inverse) = (matrix.get(column)?.clone(), inverse.get(column)?.clone());
-        for row in (0..size).filter(|row| *row != column) {
-            let factor = *matrix.get(row)?.get(column)?;
-            for (target, by) in [
-                (matrix.get_mut(row)?, &by_matrix),
-                (inverse.get_mut(row)?, &by_inverse),
-            ] {
-                target
-                    .iter_mut()
-                    .zip(by)
-                    .for_each(|(value, by)| *value = factor.mul_add(-by, *value));
-            }
+        Self {
+            upto,
+            count: running.count,
         }
     }
-    Some(inverse)
+
+    /// The sums over points `from` to `to`, both included.
+    fn between(&self, from: usize, to: usize) -> Moments {
+        let (Some(after), Some(before)) = (self.upto.get(to + 1), self.upto.get(from)) else {
+            return Moments::default();
+        };
+        Moments {
+            count: after.count - before.count,
+            xs: after.xs - before.xs,
+            xxs: after.xxs - before.xxs,
+            ys: after.ys - before.ys,
+            xys: after.xys - before.xys,
+            yys: after.yys - before.yys,
+        }
+    }
+}
+
+impl Moments {
+    /// Σ(x − x̄)².
+    fn spread(&self) -> f64 {
+        self.xs.mul_add(-self.xs / self.count, self.xxs)
+    }
+
+    /// The least-squares line: its level at day zero and its slope.
+    fn line(&self) -> Option<(f64, f64)> {
+        let spread = self.spread();
+        if self.count < 2.0 || spread <= 0.0 {
+            return None;
+        }
+        let slope = self.xs.mul_add(-self.ys / self.count, self.xys) / spread;
+        Some((slope.mul_add(-self.xs, self.ys) / self.count, slope))
+    }
+
+    /// The squares left about the least-squares line.
+    fn residual(&self) -> f64 {
+        let spread = self.spread();
+        let across = self.ys.mul_add(-self.ys / self.count, self.yys);
+        let explained = self.xs.mul_add(-self.ys / self.count, self.xys);
+        if spread > 0.0 {
+            (across - explained * explained / spread).max(0.0)
+        } else {
+            across.max(0.0)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use jiff::civil::{Date, date};
 
-    use super::{Moving, Stretch, stretches};
+    use super::{Gap, Moving, Stretch, merged, stretches};
 
     const START: Date = date(2026, 9, 28);
 
@@ -407,67 +322,75 @@ mod tests {
             .expect("a day")
     }
 
-    /// A flat expectation of zero over `length` days, and a reading of
-    /// `gap` on each, with a beat of day-to-day noise.
-    fn read(length: i32, gap: impl Fn(i32) -> f64) -> (BTreeMap<Date, f64>, Vec<(Date, f64)>) {
-        let readings = (0..length)
+    /// `gap` on each of `length` days, with a beat of day-to-day noise, and a
+    /// band of `margin` either side.
+    fn read(length: i32, margin: f64, gap: impl Fn(i32) -> f64) -> Vec<Gap> {
+        (0..length)
             .map(|index| {
                 let wobble = if index % 2 == 0 { 0.1 } else { -0.1 };
-                (day(index), gap(index) + wobble)
+                Gap {
+                    on: day(index),
+                    by: gap(index) + wobble,
+                    margin,
+                }
             })
-            .collect();
-        let line = (0..length).map(|index| (day(index), 0.0)).collect();
-        (readings, line)
+            .collect()
+    }
+
+    fn states(found: &[Stretch]) -> Vec<Moving> {
+        found.iter().map(|one| one.moving).collect()
     }
 
     /// **A turn is found where the gap turned**: away from expected for
-    /// three weeks, then back towards it.
+    /// three weeks, then back towards it, the two stretches meeting there.
     #[test]
     fn a_gap_that_turns_is_two_stretches() {
-        let (readings, line) = read(42, |index| {
+        let line = read(42, 0.3, |index| {
             if index < 21 {
                 0.1f64.mul_add(f64::from(index), 0.5)
             } else {
                 0.1f64.mul_add(-f64::from(index - 21), 2.6)
             }
         });
-        let found = stretches(&readings, &[line]);
+        let found = stretches(&[line], 1);
         assert_eq!(
-            found,
-            vec![
-                Stretch {
-                    from: day(0),
-                    to: day(21),
-                    moving: Moving::Diverging,
-                },
-                Stretch {
-                    from: day(21),
-                    to: day(41),
-                    moving: Moving::Converging,
-                },
-            ]
+            states(&found),
+            vec![Moving::Diverging, Moving::Converging],
+            "{found:?}"
         );
+        let turn = found.first().map(|one| one.to).expect("a turn");
+        assert!((day(20)..=day(22)).contains(&turn), "{found:?}");
+        assert_eq!(found.get(1).map(|one| one.from), Some(turn));
+        assert_eq!(found.last().map(|one| one.to), Some(day(41)));
     }
 
-    /// **A gap that holds is tracking**, and noise alone finds no turn.
+    /// **A gap that holds within the band is tracking**, and noise alone
+    /// finds no turn.
     #[test]
-    fn noise_alone_is_no_change() {
-        let (readings, line) = read(28, |_| 0.5);
-        let found = stretches(&readings, &[line]);
-        assert_eq!(found.len(), 1, "{found:?}");
-        assert_eq!(found.first().map(|one| one.moving), Some(Moving::Tracking));
+    fn holding_on_the_line_is_tracking() {
+        let found = stretches(&[read(28, 1.0, |_| 0.5)], 1);
+        assert_eq!(states(&found), vec![Moving::Tracking], "{found:?}");
+    }
+
+    /// **A gap that holds beyond the band has diverged**: off the line and
+    /// neither moving away from it nor back.
+    #[test]
+    fn holding_off_the_line_has_diverged() {
+        let found = stretches(&[read(28, 1.0, |_| -3.0)], 1);
+        assert_eq!(states(&found), vec![Moving::Diverged], "{found:?}");
     }
 
     /// **Below expected and rising is converging**: which way converges
     /// depends on which side of the line the reading is.
     #[test]
     fn converging_is_towards_the_line_from_either_side() {
-        let (readings, line) = read(21, |index| 0.1f64.mul_add(f64::from(index), -3.0));
-        let found = stretches(&readings, &[line]);
-        assert_eq!(
-            found.first().map(|one| one.moving),
-            Some(Moving::Converging)
+        let found = stretches(
+            &[read(21, 0.3, |index| {
+                0.1f64.mul_add(f64::from(index), -3.0)
+            })],
+            1,
         );
+        assert_eq!(states(&found), vec![Moving::Converging], "{found:?}");
     }
 
     /// **A reading that crosses the line and ends as far from it is
@@ -475,20 +398,76 @@ mod tests {
     /// result read as converging on it.
     #[test]
     fn crossing_the_line_is_tracking_it() {
-        let (readings, line) = read(21, |index| 0.1f64.mul_add(f64::from(index), -1.0));
-        let found = stretches(&readings, &[line]);
-        assert_eq!(found.first().map(|one| one.moving), Some(Moving::Tracking));
+        let found = stretches(
+            &[read(21, 0.3, |index| {
+                0.1f64.mul_add(f64::from(index), -1.0)
+            })],
+            1,
+        );
+        assert_eq!(states(&found), vec![Moving::Tracking], "{found:?}");
     }
 
     /// **A reading that overshoots the line has still converged**: resting
     /// heart rate coming back after 4 November ends just past its line.
     #[test]
     fn overshooting_the_line_is_converging() {
-        let (readings, line) = read(21, |index| 0.2f64.mul_add(-f64::from(index), 3.0));
-        let found = stretches(&readings, &[line]);
+        let found = stretches(
+            &[read(21, 0.3, |index| {
+                0.2f64.mul_add(-f64::from(index), 3.0)
+            })],
+            1,
+        );
+        assert_eq!(states(&found), vec![Moving::Converging], "{found:?}");
+    }
+
+    /// **As many turns as the gap took**: the operator's reading of
+    /// overnight HRV is five stretches, one more than three turns allowed.
+    #[test]
+    fn every_turn_is_found() {
+        let line = read(75, 0.5, |index| {
+            let at = f64::from(index);
+            match index {
+                0..15 => 0.0,
+                15..30 => 0.4 * (at - 15.0),
+                30..45 => 0.4f64.mul_add(-(at - 30.0), 6.0),
+                45..60 => 0.4 * (at - 45.0),
+                _ => 0.4f64.mul_add(-(at - 60.0), 6.0),
+            }
+        });
+        let found = stretches(&[line], 1);
         assert_eq!(
-            found.first().map(|one| one.moving),
-            Some(Moving::Converging)
+            states(&found),
+            vec![
+                Moving::Tracking,
+                Moving::Diverging,
+                Moving::Converging,
+                Moving::Diverging,
+                Moving::Converging,
+            ],
+            "{found:?}"
+        );
+    }
+
+    /// **Neighbours in the same state are one stretch**: stress was two
+    /// stretches of tracking meeting on 2 November.
+    #[test]
+    fn neighbours_in_one_state_are_one_stretch() {
+        let stretch = |from, to, moving| Stretch {
+            from: day(from),
+            to: day(to),
+            moving,
+        };
+        let found = merged(vec![
+            stretch(0, 10, Moving::Tracking),
+            stretch(10, 20, Moving::Tracking),
+            stretch(20, 30, Moving::Diverging),
+        ]);
+        assert_eq!(
+            found,
+            vec![
+                stretch(0, 20, Moving::Tracking),
+                stretch(20, 30, Moving::Diverging),
+            ]
         );
     }
 
@@ -496,9 +475,9 @@ mod tests {
     /// a restart, and a line too short to judge has none.
     #[test]
     fn each_line_is_judged_on_its_own() {
-        let (readings, line) = read(30, |index| 0.1f64.mul_add(f64::from(index), 0.5));
+        let line = read(30, 0.3, |index| 0.1f64.mul_add(f64::from(index), 0.5));
         let (early, late) = line.split_at(5);
-        let found = stretches(&readings, &[early.to_vec(), late.to_vec()]);
+        let found = stretches(&[early.to_vec(), late.to_vec()], 1);
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(found.first().map(|one| one.from), Some(day(5)));
     }
