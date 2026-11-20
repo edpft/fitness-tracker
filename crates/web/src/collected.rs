@@ -25,7 +25,7 @@ struct Row {
 fn chart(path: &str) -> Option<Scope> {
     use crate::card::{reads, scope};
     Some(match path {
-        crate::working::PATH => scope(&reads::<crate::working::Page>()),
+        crate::response::PATH => scope(&reads::<crate::response::Page>()),
         crate::at_power::PATH => scope(&reads::<crate::at_power::Page>()),
         crate::ftp::PATH => scope(&reads::<crate::ftp::Page>()),
         crate::body::PATH => scope(&reads::<crate::body::Page>()),

@@ -19,7 +19,7 @@ use application::{
     per_device::PerDevice,
     pulse_wave_velocity::PulseWaveVelocities,
     sleep::Sleeping,
-    working::{self, Frame, Framed, Performance, Responding, SoFar, Tested},
+    working::{self, Frame, Framed, Performance, Responding},
 };
 use domain::{
     analytical::{
@@ -67,15 +67,6 @@ pub type Response = Option<Framed<Responding>>;
 
 /// Every response reading over the macrocycle in force.
 pub type ResponsesRead = Option<Framed<Vec<Responding>>>;
-
-/// Every test since its entry test, each estimate since the start, and every
-/// response reading: what fitness so far is read from.
-type Performed = (
-    Arc<Option<SinceEntry>>,
-    Arc<Option<SinceStart>>,
-    Arc<Vec<Performance>>,
-    Arc<ResponsesRead>,
-);
 
 /// Every canonical weigh-in, and the trend through them.
 pub struct BodyWeight;
@@ -659,32 +650,6 @@ composed!(
     )
 );
 
-composed!(
-    /// Has this macrocycle improved my fitness so far? The FTP test with heart
-    /// rate at 140 W beside it, each lift, and each response reading.
-    FitnessSoFar: Option<Framed<SoFar>> = |(ftp, at_power, gym, responses): Performed| {
-        let responses = responses.as_ref().as_ref()?;
-        let cycling = Performance {
-            tested: Tested::Ftp,
-            since: *ftp,
-            estimated: *at_power,
-        };
-        Some(Framed {
-            frame: responses.frame.clone(),
-            read: SoFar {
-                performance: std::iter::once(cycling).chain(gym.iter().copied()).collect(),
-                responses: responses.read.clone(),
-            },
-        })
-    },
-    from (
-        Of<FtpSinceEntry>,
-        Of<AtPowerSinceStart>,
-        Of<GymPerformance>,
-        Of<Responses>,
-    )
-);
-
 /// The heart rate each FTP test was ridden at, and the days the tests span,
 /// which its chart is drawn over so it lines up with the tests'.
 #[derive(PartialEq, Eq)]
@@ -873,7 +838,6 @@ pub(crate) fn derivations() -> [application::graph::Derivation; Analysis::ALL.le
         derivation::<FatFreeSinceStart>(),
         derivation::<GymPerformance>(),
         derivation::<Responses>(),
-        derivation::<FitnessSoFar>(),
         derivation::<HeartRatesOverTests>(),
         derivation::<Body>(),
     ]

@@ -62,8 +62,6 @@ pub struct Frame {
     pub today: Date,
     /// The days of each of its mesocycles, oldest first.
     pub mesocycles: Vec<Span>,
-    /// The first day of the macrocycle before it, where there was one.
-    pub last_began: Option<Date>,
 }
 
 impl Frame {
@@ -72,16 +70,10 @@ impl Frame {
     #[must_use]
     pub fn on(today: Date, plans: &[Plan]) -> Option<Self> {
         let plan = plans.iter().find(|plan| plan.span().covers(today))?;
-        let began = plan.span().start();
         Some(Self {
-            began,
+            began: plan.span().start(),
             today,
             mesocycles: plan.mesocycle_spans(),
-            last_began: plans
-                .iter()
-                .map(|plan| plan.span().start())
-                .filter(|start| *start < began)
-                .max(),
         })
     }
 }
@@ -92,14 +84,6 @@ impl Frame {
 pub struct Framed<T> {
     pub frame: Frame,
     pub read: T,
-}
-
-/// Has this macrocycle improved my fitness so far? Every test, with the
-/// estimate beside it, and every response reading.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SoFar {
-    pub performance: Vec<Performance>,
-    pub responses: Vec<Responding>,
 }
 
 /// What a test measures.

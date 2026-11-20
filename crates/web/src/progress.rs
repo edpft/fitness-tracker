@@ -2,8 +2,8 @@
 //!
 //! **A tile is the headline; its page holds the detail** (operator,
 //! 2026-11-12): *"Don't try and force it, the extra detail can live on the
-//! page."* Each row opens its own page until a set read together has a page of
-//! its own (#786, #787).
+//! page."* Each row opens its own page, or its set's where the set is read
+//! together on one page (#786, #787).
 //!
 //! **Progress is measured against the plan or what is expected**, the plan
 //! being the training in the macrocycle. Drawn as mock 3, which he approved
@@ -14,9 +14,8 @@
 //! - **Body weight and composition**, one tile: body weight's trend since the
 //!   start against where the plan's aims would have taken it, fat and
 //!   fat-free mass as bars.
-//! - **Resting heart rate, HRV and stress**, one tile: each week since the
-//!   start against the expected result of the training done, as `/working`
-//!   draws them, so the movement shows as well as the gap.
+//! - **Resting heart rate, HRV and stress**, one tile: each against the
+//!   expected result of the training done, every row opening `/response`.
 //! - **Health** at the bottom, as links: sleep and pulse wave velocity are
 //!   held against guidelines or cohorts, not the training.
 //!
@@ -88,9 +87,9 @@ fn laid_out(cards: [Markup; 10]) -> Markup {
                     div.cards {
                         h2.group { (Group::Response.heading()) }
                         section.card.tile {
-                            (linked(crate::resting::PATH, &resting))
-                            (linked(crate::hrv::PATH, &hrv))
-                            (linked(crate::working::PATH, &stress))
+                            (linked(crate::response::PATH, &resting))
+                            (linked(crate::response::PATH, &hrv))
+                            (linked(crate::response::PATH, &stress))
                         }
                     }
                     (health())
@@ -364,7 +363,6 @@ mod tests {
                     Span::new(date(2026, 9, 28), 4),
                     Span::new(date(2026, 10, 26), 4),
                 ],
-                last_began: None,
             }),
             performance: vec![
                 Performance {
@@ -501,11 +499,9 @@ mod tests {
             "expected −1.8 kg",
             r#"<a class="row" href="/body">"#,
             "<b>−0.8 kg</b>",
-            r#"<a class="row" href="/resting-heart-rate">"#,
+            r#"<a class="row" href="/response">"#,
             "<b>+1.4 bpm</b><span>since the start</span>",
             "expected −1.4 bpm",
-            r#"<a class="row" href="/hrv">"#,
-            r#"<a class="row" href="/working">"#,
             r#"<a href="/sleep">Sleep</a>"#,
             r#"<a href="/pulse-wave-velocity">Pulse wave velocity</a>"#,
         ] {
@@ -545,13 +541,18 @@ mod tests {
     }
 
     /// **Every page under Progress is opened from it**, now its list of links
-    /// is gone (#768).
+    /// is gone (#768), or from its group's page, which is (#787).
     #[test]
     fn every_page_under_progress_is_opened_from_it() {
         let page = body(&autumn());
+        let opened = |path: &str| page.contains(&format!(r#"href="{path}""#));
         for one in PAGES.iter().filter(|one| one.place == Place::Progress) {
+            let group_page = PAGES.iter().find(|page| {
+                one.group
+                    .is_some_and(|group| page.group == Some(group) && page.name == group.heading())
+            });
             assert!(
-                page.contains(&format!(r#"href="{}""#, one.path)),
+                opened(one.path) || group_page.is_some_and(|page| opened(page.path)),
                 "{} is not opened from Progress: {page}",
                 one.path
             );

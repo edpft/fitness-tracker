@@ -33,13 +33,13 @@ mod pulse_wave_velocity;
 mod range;
 mod report;
 mod reporting;
+mod response;
 mod resting;
 mod run;
 mod schedule;
 mod sleep;
 mod summary;
 mod weight;
-mod working;
 mod workout;
 
 use std::{
@@ -205,7 +205,7 @@ fn pages() -> Pages {
         .cards::<resting::Page>()
         .cards::<sleep::Page>()
         .cards::<one_rep_max::Page>()
-        .cards::<working::Page>()
+        .cards::<response::Page>()
         .cards::<progress::Page>()
         .page::<history::Page>()
         .page::<history::Opened>()
@@ -845,7 +845,7 @@ mod tests {
 
     /// **A night of HRV redraws the HRV cards and no other** (#830): its
     /// response is a node of its own, so resting heart rate and stress, on
-    /// Progress and on /working, are served as they were.
+    /// Progress and on /response, are served as they were.
     #[test]
     fn a_night_of_hrv_redraws_only_the_cards_reading_hrv() {
         let graph = configurator::graph::graph();
@@ -863,9 +863,8 @@ mod tests {
             [
                 "hrv-latest",
                 "hrv-nights",
+                "response-each-week",
                 "summary-overnight-hrv",
-                "working-each-week",
-                "working-so-far",
             ]
         );
     }

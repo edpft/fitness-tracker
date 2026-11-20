@@ -116,9 +116,6 @@ pub enum Analysis {
     GymPerformance,
     /// Each response reading over the macrocycle, read together.
     Responses,
-    /// Whether the macrocycle has improved his fitness so far: every test
-    /// and every response reading.
-    FitnessSoFar,
     /// The heart rate each FTP test was ridden at, over the days the tests
     /// span.
     HeartRatesOverTests,
@@ -127,7 +124,7 @@ pub enum Analysis {
 }
 
 impl Analysis {
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 35] = [
         Self::BodyWeight,
         Self::Composition,
         Self::Plans,
@@ -161,7 +158,6 @@ impl Analysis {
         Self::FatFreeSinceStart,
         Self::GymPerformance,
         Self::Responses,
-        Self::FitnessSoFar,
         Self::HeartRatesOverTests,
         Self::Body,
     ];
@@ -202,7 +198,6 @@ impl Analysis {
             Self::FatFreeSinceStart => "fat-free since start",
             Self::GymPerformance => "gym performance",
             Self::Responses => "responses",
-            Self::FitnessSoFar => "fitness so far",
             Self::HeartRatesOverTests => "heart rates over tests",
             Self::Body => "body",
         }
