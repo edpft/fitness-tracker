@@ -9,6 +9,7 @@
 mod at_power;
 mod body;
 mod card;
+mod change;
 mod collected;
 mod composition;
 mod curves;
@@ -205,6 +206,8 @@ fn pages() -> Pages {
         .cards::<progress::Page>()
         .page::<history::Page>()
         .page::<history::Opened>()
+        .form(change::ROUTE, get(change::shown).post(change::posted))
+        .form(change::CHANGED, get(change::made))
         .file(body::REPLACED[0], get(to_body))
         .file(body::REPLACED[1], get(to_body))
         .form("/equipment", get(equipment_page).post(equipment_post))
