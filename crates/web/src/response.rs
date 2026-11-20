@@ -9,8 +9,8 @@
 //! **A card for each reading** (operator, 2026-11-20), each week against the
 //! expected result: the reading as the mean of the week to each day since the
 //! macrocycle began, its noise as a band, the
-//! expected result as a dashed line, and whether it is tracking, diverging
-//! from or converging on it (#874), with the mesocycles marked behind.
+//! expected result as a dashed line, and whether it is tracking, has
+//! diverged from, or is diverging from or converging on it (#874, #888), with the mesocycles marked behind.
 //!
 //! **The charts here, their summaries on Progress** (operator, 2026-11-20):
 //! Progress's three cards are simplifications of these charts, read from the

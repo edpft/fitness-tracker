@@ -266,8 +266,9 @@ pub enum Layer {
     Bars(Vec<(Date, f64, f64)>),
     /// What was intended, dashed, one line per stretch a plan states it.
     Aim(Vec<Vec<(Date, f64)>>),
-    /// Whether the reading is tracking the expected line, diverging from it
-    /// or converging on it (#874): the latest stretch said above the chart,
+    /// Whether the reading is tracking the expected line, has diverged from
+    /// it, or is diverging from or converging on it (#874, #888): the latest
+    /// stretch said above the chart,
     /// and every stretch in a strip beneath it.
     Moving(Vec<Stretch>),
 }
@@ -436,6 +437,7 @@ pub fn drawn(chart: &Chart<'_>) -> Markup {
 const fn called(moving: Moving) -> &'static str {
     match moving {
         Moving::Tracking => "tracking",
+        Moving::Diverged => "diverged",
         Moving::Diverging => "diverging",
         Moving::Converging => "converging",
     }
@@ -446,6 +448,7 @@ const fn called(moving: Moving) -> &'static str {
 fn headline(latest: &Stretch, today: Date) -> Markup {
     let said = match latest.moving {
         Moving::Tracking => "Tracking expected",
+        Moving::Diverged => "Diverged from expected",
         Moving::Diverging => "Diverging from expected",
         Moving::Converging => "Converging on expected",
     };
