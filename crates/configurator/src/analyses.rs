@@ -66,9 +66,6 @@ pub type Lifts = (Vec<Tests>, View);
 /// is in force.
 pub type Response = Option<Framed<Responding>>;
 
-/// Every response reading over the macrocycle in force.
-pub type ResponsesRead = Option<Framed<Vec<Responding>>>;
-
 /// Every canonical weigh-in, and the trend through them.
 pub struct BodyWeight;
 
@@ -626,30 +623,6 @@ composed!(
     from (Of<Macrocycle>, Of<Strength>)
 );
 
-composed!(
-    /// Each response reading over the macrocycle there is, in order.
-    Responses: ResponsesRead = |(frame, resting, hrv, stress): (
-        Arc<Option<Frame>>,
-        Arc<Response>,
-        Arc<Response>,
-        Arc<Response>,
-    )| {
-        frame.as_ref().as_ref().map(|frame| Framed {
-            frame: frame.clone(),
-            read: [resting, hrv, stress]
-                .iter()
-                .filter_map(|one| Some(one.as_ref().as_ref()?.read.clone()))
-                .collect(),
-        })
-    },
-    from (
-        Of<Macrocycle>,
-        Of<RestingHeartRateResponse>,
-        Of<OvernightHrvResponse>,
-        Of<StressResponse>,
-    )
-);
-
 /// The heart rate each FTP test was ridden at, and the days the tests span,
 /// which its chart is drawn over so it lines up with the tests'.
 #[derive(PartialEq, Eq)]
@@ -837,7 +810,6 @@ pub(crate) fn derivations() -> [application::graph::Derivation; Analysis::ALL.le
         derivation::<FatSinceStart>(),
         derivation::<FatFreeSinceStart>(),
         derivation::<GymPerformance>(),
-        derivation::<Responses>(),
         derivation::<HeartRatesOverTests>(),
         derivation::<Body>(),
     ]

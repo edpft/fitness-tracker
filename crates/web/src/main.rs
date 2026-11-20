@@ -854,7 +854,7 @@ mod tests {
             .filter(|(_, reads)| graph.moved_by(reads).contains(&night))
             .map(|(name, _)| *name)
             .collect();
-        assert_eq!(redrawn, ["response-each-week", "summary-overnight-hrv",]);
+        assert_eq!(redrawn, ["response-overnight-hrv", "summary-overnight-hrv"]);
     }
 
     /// **A gym session made canonical redraws the home page's cards** (#830):

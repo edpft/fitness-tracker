@@ -6,8 +6,9 @@
 //! answers whether each is where the training done expects it to be, and
 //! whether it is moving towards that or away from it.
 //!
-//! **Each week against the expected result**: each reading as the mean of
-//! the week to each day since the macrocycle began, its noise as a band, the
+//! **A card for each reading** (operator, 2026-11-20), each week against the
+//! expected result: the reading as the mean of the week to each day since the
+//! macrocycle began, its noise as a band, the
 //! expected result as a dashed line, and whether it is tracking, diverging
 //! from or converging on it (#874), with the mesocycles marked behind.
 //!
@@ -23,7 +24,10 @@
 use std::{collections::HashMap, sync::Arc};
 
 use application::working::{Answering, Frame, Framed, Responding};
-use configurator::{analyses::Responses, held::Of};
+use configurator::{
+    analyses::{OvernightHrvResponse, RestingHeartRateResponse, StressResponse},
+    held::Of,
+};
 use domain::analytical::{range::Range, response::Response};
 use jiff::civil::Date;
 use maud::{Markup, html};
@@ -41,51 +45,84 @@ pub const PATH: &str = "/response";
 /// What the page is called: its group's heading, since it is the whole group.
 pub const TITLE: &str = Group::Response.heading();
 
-/// The page: why there is nothing to read, or each week against the
-/// expected result.
-fn laid_out(cards: [Markup; 2]) -> Markup {
-    let [none, each_week] = cards;
-    detail::page(PATH, TITLE, None, &html! { (none) (each_week) })
+/// The page: why there is nothing to read, or a card for each reading.
+fn laid_out(cards: [Markup; 4]) -> Markup {
+    let [none, resting, hrv, stress] = cards;
+    detail::page(
+        PATH,
+        TITLE,
+        None,
+        &html! { (none) (resting) (hrv) (stress) },
+    )
 }
 
-/// Each response reading week by week against the expected result.
-pub struct EachWeek;
+macro_rules! weekly_card {
+    ($(#[$meta:meta])* $card:ident, $name:literal, $node:ty) => {
+        $(#[$meta])*
+        pub struct $card;
 
-impl Card for EachWeek {
-    const NAME: &'static str = "response-each-week";
-    type Reads = Of<Responses>;
+        impl Card for $card {
+            const NAME: &'static str = $name;
+            type Reads = Of<$node>;
 
-    fn asked(_: &HashMap<String, String>) -> Self {
-        Self
-    }
+            fn asked(_: &HashMap<String, String>) -> Self {
+                Self
+            }
 
-    fn render(&self, read: Arc<Option<Framed<Vec<Responding>>>>) -> Markup {
-        read.as_ref().as_ref().map_or_else(
-            || html! {},
-            |read| each_week(&read.read, &read.frame, read.frame.today),
-        )
-    }
+            fn render(&self, read: Arc<Option<Framed<Responding>>>) -> Markup {
+                read.as_ref().as_ref().map_or_else(
+                    || html! {},
+                    |read| card(&read.read, &read.frame, read.frame.today),
+                )
+            }
+        }
+    };
 }
 
-/// The second card: each response reading week by week against the expected
-/// result.
-fn each_week(responses: &[Responding], frame: &Frame, today: Date) -> Markup {
+weekly_card!(
+    /// Resting heart rate each week against the expected result.
+    RestingHeartRate,
+    "response-resting-heart-rate",
+    RestingHeartRateResponse
+);
+weekly_card!(
+    /// Overnight HRV each week against the expected result.
+    OvernightHrv,
+    "response-overnight-hrv",
+    OvernightHrvResponse
+);
+weekly_card!(
+    /// Stress each week against the expected result.
+    Stress,
+    "response-stress",
+    StressResponse
+);
+
+/// One reading's card: its weeks against the expected result, the
+/// mesocycles behind; nothing where there is no response to read.
+fn card(one: &Responding, frame: &Frame, today: Date) -> Markup {
+    let Some(response) = &one.response else {
+        return html! {};
+    };
     let range = Range {
         from: frame.began,
         to: today,
     };
     let mesocycles = detail::mesocycles(&frame.mesocycles, range);
+    let (label, written) = answering(one.reading);
+    let chart = weeks(
+        one.reading,
+        label,
+        written,
+        response,
+        &mesocycles,
+        range,
+        today,
+    );
     html! {
-        section.card.weeks {
-            h2 { "Each week against the expected result" }
-            @for one in responses {
-                @if let Some(response) = &one.response {
-                    @let (label, written) = answering(one.reading);
-                    div class=(written.metric.class()) {
-                        (detail::drawn(&weeks(one.reading, label, written, response, &mesocycles, range, today)))
-                    }
-                }
-            }
+        section class=(format!("card weeks {}", written.metric.class())) {
+            h2 { (label) }
+            (detail::drawn(&chart))
             p.marks {
                 span { i.read {} "the week to each day, and its noise" }
                 span { i.dash {} "expected from the training done" }
@@ -153,9 +190,9 @@ fn weeks(
         metric: written.metric,
         title: label,
         sub: if written.unit.is_empty() {
-            label.to_owned()
+            "Each week against the expected result".to_owned()
         } else {
-            format!("{label} · {}", written.unit)
+            format!("Each week against the expected result · {}", written.unit)
         },
         range,
         axis: Axis::Figures,
@@ -176,7 +213,7 @@ pub struct Page;
 
 impl crate::card::Page for Page {
     const ROUTE: &'static str = PATH;
-    type Cards = (NoMacrocycle, EachWeek);
+    type Cards = (NoMacrocycle, RestingHeartRate, OvernightHrv, Stress);
 
     fn asked(
         _path: &axum::extract::RawPathParams,
@@ -185,7 +222,7 @@ impl crate::card::Page for Page {
         Ok(Self)
     }
 
-    fn layout(&self, cards: [Markup; 2]) -> Markup {
+    fn layout(&self, cards: [Markup; 4]) -> Markup {
         laid_out(cards)
     }
 }
@@ -203,7 +240,7 @@ mod tests {
     };
     use jiff::civil::{Date, date};
 
-    use super::{each_week, laid_out};
+    use super::{card, laid_out};
     use crate::progress::no_macrocycle;
 
     /// What the page's cards read, on a day.
@@ -215,13 +252,13 @@ mod tests {
     /// The page as its cards draw it from `shown`.
     fn body(shown: &Shown) -> String {
         let frame = shown.frame.as_ref();
-        laid_out([
-            no_macrocycle(frame),
+        let card = |at: usize| {
             frame
-                .map(|frame| each_week(&shown.responses, frame, TODAY))
-                .unwrap_or_default(),
-        ])
-        .into_string()
+                .zip(shown.responses.get(at))
+                .map(|(frame, one)| card(one, frame, TODAY))
+                .unwrap_or_default()
+        };
+        laid_out([no_macrocycle(frame), card(0), card(1), card(2)]).into_string()
     }
 
     const BEGAN: Date = date(2026, 9, 14);
@@ -315,6 +352,29 @@ mod tests {
         for gone in [r#"class="reading"#, r#"class="trace""#, "since the start"] {
             assert!(!page.contains(gone), "{gone}: {page}");
         }
+    }
+
+    /// **A card for each reading** (operator, 2026-11-20), where Progress
+    /// has one tile for the three.
+    #[test]
+    fn each_reading_is_its_own_card() {
+        let page = body(&autumn());
+        let order = [
+            r#"<section class="card weeks resting-heart-rate"><h2>Resting heart rate</h2>"#,
+            "Each week against the expected result · bpm",
+            r#"<section class="card weeks hrv"><h2>Overnight HRV</h2>"#,
+            "Each week against the expected result · ms",
+            r#"<section class="card weeks stress"><h2>Stress</h2>"#,
+            "Each week against the expected result",
+        ];
+        let mut from = 0;
+        for said in order {
+            let at = page[from..]
+                .find(said)
+                .unwrap_or_else(|| panic!("{said} after {from}: {page}"));
+            from += at + said.len();
+        }
+        assert_eq!(page.matches(r#"<p class="marks">"#).count(), 3, "{page}");
     }
 
     #[test]
