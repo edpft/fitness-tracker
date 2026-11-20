@@ -120,7 +120,7 @@ const fn metric(path: &'static str, name: &'static str, group: Group) -> Page {
 }
 
 /// Every page, in the order its place shows them.
-pub const PAGES: [Page; 15] = [
+pub const PAGES: [Page; 13] = [
     page("/", "Today", Place::Today),
     metric("/ftp", "FTP tests", Group::Performance),
     metric(
@@ -130,9 +130,11 @@ pub const PAGES: [Page; 15] = [
     ),
     metric("/estimated-1rm", "Estimated 1RM", Group::Performance),
     metric(crate::body::PATH, crate::body::TITLE, Group::Body),
-    metric("/resting-heart-rate", "Resting heart rate", Group::Response),
-    metric("/hrv", "Overnight HRV", Group::Response),
-    page("/working", "Is what I'm doing working?", Place::Progress),
+    metric(
+        crate::response::PATH,
+        crate::response::TITLE,
+        Group::Response,
+    ),
     metric("/sleep", "Sleep", Group::Health),
     metric("/pulse-wave-velocity", "Pulse wave velocity", Group::Health),
     page("/workout", "Workout", Place::Plan),

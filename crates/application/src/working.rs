@@ -29,10 +29,9 @@ use std::collections::BTreeMap;
 use domain::{
     analytical::{
         composition::{ComponentSeries, Unit},
-        ftp_test, heart_rate_at_power, hrv, one_rep_max,
+        ftp_test, heart_rate_at_power, one_rep_max,
         per_device::{DeviceSeries, SentBy},
         response::{Response, response},
-        resting,
         since_entry::{SinceEntry, since_entry},
         since_start::{SinceStart, since_start},
         stress,
@@ -40,6 +39,7 @@ use domain::{
     },
     body::Component,
     gym::exercise::RepsExercise,
+    measure::{BeatsPerMinute, HeartRateVariability},
     plan::{Plan, Span},
     planner::Discipline,
 };
@@ -62,8 +62,6 @@ pub struct Frame {
     pub today: Date,
     /// The days of each of its mesocycles, oldest first.
     pub mesocycles: Vec<Span>,
-    /// The first day of the macrocycle before it, where there was one.
-    pub last_began: Option<Date>,
 }
 
 impl Frame {
@@ -72,16 +70,10 @@ impl Frame {
     #[must_use]
     pub fn on(today: Date, plans: &[Plan]) -> Option<Self> {
         let plan = plans.iter().find(|plan| plan.span().covers(today))?;
-        let began = plan.span().start();
         Some(Self {
-            began,
+            began: plan.span().start(),
             today,
             mesocycles: plan.mesocycle_spans(),
-            last_began: plans
-                .iter()
-                .map(|plan| plan.span().start())
-                .filter(|start| *start < began)
-                .max(),
         })
     }
 }
@@ -92,14 +84,6 @@ impl Frame {
 pub struct Framed<T> {
     pub frame: Frame,
     pub read: T,
-}
-
-/// Has this macrocycle improved my fitness so far? Every test, with the
-/// estimate beside it, and every response reading.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SoFar {
-    pub performance: Vec<Performance>,
-    pub responses: Vec<Responding>,
 }
 
 /// What a test measures.
@@ -155,14 +139,14 @@ pub struct Responding {
 /// against the training `carried`.
 #[must_use]
 pub fn resting(
-    trended: &[resting::Trended],
+    series: &[DeviceSeries<BeatsPerMinute>],
     carried: &Carried,
     began: Date,
     today: Date,
 ) -> Responding {
     responding(
         Answering::RestingHeartRate,
-        trended.iter().map(|one| &one.series),
+        series,
         |reading| f64::from(reading.as_u32()),
         carried,
         began,
@@ -174,14 +158,14 @@ pub fn resting(
 /// the training `carried`.
 #[must_use]
 pub fn overnight_hrv(
-    trended: &[hrv::Trended],
+    series: &[DeviceSeries<HeartRateVariability>],
     carried: &Carried,
     began: Date,
     today: Date,
 ) -> Responding {
     responding(
         Answering::OvernightHrv,
-        trended.iter().map(|one| &one.series),
+        series,
         |reading| f64::from(reading.as_milliseconds()),
         carried,
         began,

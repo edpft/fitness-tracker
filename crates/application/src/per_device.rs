@@ -5,11 +5,7 @@
 //! re-derives from them exactly (§ 5).
 
 use domain::{
-    analytical::{
-        hrv::Trended,
-        per_device::{DeviceSeries, per_device},
-        resting,
-    },
+    analytical::per_device::{DeviceSeries, per_device},
     device::Measurand,
     measure::{BeatsPerMinute, HeartRateVariability},
 };
@@ -67,21 +63,6 @@ where
             &register,
         ))
     }
-
-    /// Last night's average HRV, one series per watch, and the trend through
-    /// each (#417).
-    ///
-    /// # Errors
-    ///
-    /// [`StoreError`] if any store is unavailable.
-    pub async fn overnight_hrv_trend(&self) -> Result<Vec<Trended>, StoreError> {
-        Ok(self
-            .overnight_hrv()
-            .await?
-            .into_iter()
-            .map(Trended::of)
-            .collect())
-    }
 }
 
 impl<N, D, R, W> PerDevice<N, D, R, W>
@@ -105,20 +86,5 @@ where
             Measurand::HeartRate,
             &register,
         ))
-    }
-
-    /// Each day's resting heart rate, one series per watch, with its slow line
-    /// and the nights it flags (#417).
-    ///
-    /// # Errors
-    ///
-    /// [`StoreError`] if any store is unavailable.
-    pub async fn resting_heart_rate_trend(&self) -> Result<Vec<resting::Trended>, StoreError> {
-        Ok(self
-            .resting_heart_rate()
-            .await?
-            .into_iter()
-            .map(resting::Trended::of)
-            .collect())
     }
 }

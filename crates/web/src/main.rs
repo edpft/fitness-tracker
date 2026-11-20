@@ -21,7 +21,6 @@ mod equipment;
 mod ftp;
 mod history;
 mod home;
-mod hrv;
 mod illness;
 mod input;
 mod one_rep_max;
@@ -33,13 +32,12 @@ mod pulse_wave_velocity;
 mod range;
 mod report;
 mod reporting;
-mod resting;
+mod response;
 mod run;
 mod schedule;
 mod sleep;
 mod summary;
 mod weight;
-mod working;
 mod workout;
 
 use std::{
@@ -201,11 +199,9 @@ fn pages() -> Pages {
         .cards::<ftp::Page>()
         .cards::<body::Page>()
         .cards::<pulse_wave_velocity::Page>()
-        .cards::<hrv::Page>()
-        .cards::<resting::Page>()
         .cards::<sleep::Page>()
         .cards::<one_rep_max::Page>()
-        .cards::<working::Page>()
+        .cards::<response::Page>()
         .cards::<progress::Page>()
         .page::<history::Page>()
         .page::<history::Opened>()
@@ -845,7 +841,7 @@ mod tests {
 
     /// **A night of HRV redraws the HRV cards and no other** (#830): its
     /// response is a node of its own, so resting heart rate and stress, on
-    /// Progress and on /working, are served as they were.
+    /// Progress and on /response, are served as they were.
     #[test]
     fn a_night_of_hrv_redraws_only_the_cards_reading_hrv() {
         let graph = configurator::graph::graph();
@@ -858,16 +854,7 @@ mod tests {
             .filter(|(_, reads)| graph.moved_by(reads).contains(&night))
             .map(|(name, _)| *name)
             .collect();
-        assert_eq!(
-            redrawn,
-            [
-                "hrv-latest",
-                "hrv-nights",
-                "summary-overnight-hrv",
-                "working-each-week",
-                "working-so-far",
-            ]
-        );
+        assert_eq!(redrawn, ["response-overnight-hrv", "summary-overnight-hrv"]);
     }
 
     /// **A gym session made canonical redraws the home page's cards** (#830):
@@ -1000,7 +987,12 @@ mod tests {
                 .expect("a port");
             let address = listener.local_addr().expect("an address");
             tokio::spawn(async move { axum::serve(listener, super::app(runs)).await });
-            for path in ["/equipment", "/nowhere", "/history/2026-11-02/1", "/hrv"] {
+            for path in [
+                "/equipment",
+                "/nowhere",
+                "/history/2026-11-02/1",
+                "/response",
+            ] {
                 let mut stream = tokio::net::TcpStream::connect(address)
                     .await
                     .expect("a connection");
@@ -1048,7 +1040,7 @@ mod tests {
                 "{part}: {session:?}"
             );
         }
-        let chart = parts("/hrv");
+        let chart = parts("/response");
         assert!(chart.iter().any(|seen| seen == "checking"), "{chart:?}");
         // **No page load opens the store** (#663), neither drawing the page nor
         // checking whether a run is due: it was opened once, before serving.

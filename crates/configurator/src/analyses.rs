@@ -19,7 +19,7 @@ use application::{
     per_device::PerDevice,
     pulse_wave_velocity::PulseWaveVelocities,
     sleep::Sleeping,
-    working::{self, Frame, Framed, Performance, Responding, SoFar, Tested},
+    working::{self, Frame, Framed, Performance, Responding},
 };
 use domain::{
     analytical::{
@@ -27,9 +27,9 @@ use domain::{
         composition::ComponentSeries,
         ftp_test,
         heart_rate::RideHeartRate,
-        heart_rate_at_power, hrv,
+        heart_rate_at_power,
         per_device::{DeviceSeries, per_device},
-        pulse_wave_velocity, range, resting,
+        pulse_wave_velocity, range,
         since_entry::SinceEntry,
         since_start::SinceStart,
         sleep, stress,
@@ -38,6 +38,7 @@ use domain::{
     body::Component,
     cycling::Ftp,
     device::{self, Measurand},
+    measure::{BeatsPerMinute, HeartRateVariability},
     normalised::OperatorZone,
     schedule::DayPart,
 };
@@ -64,18 +65,6 @@ pub type Lifts = (Vec<Tests>, View);
 /// A response reading over the macrocycle in force: `None` on a day no plan
 /// is in force.
 pub type Response = Option<Framed<Responding>>;
-
-/// Every response reading over the macrocycle in force.
-pub type ResponsesRead = Option<Framed<Vec<Responding>>>;
-
-/// Every test since its entry test, each estimate since the start, and every
-/// response reading: what fitness so far is read from.
-type Performed = (
-    Arc<Option<SinceEntry>>,
-    Arc<Option<SinceStart>>,
-    Arc<Vec<Performance>>,
-    Arc<ResponsesRead>,
-);
 
 /// Every canonical weigh-in, and the trend through them.
 pub struct BodyWeight;
@@ -405,7 +394,7 @@ response!(
     working::stress
 );
 
-/// Last night's average HRV, one series per watch, and the trend through each.
+/// Last night's average HRV, one series per watch.
 pub struct OvernightHrv;
 
 impl Analysed for OvernightHrv {
@@ -417,7 +406,7 @@ impl Analysed for OvernightHrv {
         Spanned<GarminWear>,
     >;
     type Reads = ();
-    type Value = Vec<hrv::Trended>;
+    type Value = Vec<DeviceSeries<HeartRateVariability>>;
 
     async fn open(store: &Store, _: &OperatorZone) -> Result<Self::Ports, NextFailure> {
         Ok(PerDevice::new(
@@ -428,12 +417,11 @@ impl Analysed for OvernightHrv {
     }
 
     async fn derive(ports: Self::Ports, (): ()) -> Result<Self::Value, NextFailure> {
-        Ok(ports.overnight_hrv_trend().await?)
+        Ok(ports.overnight_hrv().await?)
     }
 }
 
-/// Each day's resting heart rate, one series per watch, with its slow line and
-/// the nights it flags.
+/// Each day's resting heart rate, one series per watch.
 pub struct RestingHeartRate;
 
 impl Analysed for RestingHeartRate {
@@ -445,7 +433,7 @@ impl Analysed for RestingHeartRate {
         Spanned<GarminWear>,
     >;
     type Reads = ();
-    type Value = Vec<resting::Trended>;
+    type Value = Vec<DeviceSeries<BeatsPerMinute>>;
 
     async fn open(store: &Store, _: &OperatorZone) -> Result<Self::Ports, NextFailure> {
         Ok(PerDevice::new(
@@ -456,7 +444,7 @@ impl Analysed for RestingHeartRate {
     }
 
     async fn derive(ports: Self::Ports, (): ()) -> Result<Self::Value, NextFailure> {
-        Ok(ports.resting_heart_rate_trend().await?)
+        Ok(ports.resting_heart_rate().await?)
     }
 }
 
@@ -633,56 +621,6 @@ composed!(
             })
         },
     from (Of<Macrocycle>, Of<Strength>)
-);
-
-composed!(
-    /// Each response reading over the macrocycle there is, in order.
-    Responses: ResponsesRead = |(frame, resting, hrv, stress): (
-        Arc<Option<Frame>>,
-        Arc<Response>,
-        Arc<Response>,
-        Arc<Response>,
-    )| {
-        frame.as_ref().as_ref().map(|frame| Framed {
-            frame: frame.clone(),
-            read: [resting, hrv, stress]
-                .iter()
-                .filter_map(|one| Some(one.as_ref().as_ref()?.read.clone()))
-                .collect(),
-        })
-    },
-    from (
-        Of<Macrocycle>,
-        Of<RestingHeartRateResponse>,
-        Of<OvernightHrvResponse>,
-        Of<StressResponse>,
-    )
-);
-
-composed!(
-    /// Has this macrocycle improved my fitness so far? The FTP test with heart
-    /// rate at 140 W beside it, each lift, and each response reading.
-    FitnessSoFar: Option<Framed<SoFar>> = |(ftp, at_power, gym, responses): Performed| {
-        let responses = responses.as_ref().as_ref()?;
-        let cycling = Performance {
-            tested: Tested::Ftp,
-            since: *ftp,
-            estimated: *at_power,
-        };
-        Some(Framed {
-            frame: responses.frame.clone(),
-            read: SoFar {
-                performance: std::iter::once(cycling).chain(gym.iter().copied()).collect(),
-                responses: responses.read.clone(),
-            },
-        })
-    },
-    from (
-        Of<FtpSinceEntry>,
-        Of<AtPowerSinceStart>,
-        Of<GymPerformance>,
-        Of<Responses>,
-    )
 );
 
 /// The heart rate each FTP test was ridden at, and the days the tests span,
@@ -872,8 +810,6 @@ pub(crate) fn derivations() -> [application::graph::Derivation; Analysis::ALL.le
         derivation::<FatSinceStart>(),
         derivation::<FatFreeSinceStart>(),
         derivation::<GymPerformance>(),
-        derivation::<Responses>(),
-        derivation::<FitnessSoFar>(),
         derivation::<HeartRatesOverTests>(),
         derivation::<Body>(),
     ]

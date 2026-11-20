@@ -23,7 +23,6 @@ mod gym_value_types;
 mod heart_rate;
 mod heart_rate_at_power;
 mod holidays;
-mod hrv;
 mod ladder;
 mod load_steps;
 mod macrocycle;
