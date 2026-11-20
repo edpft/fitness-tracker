@@ -25,12 +25,19 @@
 //! Counting them as one in the criterion too found no turn at all in
 //! overnight HRV's weekly line. Then each stretch:
 //!
-//! - **converging** where it ends nearer the line than it began, by more than
-//!   its slope's noise, and **diverging** where it ends further from it;
-//! - otherwise **diverged** where it is off the line by more than the band
-//!   drawn about the reading at both ends, on the same side;
-//! - otherwise **tracking**: on the line within noise, or wavering across it
-//!   and ending about as far from it as it began.
+//! - **tracking** where the line is within the band drawn about the reading
+//!   at both its ends: a movement inside the band is noise;
+//! - **diverging** where it leaves the band, and **converging** where it
+//!   comes back inside it;
+//! - off the line at both ends, **converging** where it ends nearer the line
+//!   than it began by more than its slope's noise, **diverging** where it ends
+//!   further from it, **diverged** where it holds on one side, and
+//!   **tracking** where it crossed the line and ends about as far from it as
+//!   it began.
+//!
+//! So converging ends on the line or nearer it, and diverging leaves it
+//! (operator, 2026-11-20: stress went tracking to converging without
+//! diverging, when only the gap's movement inside its band was judged).
 //!
 //! Neighbouring stretches in the same state are one stretch. The stretch since
 //! the last turn is the answer now. A fixed window was mocked and rejected: a
@@ -194,17 +201,15 @@ fn judged(line: &[Gap], spanning: i32) -> Option<Vec<Stretch>> {
             // crosses the line ends about as far from it as it began.
             let grew = closed.abs() - opened.abs();
             let noise = Z * (variance / segment.spread()).sqrt() * (end - begin);
-            let moving = if grew < -noise {
-                Moving::Converging
-            } else if grew > noise {
-                Moving::Diverging
-            } else if opened.signum() == closed.signum()
-                && opened.abs() > open.margin
-                && closed.abs() > close.margin
-            {
-                Moving::Diverged
-            } else {
-                Moving::Tracking
+            let (left, back) = (opened.abs() <= open.margin, closed.abs() <= close.margin);
+            let moving = match (left, back) {
+                (true, false) => Moving::Diverging,
+                (false, true) => Moving::Converging,
+                (false, false) if grew < -noise => Moving::Converging,
+                (false, false) if grew > noise => Moving::Diverging,
+                (false, false) if opened.signum() == closed.signum() => Moving::Diverged,
+                // Inside the band at both ends, or across the line.
+                _ => Moving::Tracking,
             };
             let stretch = Stretch {
                 from: if from == 0 { open.on } else { met },
@@ -369,6 +374,22 @@ mod tests {
     #[test]
     fn holding_on_the_line_is_tracking() {
         let found = stretches(&[read(28, 1.0, |_| 0.5)], 1);
+        assert_eq!(states(&found), vec![Moving::Tracking], "{found:?}");
+    }
+
+    /// **A movement inside the band is tracking**: stress fell to 4 below
+    /// its line and came back, all within its band of 5.5, and read as
+    /// converging after tracking with no diverging between.
+    #[test]
+    fn moving_inside_the_band_is_tracking() {
+        let line = read(42, 5.0, |index| {
+            if index < 21 {
+                -0.2 * f64::from(index)
+            } else {
+                0.2f64.mul_add(f64::from(index - 21), -4.2)
+            }
+        });
+        let found = stretches(&[line], 1);
         assert_eq!(states(&found), vec![Moving::Tracking], "{found:?}");
     }
 
