@@ -12,7 +12,7 @@ use domain::{
     landing::InvalidStream,
     normalised::{
         CorrectedTerm, Correction, CorrectionId, CorrectionReason, EditOverlay, OperatorZone,
-        SetFigures, StatedZones,
+        SetEdit, SetFigures, StatedZones,
     },
     sequence::NonEmpty,
 };
@@ -25,7 +25,7 @@ use jiff::{Timestamp, civil::Date};
 use crate::store::Store;
 
 /// What one source's entries read as an exercise, as found for a correction.
-pub use infrastructure::hevy::StandIn;
+pub use infrastructure::hevy::{LoggedSet, StandIn};
 
 /// A set one source recorded with given figures, as found for a correction.
 pub use infrastructure::garmin::FoundSet;
@@ -156,6 +156,49 @@ pub async fn assert_exercise(
         .await?)
 }
 
+/// Every set of an exercise logged in Hevy on a day, in the order performed,
+/// with what has been changed about each (#892).
+///
+/// # Errors
+///
+/// [`CorrectionError`] if the store cannot be read.
+pub async fn sets_of(
+    store: &Store,
+    exercise: Exercise,
+    zone: &OperatorZone,
+    on: Date,
+) -> Result<Vec<LoggedSet>, CorrectionError> {
+    let zones = stated_zones(store, zone).await?;
+    let overlay = hevy_overlay(store).await?;
+    Ok(store
+        .adapter(HevyStandIns::new)
+        .call("HevyStandIns::sets_of", |adapter| {
+            adapter.sets_of(exercise, &zones, &overlay, on)
+        })
+        .await?)
+}
+
+/// Assert what one set Hevy logged was.
+///
+/// # Errors
+///
+/// [`CorrectionError`] if the store cannot be written.
+pub async fn assert_logged_set(
+    store: &Store,
+    recorded: SetFigures,
+    edit: SetEdit,
+    reason: &CorrectionReason,
+    set: CorrectedTerm,
+) -> Result<CorrectionId, CorrectionError> {
+    let sets = NonEmpty::of(set, Vec::new());
+    Ok(store
+        .try_adapter_with(SqliteEditOverlayStore::new, HevyWorkoutLandingStore::STREAM)?
+        .call("SqliteEditOverlayStore::assert_set", |adapter| {
+            adapter.assert_set(recorded, edit, Timestamp::now(), reason, &sets)
+        })
+        .await?)
+}
+
 /// Every set recorded with the given figures on a day.
 ///
 /// # Errors
@@ -185,17 +228,16 @@ pub async fn recording(
     Ok(found)
 }
 
-/// Assert that the sets found were performed with other figures: one
-/// assertion per source they were found in, since each source's overlay is
-/// its own.
+/// Assert what the sets found were: one assertion per source they were found
+/// in, since each source's overlay is its own.
 ///
 /// # Errors
 ///
 /// [`CorrectionError`] if the store cannot be written.
-pub async fn assert_figures(
+pub async fn assert_set(
     store: &Store,
     recorded: SetFigures,
-    actually: SetFigures,
+    edit: SetEdit,
     reason: &CorrectionReason,
     found: &[FoundSet],
 ) -> Result<Vec<CorrectionId>, CorrectionError> {
@@ -213,8 +255,8 @@ pub async fn assert_figures(
         ids.push(
             store
                 .try_adapter_with(SqliteEditOverlayStore::new, stream)?
-                .call("SqliteEditOverlayStore::assert_figures", |adapter| {
-                    adapter.assert_figures(recorded, actually, at, reason, &sets)
+                .call("SqliteEditOverlayStore::assert_set", |adapter| {
+                    adapter.assert_set(recorded, edit, at, reason, &sets)
                 })
                 .await?,
         );

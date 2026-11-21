@@ -33,7 +33,7 @@ use domain::{
     },
     landing::{EventKind, LandedRecord},
     measure::{Distance, Duration, Kg, Metres, PositiveDuration, RepCount},
-    normalised::{EditOverlay, Refusal, RefusalLocus, RefusalReason, StatedZones},
+    normalised::{EditOverlay, Refusal, RefusalLocus, RefusalReason, StatedLoad, StatedZones},
     prescription::DeliveryReference,
     sequence::{AtLeastTwo, NonEmpty},
 };
@@ -474,7 +474,8 @@ struct Corrections<'a> {
 
 impl Corrections<'_> {
     /// A set as the operator corrected it, where he has and the source still
-    /// records what he corrected (#453).
+    /// records what he corrected (#453): each field he changed, and the
+    /// source's own for the rest (#892).
     fn apply(
         &self,
         entry: &ExerciseEntry<'_>,
@@ -488,25 +489,31 @@ impl Corrections<'_> {
         let Some(recorded) = recorded_figures(served) else {
             return set;
         };
-        let Some(figures) = self.overlay.figures_for(
+        let Some(edit) = self.overlay.set_for(
             self.record.source_record_id(),
             &set_term(&entry.exercise_template_id, served.index),
             recorded,
         ) else {
             return set;
         };
-        let load = match (figures.load(), figures.is_assisted(), mapped.load) {
-            (None, _, LoadReading::Absolute) => Load::UNLOADED,
-            (None, _, _) => Load::BODYWEIGHT,
-            (Some(mass), true, _) | (Some(mass), false, LoadReading::RelativeNegated) => {
-                Load::relative(SignedKg::from(mass).negated())
-            }
-            (Some(mass), false, LoadReading::Absolute) => Load::absolute(mass),
-            (Some(mass), false, LoadReading::Relative) => Load::relative(SignedKg::from(mass)),
-        };
+        let load = edit
+            .load()
+            .map_or(set.load, |stated| match (stated, mapped.load) {
+                (StatedLoad::Nothing, LoadReading::Absolute) => Load::UNLOADED,
+                (StatedLoad::Nothing, _) => Load::BODYWEIGHT,
+                (StatedLoad::Assistance(mass), _)
+                | (StatedLoad::Mass(mass), LoadReading::RelativeNegated) => {
+                    Load::relative(SignedKg::from(mass).negated())
+                }
+                (StatedLoad::Mass(mass), LoadReading::Absolute) => Load::absolute(mass),
+                (StatedLoad::Mass(mass), LoadReading::Relative) => {
+                    Load::relative(SignedKg::from(mass))
+                }
+            });
         Set {
             load,
-            outcome: Performed::Completed(figures.reps()),
+            outcome: edit.reps().map_or(set.outcome, Performed::Completed),
+            intensity: edit.effort().or(set.intensity),
             ..set
         }
     }
@@ -556,7 +563,7 @@ fn kind_of(kind: &str) -> Result<SetKind, RefusalReason> {
 ///
 /// Matched on the number's own characters, so `9.5` never becomes a float on
 /// its way to a comparison.
-fn intensity_of(set: &PerformedSet<'_>) -> Result<Option<Rir>, RefusalReason> {
+pub(super) fn intensity_of(set: &PerformedSet<'_>) -> Result<Option<Rir>, RefusalReason> {
     let Some(token) = number(set.rpe) else {
         // Absent is absent: not zero, and not carried forward from a neighbour.
         return Ok(None);

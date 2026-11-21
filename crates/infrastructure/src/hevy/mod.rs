@@ -28,6 +28,6 @@ pub use page::parse_page;
 pub use paging::{PageCount, PageNumber};
 pub use retry::RetryPolicy;
 pub use sessions::group;
-pub use standins::{HevyStandIns, StandIn, Within};
+pub use standins::{HevyStandIns, LoggedSet, StandIn, Within};
 pub use translate::HevySessionTranslator;
 pub use writable::{Unwritable, Writable, WrittenLoad, write_load};

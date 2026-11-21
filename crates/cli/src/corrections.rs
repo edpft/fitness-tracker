@@ -195,7 +195,7 @@ pub async fn add_figures(
 
     report_figures(&found, on, recorded, actually);
 
-    let ids = corrections::assert_figures(store, recorded, actually, &reason, &found)
+    let ids = corrections::assert_set(store, recorded, actually.into(), &reason, &found)
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
 
@@ -234,14 +234,9 @@ pub async fn show(store: &Store) -> Result<(), Failure> {
             Corrected::Exercise { exercise, .. } => {
                 format!("{reaches} entries read as {}", exercise.name())
             }
-            Corrected::Figures {
-                recorded,
-                figures: reads,
-                ..
-            } => format!(
-                "{} recorded as {recorded} reads as {reads}",
-                counted(reaches)
-            ),
+            Corrected::Set { recorded, edit, .. } => {
+                format!("{} recorded as {recorded}: {edit}", counted(reaches))
+            }
         };
         println!(
             "{} — {what}, asserted {}",
