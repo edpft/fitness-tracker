@@ -434,13 +434,14 @@ fn set_line<M: Spans + std::fmt::Display>(set: &PrescribedSet<M>) -> String {
 }
 
 /// A load, written the short way, or nothing for a set without one: plain
-/// bodyweight is no load to write.
+/// bodyweight is no load to write, and an assisted one is the difference
+/// alone, -21kg (operator, 2026-11-21).
 fn weight(load: Load) -> Option<String> {
     match load {
         _ if unloaded(load) || load == Load::BODYWEIGHT => None,
         Load::Absolute(mass) => Some(format!("{mass}kg")),
-        Load::Relative(delta) if delta.as_grams() < 0 => Some(format!("bodyweight {delta}kg")),
-        Load::Relative(delta) => Some(format!("bodyweight +{delta}kg")),
+        Load::Relative(delta) if delta.as_grams() < 0 => Some(format!("{delta}kg")),
+        Load::Relative(delta) => Some(format!("+{delta}kg")),
     }
 }
 
