@@ -248,13 +248,35 @@ main.history i.gym { background: var(--gym); }
 main.history i.cycling { background: var(--cycling); }
 main.history i.padel { background: var(--ink2); }
 .card.exercise h2, .card.ride h2 { font-size: 17px; margin: 0 0 4px; }
-.card.exercise h2 + ol.sets + h2 { margin-top: 14px; }
-h2.editable { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-a.edit { display: inline-flex; padding: 6px; margin: -6px; color: var(--muted); }
+a.edit { display: inline-flex; padding: 8px; margin: -8px -8px -8px auto; color: var(--muted); }
+/* A gym session (#754's restyle): its figures in a row, then each exercise
+   named in the gym's colour above a table of its sets. */
+main.history p.when { display: flex; align-items: center; gap: 10px; color: var(--ink2); margin: 4px 0 16px; }
+main.history p.when svg { color: var(--muted); }
+dl.figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr)); gap: 14px 12px; margin: 0 0 20px; padding: 16px 0; border-top: 1px solid var(--grid); border-bottom: 1px solid var(--grid); }
+dl.figures dt { font-size: 12px; color: var(--muted); }
+dl.figures dd { margin: 2px 0 0; font-size: 17px; font-weight: 600; color: var(--gym); font-variant-numeric: tabular-nums; }
+.card.exercise { padding: 16px 0 6px; overflow: hidden; }
+.card.exercise > * { margin-left: 16px; margin-right: 16px; }
+.card.exercise .named { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.card.exercise .named h2 { margin: 0; color: var(--gym); }
+.card.exercise .initials { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--raised); color: var(--ink2); font-size: 14px; font-weight: 600; }
+.card.exercise table.sets + .named { margin-top: 22px; }
+p.badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 6px; background: #6a5acd; color: var(--ink); margin-bottom: 12px; }
+p.badge.test { background: var(--ink2); color: var(--bg); margin: -4px 0 10px 68px; }
+table.sets { width: calc(100% - 0px); margin: 0 0 8px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.card.exercise > table.sets { margin-left: 0; margin-right: 0; width: 100%; }
+table.sets th { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); text-align: center; padding: 0 4px 6px; }
+table.sets td { text-align: center; padding: 10px 4px; font-size: 16px; }
+table.sets th:first-child, table.sets td:first-child { width: 56px; padding-left: 16px; text-align: left; }
+table.sets tbody tr:nth-child(odd) { background: var(--raised); }
+table.sets td.set { font-weight: 600; color: var(--ink2); }
+table.sets tr.warm-up td { color: var(--ink2); }
+table.sets tr.warm-up td.set { color: var(--gym); }
+table.sets tr.failed td { color: var(--failed); }
 .card.exercise .label, .card.ride .label { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 4px; }
 ul.sessions em.test, p.test { font-style: normal; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--bg); background: var(--ink2); border-radius: 6px; padding: 2px 6px; vertical-align: 1px; }
 p.test { display: inline-block; margin: 0 0 8px; }
-ol.sets { margin: 0; font-variant-numeric: tabular-nums; }
 main.history p.sub + section.card { margin-top: 14px; }
 
 

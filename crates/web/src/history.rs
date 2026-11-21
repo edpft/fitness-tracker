@@ -191,21 +191,6 @@ fn padel_facts(played: &PlayedPadelMatch) -> Vec<String> {
     facts
 }
 
-fn gym_facts(session: &CanonicalGymSession) -> Vec<String> {
-    let mut facts = Vec::new();
-    if let Some(duration) = session.duration() {
-        facts.push(length(Duration::from_seconds(
-            duration.value().as_seconds(),
-        )));
-    }
-    facts.push(counted(session.exercises().count(), "exercise"));
-    facts.push(counted(session.set_count(), "set"));
-    if let Some(heart_rate) = session.heart_rate() {
-        facts.push(heart_rate.value().stated().average().to_string());
-    }
-    facts
-}
-
 /// How long every ride of the session took, warm-up and cool-down included.
 fn ridden(session: &CanonicalCyclingSession) -> Duration {
     Duration::from_seconds(
@@ -291,17 +276,30 @@ fn gym(here: &str, on: Date, session: &CanonicalGymSession, tested: &[RepsExerci
                 .to_string()
         },
     );
+    let mut figures: Vec<(&str, String)> = Vec::new();
+    if let Some(duration) = session.duration() {
+        figures.push((
+            "Duration",
+            length(Duration::from_seconds(duration.value().as_seconds())),
+        ));
+    }
+    figures.push(("Exercises", session.exercises().count().to_string()));
+    figures.push(("Sets", session.set_count().to_string()));
+    if let Some(heart_rate) = session.heart_rate() {
+        let stated = heart_rate.value().stated();
+        figures.push(("Heart rate", stated.average().to_string()));
+        figures.push(("Highest", stated.highest().to_string()));
+    }
     html! {
-        p.sub { (when) }
-        p.sub { (gym_facts(session).join(" · ")) }
-        @if let Some(heart_rate) = session.heart_rate() {
-            p.sub { "Highest " (heart_rate.value().stated().highest()) }
+        p.when { (CALENDAR) (when) }
+        dl.figures {
+            @for (label, value) in &figures { div { dt { (label) } dd { (value) } } }
         }
         @for (item, first) in items(session) {
             @match item {
                 CanonicalItem::Exercise(exercise) => section.card.exercise { (exercise_sets(here, first, exercise, tested)) },
-                CanonicalItem::Superset(members) => section.card.exercise {
-                    p.label { "Superset" }
+                CanonicalItem::Superset(members) => section.card.exercise.superset {
+                    p.badge { "Superset" }
                     @for (offset, exercise) in members.iter().enumerate() {
                         (exercise_sets(here, first + offset, exercise, tested))
                     }
@@ -338,7 +336,7 @@ fn exercise_sets(
     let is_tested = tested
         .iter()
         .any(|lift| exercise.exercise_key() == Some(lift.as_str()));
-    let (named, sets): (String, Vec<String>) = match exercise {
+    let (named, measure, rows): (String, &str, Vec<Row>) = match exercise {
         CanonicalExercise::ForReps { identified, sets } => (
             match identified.value() {
                 domain::gym::Identified::Recorded(exercise) => exercise.name().to_owned(),
@@ -347,77 +345,121 @@ fn exercise_sets(
                     |exercise| format!("{}?", exercise.name()),
                 ),
             },
+            "Reps",
             sets.iter()
-                .map(|set| set_line(set, |reps, loaded| reps_line(*reps, loaded)))
+                .map(|set| row(set, RepCount::to_string))
                 .collect(),
         ),
         CanonicalExercise::ForDuration { exercise, sets } => (
             exercise.value().name().to_owned(),
+            "Time",
             sets.iter()
-                .map(|set| set_line(set, |held, _| length(*held)))
+                .map(|set| row(set, |held| length(*held)))
                 .collect(),
         ),
         CanonicalExercise::ForDistance { exercise, sets } => (
             exercise.value().name().to_owned(),
+            "Distance",
             sets.iter()
-                .map(|set| set_line(set, |distance, _| distance.to_string()))
+                .map(|set| row(set, ToString::to_string))
                 .collect(),
         ),
     };
+    let loaded = rows.iter().any(|row| row.load.is_some());
+    let rated = rows.iter().any(|row| row.reserve.is_some());
+    let mut working = 0;
     html! {
-        @if is_tested { p.label { (ONE_REP_MAX_TEST) } }
-        h2.editable {
-            (named)
+        div.named {
+            span.initials aria-hidden="true" { (initials(&named)) }
+            h2 { (named) }
             @if exercise.exercise_key().is_some() {
                 a.edit href=(format!("{here}/exercise/{position}")) aria-label="Change" title="Change" { (PEN) }
             }
         }
-        ol.sets { @for set in &sets { li { (set) } } }
+        @if is_tested { p.badge.test { (ONE_REP_MAX_TEST) } }
+        table.sets {
+            thead { tr {
+                th { "Set" }
+                @if loaded { th { "kg" } }
+                th { (measure) }
+                @if rated { th { "In reserve" } }
+            } }
+            tbody {
+                @for row in &rows {
+                    tr.warm-up[row.warm_up].failed[row.failed] {
+                        td.set {
+                            @if row.warm_up { "W" } @else {
+                                ({ working += 1; working })
+                            }
+                        }
+                        @if loaded { td { (row.load.as_deref().unwrap_or("–")) } }
+                        td { (row.performed) }
+                        @if rated { td { (row.reserve.as_deref().unwrap_or("–")) } }
+                    }
+                }
+            }
+        }
     }
 }
+
+/// The calendar a session's day is shown beside.
+const CALENDAR: PreEscaped<&str> = PreEscaped(
+    r#"<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>"#,
+);
 
 /// The pen an editable value is opened from.
 const PEN: PreEscaped<&str> = PreEscaped(
     r#"<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>"#,
 );
 
-/// A set as it was performed: its load, how much of it, how far from failure,
-/// and whether it was a warm-up.
-///
-/// **No load said where there was none**: a pogo's ten is ten.
-fn set_line<M>(set: &CanonicalSet<M>, measured: impl Fn(&M, bool) -> String) -> String {
+/// The first letters of an exercise's first two words, as its mark.
+fn initials(named: &str) -> String {
+    named
+        .split_whitespace()
+        .filter_map(|word| word.chars().find(|c| c.is_alphanumeric()))
+        .take(2)
+        .collect()
+}
+
+/// A set as a row of its table: its load, how much of it, how far from
+/// failure, and whether it was a warm-up.
+struct Row {
+    warm_up: bool,
+    failed: bool,
+    load: Option<String>,
+    performed: String,
+    reserve: Option<String>,
+}
+
+/// **No load said where nothing was added to the body** (operator,
+/// 2026-11-21): a pogo, a box jump and a dip have none, and an assisted front
+/// lever reads -21. Kilograms are the column's.
+fn row<M>(set: &CanonicalSet<M>, measured: impl Fn(&M) -> String) -> Row {
     let load = set
         .load
         .as_ref()
         .map(|load| *load.value())
-        .filter(|load| !matches!(load, Load::Absolute(mass) if mass.is_none()))
-        .map(|load| format!("{load} × "))
-        .unwrap_or_default();
-    let performed = match set.outcome.value() {
-        Performed::Completed(Some(measure)) => measured(measure, !load.is_empty()),
-        Performed::Completed(None) => "done".to_owned(),
-        Performed::Failed => "failed".to_owned(),
+        .and_then(|load| match load {
+            Load::Absolute(mass) if mass.is_none() => None,
+            Load::Absolute(mass) => Some(mass.to_string()),
+            Load::Relative(delta) if delta.as_grams() == 0 => None,
+            Load::Relative(delta) if delta.as_grams() < 0 => Some(delta.to_string()),
+            Load::Relative(delta) => Some(format!("+{delta}")),
+        });
+    let (performed, failed) = match set.outcome.value() {
+        Performed::Completed(Some(measure)) => (measured(measure), false),
+        Performed::Completed(None) => ("done".to_owned(), false),
+        Performed::Failed => ("failed".to_owned(), true),
     };
-    let reserve = set
-        .intensity
-        .as_ref()
-        .map(|intensity| format!(" @ {} in reserve", intensity.value()))
-        .unwrap_or_default();
-    let warm_up = if set.kind.as_ref().map(|kind| *kind.value()) == Some(SetKind::Warmup) {
-        " (warm-up)"
-    } else {
-        ""
-    };
-    format!("{load}{performed}{reserve}{warm_up}")
-}
-
-/// Repetitions after a load, as "75 kg × 6", and named where there is none:
-/// a pogo's "10 reps".
-fn reps_line(reps: RepCount, loaded: bool) -> String {
-    match (loaded, reps.as_u32()) {
-        (true, _) => reps.to_string(),
-        (false, 1) => "1 rep".to_owned(),
-        (false, _) => format!("{reps} reps"),
+    Row {
+        warm_up: set.kind.as_ref().map(|kind| *kind.value()) == Some(SetKind::Warmup),
+        failed,
+        load,
+        performed,
+        reserve: set
+            .intensity
+            .as_ref()
+            .map(|intensity| intensity.value().to_string()),
     }
 }
 
@@ -573,10 +615,10 @@ impl crate::drawn::Drawn for Opened {
 #[cfg(test)]
 mod tests {
     use application::history::Number;
-    use domain::measure::{Duration, Metres, RepCount};
+    use domain::measure::{Duration, Metres};
     use jiff::civil::date;
 
-    use super::{address, day_name, kilometres, length, reps_line};
+    use super::{address, day_name, kilometres, length};
 
     /// **Lengths as the feed shows them**: 30 Oct's gym session, 25 Oct's test
     /// with its warm-up and cool-down, and a hold.
@@ -594,16 +636,6 @@ mod tests {
         let today = date(2026, 11, 12);
         assert_eq!(day_name(date(2026, 10, 30), today), "Fri 30 Oct");
         assert_eq!(day_name(date(2025, 10, 31), today), "Fri 31 Oct 2025");
-    }
-
-    /// **Repetitions are named only where no load says what they are of.**
-    #[test]
-    fn reps_are_named_without_a_load() {
-        let ten = RepCount::new(10).expect("ten");
-        let one = RepCount::new(1).expect("one");
-        assert_eq!(reps_line(ten, true), "10");
-        assert_eq!(reps_line(ten, false), "10 reps");
-        assert_eq!(reps_line(one, false), "1 rep");
     }
 
     #[test]
