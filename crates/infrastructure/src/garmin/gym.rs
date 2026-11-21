@@ -526,14 +526,15 @@ struct Corrections<'a> {
 
 impl Corrections<'_> {
     /// What this set's figures read: the source's own, unless the operator has
-    /// said otherwise about exactly these.
+    /// said otherwise about exactly these. An effort he states is not read:
+    /// a watch's set carries none to correct.
     fn figures(&self, set: &ServedSet, recorded: SetFigures) -> SetFigures {
         let Some(term) = set.started_at.as_deref() else {
             return recorded;
         };
         self.overlay
-            .figures_for(self.record, term, recorded)
-            .unwrap_or(recorded)
+            .set_for(self.record, term, recorded)
+            .map_or(recorded, |edit| edit.over(recorded))
     }
 }
 

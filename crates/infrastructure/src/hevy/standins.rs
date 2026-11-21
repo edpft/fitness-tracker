@@ -22,9 +22,9 @@
 
 use application::StoreError;
 use domain::{
-    gym::exercise::Exercise,
+    gym::{exercise::Exercise, intensity::Rir},
     landing::SourceRecordId,
-    normalised::{CorrectedTerm, EditOverlay, SetFigures, SourceTerm, StatedZones},
+    normalised::{CorrectedTerm, EditOverlay, SetEdit, SetFigures, SourceTerm, StatedZones},
 };
 use jiff::{Timestamp, civil::Date};
 use sqlx::SqlitePool;
@@ -35,7 +35,7 @@ use crate::store::store_error;
 use super::{
     mapping::lookup,
     payload::WorkoutEnvelope,
-    translate::{recorded_figures, set_term},
+    translate::{intensity_of, recorded_figures, set_term},
 };
 use crate::garmin::FoundSet;
 
@@ -51,6 +51,21 @@ pub struct StandIn {
     /// How many sets it carries, which is the figure that makes the scale of an
     /// assertion legible.
     pub sets: usize,
+}
+
+/// One set as Hevy logged it, and what the operator has changed about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoggedSet {
+    /// What a correction of it is anchored by.
+    pub term: CorrectedTerm,
+    /// Its count and mass as logged; [`None`] for a failed attempt, which has
+    /// no count to anchor a correction on.
+    pub recorded: Option<SetFigures>,
+    pub warm_up: bool,
+    /// Its effort as logged.
+    pub effort: Option<Rir>,
+    /// What the operator has changed about it, where he has.
+    pub edit: Option<SetEdit>,
 }
 
 /// The days a search for entries reaches, both inclusive and either open.
@@ -71,6 +86,107 @@ impl HevyStandIns {
         Self { pool }
     }
 
+    /// The effective serving of each record, the way a derivation sees it: a
+    /// later serving replaces an earlier one, and a deletion *anywhere* in a
+    /// record's history withdraws it whatever order the events arrived in.
+    /// Absorbing rather than latest-wins, because that is what
+    /// [`super::translate`] does and an enumeration that disagreed with the
+    /// derivation would offer the operator entries it will never correct.
+    async fn current(&self) -> Result<BTreeMap<String, Vec<u8>>, StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT source_record_id AS "source_record_id!: String",
+                   event_kind       AS "event_kind!: String",
+                   payload          AS "payload!: Vec<u8>"
+            FROM hevy_workout_landing
+            ORDER BY id ASC
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| store_error(&error))?;
+
+        let mut withdrawn: BTreeSet<String> = BTreeSet::new();
+        let mut latest: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        for row in rows {
+            if row.event_kind == "deleted" {
+                withdrawn.insert(row.source_record_id);
+                continue;
+            }
+            // Ordered by id, so the last write for a record is its latest
+            // serving.
+            latest.insert(row.source_record_id, row.payload);
+        }
+        latest.retain(|record, _| !withdrawn.contains(record));
+        Ok(latest)
+    }
+
+    /// Every set logged on `day` under an entry that reads as `exercise`, in
+    /// the order performed (#892): workouts by their start, then Hevy's own
+    /// order within each.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read or holds a payload that is
+    /// not a workout.
+    pub async fn sets_of(
+        &self,
+        exercise: Exercise,
+        zones: &StatedZones,
+        overlay: &EditOverlay,
+        day: Date,
+    ) -> Result<Vec<LoggedSet>, StoreError> {
+        let mut workouts = Vec::new();
+        for (source_record_id, payload) in self.current().await? {
+            let envelope =
+                WorkoutEnvelope::read(&payload).map_err(|error| StoreError::Corrupt {
+                    detail: format!("{source_record_id}: {}", error.detail),
+                })?;
+            let Some(workout) = envelope.workout else {
+                continue;
+            };
+            let Ok(instant) = workout.start_time.parse::<Timestamp>() else {
+                continue;
+            };
+            if zones.started_at(instant).wall_clock().date() != day {
+                continue;
+            }
+            let record = SourceRecordId::try_from(source_record_id.clone()).map_err(|error| {
+                StoreError::Corrupt {
+                    detail: error.to_string(),
+                }
+            })?;
+            let mut sets = Vec::new();
+            for entry in &workout.exercises {
+                let reads = overlay
+                    .exercise_for(&record, &entry.exercise_template_id)
+                    .or_else(|| lookup(&entry.exercise_template_id).map(|mapped| mapped.exercise));
+                if reads != Some(exercise) {
+                    continue;
+                }
+                for set in &entry.sets {
+                    let Ok(term) =
+                        SourceTerm::try_from(set_term(&entry.exercise_template_id, set.index))
+                    else {
+                        continue;
+                    };
+                    let recorded = recorded_figures(set);
+                    sets.push(LoggedSet {
+                        edit: recorded
+                            .and_then(|recorded| overlay.set_for(&record, term.as_str(), recorded)),
+                        term: CorrectedTerm::new(record.clone(), term),
+                        recorded,
+                        warm_up: set.kind == "warmup",
+                        effort: intensity_of(set).ok().flatten(),
+                    });
+                }
+            }
+            workouts.push((instant, sets));
+        }
+        workouts.sort_by_key(|(instant, _)| *instant);
+        Ok(workouts.into_iter().flat_map(|(_, sets)| sets).collect())
+    }
+
     /// Every entry that currently translates to `exercise`, within the days
     /// given, in the order it was performed.
     ///
@@ -89,44 +205,10 @@ impl HevyStandIns {
         overlay: &EditOverlay,
         within: &Within,
     ) -> Result<Vec<StandIn>, StoreError> {
-        let rows = sqlx::query!(
-            r#"
-            SELECT id               AS "id!: i64",
-                   source_record_id AS "source_record_id!: String",
-                   event_kind       AS "event_kind!: String",
-                   payload          AS "payload!: Vec<u8>"
-            FROM hevy_workout_landing
-            ORDER BY id ASC
-            "#
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|error| store_error(&error))?;
-
-        // The effective serving of each record, the way a derivation sees it: a
-        // later serving replaces an earlier one, and a deletion *anywhere* in a
-        // record's history withdraws it whatever order the events arrived in.
-        // Absorbing rather than latest-wins, because that is what
-        // [`super::translate`] does and an enumeration that disagreed with the
-        // derivation would offer the operator entries it will never correct.
-        let mut withdrawn: BTreeSet<String> = BTreeSet::new();
-        let mut latest: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-        for row in rows {
-            if row.event_kind == "deleted" {
-                withdrawn.insert(row.source_record_id);
-                continue;
-            }
-            // Ordered by id, so the last write for a record is its latest
-            // serving.
-            latest.insert(row.source_record_id, row.payload);
-        }
+        let latest = self.current().await?;
 
         let mut found = Vec::new();
         for (source_record_id, payload) in latest {
-            if withdrawn.contains(&source_record_id) {
-                continue;
-            }
-
             let envelope =
                 WorkoutEnvelope::read(&payload).map_err(|error| StoreError::Corrupt {
                     detail: format!("{source_record_id}: {}", error.detail),
@@ -204,35 +286,10 @@ impl HevyStandIns {
         zones: &StatedZones,
         day: Date,
     ) -> Result<Vec<FoundSet>, StoreError> {
-        let rows = sqlx::query!(
-            r#"
-            SELECT source_record_id AS "source_record_id!: String",
-                   event_kind       AS "event_kind!: String",
-                   payload          AS "payload!: Vec<u8>"
-            FROM hevy_workout_landing
-            ORDER BY id ASC
-            "#
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|error| store_error(&error))?;
-
-        // The effective serving of each record, as above.
-        let mut withdrawn: BTreeSet<String> = BTreeSet::new();
-        let mut latest: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-        for row in rows {
-            if row.event_kind == "deleted" {
-                withdrawn.insert(row.source_record_id);
-                continue;
-            }
-            latest.insert(row.source_record_id, row.payload);
-        }
+        let latest = self.current().await?;
 
         let mut found = Vec::new();
         for (source_record_id, payload) in latest {
-            if withdrawn.contains(&source_record_id) {
-                continue;
-            }
             let envelope =
                 WorkoutEnvelope::read(&payload).map_err(|error| StoreError::Corrupt {
                     detail: format!("{source_record_id}: {}", error.detail),

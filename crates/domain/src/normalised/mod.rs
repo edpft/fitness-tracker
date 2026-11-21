@@ -20,8 +20,8 @@ pub mod time;
 
 pub use entity::NormalisedEntity;
 pub use overlay::{
-    Corrected, CorrectedTerm, Correction, CorrectionId, CorrectionReason, EditOverlay, SetFigures,
-    SourceTerm,
+    Corrected, CorrectedTerm, Correction, CorrectionId, CorrectionReason, EditOverlay, SetEdit,
+    SetFigures, SourceTerm, StatedLoad,
 };
 pub use refusal::{Refusal, RefusalKind, RefusalLocus, RefusalReason};
 pub use run::{

@@ -366,6 +366,10 @@ fn exercise_sets(
         ),
     };
     let loaded = rows.iter().any(|row| row.load.is_some());
+    // A set is changed from its row (#892), where it is counted in reps and
+    // named an exercise: what the overlay can correct so far.
+    let editable =
+        matches!(exercise, CanonicalExercise::ForReps { .. }) && exercise.exercise_key().is_some();
     let rated = rows.iter().any(|row| row.reserve.is_some());
     let mut working = 0;
     html! {
@@ -383,9 +387,10 @@ fn exercise_sets(
                 @if loaded { th { "kg" } }
                 th { (measure) }
                 @if rated { th { "In reserve" } }
+                @if editable { th.pen aria-label="Change" {} }
             } }
             tbody {
-                @for row in &rows {
+                @for (index, row) in rows.iter().enumerate() {
                     tr.warm-up[row.warm_up].failed[row.failed] {
                         td.set {
                             @if row.warm_up { "W" } @else {
@@ -395,6 +400,16 @@ fn exercise_sets(
                         @if loaded { td { (row.load.as_deref().unwrap_or("–")) } }
                         td { (row.performed) }
                         @if rated { td { (row.reserve.as_deref().unwrap_or("–")) } }
+                        @if editable {
+                            td.pen {
+                                // A failed attempt has no reps to anchor a
+                                // change on, so it is not offered one.
+                                @if !row.failed {
+                                    a.edit href=(crate::change_set::address(here, position, index + 1))
+                                        aria-label="Change" title="Change" { (PEN) }
+                                }
+                            }
+                        }
                     }
                 }
             }

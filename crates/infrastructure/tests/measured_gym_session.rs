@@ -1317,9 +1317,9 @@ fn correcting(
         CorrectionId::from(1),
         "2026-10-04T09:00:00Z".parse()?,
         CorrectionReason::try_from("transposed when I typed it into the watch".to_owned())?,
-        Corrected::Figures {
+        Corrected::Set {
             recorded,
-            figures: reads,
+            edit: reads.into(),
             sets: NonEmpty::new(vec![term])?,
         },
     )]))

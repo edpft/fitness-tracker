@@ -580,9 +580,11 @@ pub async fn made(
         let Some(correction) = corrections::one(store, CorrectionId::from(id)).await? else {
             return Ok(None);
         };
-        let domain::normalised::Corrected::Exercise { exercise, entries } = correction.corrected()
-        else {
-            return Ok(None);
+        let (exercise, entries) = match correction.corrected() {
+            domain::normalised::Corrected::Exercise { exercise, entries } => (exercise, entries),
+            domain::normalised::Corrected::Set { recorded, edit, .. } => {
+                return Ok(Some(crate::change_set::changed(&session, *recorded, *edit)));
+            }
         };
         let reached: Vec<StandIn> = corrections::reading_as(store, *exercise, zone, None, None)
             .await?
