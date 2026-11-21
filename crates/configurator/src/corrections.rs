@@ -11,14 +11,14 @@ use domain::{
     gym::exercise::Exercise,
     landing::InvalidStream,
     normalised::{
-        CorrectedTerm, Correction, CorrectionId, CorrectionReason, OperatorZone, SetFigures,
-        StatedZones,
+        CorrectedTerm, Correction, CorrectionId, CorrectionReason, EditOverlay, OperatorZone,
+        SetFigures, StatedZones,
     },
     sequence::NonEmpty,
 };
 use infrastructure::{
     GarminExerciseSetLandingStore, GarminRecordedSets, HevyStandIns, HevyWorkoutLandingStore,
-    OverlayError, SqliteEditOverlayStore,
+    OverlayError, SqliteEditOverlayStore, hevy::Within,
 };
 use jiff::{Timestamp, civil::Date};
 
@@ -63,7 +63,20 @@ async fn stated_zones(
     Ok(crate::wiring::stated_zones(store, declared).await?)
 }
 
-/// Every entry that reads as an exercise within the days given.
+/// The corrections in force over Hevy's workouts, so a search for what an
+/// entry reads as reads what the derivation does.
+async fn hevy_overlay(store: &Store) -> Result<EditOverlay, CorrectionError> {
+    Ok(store
+        .try_adapter_with(SqliteEditOverlayStore::new, HevyWorkoutLandingStore::STREAM)?
+        .call(
+            "SqliteEditOverlayStore::overlay",
+            SqliteEditOverlayStore::overlay,
+        )
+        .await?)
+}
+
+/// Every entry that reads as an exercise within the days given, or in the
+/// whole record where neither is.
 ///
 /// # Errors
 ///
@@ -75,11 +88,51 @@ pub async fn reading_as(
     from: Option<Date>,
     until: Option<Date>,
 ) -> Result<Vec<StandIn>, CorrectionError> {
+    entries(store, exercise, zone, Within { from, until }).await
+}
+
+/// The entries of one day's gym session that read as an exercise (#754):
+/// none where it was not recorded in Hevy, since only Hevy's entries can be
+/// corrected so far.
+///
+/// **By the day, not by the normalised session** the exercise's identity was
+/// taken from: a canonical session names normalised ids that a rebuild has
+/// since reissued (#890). A day is one visit (§ II.4's rule), and a visit
+/// logged as two Hevy workouts a quarter of an hour apart has both on it.
+///
+/// # Errors
+///
+/// [`CorrectionError`] if the store cannot be read.
+pub async fn in_session(
+    store: &Store,
+    exercise: Exercise,
+    zone: &OperatorZone,
+    on: Date,
+) -> Result<Vec<StandIn>, CorrectionError> {
+    entries(
+        store,
+        exercise,
+        zone,
+        Within {
+            from: Some(on),
+            until: Some(on),
+        },
+    )
+    .await
+}
+
+async fn entries(
+    store: &Store,
+    exercise: Exercise,
+    zone: &OperatorZone,
+    within: Within,
+) -> Result<Vec<StandIn>, CorrectionError> {
     let zones = stated_zones(store, zone).await?;
+    let overlay = hevy_overlay(store).await?;
     Ok(store
         .adapter(HevyStandIns::new)
         .call("HevyStandIns::reading_as", |adapter| {
-            adapter.reading_as(exercise, &zones, from, until)
+            adapter.reading_as(exercise, &zones, &overlay, &within)
         })
         .await?)
 }
@@ -188,6 +241,18 @@ pub async fn all(store: &Store) -> Result<Vec<Correction>, CorrectionError> {
     }
     corrections.sort_by_key(|correction| (correction.asserted_at(), correction.id()));
     Ok(corrections)
+}
+
+/// One assertion, by its number, where there is one.
+///
+/// # Errors
+///
+/// [`CorrectionError`] if the store cannot be read.
+pub async fn one(store: &Store, id: CorrectionId) -> Result<Option<Correction>, CorrectionError> {
+    Ok(all(store)
+        .await?
+        .into_iter()
+        .find(|correction| correction.id() == id))
 }
 
 /// Retract one assertion, by its number. `false` if there is none.

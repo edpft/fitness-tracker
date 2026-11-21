@@ -24,7 +24,7 @@ use application::StoreError;
 use domain::{
     gym::exercise::Exercise,
     landing::SourceRecordId,
-    normalised::{CorrectedTerm, SetFigures, SourceTerm, StatedZones},
+    normalised::{CorrectedTerm, EditOverlay, SetFigures, SourceTerm, StatedZones},
 };
 use jiff::{Timestamp, civil::Date};
 use sqlx::SqlitePool;
@@ -53,6 +53,13 @@ pub struct StandIn {
     pub sets: usize,
 }
 
+/// The days a search for entries reaches, both inclusive and either open.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Within {
+    pub from: Option<Date>,
+    pub until: Option<Date>,
+}
+
 /// Hevy's landed workouts, asked which entries currently read as an exercise.
 #[derive(Debug, Clone)]
 pub struct HevyStandIns {
@@ -79,8 +86,8 @@ impl HevyStandIns {
         &self,
         exercise: Exercise,
         zones: &StatedZones,
-        from: Option<Date>,
-        until: Option<Date>,
+        overlay: &EditOverlay,
+        within: &Within,
     ) -> Result<Vec<StandIn>, StoreError> {
         let rows = sqlx::query!(
             r#"
@@ -131,7 +138,9 @@ impl HevyStandIns {
                 continue;
             };
             let day = zones.started_at(instant).wall_clock().date();
-            if from.is_some_and(|first| day < first) || until.is_some_and(|last| day > last) {
+            if within.from.is_some_and(|first| day < first)
+                || within.until.is_some_and(|last| day > last)
+            {
                 continue;
             }
 
@@ -145,9 +154,14 @@ impl HevyStandIns {
                 // An unmapped template is not a candidate and is not an error
                 // here: the derivation is the thing that fails on a gap in the
                 // vocabulary, and this is a question about one exercise.
-                if lookup(&entry.exercise_template_id).map(|mapped| mapped.exercise)
-                    != Some(exercise)
-                {
+                //
+                // What it reads as is what the derivation reads, so a
+                // correction already asserted counts: an entry corrected away
+                // from `exercise` is not one, and one corrected to it is.
+                let reads = overlay
+                    .exercise_for(&record, &entry.exercise_template_id)
+                    .or_else(|| lookup(&entry.exercise_template_id).map(|mapped| mapped.exercise));
+                if reads != Some(exercise) {
                     continue;
                 }
                 let Ok(term) = SourceTerm::try_from(entry.exercise_template_id.clone()) else {

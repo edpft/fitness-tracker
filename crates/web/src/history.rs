@@ -17,7 +17,7 @@ use domain::{
     measure::{Duration, RepCount},
 };
 use jiff::civil::Date;
-use maud::{DOCTYPE, Markup, html};
+use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 use crate::page::{self, Place};
 
@@ -258,7 +258,7 @@ pub fn session(here: &str, on: Date, session: &Result<Option<opened::Activity>, 
                     (page::header(here, title))
                     @if let Some(test) = marked { p.test { (test) } }
                     @match session {
-                        Ok(Some(opened::Activity::Gym { session, tested })) => (gym(on, session, tested)),
+                        Ok(Some(opened::Activity::Gym { session, tested })) => (gym(here, on, session, tested)),
                         Ok(Some(opened::Activity::Cycling(session))) => (cycling(session)),
                         Ok(Some(opened::Activity::Padel(played))) => (padel(played)),
                         Ok(None) => p.sub { "No such activity on " (on.strftime("%A %-d %B %Y")) "." },
@@ -281,7 +281,7 @@ fn padel(played: &PlayedPadelMatch) -> Markup {
     }
 }
 
-fn gym(on: Date, session: &CanonicalGymSession, tested: &[RepsExercise]) -> Markup {
+fn gym(here: &str, on: Date, session: &CanonicalGymSession, tested: &[RepsExercise]) -> Markup {
     let when = session.occurred().instant().map_or_else(
         || on.strftime("%A %-d %B %Y").to_string(),
         |started| {
@@ -297,19 +297,44 @@ fn gym(on: Date, session: &CanonicalGymSession, tested: &[RepsExercise]) -> Mark
         @if let Some(heart_rate) = session.heart_rate() {
             p.sub { "Highest " (heart_rate.value().stated().highest()) }
         }
-        @for item in session.items().iter() {
+        @for (item, first) in items(session) {
             @match item {
-                CanonicalItem::Exercise(exercise) => section.card.exercise { (exercise_sets(exercise, tested)) },
+                CanonicalItem::Exercise(exercise) => section.card.exercise { (exercise_sets(here, first, exercise, tested)) },
                 CanonicalItem::Superset(members) => section.card.exercise {
                     p.label { "Superset" }
-                    @for exercise in members.iter() { (exercise_sets(exercise, tested)) }
+                    @for (offset, exercise) in members.iter().enumerate() {
+                        (exercise_sets(here, first + offset, exercise, tested))
+                    }
                 },
             }
         }
     }
 }
 
-fn exercise_sets(exercise: &CanonicalExercise, tested: &[RepsExercise]) -> Markup {
+/// Each item, with the position of its first exercise among the session's,
+/// from one: what a change of exercise is addressed by (#754).
+fn items(session: &CanonicalGymSession) -> Vec<(&CanonicalItem, usize)> {
+    let mut first = 1;
+    session
+        .items()
+        .iter()
+        .map(|item| {
+            let at = first;
+            first += match item {
+                CanonicalItem::Exercise(_) => 1,
+                CanonicalItem::Superset(members) => members.iter().count(),
+            };
+            (item, at)
+        })
+        .collect()
+}
+
+fn exercise_sets(
+    here: &str,
+    position: usize,
+    exercise: &CanonicalExercise,
+    tested: &[RepsExercise],
+) -> Markup {
     let is_tested = tested
         .iter()
         .any(|lift| exercise.exercise_key() == Some(lift.as_str()));
@@ -341,10 +366,20 @@ fn exercise_sets(exercise: &CanonicalExercise, tested: &[RepsExercise]) -> Marku
     };
     html! {
         @if is_tested { p.label { (ONE_REP_MAX_TEST) } }
-        h2 { (named) }
+        h2.editable {
+            (named)
+            @if exercise.exercise_key().is_some() {
+                a.edit href=(format!("{here}/exercise/{position}")) aria-label="Change" title="Change" { (PEN) }
+            }
+        }
         ol.sets { @for set in &sets { li { (set) } } }
     }
 }
+
+/// The pen an editable value is opened from.
+const PEN: PreEscaped<&str> = PreEscaped(
+    r#"<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>"#,
+);
 
 /// A set as it was performed: its load, how much of it, how far from failure,
 /// and whether it was a warm-up.

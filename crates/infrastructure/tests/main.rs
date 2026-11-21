@@ -71,6 +71,7 @@ mod schedule;
 mod scheduled_mesocycle;
 mod sleep;
 mod spreadsheet_files;
+mod stand_ins;
 mod standalone_test;
 mod store;
 mod stress;
