@@ -25,21 +25,25 @@
 //! one assertion, so the id space is shared: `correction` holds what every
 //! correction has — a stream, an instant and a reason — with the field it
 //! replaces beside it, as nullable columns under a check that exactly one of
-//! them is stated. A figures correction states what it replaces as well, once,
-//! because one assertion names the sets that recorded one pair of figures and
-//! only applies while that is still what the source says.
+//! them is stated. A set's correction states the figures it was asserted over
+//! as well, once, because one assertion names the sets that recorded one pair
+//! of figures and only applies while that is still what the source says.
+//!
+//! **A set's edit is sparse** (#892): a null `reps`, `load` or `effort` is a
+//! field the operator left as the source has it, and the table's checks refuse
+//! a row that changes none.
 //!
 //! What it reaches is `correction_term`, which is the same shape either way: a
 //! record, and the source's own word for the thing inside it.
 
 use application::StoreError;
-use domain::gym::exercise::Exercise;
+use domain::gym::{exercise::Exercise, intensity::Rir};
 use domain::measure::{Kg, RepCount};
 use domain::{
     landing::{InvalidStream, LandingStream, SourceRecordId},
     normalised::{
-        Corrected, CorrectedTerm, Correction, CorrectionId, CorrectionReason, EditOverlay,
-        SetFigures, SourceTerm,
+        Corrected, CorrectedTerm, Correction, CorrectionId, CorrectionReason, EditOverlay, SetEdit,
+        SetFigures, SourceTerm, StatedLoad,
     },
     sequence::NonEmpty,
 };
@@ -93,7 +97,7 @@ impl SqliteEditOverlayStore {
     /// [`UnknownCorrectedExercise`] if a stored key is not in the vocabulary.
     pub async fn all(&self) -> Result<Vec<Correction>, OverlayError> {
         let mut corrections = self.exercise_corrections().await?;
-        corrections.extend(self.figures_corrections().await?);
+        corrections.extend(self.set_corrections().await?);
         corrections.sort_by_key(|correction| (correction.asserted_at(), correction.id()));
         Ok(corrections)
     }
@@ -151,24 +155,25 @@ impl SqliteEditOverlayStore {
         Ok(corrections)
     }
 
-    /// The figures corrections, with the sets each one reaches.
-    async fn figures_corrections(&self) -> Result<Vec<Correction>, OverlayError> {
+    /// The set corrections, with the sets each one reaches.
+    async fn set_corrections(&self) -> Result<Vec<Correction>, OverlayError> {
         let stream = self.stream.to_string();
         let rows = sqlx::query!(
             r#"
             SELECT c.id                  AS "id!: i64",
                    c.recorded_reps       AS "recorded_reps!: i64",
                    c.recorded_load_grams AS "recorded_load_grams?: i64",
-                   c.reps                AS "reps!: i64",
+                   c.reps                AS "reps?: i64",
+                   c.load                AS "load?: String",
                    c.load_grams          AS "load_grams?: i64",
-                   c.assisted            AS "assisted!: i64",
+                   c.effort              AS "effort?: String",
                    c.asserted_at         AS "asserted_at!: String",
                    c.reason              AS "reason!: String",
                    t.source_record_id    AS "source_record_id!: String",
                    t.term                AS "term!: String"
             FROM correction c
             JOIN correction_term t ON t.correction = c.id
-            WHERE c.stream = ? AND c.reps IS NOT NULL
+            WHERE c.stream = ? AND c.recorded_reps IS NOT NULL
             ORDER BY c.asserted_at, c.id, t.source_record_id, t.term
             "#,
             stream
@@ -195,10 +200,13 @@ impl SqliteEditOverlayStore {
                             row.recorded_reps,
                             row.recorded_load_grams,
                         )?,
-                        figures: assisted_if(
-                            stored_figures(row.id, row.reps, row.load_grams)?,
-                            row.assisted != 0,
-                        ),
+                        edit: stored_edit(
+                            row.id,
+                            row.reps,
+                            row.load.as_deref(),
+                            row.load_grams,
+                            row.effort,
+                        )?,
                         asserted_at: row.asserted_at,
                         reason: row.reason,
                         sets: vec![set],
@@ -293,16 +301,16 @@ impl SqliteEditOverlayStore {
         Ok(CorrectionId::from(id))
     }
 
-    /// Record one assertion that a source recorded the wrong figures for a
-    /// set, returning what the store calls it.
+    /// Record one assertion of what a set was, over the sets that recorded
+    /// `recorded`, returning what the store calls it.
     ///
     /// # Errors
     ///
     /// [`StoreError`] if the store cannot be written.
-    pub async fn assert_figures(
+    pub async fn assert_set(
         &self,
         recorded: SetFigures,
-        figures: SetFigures,
+        edit: SetEdit,
         asserted_at: Timestamp,
         reason: &CorrectionReason,
         sets: &NonEmpty<CorrectedTerm>,
@@ -311,8 +319,14 @@ impl SqliteEditOverlayStore {
         let at = asserted_at.to_string();
         let reason = reason.as_str().to_owned();
         let (recorded_reps, recorded_load) = columns(recorded);
-        let (reps, load) = columns(figures);
-        let assisted = i64::from(figures.is_assisted());
+        let reps = edit.reps().map(|reps| i64::from(reps.as_u32()));
+        let (load, load_grams) = match edit.load() {
+            None => (None, None),
+            Some(StatedLoad::Nothing) => (Some("nothing"), None),
+            Some(StatedLoad::Mass(mass)) => (Some("mass"), Some(grams(mass))),
+            Some(StatedLoad::Assistance(mass)) => (Some("assistance"), Some(grams(mass))),
+        };
+        let effort = edit.effort().map(Rir::as_str);
 
         let mut transaction = super::writing(&self.pool)
             .await
@@ -321,9 +335,9 @@ impl SqliteEditOverlayStore {
         let id = sqlx::query!(
             r#"
             INSERT INTO correction
-                (stream, asserted_at, reason, recorded_reps, recorded_load_grams, reps, load_grams,
-                 assisted)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (stream, asserted_at, reason, recorded_reps, recorded_load_grams, reps, load,
+                 load_grams, effort)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id AS "id!: i64"
             "#,
             stream,
@@ -333,7 +347,8 @@ impl SqliteEditOverlayStore {
             recorded_load,
             reps,
             load,
-            assisted
+            load_grams,
+            effort
         )
         .fetch_one(&mut *transaction)
         .await
@@ -403,10 +418,12 @@ pub enum OverlayError {
 fn columns(figures: SetFigures) -> (i64, Option<i64>) {
     (
         i64::from(figures.reps().as_u32()),
-        figures
-            .load()
-            .map(|load| i64::try_from(load.as_grams()).unwrap_or(i64::MAX)),
+        figures.load().map(grams),
     )
+}
+
+fn grams(mass: Kg) -> i64 {
+    i64::try_from(mass.as_grams()).unwrap_or(i64::MAX)
 }
 
 /// A set's figures, read back from those columns.
@@ -429,13 +446,41 @@ fn stored_figures(id: i64, reps: i64, load: Option<i64>) -> Result<SetFigures, O
     Ok(SetFigures::new(reps, load))
 }
 
-/// The figures as stored, with the mass read as assistance where the
-/// correction said so (#453).
-const fn assisted_if(figures: SetFigures, assisted: bool) -> SetFigures {
-    match (assisted, figures.load()) {
-        (true, Some(mass)) => SetFigures::assisted(figures.reps(), mass),
-        _ => figures,
-    }
+/// A set's edit, read back from its nullable columns.
+fn stored_edit(
+    id: i64,
+    reps: Option<i64>,
+    load: Option<&str>,
+    load_grams: Option<i64>,
+    effort: Option<String>,
+) -> Result<SetEdit, OverlayError> {
+    let corrupt = |detail: String| OverlayError::Store(StoreError::Corrupt { detail });
+    let reps = reps
+        .map(|reps| {
+            u32::try_from(reps)
+                .ok()
+                .and_then(|reps| RepCount::new(reps).ok())
+                .ok_or_else(|| corrupt(format!("correction {id} holds {reps} as a count of reps")))
+        })
+        .transpose()?;
+    let mass = || {
+        load_grams
+            .and_then(|grams| u64::try_from(grams).ok())
+            .map(Kg::from_grams)
+            .ok_or_else(|| corrupt(format!("correction {id} states a load with no mass")))
+    };
+    let load = match load {
+        None => None,
+        Some("nothing") => Some(StatedLoad::Nothing),
+        Some("mass") => Some(StatedLoad::Mass(mass()?)),
+        Some("assistance") => Some(StatedLoad::Assistance(mass()?)),
+        Some(other) => return Err(corrupt(format!("correction {id} states a load of {other}"))),
+    };
+    let effort = effort
+        .map(|effort| Rir::try_from(effort).map_err(|error| corrupt(error.to_string())))
+        .transpose()?;
+    SetEdit::new(reps, load, effort)
+        .ok_or_else(|| corrupt(format!("correction {id} changes nothing about its sets")))
 }
 
 fn corrected_term(record: &str, term: &str) -> Result<CorrectedTerm, OverlayError> {
@@ -519,11 +564,11 @@ impl GatheringEntries {
     }
 }
 
-/// One figures correction's rows as they arrive, before the last set is in.
+/// One set correction's rows as they arrive, before the last set is in.
 struct GatheringSets {
     id: i64,
     recorded: SetFigures,
-    figures: SetFigures,
+    edit: SetEdit,
     asserted_at: String,
     reason: String,
     sets: Vec<CorrectedTerm>,
@@ -534,7 +579,7 @@ impl GatheringSets {
         let Self {
             id,
             recorded,
-            figures,
+            edit,
             asserted_at,
             reason,
             sets,
@@ -551,9 +596,9 @@ impl GatheringSets {
             CorrectionId::from(id),
             common.asserted_at,
             common.reason,
-            Corrected::Figures {
+            Corrected::Set {
                 recorded,
-                figures,
+                edit,
                 sets,
             },
         ))

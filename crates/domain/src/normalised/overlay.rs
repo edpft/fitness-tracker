@@ -5,9 +5,9 @@
 //! correction and re-deriving restores exactly what the source said. Nothing
 //! here is ever written into a derived row.
 //!
-//! **Two fields so far, and § II.2 allows any of them.** A correction says
-//! either which exercise a source named or what figures it recorded for one
-//! set, and [`Corrected`] is which.
+//! **Two kinds so far, and § II.2 allows any field.** A correction says either
+//! which exercise a source named or what one set was, and [`Corrected`] is
+//! which.
 //!
 //! **Which exercise a source named** is the one the record needed first: a
 //! source with no entry for what the operator performed, logged under the
@@ -47,8 +47,14 @@
 //! stops applying, which is the honest outcome — the source is no longer saying
 //! the thing that was wrong.
 //!
-//! **A figures correction carries what it replaces as well as what it
-//! replaces it with**, and both have to match for it to apply. That is the same
+//! **A set's correction is sparse** (#892). The operator, 2026-11-21: *"Any
+//! field … can be edited. Its presence in the edit overlay is the signal that
+//! it's a correction. Fields that aren't included aren't edited."* So a
+//! [`SetEdit`] holds the reps, the load or the effort he changed and nothing
+//! else, and the source's own value stands for the rest.
+//!
+//! **A set's correction carries the figures the source recorded as well as
+//! what it changes**, and they have to match for it to apply. That is the same
 //! rule one level down: a set whose figures have changed at source is no longer
 //! the set the operator described, so the correction lapses rather than
 //! overwriting a number nobody has ruled on.
@@ -65,6 +71,7 @@ use std::collections::HashMap;
 use jiff::Timestamp;
 
 use crate::gym::exercise::Exercise;
+use crate::gym::intensity::Rir;
 use crate::landing::{InvalidIdentifier, SourceRecordId};
 use crate::measure::{Kg, RepCount};
 use crate::newtype::string_name;
@@ -233,6 +240,142 @@ impl std::fmt::Display for SetFigures {
     }
 }
 
+/// What a set's load was, as the operator states it.
+///
+/// A mass and not a [`crate::gym::Load`], for [`SetFigures`]'s reason: the
+/// term it was typed against decides the axis, except where he says the mass
+/// was assistance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StatedLoad {
+    /// Nothing beyond the body itself.
+    Nothing,
+    /// A mass, read as the term records one.
+    Mass(Kg),
+    /// A mass taken off, whatever the term records.
+    Assistance(Kg),
+}
+
+impl StatedLoad {
+    /// The load figures carry.
+    pub const fn of(figures: SetFigures) -> Self {
+        match (figures.load, figures.assisted) {
+            (None, _) => Self::Nothing,
+            (Some(mass), false) => Self::Mass(mass),
+            (Some(mass), true) => Self::Assistance(mass),
+        }
+    }
+}
+
+impl std::fmt::Display for StatedLoad {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Nothing => f.write_str("no load"),
+            Self::Mass(mass) => write!(f, "{mass} kg"),
+            Self::Assistance(mass) => write!(f, "{mass} kg of assistance"),
+        }
+    }
+}
+
+/// What the operator changed about one set, and only that (#892).
+///
+/// **Never empty**: an edit that changes nothing is not a correction, so
+/// [`SetEdit::new`] refuses one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SetEdit {
+    reps: Option<RepCount>,
+    load: Option<StatedLoad>,
+    effort: Option<Rir>,
+}
+
+impl SetEdit {
+    /// The fields changed, or [`None`] where none is.
+    #[must_use]
+    pub const fn new(
+        reps: Option<RepCount>,
+        load: Option<StatedLoad>,
+        effort: Option<Rir>,
+    ) -> Option<Self> {
+        if reps.is_none() && load.is_none() && effort.is_none() {
+            return None;
+        }
+        Some(Self { reps, load, effort })
+    }
+
+    pub const fn reps(self) -> Option<RepCount> {
+        self.reps
+    }
+
+    pub const fn load(self) -> Option<StatedLoad> {
+        self.load
+    }
+
+    pub const fn effort(self) -> Option<Rir> {
+        self.effort
+    }
+
+    /// The figures a set recording `recorded` reads as under this edit.
+    #[must_use]
+    pub const fn over(self, recorded: SetFigures) -> SetFigures {
+        let reps = match self.reps {
+            Some(reps) => reps,
+            None => recorded.reps,
+        };
+        match self.load {
+            None => SetFigures { reps, ..recorded },
+            Some(StatedLoad::Nothing) => SetFigures::new(reps, None),
+            Some(StatedLoad::Mass(mass)) => SetFigures::new(reps, Some(mass)),
+            Some(StatedLoad::Assistance(mass)) => SetFigures::assisted(reps, mass),
+        }
+    }
+
+    /// This edit with a later one's fields over it: what the later one
+    /// changed, it changes; what it left, this one's still says.
+    #[must_use]
+    pub const fn then(self, later: Self) -> Self {
+        Self {
+            reps: match later.reps {
+                Some(reps) => Some(reps),
+                None => self.reps,
+            },
+            load: match later.load {
+                Some(load) => Some(load),
+                None => self.load,
+            },
+            effort: match later.effort {
+                Some(effort) => Some(effort),
+                None => self.effort,
+            },
+        }
+    }
+}
+
+impl From<SetFigures> for SetEdit {
+    /// Every figure stated, which is what `fitness gym corrections` asserts.
+    fn from(figures: SetFigures) -> Self {
+        Self {
+            reps: Some(figures.reps),
+            load: Some(StatedLoad::of(figures)),
+            effort: None,
+        }
+    }
+}
+
+impl std::fmt::Display for SetEdit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut parts = Vec::new();
+        if let Some(reps) = self.reps {
+            parts.push(format!("{reps} reps"));
+        }
+        if let Some(load) = self.load {
+            parts.push(load.to_string());
+        }
+        if let Some(effort) = self.effort {
+            parts.push(format!("{effort} in reserve"));
+        }
+        f.write_str(&parts.join(", "))
+    }
+}
+
 /// What a correction replaces, and the observations it replaces it in.
 ///
 /// The parts belong in one type because none of them is meaningful without the
@@ -245,17 +388,16 @@ pub enum Corrected {
         exercise: Exercise,
         entries: NonEmpty<CorrectedTerm>,
     },
-    /// What a set's figures read, over every set that recorded the figures it
-    /// replaces.
+    /// What a set was, over every set that recorded the figures it names.
     ///
     /// **`recorded` is the assertion's, not each set's.** One assertion names
     /// the sets of one day that recorded one pair of figures — "the set
     /// recorded as 58 × 6 kg" — so what it replaces is stated once and every
     /// set it reaches held it. That is also the guard: see the module's note on
     /// lapsing.
-    Figures {
+    Set {
         recorded: SetFigures,
-        figures: SetFigures,
+        edit: SetEdit,
         sets: NonEmpty<CorrectedTerm>,
     },
 }
@@ -305,19 +447,19 @@ impl Correction {
     pub const fn reaches(&self) -> usize {
         match &self.corrected {
             Corrected::Exercise { entries, .. } => entries.count(),
-            Corrected::Figures { sets, .. } => sets.count(),
+            Corrected::Set { sets, .. } => sets.count(),
         }
     }
 }
 
-/// A figures correction as the overlay holds it.
+/// A set's correction as the overlay holds it.
 ///
-/// Both figures, because applying it is conditional: the source has to still
-/// record what the operator corrected.
+/// With the figures it was asserted over, because applying it is
+/// conditional: the source has to still record what the operator corrected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Replacement {
     recorded: SetFigures,
-    reads: SetFigures,
+    edit: SetEdit,
 }
 
 /// Every correction in force for one stream, ready for a derivation to consult.
@@ -343,6 +485,11 @@ impl EditOverlay {
     /// would make him retract the first before he could. Ordering is by when
     /// they were asserted, so the result does not depend on the order the store
     /// hands them back in.
+    ///
+    /// **A set's edits are merged, field by field**, since each holds only
+    /// what it changed: rating a set whose reps were corrected keeps the reps.
+    /// Unless the later one was asserted over other figures, which is a
+    /// different set at source and replaces the earlier outright.
     #[must_use]
     pub fn of(corrections: &[Correction]) -> Self {
         let mut ordered: Vec<&Correction> = corrections.iter().collect();
@@ -360,17 +507,24 @@ impl EditOverlay {
                         exercises.insert(term.clone(), *exercise);
                     }
                 }
-                Corrected::Figures {
+                Corrected::Set {
                     recorded,
-                    figures: reads,
+                    edit,
                     sets,
                 } => {
                     for set in sets {
+                        let edit = match figures.get(set) {
+                            Some(Replacement {
+                                recorded: earlier,
+                                edit: held,
+                            }) if earlier == recorded => held.then(*edit),
+                            _ => *edit,
+                        };
                         figures.insert(
                             set.clone(),
                             Replacement {
                                 recorded: *recorded,
-                                reads: *reads,
+                                edit,
                             },
                         );
                     }
@@ -391,27 +545,27 @@ impl EditOverlay {
             .copied()
     }
 
-    /// What the operator says this set's figures read, if he has said and the
-    /// source still records the figures he corrected.
+    /// What the operator changed about this set, if he has and the source
+    /// still records the figures he corrected it over.
     ///
     /// `recorded` is what the source says now. A correction describing
     /// something else has lapsed: the set it was asserted over is not the set
     /// that is there, and § II.2's "overrides do not propagate" applies to a
     /// set that has changed as much as to a record that has just landed.
     #[must_use]
-    pub fn figures_for(
+    pub fn set_for(
         &self,
         record: &SourceRecordId,
         term: &str,
         recorded: SetFigures,
-    ) -> Option<SetFigures> {
+    ) -> Option<SetEdit> {
         let Ok(term) = SourceTerm::try_from(term) else {
             return None;
         };
         self.figures
             .get(&CorrectedTerm::new(record.clone(), term))
             .filter(|replacement| replacement.recorded == recorded)
-            .map(|replacement| replacement.reads)
+            .map(|replacement| replacement.edit)
     }
 
     /// How many observations it reaches, for a derivation to report.
@@ -482,9 +636,9 @@ mod tests {
             CorrectionId::from(id),
             at(at_text),
             reason(),
-            Corrected::Figures {
+            Corrected::Set {
                 recorded,
-                figures: reads,
+                edit: SetEdit::from(reads),
                 sets: NonEmpty::new(sets).expect("at least one set"),
             },
         )
@@ -497,7 +651,7 @@ mod tests {
         assert!(overlay.is_empty());
         assert_eq!(overlay.exercise_for(&record("a-workout"), "1B2B1E7C"), None);
         assert_eq!(
-            overlay.figures_for(
+            overlay.set_for(
                 &record("an-activity"),
                 "2018-06-11T06:25:22.0",
                 figures(58, Some(6))
@@ -571,12 +725,12 @@ mod tests {
         )]);
 
         assert_eq!(
-            overlay.figures_for(
+            overlay.set_for(
                 &record("2768338072"),
                 "2018-06-11T06:25:22.0",
                 figures(58, Some(6))
             ),
-            Some(figures(6, Some(57)))
+            Some(SetEdit::from(figures(6, Some(57))))
         );
     }
 
@@ -596,7 +750,7 @@ mod tests {
         // The source has since been edited: the set at that instant is a
         // different set from the one the operator ruled on.
         assert_eq!(
-            overlay.figures_for(
+            overlay.set_for(
                 &record("2768338072"),
                 "2018-06-11T06:25:22.0",
                 figures(6, Some(50))
@@ -605,7 +759,7 @@ mod tests {
         );
         // And another set in the same record is reached by neither.
         assert_eq!(
-            overlay.figures_for(
+            overlay.set_for(
                 &record("2768338072"),
                 "2018-06-11T06:31:04.0",
                 figures(58, Some(6))
@@ -637,10 +791,52 @@ mod tests {
             Some(Exercise::Reps(RepsExercise::NeutralGripPullUp))
         );
         assert_eq!(
-            overlay.figures_for(&record("shared"), "a-term", figures(58, Some(6))),
-            Some(figures(6, Some(57)))
+            overlay.set_for(&record("shared"), "a-term", figures(58, Some(6))),
+            Some(SetEdit::from(figures(6, Some(57))))
         );
         assert_eq!(overlay.count(), 2);
+    }
+
+    fn edit_correction(
+        id: i64,
+        at_text: &str,
+        recorded: SetFigures,
+        edit: SetEdit,
+        set: CorrectedTerm,
+    ) -> Correction {
+        Correction::new(
+            CorrectionId::from(id),
+            at(at_text),
+            reason(),
+            Corrected::Set {
+                recorded,
+                edit,
+                sets: NonEmpty::new(vec![set]).expect("one set"),
+            },
+        )
+    }
+
+    /// **An edit holds only what was changed**, and a later edit of the same
+    /// set keeps what an earlier one changed and it did not (#892).
+    #[test]
+    fn a_later_edit_of_a_set_keeps_the_fields_it_left() {
+        let set = || CorrectedTerm::new(record("a-workout"), term("FS/4"));
+        let single = figures(1, Some(90));
+        let rated = SetEdit::new(None, None, Some(Rir::One)).expect("an effort");
+        let recounted =
+            SetEdit::new(Some(RepCount::new(2).expect("two")), None, None).expect("a count");
+
+        let overlay = EditOverlay::of(&[
+            edit_correction(1, "2026-11-21T09:00:00Z", single, rated, set()),
+            edit_correction(2, "2026-11-21T10:00:00Z", single, recounted, set()),
+        ]);
+        let edit = overlay
+            .set_for(&record("a-workout"), "FS/4", single)
+            .expect("an edit");
+
+        assert_eq!(edit.effort(), Some(Rir::One));
+        assert_eq!(edit.over(single), figures(2, Some(90)));
+        assert_eq!(SetEdit::new(None, None, None), None);
     }
 
     #[test]

@@ -357,9 +357,9 @@ fn the_store_round_trips_a_figures_correction_and_retracts_it() {
         let reason = CorrectionReason::try_from("a transposition in the watch".to_owned())?;
 
         let id = store
-            .assert_figures(
+            .assert_set(
                 figures(58, 6_000)?,
-                figures(6, 57_500)?,
+                figures(6, 57_500)?.into(),
                 "2026-10-04T09:00:00Z".parse()?,
                 &reason,
                 &NonEmpty::new(vec![term])?,
@@ -383,9 +383,9 @@ fn the_store_round_trips_a_figures_correction_and_retracts_it() {
         panic!("there is a correction")
     };
     assert_eq!(correction.id(), id);
-    let Corrected::Figures {
+    let Corrected::Set {
         recorded,
-        figures: reads,
+        edit,
         sets,
     } = correction.corrected()
     else {
@@ -393,6 +393,7 @@ fn the_store_round_trips_a_figures_correction_and_retracts_it() {
     };
     assert_eq!(recorded.reps().as_u32(), 58);
     assert_eq!(recorded.load().map(Kg::as_grams), Some(6_000));
+    let reads = edit.over(*recorded);
     assert_eq!(reads.reps().as_u32(), 6);
     assert_eq!(reads.load().map(Kg::as_grams), Some(57_500));
     assert_eq!(sets.count(), 1);
@@ -406,11 +407,13 @@ fn the_store_round_trips_a_figures_correction_and_retracts_it() {
         panic!("58 is a count")
     };
     assert_eq!(
-        overlay.figures_for(
-            &record,
-            "2018-06-11T06:25:22.0",
-            SetFigures::new(wrong, Some(Kg::from_grams(6_000)))
-        ),
+        overlay
+            .set_for(
+                &record,
+                "2018-06-11T06:25:22.0",
+                SetFigures::new(wrong, Some(Kg::from_grams(6_000)))
+            )
+            .map(|edit| edit.over(SetFigures::new(wrong, Some(Kg::from_grams(6_000))))),
         Some(SetFigures::new(
             RepCount::new(6).expect("6 is a count"),
             Some(Kg::from_grams(57_500))
@@ -420,4 +423,55 @@ fn the_store_round_trips_a_figures_correction_and_retracts_it() {
 
     assert!(retracted, "retracting an assertion that exists says so");
     assert!(after.is_empty(), "and takes the sets it named with it");
+}
+
+/// **A set's edit is stored as sparse as it was made** (#892): an effort
+/// alone reads back as an effort alone, so the reps and load stay the
+/// source's.
+#[test]
+fn the_store_round_trips_an_edit_that_states_only_an_effort() {
+    use domain::{
+        gym::intensity::Rir,
+        measure::{Kg, RepCount},
+        normalised::{SetEdit, SetFigures},
+    };
+
+    let outcome = corpus::block_on(async {
+        let directory = tempfile::tempdir()?;
+        let pool = connect(&directory.path().join("test.db")).await?;
+        let store = SqliteEditOverlayStore::new(pool, "hevy.workouts")?;
+
+        let single = SetFigures::new(RepCount::new(1)?, Some(Kg::from_grams(90_000)));
+        let rated = SetEdit::new(None, None, Some(Rir::One)).ok_or("an effort is an edit")?;
+        let term = CorrectedTerm::new(
+            SourceRecordId::try_from("3b829f3c-f5fd-41ac-9a7e-8709b757812b")?,
+            SourceTerm::try_from("5E4E8B6C/4")?,
+        );
+        let reason = CorrectionReason::try_from("forgot to rate it".to_owned())?;
+
+        store
+            .assert_set(
+                single,
+                rated,
+                "2026-11-21T09:00:00Z".parse()?,
+                &reason,
+                &NonEmpty::new(vec![term])?,
+            )
+            .await?;
+        let held = store.all().await?;
+        Ok::<_, Box<dyn std::error::Error>>((held, single, rated))
+    });
+
+    let Ok(Ok((held, single, rated))) = outcome else {
+        panic!("the store round-trips")
+    };
+    let [correction] = held.as_slice() else {
+        panic!("one assertion, read back as one")
+    };
+    let Corrected::Set { recorded, edit, .. } = correction.corrected() else {
+        panic!("the assertion that went in was about a set")
+    };
+    assert_eq!(*recorded, single);
+    assert_eq!(*edit, rated);
+    assert_eq!(edit.over(single), single, "the figures stay the source's");
 }
