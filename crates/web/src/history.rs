@@ -17,7 +17,7 @@ use domain::{
     measure::{Duration, RepCount},
 };
 use jiff::civil::Date;
-use maud::{DOCTYPE, Markup, html};
+use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 use crate::page::{self, Place};
 
@@ -366,15 +366,20 @@ fn exercise_sets(
     };
     html! {
         @if is_tested { p.label { (ONE_REP_MAX_TEST) } }
-        h2 {
+        h2.editable {
             (named)
             @if exercise.exercise_key().is_some() {
-                " " a.change href=(format!("{here}/exercise/{position}")) { "Change" }
+                a.edit href=(format!("{here}/exercise/{position}")) aria-label="Change" title="Change" { (PEN) }
             }
         }
         ol.sets { @for set in &sets { li { (set) } } }
     }
 }
+
+/// The pen an editable value is opened from.
+const PEN: PreEscaped<&str> = PreEscaped(
+    r#"<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>"#,
+);
 
 /// A set as it was performed: its load, how much of it, how far from failure,
 /// and whether it was a warm-up.
