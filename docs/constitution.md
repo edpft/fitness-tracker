@@ -1,7 +1,18 @@
 <!--
 Sync Impact Report
-- Version: 10.0.0, amended 2026-11-14. Ratified at 1.0.0 on 2026-08-11, on completion of the
+- Version: 11.0.0, amended 2026-11-21. Ratified at 1.0.0 on 2026-08-11, on completion of the
   repository's preparation.
+- 11.0.0 — § II.2's edit overlay is an input to the canonical layer, not the normalised one: an
+  edit is a sparse edit of a canonical entity, anchored to that entity's identity, which a
+  rebuild keeps. MAJOR: "anchored to source identity, never to a surrogate key" no longer
+  governs edits, and § II.3 no longer takes the edit overlay. Linking an edit to a source meant
+  giving sources fields they did not and could not have, such as an effort on a watch's set.
+  The operator, 2026-11-21: *"I think edits should be applied on top of the canonical layer,
+  that's why I keep saying they are sparse canonical gym sessions that can edit any field in a
+  canonical gym session"*; on identity, *"Once they've been built, they have been built, they
+  are a thing"*; and on a rebuild that would change an edited session, of raising the conflict,
+  locking the session or clearing the edit, *"I'd go with 1 … it would be best to deal with
+  these cases on a case by case basis."*
 - 10.0.0 — § 13 no longer says analytical results are re-derived on demand rather than stored.
   MAJOR: a rule is removed, by deletion only, with nothing written in its place. It was read as
   forbidding stored results, and pages re-derived everything they showed on every load. The
@@ -240,14 +251,16 @@ Data that is not an observation is outside this model. It acquires no raw, norma
 
 **2. Operator overlays.** Operator input is stored separately from every derivation and applied only during rebuild — never patched into derived rows directly — so removing an overlay record and rebuilding restores the underlying deterministic result. Two overlays exist.
 
-- *Edit overlay* — operator corrections to individual observations, any field. An input to the normalised layer.
+- *Edit overlay* — operator edits to a canonical entity, any field it holds. Sparse: an edit holds only the fields it changes, and the rest stand as derived. An input to the canonical layer, applied after matching.
 - *Match overlay* — operator assertions that two entities are, or are not, the same real-world event. An input to the canonical layer.
+
+A canonical entity keeps its identity once built: a rebuild that derives the same real-world event keeps its id, and the ids of what it holds. An edit is anchored to that identity. Where a rebuild would change what an edit stands on, the edited entity stands and the conflict is raised for the operator to settle.
 
 Overlays are peers of raw, not derivations of it. Unlike raw they are not append-only: retraction is the point of an override you can undo.
 
 Obligations, common to both:
 
-- **Anchored to source identity**, never to a surrogate key, so overlay records survive a rebuild.
+- **Anchored to an identity that survives a rebuild**: the match overlay to source identity, the edit overlay to canonical identity.
 - **Both directions are assertable.** For matching, a negative assertion is a first-class record and not merely the absence of a positive one — without it, a deterministic rule re-fires the same wrong match on every rebuild.
 - **Bulk application is supported.** Many observations or correspondences overridden in one action.
 - **Dated and given a reason.** An unexplained override is unreadable six months later.
@@ -256,7 +269,7 @@ Obligations, common to both:
 
 ### Derivations
 
-**3. Normalised layer.** A function of raw, deterministic translation, and the edit overlay. Per-source: each normalised entity's content is a function of what one source served about one thing, and never of another source. This layer says what each source said, in our terms — including where a source has said the same thing twice, or later contradicted itself.
+**3. Normalised layer.** A function of raw and deterministic translation. Per-source: each normalised entity's content is a function of what one source served about one thing, and never of another source. This layer says what each source said, in our terms — including where a source has said the same thing twice, or later contradicted itself.
 
 **A retraction leaves the record it names with no normalised entity.** Where a source serves an event withdrawing a record it previously served, nothing here stands for that record: a withdrawn record is not something the source is still saying, and an entity for it would be this layer asserting what no source does.
 
@@ -278,7 +291,7 @@ It models domain entities — a gym session of ordered exercises and sets; a cyc
 - **Units canonicalised** (kg, metres, seconds, bpm, watts).
 - **A recorded moment is its instant and the offset in force where it happened.** Wall-clock time is what is entered and what is displayed: the instant plus that offset. Arithmetic between moments is on their instants, so a night that crosses a clock change is as long as it was. The normalised layer carries the offset only where the source stated one. Where a source states only an instant, the canonical layer infers the offset from what else is held about where the operator was — the watch's offset for that day, or a place a source recorded — and failing that takes the declared home zone's. A clock change is a known event, and the declared home zone's rules say when it happened, so a source that stamps an interval with one offset across a change at home is corrected by them. The edit overlay is for genuine mistakes and genuine gaps, not for what the data already shows. A named zone is needed only for those rules and for times not yet happened, which the schedule projects forward.
 
-**4. Canonical layer.** A function of the normalised layer, deterministic matching, and the match overlay. Cross-source: one entry per real-world event, whatever number of sources recorded it, and whatever number of times each recorded it. This is the clean layer the analytical layer reads.
+**4. Canonical layer.** A function of the normalised layer, deterministic matching, the match overlay and the edit overlay. Cross-source: one entry per real-world event, whatever number of sources recorded it, and whatever number of times each recorded it. This is the clean layer the analytical layer reads.
 
 **A method-dependent reading that is the whole entity is read from the normalised layer.** Where the observation is a figure only the instrument that produced it can state — a night's HRV, a day's resting heart rate — another source's figure is a different series (§ 6), never a second account of the same event, so there is nothing here to match or merge, and the analytical layer reads the normalised entity directly. An entity another source could also record — a session, a ride, a weigh-in's mass — passes through here even while only one source records it.
 
@@ -440,4 +453,4 @@ Dependency updates were already exempt, and remain so for their own reason: what
 - **`docs/decisions/` records genuine changes of direction**, and decisions where more than one option was legitimately available. It is not a changelog for edits to this document. Nothing is owed to it until implementation has started — before then there is no direction to have changed.
 - A rule that is repeatedly violated is evidence to either automate it or drop it — not to restate it.
 
-**Version**: 10.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-11-14
+**Version**: 11.0.0 | **Ratified**: 2026-08-11 | **Last Amended**: 2026-11-21
