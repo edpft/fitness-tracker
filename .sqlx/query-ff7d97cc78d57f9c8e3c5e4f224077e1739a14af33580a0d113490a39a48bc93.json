@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT outcome AS \"outcome!\", reps, duration_seconds, distance_mm,\n               outcome_normalised_session AS \"outcome_normalised_session!\",\n               load_kind, load_grams, load_normalised_session,\n               began_at_utc, began_zone, began_normalised_session,\n               rir, rir_normalised_session, set_kind, set_kind_normalised_session,\n               rest_after_seconds, rest_after_normalised_session, sources AS \"sources!\"\n        FROM canonical_gym_set\n        WHERE session = ? AND item_position = ? AND exercise_position = ?\n        ORDER BY position\n        ",
+  "query": "\n        SELECT outcome AS \"outcome!\", reps, duration_seconds, distance_mm,\n               outcome_normalised_session,\n               load_kind, load_grams, load_normalised_session,\n               began_at_utc, began_zone, began_normalised_session,\n               rir, rir_normalised_session, set_kind, set_kind_normalised_session,\n               rest_after_seconds, rest_after_normalised_session, sources AS \"sources!\"\n        FROM canonical_gym_set\n        WHERE session = ? AND item_position = ? AND exercise_position = ?\n        ORDER BY position\n        ",
   "describe": {
     "columns": [
       {
@@ -48,7 +48,7 @@
         }
       },
       {
-        "name": "outcome_normalised_session!",
+        "name": "outcome_normalised_session",
         "ordinal": 4,
         "type_info": "Integer",
         "origin": {
@@ -210,7 +210,7 @@
       true,
       true,
       true,
-      false,
+      true,
       true,
       true,
       true,
@@ -226,5 +226,5 @@
       false
     ]
   },
-  "hash": "ad0ee87e45beb36ef5f1a74cbfb5119c86ea3ec282750053556671c38ff9db9d"
+  "hash": "ff7d97cc78d57f9c8e3c5e4f224077e1739a14af33580a0d113490a39a48bc93"
 }

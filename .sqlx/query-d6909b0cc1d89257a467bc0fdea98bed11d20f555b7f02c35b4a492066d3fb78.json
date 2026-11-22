@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT e.id AS \"exercise!\", st.id AS \"set!\"\n            FROM canonical_gym_exercise AS e\n            JOIN canonical_gym_set AS st\n              ON st.session = e.session AND st.item_position = e.item_position\n             AND st.exercise_position = e.position\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "exercise!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "set!",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "d6909b0cc1d89257a467bc0fdea98bed11d20f555b7f02c35b4a492066d3fb78"
+}

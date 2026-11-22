@@ -22,7 +22,7 @@ pub mod reach;
 pub mod session;
 pub mod time;
 
-pub use attribution::Attributed;
+pub use attribution::{Attributed, TakenFrom};
 pub use reach::Reach;
 pub use session::{NegativeNormalisedSessionId, NormalisedSessionId, SessionCount};
 pub use time::Occurred;

@@ -48,7 +48,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use crate::canonical::{Attributed, NormalisedSessionId, Occurred};
+use crate::canonical::{Attributed, NormalisedSessionId, Occurred, TakenFrom};
 use crate::measure::{Distance, Duration, PositiveDuration, RepCount};
 use crate::normalised::StartedAt;
 use crate::sequence::{AtLeastTwo, NonEmpty};
@@ -74,8 +74,8 @@ use super::{
 /// **The guess survives into this layer** rather than being resolved away. The
 /// operator, 2026-09-29, on the watch's guesses where nothing else covers the
 /// set: *"Yes, take them, though I may be able to match them to our catalogue
-/// retrospectively."* A later re-match is then an edit overlay (§ II.2)
-/// against the normalised set, and this layer is rebuilt from it — not patched.
+/// retrospectively."* A later re-match is then an edit (§ II.2) of the
+/// canonical exercise, applied as this layer is rebuilt — not patched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Identified {
     /// A source that records what was done named it: Hevy, the gym's log, a
@@ -136,37 +136,39 @@ impl fmt::Display for Identified {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalSet<M> {
     /// What became of the set, and how much of it where a normalised session said.
-    pub outcome: Attributed<Performed<Option<M>>>,
+    pub outcome: Attributed<Performed<Option<M>>, TakenFrom>,
     /// `None` where no normalised session recorded a load, which is not an unloaded set:
     /// that is `Some` of [`Load::UNLOADED`].
-    pub load: Option<Attributed<Load>>,
+    pub load: Option<Attributed<Load, TakenFrom>>,
     /// When the set began. Only a watch records this, so it is present on the
     /// sessions a watch recorded and absent on the rest.
-    pub began: Option<Attributed<StartedAt>>,
-    pub intensity: Option<Attributed<Rir>>,
+    pub began: Option<Attributed<StartedAt, TakenFrom>>,
+    pub intensity: Option<Attributed<Rir, TakenFrom>>,
     /// Working or warm-up. **Optional here although it is not on a logged
     /// set**, because the watch does not state it: a session only a watch
     /// recorded has sets whose kind nothing says, and defaulting them to
     /// working would file a warm-up as volume.
-    pub kind: Option<Attributed<SetKind>>,
-    pub rest_after: Option<Attributed<Duration>>,
+    pub kind: Option<Attributed<SetKind, TakenFrom>>,
+    pub rest_after: Option<Attributed<Duration, TakenFrom>>,
     /// The source sets it was built from, by the sources' own names: what it
     /// is across a rebuild ([`super::identity`]).
     pub sources: BTreeSet<SourceSet>,
 }
 
 impl<M> CanonicalSet<M> {
-    /// Every normalised session this set drew a field from, each once, in field order.
+    /// Every normalised session this set drew a field from, each once, in
+    /// field order. A field the operator's edit states names none.
     pub fn normalised_sessions(&self) -> Vec<NormalisedSessionId> {
-        let mut sessions = vec![self.outcome.normalised_session()];
-        let others = [
-            self.load.as_ref().map(Attributed::normalised_session),
-            self.began.as_ref().map(Attributed::normalised_session),
-            self.intensity.as_ref().map(Attributed::normalised_session),
-            self.kind.as_ref().map(Attributed::normalised_session),
-            self.rest_after.as_ref().map(Attributed::normalised_session),
+        let mut sessions = Vec::new();
+        let fields = [
+            self.outcome.normalised(),
+            self.load.as_ref().and_then(Attributed::normalised),
+            self.began.as_ref().and_then(Attributed::normalised),
+            self.intensity.as_ref().and_then(Attributed::normalised),
+            self.kind.as_ref().and_then(Attributed::normalised),
+            self.rest_after.as_ref().and_then(Attributed::normalised),
         ];
-        for session in others.into_iter().flatten() {
+        for session in fields.into_iter().flatten() {
             if !sessions.contains(&session) {
                 sessions.push(session);
             }
@@ -207,15 +209,15 @@ impl<M: fmt::Display> fmt::Display for CanonicalSet<M> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CanonicalExercise {
     ForReps {
-        identified: Attributed<Identified>,
+        identified: Attributed<Identified, TakenFrom>,
         sets: NonEmpty<CanonicalSet<RepCount>>,
     },
     ForDuration {
-        exercise: Attributed<DurationExercise>,
+        exercise: Attributed<DurationExercise, TakenFrom>,
         sets: NonEmpty<CanonicalSet<Duration>>,
     },
     ForDistance {
-        exercise: Attributed<DistanceExercise>,
+        exercise: Attributed<DistanceExercise, TakenFrom>,
         sets: NonEmpty<CanonicalSet<Distance>>,
     },
 }
@@ -243,12 +245,13 @@ impl CanonicalExercise {
         }
     }
 
-    /// The normalised session the exercise's own identity came from.
-    pub const fn identified_by(&self) -> NormalisedSessionId {
+    /// The normalised session the exercise's own identity came from, or
+    /// [`None`] where the operator's edit named it.
+    pub const fn identified_by(&self) -> Option<NormalisedSessionId> {
         match self {
-            Self::ForReps { identified, .. } => identified.normalised_session(),
-            Self::ForDuration { exercise, .. } => exercise.normalised_session(),
-            Self::ForDistance { exercise, .. } => exercise.normalised_session(),
+            Self::ForReps { identified, .. } => identified.normalised(),
+            Self::ForDuration { exercise, .. } => exercise.normalised(),
+            Self::ForDistance { exercise, .. } => exercise.normalised(),
         }
     }
 
@@ -271,7 +274,7 @@ impl CanonicalExercise {
 
     /// Every normalised session this exercise and its sets drew a field from, each once.
     pub fn normalised_sessions(&self) -> Vec<NormalisedSessionId> {
-        let mut sessions = vec![self.identified_by()];
+        let mut sessions: Vec<NormalisedSessionId> = self.identified_by().into_iter().collect();
         let sets: Vec<Vec<NormalisedSessionId>> = match self {
             Self::ForReps { sets, .. } => {
                 sets.iter().map(CanonicalSet::normalised_sessions).collect()
@@ -403,6 +406,28 @@ impl CanonicalGymSession {
         self.exercises.iter().flat_map(CanonicalItem::exercises)
     }
 
+    /// The same session with each exercise, in the order [`Self::exercises`]
+    /// gives them, replaced by what `f` makes of it: its items, supersets and
+    /// everything else stand as they were.
+    #[must_use]
+    pub fn map_exercises(
+        &self,
+        mut f: impl FnMut(&CanonicalExercise) -> CanonicalExercise,
+    ) -> Self {
+        let exercises = self.exercises.map_indexed(|_, item| match item {
+            CanonicalItem::Exercise(exercise) => CanonicalItem::exercise(f(exercise)),
+            CanonicalItem::Superset(members) => {
+                CanonicalItem::Superset(Box::new(members.map_indexed(|_, member| f(member))))
+            }
+        });
+        Self {
+            occurred: self.occurred.clone(),
+            exercises,
+            heart_rate: self.heart_rate.clone(),
+            duration: self.duration,
+        }
+    }
+
     /// How many sets the session holds. Never zero.
     pub fn set_count(&self) -> usize {
         self.exercises().map(CanonicalExercise::set_count).sum()
@@ -503,9 +528,9 @@ mod tests {
         let watch = session(2).expect("a normalised session");
         let deadlift = set(4, sheet, Some((63_000, watch))).expect("a set");
 
-        assert_eq!(deadlift.outcome.normalised_session(), sheet);
+        assert_eq!(deadlift.outcome.normalised(), Some(sheet));
         assert_eq!(
-            deadlift.load.as_ref().map(Attributed::normalised_session),
+            deadlift.load.as_ref().and_then(Attributed::normalised),
             Some(watch),
             "the load is the watch's, because the sheet's formula came back empty"
         );
@@ -609,11 +634,11 @@ mod tests {
             Some(Load::absolute(Kg::from_grams(47_500)))
         );
         assert_eq!(
-            bench.load.as_ref().map(Attributed::normalised_session),
+            bench.load.as_ref().and_then(Attributed::normalised),
             Some(sheet)
         );
         assert_eq!(
-            bench.began.as_ref().map(Attributed::normalised_session),
+            bench.began.as_ref().and_then(Attributed::normalised),
             Some(watch)
         );
         assert_eq!(bench.normalised_sessions(), vec![sheet, watch]);
@@ -631,7 +656,7 @@ mod tests {
 
         assert_eq!(exercise.exercise_key(), None);
         assert_eq!(exercise.set_count(), 1);
-        assert!(!exercise.identified_by().as_i64().is_negative());
+        assert_eq!(exercise.identified_by(), Some(watch));
         assert_eq!(exercise.normalised_sessions(), vec![watch]);
     }
 }

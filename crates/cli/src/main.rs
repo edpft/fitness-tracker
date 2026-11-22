@@ -5,7 +5,6 @@
 //! (#402) — and turns whatever comes back into output and an exit code.
 
 mod canonicalise;
-mod corrections;
 mod cycling;
 mod gym;
 mod holidays;
@@ -23,7 +22,7 @@ use std::{path::PathBuf, process::ExitCode};
 use application::{
     ExtractionError, NormalisationError, Rederivation, SourceError, StatusError, StoreError,
 };
-use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command as ClapCommand, value_parser};
+use clap::{Arg, ArgAction, ArgMatches, Command as ClapCommand, value_parser};
 use domain::landing::LandingStream;
 
 use configurator::{catalogue, config, paths, store::Store, wiring};
@@ -293,104 +292,12 @@ fn discipline_command() -> ClapCommand {
                  Defaults to <SOURCE>_API_BASE_URL, then to the built-in root",
             )),
     );
-    command = command.subcommand(corrections_command());
     command = command.subcommand(ClapCommand::new("templates").about(
         "Create on the Hevy account the templates for exercises Hevy does not have, \
          and print their ids",
     ));
 
     command
-}
-
-/// `fitness gym corrections` — the edit overlay (§ II.2).
-///
-/// Under the discipline rather than at the top level, because a discipline names
-/// the one source its record comes from and a correction is a correction to that
-/// source. A second discipline is an arm, not a second command.
-fn corrections_command() -> ClapCommand {
-    ClapCommand::new("corrections")
-        .about("What the operator says a source recorded wrongly: an exercise, or a set's figures")
-        .subcommand_required(true)
-        .arg_required_else_help(true)
-        .subcommand(
-            ClapCommand::new("add")
-                .about(
-                    "Assert that what a source named was another exercise, \
-                     or that what it recorded for a set was other figures",
-                )
-                .arg(timezone_argument())
-                .arg(
-                    Arg::new("was")
-                        .long("was")
-                        .value_name("exercise")
-                        .conflicts_with_all(["recorded", "on"])
-                        .help("The exercise those records read as now, as a vocabulary key"),
-                )
-                .arg(
-                    Arg::new("assisted")
-                        .long("assisted")
-                        .action(ArgAction::SetTrue)
-                        .requires("recorded")
-                        .help("The mass in --actually was assistance, whatever the source records"),
-                )
-                .arg(
-                    Arg::new("recorded")
-                        .long("recorded")
-                        .value_name("reps>x<kg")
-                        .requires("on")
-                        .conflicts_with_all(["was", "from", "until"])
-                        .help("The figures the source recorded for the set, as 58x6"),
-                )
-                .arg(
-                    Arg::new("actually")
-                        .long("actually")
-                        .value_name("exercise-or-figures")
-                        .required(true)
-                        .help(
-                            "What it was: a vocabulary key beside --was, \
-                             figures as 6x57.5 beside --recorded",
-                        ),
-                )
-                .arg(
-                    Arg::new("because")
-                        .long("because")
-                        .value_name("reason")
-                        .required(true)
-                        .help("Why, so the correction is readable in six months"),
-                )
-                .arg(
-                    Arg::new("on")
-                        .long("on")
-                        .value_name("date")
-                        .help("The day the set was performed, as YYYY-MM-DD"),
-                )
-                .arg(
-                    Arg::new("from").long("from").value_name("date").help(
-                        "The first day it reaches, as YYYY-MM-DD. Defaults to the first record",
-                    ),
-                )
-                .arg(
-                    Arg::new("until").long("until").value_name("date").help(
-                        "The last day it reaches, as YYYY-MM-DD. Defaults to the last record",
-                    ),
-                )
-                .group(
-                    ArgGroup::new("field")
-                        .args(["was", "recorded"])
-                        .required(true),
-                ),
-        )
-        .subcommand(ClapCommand::new("show").about("Every correction in force, with its reason"))
-        .subcommand(
-            ClapCommand::new("remove")
-                .about("Retract one assertion, so the source's own word stands again")
-                .arg(
-                    Arg::new("correction")
-                        .value_name("number")
-                        .required(true)
-                        .help("The number `show` prints"),
-                ),
-        )
 }
 
 /// `fitness cycling next`.
@@ -828,7 +735,6 @@ impl From<WiringError> for Failure {
             // A correction naming a key the vocabulary no longer holds is the
             // same kind of thing: a rename that missed a column, not something
             // the operator typed.
-            WiringError::Overlay(error) => Self::message(error.to_string(), exit::STORE),
             // Not a mistake in this build: the stream really does land, and
             // asking it to derive is something the operator can stop doing.
             WiringError::NothingDerives { .. } => Self::message(error.to_string(), exit::USAGE),
@@ -1139,9 +1045,6 @@ async fn discipline_command_run(
             exit::USAGE,
         ));
     };
-    if let Some(("corrections", corrections)) = sub.subcommand() {
-        return corrections_run(corrections, stated_timezone, store).await;
-    }
     if let Some(("templates", _)) = sub.subcommand() {
         return gym::templates(discipline, credentials).await;
     }
@@ -1171,68 +1074,6 @@ async fn discipline_command_run(
         credentials,
     )
     .await
-}
-
-/// `gym corrections`, once its arguments are in hand.
-async fn corrections_run(
-    sub: &ArgMatches,
-    stated_timezone: Option<&str>,
-    store: &Store,
-) -> Result<(), Failure> {
-    match sub.subcommand() {
-        Some(("add", add)) => {
-            let zone = config::timezone(
-                add.get_one::<String>("timezone").map(String::as_str),
-                stated_timezone,
-            )?;
-            let text = |name: &str| -> Result<&str, Failure> {
-                add.get_one::<String>(name)
-                    .map(String::as_str)
-                    .ok_or_else(|| Failure::message(format!("no --{name} given"), exit::USAGE))
-            };
-            // Which field is being corrected is named by the flag, and the
-            // group above makes it exactly one of them. `--actually` then means
-            // an exercise or a set's figures, which is what it says either way.
-            if add.get_one::<String>("recorded").is_some() {
-                return corrections::add_figures(
-                    store,
-                    &zone,
-                    &corrections::FigureAssertion {
-                        on: text("on")?,
-                        recorded: text("recorded")?,
-                        actually: text("actually")?,
-                        assisted: add.get_flag("assisted"),
-                        because: text("because")?,
-                    },
-                )
-                .await;
-            }
-            corrections::add(
-                store,
-                &zone,
-                &corrections::Assertion {
-                    was: text("was")?,
-                    actually: text("actually")?,
-                    because: text("because")?,
-                    from: add.get_one::<String>("from").map(String::as_str),
-                    until: add.get_one::<String>("until").map(String::as_str),
-                },
-            )
-            .await
-        }
-        Some(("show", _)) => corrections::show(store).await,
-        Some(("remove", remove)) => {
-            let id = remove
-                .get_one::<String>("correction")
-                .map(String::as_str)
-                .ok_or_else(|| Failure::message("no correction number given", exit::USAGE))?;
-            corrections::remove(store, id).await
-        }
-        _ => Err(Failure::message(
-            "no corrections command given",
-            exit::USAGE,
-        )),
-    }
 }
 
 /// `plan`, once its arguments are in hand.

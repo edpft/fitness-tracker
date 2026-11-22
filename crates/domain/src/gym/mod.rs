@@ -11,6 +11,7 @@
 
 pub mod canonical;
 pub mod canonicalise;
+pub mod edit;
 pub mod equipment;
 pub mod exercise;
 pub mod identity;

@@ -278,10 +278,11 @@ impl SqliteExerciseHistory {
             -- visit's.** Only the source a prescription is delivered to records
             -- what a workout was performed against, so the reference is found on
             -- its rows and carried up through whichever field of the canonical
-            -- session names that normalised session. The two attribution columns
-            -- joined here are the layer's only `NOT NULL` ones, which is what
-            -- makes them enough: an account that contributed anything to the
-            -- visit named an exercise or a set's outcome.
+            -- session names that normalised session: an account that
+            -- contributed anything to the visit named an exercise, a set's
+            -- outcome or a set's kind. The operator's edit names none of them
+            -- (#893), so all three are joined: one he edited the exercise and
+            -- the reps of is still named by its sets' kinds.
             --
             -- `MIN(d.prescription)` keeps the pick deterministic where a
             -- reference somehow resolved twice; a join that fanned out would
@@ -296,6 +297,10 @@ impl SqliteExerciseHistory {
                     UNION
                     SELECT session AS canonical,
                            outcome_normalised_session AS normalised
+                    FROM canonical_gym_set
+                    UNION
+                    SELECT session AS canonical,
+                           set_kind_normalised_session AS normalised
                     FROM canonical_gym_set
                 ) AS stands_on
                 JOIN gym_workout AS w ON w.session = stands_on.normalised

@@ -11,10 +11,11 @@
 //! Tests return `()` and assert by panicking. See `store.rs` for why.
 
 use crate::support;
+use domain::gym::edit::Edits;
 
 use application::{CanonicalGymSessionStore as _, PerformedGymSessions as _};
 use domain::{
-    canonical::{Attributed, NormalisedSessionId, Occurred, SessionCount},
+    canonical::{Attributed, NormalisedSessionId, Occurred, SessionCount, TakenFrom},
     gym::{
         CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Guess,
         GuessedExercise, Identified, Load, MeasuredHeartRate, Performed, SetKind,
@@ -61,7 +62,7 @@ fn on(day: &str) -> Result<Occurred, Failure> {
 fn began(
     instant: &str,
     normalised_session: NormalisedSessionId,
-) -> Result<Attributed<StartedAt>, Failure> {
+) -> Result<Attributed<StartedAt, TakenFrom>, Failure> {
     Ok(Attributed::new(
         StartedAt::new(
             instant.parse()?,
@@ -180,7 +181,10 @@ fn a_merged_session_round_trips_field_by_field() {
             )),
         );
 
-        let written = store.replace(vec![session.clone()]).await.expect("a write");
+        let written = store
+            .replace(vec![session.clone()], &Edits::default())
+            .await
+            .expect("a write");
         assert_eq!(written, SessionCount::from(1));
 
         let read = store.all().await.expect("a read");
@@ -256,7 +260,10 @@ fn a_superset_and_a_guess_both_round_trip() {
             None,
         );
 
-        store.replace(vec![session.clone()]).await.expect("a write");
+        store
+            .replace(vec![session.clone()], &Edits::default())
+            .await
+            .expect("a write");
         let read = store.all().await.expect("a read");
 
         assert_eq!(read, vec![session]);
@@ -302,17 +309,20 @@ fn a_replacement_replaces_and_reads_oldest_first() {
         let newer = one(at("2025-02-19T12:30:30Z").expect("an instant"));
 
         store
-            .replace(vec![
-                newer.clone(),
-                older.clone(),
-                one(on("2021-01-01").expect("a day")),
-            ])
+            .replace(
+                vec![
+                    newer.clone(),
+                    older.clone(),
+                    one(on("2021-01-01").expect("a day")),
+                ],
+                &Edits::default(),
+            )
             .await
             .expect("a write");
         assert_eq!(store.count().await.expect("a count"), SessionCount::from(3));
 
         let written = store
-            .replace(vec![newer.clone(), older.clone()])
+            .replace(vec![newer.clone(), older.clone()], &Edits::default())
             .await
             .expect("a second write");
         assert_eq!(written, SessionCount::from(2));
@@ -373,7 +383,10 @@ fn a_reading_spanning_a_replacement_sees_the_layer_it_began_on() {
             "2026-09-01".parse::<Date>().expect("a day"),
             "2026-10-31".parse::<Date>().expect("a day"),
         );
-        store.replace(before.clone()).await.expect("a write");
+        store
+            .replace(before.clone(), &Edits::default())
+            .await
+            .expect("a write");
 
         let mut reading = store.reading().await.expect("a reading");
         assert_eq!(
@@ -383,7 +396,7 @@ fn a_reading_spanning_a_replacement_sees_the_layer_it_began_on() {
         );
 
         store
-            .replace(after.clone())
+            .replace(after.clone(), &Edits::default())
             .await
             .expect("a rebuild while the reading is open");
 
@@ -436,26 +449,29 @@ fn a_session_is_listed_by_its_counts_and_averages() {
         let clocked = at("2020-10-09T07:12:00Z").expect("an instant");
         let dated = on("2020-10-10").expect("a day");
         store
-            .replace(vec![
-                CanonicalGymSession::new(
-                    clocked.clone(),
-                    NonEmpty::of(
-                        CanonicalItem::exercise(deadlift),
-                        vec![CanonicalItem::exercise(squat.clone())],
+            .replace(
+                vec![
+                    CanonicalGymSession::new(
+                        clocked.clone(),
+                        NonEmpty::of(
+                            CanonicalItem::exercise(deadlift),
+                            vec![CanonicalItem::exercise(squat.clone())],
+                        ),
+                        Some(heart_rate(watch).expect("a heart rate")),
+                        Some(Attributed::new(
+                            PositiveDuration::from_seconds(3_120).expect("a duration"),
+                            watch,
+                        )),
                     ),
-                    Some(heart_rate(watch).expect("a heart rate")),
-                    Some(Attributed::new(
-                        PositiveDuration::from_seconds(3_120).expect("a duration"),
-                        watch,
-                    )),
-                ),
-                CanonicalGymSession::new(
-                    dated.clone(),
-                    NonEmpty::of(CanonicalItem::exercise(squat), vec![]),
-                    None,
-                    None,
-                ),
-            ])
+                    CanonicalGymSession::new(
+                        dated.clone(),
+                        NonEmpty::of(CanonicalItem::exercise(squat), vec![]),
+                        None,
+                        None,
+                    ),
+                ],
+                &Edits::default(),
+            )
             .await
             .expect("a write");
 
@@ -578,13 +594,19 @@ fn a_rebuilt_set_keeps_its_id_by_its_source_sets() {
         };
 
         store
-            .replace(vec![session(vec![named(5, "0.0.0"), named(4, "0.0.1")])])
+            .replace(
+                vec![session(vec![named(5, "0.0.0"), named(4, "0.0.1")])],
+                &Edits::default(),
+            )
             .await
             .expect("a first build");
         let first = ids_by_place(&pool).await.expect("ids");
 
         store
-            .replace(vec![session(vec![named(5, "0.0.0"), named(4, "0.0.1")])])
+            .replace(
+                vec![session(vec![named(5, "0.0.0"), named(4, "0.0.1")])],
+                &Edits::default(),
+            )
             .await
             .expect("the same build again");
         assert_eq!(ids_by_place(&pool).await.expect("ids"), first);
@@ -592,11 +614,14 @@ fn a_rebuilt_set_keeps_its_id_by_its_source_sets() {
         // The two sets swap places and a third arrives: the two keep their
         // ids, and so do the exercise and session they are in.
         store
-            .replace(vec![session(vec![
-                named(4, "0.0.1"),
-                named(5, "0.0.0"),
-                named(3, "0.0.2"),
-            ])])
+            .replace(
+                vec![session(vec![
+                    named(4, "0.0.1"),
+                    named(5, "0.0.0"),
+                    named(3, "0.0.2"),
+                ])],
+                &Edits::default(),
+            )
             .await
             .expect("a rebuild");
         let rebuilt = ids_by_place(&pool).await.expect("ids");
@@ -645,10 +670,13 @@ fn rebuilding_one_day_keeps_its_ids_and_leaves_the_others() {
         };
 
         store
-            .replace(vec![
-                session("2026-11-01", "1.0.0"),
-                session("2026-11-20", "20.0.0"),
-            ])
+            .replace(
+                vec![
+                    session("2026-11-01", "1.0.0"),
+                    session("2026-11-20", "20.0.0"),
+                ],
+                &Edits::default(),
+            )
             .await
             .expect("a whole build");
         let first = ids_by_place(&pool).await.expect("ids");
@@ -659,10 +687,146 @@ fn rebuilding_one_day_keeps_its_ids_and_leaves_the_others() {
             domain::gym::REACHES,
         );
         store
-            .replace_within(&reach, vec![session("2026-11-20", "20.0.0")])
+            .replace_within(
+                &reach,
+                vec![session("2026-11-20", "20.0.0")],
+                &Edits::default(),
+            )
             .await
             .expect("one day rebuilt");
 
         assert_eq!(ids_by_place(&pool).await.expect("ids"), first);
+    });
+}
+
+/// 2026-11-20's back squat: two sets Hevy logged at 100 kg.
+fn two_squat_sets(log: NormalisedSessionId) -> Result<CanonicalGymSession, Failure> {
+    let mut sets: Vec<CanonicalSet<RepCount>> = Vec::new();
+    for term in ["0.0.0", "0.0.1"] {
+        let mut set = logged_set(5, 100_000, log)?;
+        set.sources.insert(hevy(term)?);
+        sets.push(set);
+    }
+    Ok(CanonicalGymSession::new(
+        on("2026-11-20")?,
+        NonEmpty::of(
+            CanonicalItem::exercise(CanonicalExercise::ForReps {
+                identified: Attributed::new(
+                    Identified::Recorded(RepsExercise::BackSquatBarbell),
+                    log,
+                ),
+                sets: NonEmpty::new(sets)?,
+            }),
+            vec![],
+        ),
+        None,
+        None,
+    ))
+}
+
+/// **An edit is applied on top of the layer, on the ids it keeps** (#893):
+/// an effort given a set and an exercise renamed both stand after the layer
+/// is rebuilt whole, on the same ids, and both say they came from the edit.
+/// Retracting one rebuilds the set as its sources said it.
+#[test]
+fn an_edit_stands_on_the_same_ids_across_a_rebuild() {
+    use domain::gym::{
+        Rir,
+        edit::{EditReason, Edited, ExerciseEdit, SetEdit},
+        exercise::Exercise,
+    };
+
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (_directory, pool) = support::store::derived_and_authored()
+            .await
+            .expect("a derived store");
+        let ids = normalised(&pool).await.expect("normalised sessions");
+        let log = ids[0];
+        let store = SqliteCanonicalGymSessionStore::new(pool.clone());
+        let session = || two_squat_sets(log).expect("a session");
+        let rebuild = async || {
+            let edits = Edits::of(&store.edits().await.expect("the edits"));
+            store
+                .replace(vec![session()], &edits)
+                .await
+                .expect("a whole build");
+        };
+
+        rebuild().await;
+        let first = ids_by_place(&pool).await.expect("ids");
+        let held = store.held().await.expect("the layer's ids");
+        let (exercise, sets) = held.iter().next().expect("one exercise");
+        let second = *sets.iter().nth(1).expect("a second set");
+
+        let reason = EditReason::try_from("forgot to rate it".to_owned()).expect("a reason");
+        let rated = store
+            .assert_set(
+                "2026-11-22T09:00:00Z".parse().expect("an instant"),
+                &reason,
+                second,
+                SetEdit::new(None, None, Some(Rir::Two)).expect("an effort"),
+            )
+            .await
+            .expect("an edit");
+        store
+            .assert_exercises(
+                "2026-11-22T09:01:00Z".parse().expect("an instant"),
+                &reason,
+                &NonEmpty::of(
+                    ExerciseEdit {
+                        exercise: *exercise,
+                        becomes: Exercise::Reps(RepsExercise::FrontSquatBarbell),
+                        read: Exercise::Reps(RepsExercise::BackSquatBarbell),
+                        sets: sets.clone(),
+                    },
+                    vec![],
+                ),
+            )
+            .await
+            .expect("an edit");
+
+        rebuild().await;
+        rebuild().await;
+        assert_eq!(ids_by_place(&pool).await.expect("ids"), first);
+        let read = store.all().await.expect("a read");
+        let edited = read[0].exercises().next().expect("an exercise");
+        assert_eq!(
+            edited.exercise_key(),
+            Some(RepsExercise::FrontSquatBarbell.as_str())
+        );
+        assert_eq!(edited.identified_by(), None, "the name is the edit's");
+        let CanonicalExercise::ForReps {
+            sets: read_sets, ..
+        } = edited
+        else {
+            panic!("a reps exercise");
+        };
+        let efforts: Vec<_> = read_sets
+            .iter()
+            .map(|set| set.intensity.map(|rir| (rir.copied(), rir.is_edited())))
+            .collect();
+        assert_eq!(efforts, vec![None, Some((Rir::Two, true))]);
+        assert!(
+            store.held().await.expect("ids").len() == 1
+                && Edits::of(&store.edits().await.expect("edits"))
+                    .conflicts(&store.held().await.expect("ids"))
+                    .is_empty()
+        );
+        assert!(matches!(
+            store.edits().await.expect("edits")[0].edited,
+            Edited::Set { .. }
+        ));
+
+        assert!(store.retract(rated).await.expect("a retraction"));
+        rebuild().await;
+        let read = store.all().await.expect("a read");
+        let CanonicalExercise::ForReps {
+            sets: read_sets, ..
+        } = read[0].exercises().next().expect("an exercise")
+        else {
+            panic!("a reps exercise");
+        };
+        assert!(read_sets.iter().all(|set| set.intensity.is_none()));
     });
 }

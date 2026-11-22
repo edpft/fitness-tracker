@@ -366,10 +366,9 @@ fn exercise_sets(
         ),
     };
     let loaded = rows.iter().any(|row| row.load.is_some());
-    // A set is changed from its row (#892), where it is counted in reps and
-    // named an exercise: what the overlay can correct so far.
-    let editable =
-        matches!(exercise, CanonicalExercise::ForReps { .. }) && exercise.exercise_key().is_some();
+    // A set is changed from its row (#892), whichever source recorded it
+    // (#893), where it is counted in reps.
+    let editable = matches!(exercise, CanonicalExercise::ForReps { .. });
     let rated = rows.iter().any(|row| row.reserve.is_some());
     let mut working = 0;
     html! {

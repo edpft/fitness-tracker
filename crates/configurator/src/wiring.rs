@@ -48,13 +48,13 @@ use infrastructure::{
     PelotonRideDetailLandingStore, PelotonRideLandingStore, PelotonRideSampleLandingStore,
     PelotonSessionAccountReader, PelotonWorkoutSamples, PelotonWorkouts,
     SpreadsheetFileAccountReader, SpreadsheetFileLandingStore, SpreadsheetTranslator,
-    SqliteBtwbStore, SqliteCyclingSessionStore, SqliteDailyHeartRateStore, SqliteEditOverlayStore,
-    SqliteExtractionRunLog, SqliteGarminActivityStore, SqliteGymSessionStore,
-    SqliteMeasuredGymSessionStore, SqliteMyFitnessPalStore, SqliteNormalisationRunLog,
-    SqliteOvernightHrvStore, SqliteRefusalStore, SqliteRestingHeartRateStore,
-    SqliteResumptionPointStore, SqliteSleepStore, SqliteSpreadsheetStore, SqliteStressStore,
-    SqliteWeighInStore, TokenFile, WahooFileLandingStore, WithingsAuth, WithingsClient,
-    WithingsEcgLandingStore, WithingsEcgSignalLandingStore, WithingsEcgSignals, WithingsEcgs,
+    SqliteBtwbStore, SqliteCyclingSessionStore, SqliteDailyHeartRateStore, SqliteExtractionRunLog,
+    SqliteGarminActivityStore, SqliteGymSessionStore, SqliteMeasuredGymSessionStore,
+    SqliteMyFitnessPalStore, SqliteNormalisationRunLog, SqliteOvernightHrvStore,
+    SqliteRefusalStore, SqliteRestingHeartRateStore, SqliteResumptionPointStore, SqliteSleepStore,
+    SqliteSpreadsheetStore, SqliteStressStore, SqliteWeighInStore, TokenFile,
+    WahooFileLandingStore, WithingsAuth, WithingsClient, WithingsEcgLandingStore,
+    WithingsEcgSignalLandingStore, WithingsEcgSignals, WithingsEcgs,
     WithingsMeasurementLandingStore, WithingsMeasurements, WithingsWeighInAccountReader,
     WithingsWeighInTranslator, garmin,
     garmin::{days::GarminDay, latest::GarminLatest, months::GarminMonth},
@@ -211,8 +211,6 @@ pub enum WiringError {
     NotAFolder { stream: &'static str },
     #[error("{stream} lands, and nothing derives it yet")]
     NothingDerives { stream: &'static str },
-    #[error(transparent)]
-    Overlay(#[from] infrastructure::OverlayError),
 }
 
 /// Carry out `command` against `known`, with whatever adapters that stream
@@ -262,13 +260,12 @@ pub fn derives(known: &KnownStream) -> bool {
 
 /// What `known`'s normalised layer would be derived from now (#468): the
 /// version of its translation (#606), how many landing records its derivation
-/// reads, the corrections it applies, and the zone.
+/// reads, and the zone.
 ///
 /// **A count is the whole of raw's extent**, because raw is append-only
 /// (§ II.1): a record is never removed or rewritten, so the same count is the
-/// same records. Corrections are not, so they are named, and a correction
-/// retracted and another asserted reads differently. The landing tables and
-/// the overlay are the ones the stream's arm of [`run`] derives from.
+/// same records. The landing tables are the ones the stream's arm of [`run`]
+/// derives from.
 ///
 /// # Errors
 ///
@@ -281,7 +278,7 @@ pub async fn inputs(
 ) -> Result<DerivedFrom, WiringError> {
     let stream = known.landing_stream()?;
     // **Held as long as nothing the layer is derived from moves** (#830):
-    // its landing tables, its overlay and the zones, as the graph says.
+    // its landing tables and the zones, as the graph says.
     match crate::graph::graph().reads(&application::graph::Node::Normalised(stream.clone())) {
         Some(on) => {
             store
@@ -304,26 +301,22 @@ async fn inputs_now(
     zone: &OperatorZone,
 ) -> Result<DerivedFrom, WiringError> {
     use application::RawExtent as _;
-    let (records, overlay, version) = match known.name().as_str() {
+    let (records, version) = match known.name().as_str() {
         HevyWorkoutLandingStore::STREAM => (
             records(store, HevyWorkoutLandingStore::new).await?,
-            Some(HevyWorkoutLandingStore::STREAM),
             HevySessionTranslator::VERSION,
         ),
         PelotonRideLandingStore::STREAM => (
             peloton_rides_read(store).await?,
-            None,
             PelotonSessionTranslator::VERSION,
         ),
         WithingsMeasurementLandingStore::STREAM => (
             records(store, WithingsMeasurementLandingStore::new).await?,
-            None,
             WithingsWeighInTranslator::VERSION,
         ),
         // The sleep record as well, which names each night's watch (#569).
         GarminHrvLandingStore::STREAM => (
             with_sleep(&store.try_adapter(GarminHrvLandingStore::new)?, store).await?,
-            None,
             GarminHrvTranslator::VERSION,
         ),
         GarminActivityLandingStore::STREAM => (
@@ -334,7 +327,6 @@ async fn inputs_now(
             )
             .records()
             .await?,
-            Some(GarminExerciseSetLandingStore::STREAM),
             GarminActivityTranslator::VERSION,
         ),
         GarminDailyHeartRateLandingStore::STREAM => (
@@ -343,12 +335,10 @@ async fn inputs_now(
                 store,
             )
             .await?,
-            None,
             GarminDailyHeartRateTranslator::VERSION,
         ),
         GarminSleepLandingStore::STREAM => (
             records(store, GarminSleepLandingStore::new).await?,
-            None,
             GarminSleepTranslator::VERSION,
         ),
         // The sleep record as well, which names each day's watch (#569).
@@ -358,22 +348,18 @@ async fn inputs_now(
                 store,
             )
             .await?,
-            None,
             GarminStressTranslator::VERSION,
         ),
         SpreadsheetFileLandingStore::STREAM => (
             records(store, SpreadsheetFileLandingStore::new).await?,
-            None,
             SpreadsheetTranslator::VERSION,
         ),
         BtwbExportLandingStore::STREAM => (
             records(store, BtwbExportLandingStore::new).await?,
-            None,
             BtwbTranslator::VERSION,
         ),
         MyFitnessPalExportLandingStore::STREAM => (
             records(store, MyFitnessPalExportLandingStore::new).await?,
-            None,
             MyFitnessPalWeighInTranslator::VERSION,
         ),
         WahooFileLandingStore::STREAM => {
@@ -387,27 +373,10 @@ async fn inputs_now(
             });
         }
     };
-    let corrections = corrections(store, overlay).await?;
     let zones = stated_zones(store, zone).await?;
     Ok(DerivedFrom::from(format!(
-        "version {version}; records {records}; corrections {}; zone {zones}",
-        corrections.join(","),
+        "version {version}; records {records}; zone {zones}"
     )))
-}
-
-/// The corrections in force on `stream`'s records, as a normalisation applies
-/// them while the layer is rebuilt (§ II.2).
-async fn overlay(
-    store: &Store,
-    stream: &'static str,
-) -> Result<domain::normalised::overlay::EditOverlay, WiringError> {
-    Ok(store
-        .try_adapter_with(SqliteEditOverlayStore::new, stream)?
-        .call(
-            "SqliteEditOverlayStore::overlay",
-            SqliteEditOverlayStore::overlay,
-        )
-        .await?)
 }
 
 /// What the landing table `new` stores holds.
@@ -420,43 +389,11 @@ async fn records<L: application::RawExtent>(
     Ok(store.try_adapter(new)?.records().await?)
 }
 
-/// The corrections in force on a stream's overlay, by id, where it has one.
-async fn corrections(
-    store: &Store,
-    overlay: Option<&'static str>,
-) -> Result<Vec<String>, WiringError> {
-    Ok(match overlay {
-        None => Vec::new(),
-        Some(stream) => store
-            .try_adapter_with(SqliteEditOverlayStore::new, stream)?
-            .held(
-                "SqliteEditOverlayStore::all",
-                stream.to_owned(),
-                &application::graph::Reads::of([application::graph::Node::Edits(
-                    LandingStream::try_from(stream).map_err(WiringError::from)?,
-                )]),
-                SqliteEditOverlayStore::all,
-            )
-            .await?
-            .iter()
-            .map(|correction| correction.id().to_string())
-            .collect(),
-    })
-}
-
 /// What a derivation interprets raw under (#571): the translation's version
-/// (#606), the corrections in force on its overlay, and the zone. A derivation
-/// picks up where the last one stopped only where these read the same.
-async fn terms(
-    store: &Store,
-    zones: &StatedZones,
-    overlay: Option<&'static str>,
-    version: u32,
-) -> Result<Terms, WiringError> {
-    Ok(Terms::from(format!(
-        "version {version}; corrections {}; zone {zones}",
-        corrections(store, overlay).await?.join(","),
-    )))
+/// (#606) and the zone. A derivation picks up where the last one stopped only
+/// where these read the same.
+fn terms(zones: &StatedZones, version: u32) -> Terms {
+    Terms::from(format!("version {version}; zone {zones}"))
 }
 
 /// The zones a derivation reads (#66): every zone the operator stated, each
@@ -543,7 +480,7 @@ async fn garmin_daily_heart_rate(command: Command, store: &Store) -> Result<Outc
         }
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(store, &declared).await?;
-            let terms = terms(store, &zones, None, GarminDailyHeartRateTranslator::VERSION).await?;
+            let terms = terms(&zones, GarminDailyHeartRateTranslator::VERSION);
             let normalisation: graph::GarminDailyHeartRate = Normalisation::new(
                 NormalisationPorts {
                     raw: store.try_adapter(GarminDailyHeartRateAccountReader::new)?,
@@ -612,7 +549,7 @@ async fn garmin_sleep(command: Command, store: &Store) -> Result<Outcome, Wiring
         }
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(store, &declared).await?;
-            let terms = terms(store, &zones, None, GarminSleepTranslator::VERSION).await?;
+            let terms = terms(&zones, GarminSleepTranslator::VERSION);
             let normalisation: graph::GarminSleep = Normalisation::new(
                 NormalisationPorts {
                     raw: store.try_adapter(GarminSleepAccountReader::new)?,
@@ -682,7 +619,7 @@ async fn garmin_daily_summary(command: Command, store: &Store) -> Result<Outcome
         }
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(store, &declared).await?;
-            let terms = terms(store, &zones, None, GarminStressTranslator::VERSION).await?;
+            let terms = terms(&zones, GarminStressTranslator::VERSION);
             let normalisation: graph::GarminDailySummary = Normalisation::new(
                 NormalisationPorts {
                     raw: store.try_adapter(GarminDailySummaryAccountReader::new)?,
@@ -781,7 +718,7 @@ async fn peloton_rides(
         }
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(store, &declared).await?;
-            let terms = terms(store, &zones, None, PelotonSessionTranslator::VERSION).await?;
+            let terms = terms(&zones, PelotonSessionTranslator::VERSION);
             let summary = peloton_normalisation(store, zones, terms)?
                 .normalise(rederivation)
                 .await?;
@@ -1128,7 +1065,7 @@ async fn garmin_hrv(command: Command, store: &Store) -> Result<Outcome, WiringEr
         }
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(store, &declared).await?;
-            let terms = terms(store, &zones, None, GarminHrvTranslator::VERSION).await?;
+            let terms = terms(&zones, GarminHrvTranslator::VERSION);
             let normalisation: graph::GarminHrv = Normalisation::new(
                 NormalisationPorts {
                     raw: store.try_adapter(GarminHrvAccountReader::new)?,
@@ -1218,26 +1155,12 @@ async fn garmin_activities(
         Command::Extract(access) => collect_activities(access, store, walks).await,
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(store, &declared).await?;
-            let terms = terms(
-                store,
-                &zones,
-                Some(GarminExerciseSetLandingStore::STREAM),
-                GarminActivityTranslator::VERSION,
-            )
-            .await?;
-            // The overlay is read here, as it is for Hevy and for the same
-            // reason: § II.2 applies a correction while the layer is rebuilt,
-            // and this is that moment. It is keyed on `garmin.exercise_sets`
-            // because a set is what the corrected figures belong to, and that
-            // is the record whose content is wrong.
-            let overlay = overlay(store, GarminExerciseSetLandingStore::STREAM).await?;
+            let terms = terms(&zones, GarminActivityTranslator::VERSION);
 
             let normalisation: graph::GarminActivities = Normalisation::new(
                 NormalisationPorts {
                     raw: store.try_adapter(GarminGymAccountReader::new)?,
-                    translator: GarminActivityTranslator::new(GarminGymTranslator::correcting(
-                        overlay,
-                    )),
+                    translator: GarminActivityTranslator::new(GarminGymTranslator),
                     workouts: store.try_adapter(SqliteGarminActivityStore::new)?,
                     refusals: store.try_adapter_with(
                         SqliteRefusalStore::new,
@@ -1831,7 +1754,7 @@ async fn withings_measurements(
         }
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(store, &declared).await?;
-            let terms = terms(store, &zones, None, WithingsWeighInTranslator::VERSION).await?;
+            let terms = terms(&zones, WithingsWeighInTranslator::VERSION);
             let summary = withings_normalisation(store, zones, terms)?
                 .normalise(rederivation)
                 .await?;
@@ -1993,21 +1916,15 @@ fn hevy_walk(
 /// No lock. A derivation reads raw and writes only its own tables, so it
 /// neither takes the extraction lock nor advances the resumption point — the
 /// two commands can run at once.
-///
-/// The overlay is read here, as the zone is, and handed to the translator
-/// already resolved: § II.2 applies a correction while the layer is rebuilt,
-/// and this is that moment. A store that holds none yields an empty overlay and
-/// the derivation is the one it always was.
-async fn hevy_normalisation(
+fn hevy_normalisation(
     store: &Store,
     zones: StatedZones,
     terms: Terms,
 ) -> Result<graph::HevyWorkouts, WiringError> {
-    let overlay = overlay(store, HevyWorkoutLandingStore::STREAM).await?;
     Ok(Normalisation::new(
         NormalisationPorts {
             raw: store.try_adapter(HevySessionAccountReader::new)?,
-            translator: HevySessionTranslator::correcting(overlay),
+            translator: HevySessionTranslator,
             workouts: store.try_adapter(SqliteGymSessionStore::new)?,
             refusals: store
                 .try_adapter_with(SqliteRefusalStore::new, HevyWorkoutLandingStore::STREAM)?,
@@ -2191,15 +2108,8 @@ async fn hevy_workouts(command: Command, store: &Store) -> Result<Outcome, Wirin
         }
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(store, &declared).await?;
-            let terms = terms(
-                store,
-                &zones,
-                Some(HevyWorkoutLandingStore::STREAM),
-                HevySessionTranslator::VERSION,
-            )
-            .await?;
-            let summary = hevy_normalisation(store, zones, terms)
-                .await?
+            let terms = terms(&zones, HevySessionTranslator::VERSION);
+            let summary = hevy_normalisation(store, zones, terms)?
                 .normalise(rederivation)
                 .await?;
             Ok(Outcome::Derived(Box::new(summary)))
@@ -2268,7 +2178,7 @@ async fn spreadsheet_files(command: Command, store: &Store) -> Result<Outcome, W
         }),
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(store, &declared).await?;
-            let terms = terms(store, &zones, None, SpreadsheetTranslator::VERSION).await?;
+            let terms = terms(&zones, SpreadsheetTranslator::VERSION);
             let normalisation: graph::Spreadsheets = Normalisation::new(
                 NormalisationPorts {
                     raw: store.try_adapter(SpreadsheetFileAccountReader::new)?,
@@ -2353,7 +2263,7 @@ async fn btwb_exports(command: Command, store: &Store) -> Result<Outcome, Wiring
         }),
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(store, &declared).await?;
-            let terms = terms(store, &zones, None, BtwbTranslator::VERSION).await?;
+            let terms = terms(&zones, BtwbTranslator::VERSION);
             let normalisation: graph::Btwb = Normalisation::new(
                 NormalisationPorts {
                     raw: store.try_adapter(BtwbExportAccountReader::new)?,
@@ -2432,7 +2342,7 @@ async fn myfitnesspal_exports(command: Command, store: &Store) -> Result<Outcome
         }),
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(store, &declared).await?;
-            let terms = terms(store, &zones, None, MyFitnessPalWeighInTranslator::VERSION).await?;
+            let terms = terms(&zones, MyFitnessPalWeighInTranslator::VERSION);
             let normalisation: graph::MyFitnessPal = Normalisation::new(
                 NormalisationPorts {
                     raw: store.try_adapter(MyFitnessPalExportAccountReader::new)?,

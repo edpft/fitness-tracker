@@ -22,8 +22,8 @@ pub enum Node {
     /// A table of the normalised layer, which several streams may write: it
     /// is derived from every stream whose layer writes it.
     Table(Table),
-    /// The edit overlay, an input to that stream's normalised layer.
-    Edits(LandingStream),
+    /// The edit overlay, an input to that canonical layer (§ II.2).
+    Edits(CanonicalLayer),
     // § III, what we intend and what we consult: not layered.
     /// § 12.
     Authored(Authored),

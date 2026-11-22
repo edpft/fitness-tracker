@@ -128,7 +128,7 @@ async fn derived() -> Result<(SqlitePool, tempfile::TempDir), Failure> {
     Normalisation::new(
         NormalisationPorts {
             raw: HevySessionAccountReader::new(pool.clone())?,
-            translator: HevySessionTranslator::default(),
+            translator: HevySessionTranslator,
             workouts: SqliteGymSessionStore::new(pool.clone())?,
             refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),
@@ -142,7 +142,7 @@ async fn derived() -> Result<(SqlitePool, tempfile::TempDir), Failure> {
     Normalisation::new(
         NormalisationPorts {
             raw: GarminGymAccountReader::new(pool.clone())?,
-            translator: GarminGymTranslator::default(),
+            translator: GarminGymTranslator,
             workouts: SqliteMeasuredGymSessionStore::new(pool.clone())?,
             refusals: SqliteRefusalStore::new(pool.clone(), GarminActivityLandingStore::STREAM)?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),
@@ -301,7 +301,7 @@ fn re_deriving_a_stream_leaves_the_layer_rebuildable() {
         Normalisation::new(
             NormalisationPorts {
                 raw: HevySessionAccountReader::new(pool.clone()).expect("a reader"),
-                translator: HevySessionTranslator::default(),
+                translator: HevySessionTranslator,
                 workouts: SqliteGymSessionStore::new(pool.clone()).expect("a store"),
                 refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)
                     .expect("a refusal store"),
@@ -365,7 +365,7 @@ fn a_cleared_layer_answers_the_performed_log_with_nothing() {
         Normalisation::new(
             NormalisationPorts {
                 raw: HevySessionAccountReader::new(pool.clone()).expect("a reader"),
-                translator: HevySessionTranslator::default(),
+                translator: HevySessionTranslator,
                 workouts: SqliteGymSessionStore::new(pool.clone()).expect("a store"),
                 refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)
                     .expect("a refusal store"),
@@ -428,7 +428,7 @@ async fn land_hevy(
     Normalisation::new(
         NormalisationPorts {
             raw: HevySessionAccountReader::new(pool.clone())?,
-            translator: HevySessionTranslator::default(),
+            translator: HevySessionTranslator,
             workouts: SqliteGymSessionStore::new(pool.clone())?,
             refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),

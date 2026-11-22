@@ -44,9 +44,38 @@ impl<T> Attributed<T> {
     }
 }
 
+impl<T> Attributed<T, TakenFrom> {
+    /// The normalised session this value was taken from, or [`None`] where
+    /// the operator's edit stated it.
+    pub const fn normalised(&self) -> Option<NormalisedSessionId> {
+        match self.taken_from {
+            TakenFrom::Normalised(session) => Some(session),
+            TakenFrom::Edit => None,
+        }
+    }
+
+    /// Whether the operator's edit stated it.
+    pub const fn is_edited(&self) -> bool {
+        matches!(self.taken_from, TakenFrom::Edit)
+    }
+
+    /// A value the operator's edit states (§ II.2).
+    pub const fn edited(value: T) -> Self {
+        Self {
+            value,
+            taken_from: TakenFrom::Edit,
+        }
+    }
+}
+
 impl<T, By: Copy> Attributed<T, By> {
-    pub const fn new(value: T, taken_from: By) -> Self {
-        Self { value, taken_from }
+    /// `taken_from` is anything that names what `By` does: a field of a
+    /// canonical gym set is given the normalised session it was read from.
+    pub fn new(value: T, taken_from: impl Into<By>) -> Self {
+        Self {
+            value,
+            taken_from: taken_from.into(),
+        }
     }
 
     pub const fn value(&self) -> &T {
@@ -81,5 +110,36 @@ impl<T: Copy, By: Copy> Attributed<T, By> {
 impl<T: fmt::Display, By: fmt::Display> fmt::Display for Attributed<T, By> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} ({})", self.value, self.taken_from)
+    }
+}
+
+/// Where a field of a canonical entity the operator can edit was taken from:
+/// a normalised session, or his edit (§ II.2, #893).
+///
+/// **The edit names no normalised session**, because it is not one: a reps in
+/// reserve he gave a watch's set was never recorded anywhere. What the edit
+/// was, when and why, is read from the overlay by the entity's own id.
+///
+/// **Ordered with every normalised session before the edit**, so a merge that
+/// takes the lowest gives the same answer it did; an edit never reaches one,
+/// since it is applied after matching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TakenFrom {
+    Normalised(NormalisedSessionId),
+    Edit,
+}
+
+impl From<NormalisedSessionId> for TakenFrom {
+    fn from(session: NormalisedSessionId) -> Self {
+        Self::Normalised(session)
+    }
+}
+
+impl fmt::Display for TakenFrom {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Normalised(session) => write!(f, "{session}"),
+            Self::Edit => f.write_str("an edit"),
+        }
     }
 }

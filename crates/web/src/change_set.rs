@@ -1,36 +1,37 @@
 //! Changing one set of an opened session: its reps, its load, whether the
-//! load was assistance, and its effort (#892).
+//! load was assistance, and its effort (#892, #893).
 //!
 //! **One set, never the similar ones.** The operator, 2026-11-21: *"There's
 //! nothing necessarily similar about two different sets of 10 x 70kg. The
 //! idea behind similar sets was to be able to change exercises."*
 //!
-//! **Only what was changed is asserted.** A field posted as it already reads
-//! is left out of the edit, so the source's own value, or an earlier edit's,
-//! still stands for it.
+//! **Whatever source recorded it.** The edit is anchored to the canonical set
+//! (§ II.2), so a set a sheet or a watch recorded takes a reps in reserve it
+//! never had, exactly as one logged in Hevy does.
 //!
-//! **Which of Hevy's sets it is, is found by its place**: the session's sets
-//! of the exercise and that day's Hevy sets of it, in the order performed.
-//! What is stored is Hevy's own identity for the set (§ II.2), so the place is
-//! only how the page finds it. Where the two counts differ there is no telling
-//! which set is meant, and the page says so rather than guessing.
+//! **Only what was changed is asserted.** A field posted as it already reads
+//! is left out of the edit, so what the sources said, or an earlier edit,
+//! still stands for it.
 
 use std::{str::FromStr as _, sync::Arc};
 
-use application::history::{Number, opened};
+use application::history::Number;
 use axum::{
     Form,
     extract::{Path, State},
     response::{IntoResponse as _, Redirect, Response},
 };
-use configurator::{
-    corrections::{self, LoggedSet},
-    store::Store,
-};
+use configurator::{edits, store::Store};
 use domain::{
-    gym::{CanonicalExercise, exercise::Exercise, intensity::Rir},
+    canonical::Attributed,
+    gym::{
+        CanonicalExercise, CanonicalSet, Identified, Load, Performed, SetKind,
+        edit::{EditReason, SetEdit, StatedLoad},
+        identity::CanonicalSetId,
+        intensity::Rir,
+    },
     measure::{Kg, RepCount},
-    normalised::{CorrectionReason, OperatorZone, SetEdit, SetFigures, StatedLoad},
+    normalised::OperatorZone,
 };
 use jiff::civil::Date;
 use maud::{Markup, html};
@@ -53,22 +54,26 @@ pub fn address(session: &str, position: usize, set: usize) -> String {
     format!("{session}/exercise/{position}/set/{set}")
 }
 
-/// What a set reads as now: Hevy's figures with any edit over them.
+/// What a set reads as now.
+///
+/// **Each may be unstated**: a sheet that wrote "Burpee" and not how many, a
+/// set no source put a load on, a set nobody rated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Reads {
-    pub reps: RepCount,
-    pub load: StatedLoad,
+    pub reps: Option<RepCount>,
+    pub load: Option<Load>,
     pub effort: Option<Rir>,
+    /// Whether it can be given an effort: not a warm-up.
+    pub rated: bool,
 }
 
 impl Reads {
-    fn of(recorded: SetFigures, logged: &LoggedSet) -> Self {
-        let edit = logged.edit;
-        let figures = edit.map_or(recorded, |edit| edit.over(recorded));
+    fn of(set: &CanonicalSet<RepCount>) -> Self {
         Self {
-            reps: figures.reps(),
-            load: StatedLoad::of(figures),
-            effort: edit.and_then(SetEdit::effort).or(logged.effort),
+            reps: set.outcome.value().completed().copied().flatten(),
+            load: set.load.as_ref().map(Attributed::copied),
+            effort: set.intensity.as_ref().map(Attributed::copied),
+            rated: set.kind.as_ref().map(Attributed::copied) != Some(SetKind::Warmup),
         }
     }
 }
@@ -85,13 +90,13 @@ pub struct Typed {
 
 impl Typed {
     fn reading(reads: Reads) -> Self {
-        let (kg, assistance) = match reads.load {
-            StatedLoad::Nothing => (String::new(), false),
-            StatedLoad::Mass(mass) => (mass.to_string(), false),
-            StatedLoad::Assistance(mass) => (mass.to_string(), true),
+        let (kg, assistance) = match reads.load.map(StatedLoad::of) {
+            None | Some(StatedLoad::Nothing) => (String::new(), false),
+            Some(StatedLoad::Mass(mass)) => (mass.to_string(), false),
+            Some(StatedLoad::Assistance(mass)) => (mass.to_string(), true),
         };
         Self {
-            reps: reads.reps.to_string(),
+            reps: reads.reps.map(|reps| reps.to_string()).unwrap_or_default(),
             kg,
             assistance,
             effort: reads.effort.map(Rir::as_str).unwrap_or_default().to_owned(),
@@ -103,7 +108,7 @@ impl Typed {
         let mut typed = Self::default();
         for (key, value) in form {
             match key.as_str() {
-                "reps" => value.clone_into(&mut typed.reps),
+                "reps" => value.trim().clone_into(&mut typed.reps),
                 "kg" => value.trim().clone_into(&mut typed.kg),
                 "assistance" => typed.assistance = true,
                 "effort" => value.clone_into(&mut typed.effort),
@@ -118,39 +123,44 @@ impl Typed {
 /// The edit a post asks for: each field that differs from what the set reads
 /// as now, and why.
 ///
+/// **A field left blank where nothing was stated changes nothing**: an empty
+/// kg on a set no source put a load on is not a claim that there was none.
+///
 /// # Errors
 ///
 /// [`Refusal`] beside the field at fault, or of the whole form if nothing was
 /// changed.
-pub fn asked(
-    reads: Reads,
-    rated: bool,
-    typed: &Typed,
-) -> Result<(SetEdit, CorrectionReason), Refusal> {
-    let reps = typed
-        .reps
-        .trim()
-        .parse::<u32>()
-        .ok()
-        .and_then(|reps| RepCount::new(reps).ok())
-        .ok_or_else(|| Refusal::of("reps", "a whole number above nought".to_owned()))?;
-    let load = if typed.kg.is_empty() {
+pub fn asked(reads: Reads, typed: &Typed) -> Result<(SetEdit, EditReason), Refusal> {
+    let reps = if typed.reps.is_empty() && reads.reps.is_none() {
+        None
+    } else {
+        Some(
+            typed
+                .reps
+                .parse::<u32>()
+                .ok()
+                .and_then(|reps| RepCount::new(reps).ok())
+                .ok_or_else(|| Refusal::of("reps", "a whole number above nought".to_owned()))?,
+        )
+    };
+    let stated = if typed.kg.is_empty() {
         if typed.assistance {
             return Err(Refusal::of("kg", "say how much assistance".to_owned()));
         }
-        StatedLoad::Nothing
+        reads.load.map(|_| StatedLoad::Nothing)
     } else {
         let mass = Kg::from_str(&typed.kg)
             .map_err(|_| Refusal::of("kg", "a mass in kg, as 92.5".to_owned()))?;
-        if typed.assistance {
+        Some(if typed.assistance {
             StatedLoad::Assistance(mass)
         } else {
             StatedLoad::Mass(mass)
-        }
+        })
     };
+    let load = stated.map(|stated| stated.on(reads.load));
     let effort = if typed.effort.is_empty() {
         None
-    } else if rated {
+    } else if reads.rated {
         Some(
             Rir::from_str(&typed.effort)
                 .map_err(|_| Refusal::of("effort", "choose how many were in reserve".to_owned()))?,
@@ -158,14 +168,14 @@ pub fn asked(
     } else {
         return Err(Refusal::of(
             "effort",
-            "only a completed working set has an effort".to_owned(),
+            "only a working set has an effort".to_owned(),
         ));
     };
-    let because = CorrectionReason::try_from(typed.because.clone())
+    let because = EditReason::try_from(typed.because.clone())
         .map_err(|_| Refusal::of("because", "say why".to_owned()))?;
     let edit = SetEdit::new(
-        (reps != reads.reps).then_some(reps),
-        (load != reads.load).then_some(load),
+        reps.filter(|reps| Some(*reps) != reads.reps),
+        load.filter(|load| Some(*load) != reads.load),
         effort.filter(|effort| Some(*effort) != reads.effort),
     )
     .ok_or_else(|| Refusal::whole("nothing was changed".to_owned()))?;
@@ -174,40 +184,30 @@ pub fn asked(
 
 /// What the session calls the set: a warm-up, or its place among the working
 /// sets, as its table numbers them.
-fn named(logged: &[LoggedSet], index: usize) -> String {
-    match logged.get(index) {
-        Some(set) if set.warm_up => "a warm-up".to_owned(),
+fn named(warm_ups: &[bool], index: usize) -> String {
+    match warm_ups.get(index) {
+        Some(true) => "a warm-up".to_owned(),
         _ => format!(
             "set {}",
-            logged
+            warm_ups
                 .iter()
                 .take(index + 1)
-                .filter(|set| !set.warm_up)
+                .filter(|warm_up| !**warm_up)
                 .count()
         ),
     }
 }
 
 /// The form.
-pub fn form(
-    session: &str,
-    exercise: Exercise,
-    set: &str,
-    logged: &LoggedSet,
-    recorded: SetFigures,
-    typed: &Typed,
-    refused: Option<&Refusal>,
-) -> Markup {
-    let rated = !logged.warm_up;
+pub fn form(session: &str, found: &Found, typed: &Typed, refused: Option<&Refusal>) -> Markup {
     input::page(
         session,
         TITLE,
         &html! {
-            h2 { (exercise.name()) ", " (set) }
-            p.sub { "Logged in Hevy as " (recorded) }
+            h2 { (found.exercise) ", " (found.name) }
             form.card method="post" {
                 (input::field("reps", "reps", "Reps", &html! {
-                    input id="reps" name="reps" inputmode="numeric" value=(typed.reps) required;
+                    input id="reps" name="reps" inputmode="numeric" value=(typed.reps);
                 }, refused))
                 (input::field("kg", "kg", "kg", &html! {
                     input id="kg" name="kg" inputmode="decimal" value=(typed.kg);
@@ -215,10 +215,10 @@ pub fn form(
                 (input::field("assistance", "assistance", "Assistance", &html! {
                     input id="assistance" name="assistance" type="checkbox" checked[typed.assistance];
                 }, refused))
-                @if rated {
+                @if found.reads.rated {
                     (input::field("effort", "effort", "In reserve", &html! {
                         select id="effort" name="effort" {
-                            @if logged.effort.is_none() && logged.edit.and_then(SetEdit::effort).is_none() {
+                            @if found.reads.effort.is_none() {
                                 option value="" selected[typed.effort.is_empty()] { "Not rated" }
                             }
                             @for position in Rir::ALL {
@@ -235,18 +235,6 @@ pub fn form(
                 (input::whole(refused))
                 button { "Change" }
             }
-            p { a href=(session) { "Back to the session" } }
-        },
-    )
-}
-
-/// A set the page cannot change, and why.
-fn cannot(session: &str, why: &str) -> Markup {
-    input::page(
-        session,
-        TITLE,
-        &html! {
-            p { (why) }
             p { a href=(session) { "Back to the session" } }
         },
     )
@@ -279,63 +267,56 @@ impl At {
     }
 }
 
-/// The set there, as Hevy logged it, or the page to show instead.
-async fn found(
-    store: &Store,
-    zone: &OperatorZone,
-    at: &At,
-) -> Result<(Exercise, String, LoggedSet, SetFigures), Response> {
+/// The set a change is asked of, as the layer holds it.
+pub struct Found {
+    exercise: String,
+    name: String,
+    id: CanonicalSetId,
+    reads: Reads,
+}
+
+/// The set there, or the page to show instead.
+async fn found(store: &Store, zone: &OperatorZone, at: &At) -> Result<Found, Response> {
     let session = at.session();
     let unreadable = |error: &str| input::unreadable(&session, TITLE, error).into_response();
-    let activity = configurator::history::Opened::open(store, zone)
-        .activity(at.on, at.number)
-        .await
-        .map_err(|error| unreadable(&error.to_string()))?;
-    let Some(opened::Activity::Gym { session: gym, .. }) = activity else {
+    let canonical = match change::located(store, zone, at.on, at.number, at.position).await {
+        Ok(Some(canonical @ CanonicalExercise::ForReps { .. })) => canonical,
+        Ok(_) => return Err(Redirect::to(&session).into_response()),
+        Err(error) => return Err(unreadable(&error)),
+    };
+    let CanonicalExercise::ForReps { identified, sets } = &canonical else {
         return Err(Redirect::to(&session).into_response());
     };
-    let Some(canonical @ CanonicalExercise::ForReps { sets, .. }) =
-        gym.exercises().nth(at.position - 1)
-    else {
+    let Some(set) = sets.iter().nth(at.set - 1) else {
         return Err(Redirect::to(&session).into_response());
     };
-    let Some(exercise) = canonical.exercise_key().and_then(Exercise::named) else {
+    // A failed attempt has no reps to change, and is not offered a pen.
+    if matches!(set.outcome.value(), Performed::Failed) {
         return Err(Redirect::to(&session).into_response());
-    };
-    let logged = corrections::sets_of(store, exercise, zone, at.on)
-        .await
-        .map_err(|error| unreadable(&error.to_string()))?;
-    if logged.is_empty() {
-        return Err(cannot(
-            &session,
-            "Only what was logged in Hevy can be changed so far, and Hevy has none of these sets.",
-        )
-        .into_response());
     }
-    if logged.len() != sets.count() {
-        return Err(cannot(
-            &session,
-            &format!(
-                "Hevy logged {} sets of {} that day and the session shows {}, so which one this is cannot be told.",
-                logged.len(),
-                exercise.name(),
-                sets.count()
+    let ids = edits::ids_of(store, &canonical)
+        .await
+        .map_err(|error| unreadable(&error.to_string()))?
+        .ok_or_else(|| unreadable("the session is being rebuilt; open it again in a moment"))?;
+    let Some(id) = ids.sets.get(at.set - 1).copied() else {
+        return Err(Redirect::to(&session).into_response());
+    };
+    let warm_ups: Vec<bool> = sets
+        .iter()
+        .map(|set| set.kind.as_ref().map(Attributed::copied) == Some(SetKind::Warmup))
+        .collect();
+    Ok(Found {
+        exercise: match identified.value() {
+            Identified::Recorded(exercise) => exercise.name().to_owned(),
+            Identified::Guessed(guess) => guess.exercise().map_or_else(
+                || guess.to_string(),
+                |exercise| format!("{}?", exercise.name()),
             ),
-        )
-        .into_response());
-    }
-    let name = named(&logged, at.set - 1);
-    let Some(set) = logged.into_iter().nth(at.set - 1) else {
-        return Err(Redirect::to(&session).into_response());
-    };
-    let Some(recorded) = set.recorded else {
-        return Err(cannot(
-            &session,
-            "A failed attempt has no reps to change it by, so it cannot be changed yet.",
-        )
-        .into_response());
-    };
-    Ok((exercise, name, set, recorded))
+        },
+        name: named(&warm_ups, at.set - 1),
+        id,
+        reads: Reads::of(set),
+    })
 }
 
 /// The form, filled with what the set reads as now.
@@ -349,18 +330,8 @@ pub async fn shown(
     let store = &runs.setting().store;
     let zone = &runs.setting().zone;
     match found(store, zone, &at).await {
-        Ok((exercise, name, logged, recorded)) => {
-            let typed = Typed::reading(Reads::of(recorded, &logged));
-            form(
-                &at.session(),
-                exercise,
-                &name,
-                &logged,
-                recorded,
-                &typed,
-                None,
-            )
-            .into_response()
+        Ok(found) => {
+            form(&at.session(), &found, &Typed::reading(found.reads), None).into_response()
         }
         Err(shown) => shown,
     }
@@ -379,29 +350,17 @@ pub async fn posted(
     let store = &runs.setting().store;
     let zone = &runs.setting().zone;
     let session = at.session();
-    let (exercise, name, logged, recorded) = match found(store, zone, &at).await {
+    let found = match found(store, zone, &at).await {
         Ok(found) => found,
         Err(shown) => return shown,
     };
     let typed = Typed::of(&form_posted);
-    let refused = |refusal: &Refusal| {
-        form(
-            &session,
-            exercise,
-            &name,
-            &logged,
-            recorded,
-            &typed,
-            Some(refusal),
-        )
-        .into_response()
-    };
-    let (edit, because) = match asked(Reads::of(recorded, &logged), !logged.warm_up, &typed) {
+    let refused = |refusal: &Refusal| form(&session, &found, &typed, Some(refusal)).into_response();
+    let (edit, because) = match asked(found.reads, &typed) {
         Ok(asked) => asked,
         Err(refusal) => return refused(&refusal),
     };
-    match corrections::assert_logged_set(store, recorded, edit, &because, logged.term.clone()).await
-    {
+    match edits::assert_set(store, &because, found.id, edit).await {
         Ok(id) => {
             // What History collects, so the session is drawn again from the
             // layers derived under the change by the time it is opened.
@@ -412,33 +371,22 @@ pub async fn posted(
     }
 }
 
-/// What a change of one set changed.
-pub fn changed(session: &str, recorded: SetFigures, edit: SetEdit) -> Markup {
-    input::page(
-        session,
-        "Changed",
-        &html! {
-            p { "The set logged in Hevy as " (recorded) " now reads " (edit) "." }
-            p { a href=(session) { "Back to the session" } }
-        },
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use domain::{
-        gym::intensity::Rir,
+        gym::{Load, SignedKg, intensity::Rir},
         measure::{Kg, RepCount},
-        normalised::StatedLoad,
     };
 
     use super::{Reads, Typed, asked};
 
+    /// 25 Sep's 90 kg front squat single, unrated.
     fn single() -> Reads {
         Reads {
-            reps: RepCount::new(1).expect("one"),
-            load: StatedLoad::Mass(Kg::from_grams(90_000)),
+            reps: Some(RepCount::new(1).expect("one")),
+            load: Some(Load::absolute(Kg::from_grams(90_000))),
             effort: None,
+            rated: true,
         }
     }
 
@@ -456,7 +404,7 @@ mod tests {
     /// its reps and load out of the edit.
     #[test]
     fn rating_a_set_asserts_only_its_effort() {
-        let (edit, _) = asked(single(), true, &typed("1", "90", "1")).expect("an edit");
+        let (edit, _) = asked(single(), &typed("1", "90", "1")).expect("an edit");
 
         assert_eq!(edit.reps(), None);
         assert_eq!(edit.load(), None);
@@ -465,7 +413,7 @@ mod tests {
 
     #[test]
     fn a_form_posted_as_it_reads_changes_nothing_and_is_refused() {
-        let refused = asked(single(), true, &typed("1", "90", "")).map_err(|refusal| refusal.field);
+        let refused = asked(single(), &typed("1", "90", "")).map_err(|refusal| refusal.field);
 
         assert_eq!(refused, Err(None));
     }
@@ -474,8 +422,11 @@ mod tests {
     /// stored (#817's ruling on which sets are rated).
     #[test]
     fn a_warm_up_is_given_no_effort() {
-        let refused =
-            asked(single(), false, &typed("1", "90", "1")).map_err(|refusal| refusal.field);
+        let warm_up = Reads {
+            rated: false,
+            ..single()
+        };
+        let refused = asked(warm_up, &typed("1", "90", "1")).map_err(|refusal| refusal.field);
 
         assert_eq!(refused, Err(Some("effort")));
     }
@@ -484,33 +435,40 @@ mod tests {
     /// not counted, so 25 Sep's 92.5 kg single, sixth logged, is set 2.
     #[test]
     fn a_set_is_named_as_the_session_numbers_it() {
-        use configurator::corrections::LoggedSet;
-        use domain::{
-            landing::SourceRecordId,
-            normalised::{CorrectedTerm, SourceTerm},
-        };
+        let warm_ups = [true, true, true, true, false, false];
 
-        let logged = |warm_up: bool| LoggedSet {
-            term: CorrectedTerm::new(
-                SourceRecordId::try_from("a-workout").expect("a record"),
-                SourceTerm::try_from("FS/0").expect("a term"),
-            ),
-            recorded: None,
-            warm_up,
-            effort: None,
-            edit: None,
-        };
-        let sets = [true, true, true, true, false, false].map(logged);
-
-        assert_eq!(super::named(&sets, 5), "set 2");
-        assert_eq!(super::named(&sets, 0), "a warm-up");
+        assert_eq!(super::named(&warm_ups, 5), "set 2");
+        assert_eq!(super::named(&warm_ups, 0), "a warm-up");
     }
 
     #[test]
-    fn a_changed_load_is_asserted_as_typed() {
-        let (edit, _) = asked(single(), true, &typed("1", "92.5", "")).expect("an edit");
-
-        assert_eq!(edit.load(), Some(StatedLoad::Mass(Kg::from_grams(92_500))));
+    fn a_changed_load_is_asserted_on_the_set_s_axis() {
+        let (edit, _) = asked(single(), &typed("1", "92.5", "")).expect("an edit");
+        assert_eq!(edit.load(), Some(Load::absolute(Kg::from_grams(92_500))));
         assert_eq!(edit.reps(), None);
+
+        let pull_up = Reads {
+            load: Some(Load::BODYWEIGHT),
+            ..single()
+        };
+        let (edit, _) = asked(pull_up, &typed("1", "10", "")).expect("an edit");
+        assert_eq!(
+            edit.load(),
+            Some(Load::relative(SignedKg::from_grams(10_000)))
+        );
+    }
+
+    /// **A sheet's set with no load and no effort takes an effort alone**: a
+    /// kg left blank where nothing was stated is not a claim of no load.
+    #[test]
+    fn a_blank_field_where_nothing_was_stated_changes_nothing() {
+        let sheet = Reads {
+            load: None,
+            ..single()
+        };
+        let (edit, _) = asked(sheet, &typed("1", "", "2")).expect("an edit");
+
+        assert_eq!(edit.load(), None);
+        assert_eq!(edit.effort(), Some(Rir::Two));
     }
 }

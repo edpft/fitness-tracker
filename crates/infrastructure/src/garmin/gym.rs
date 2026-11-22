@@ -36,9 +36,9 @@ use domain::{
         ComposedFrom, Guess, GuessedExercise, Load, MeasuredGymSession, MeasuredHeartRate,
         MeasuredSet, Recorded, SignedKg,
     },
-    landing::{EventKind, LandedRecord, SourceRecordId},
+    landing::{EventKind, LandedRecord},
     measure::{BeatsPerMinute, HeartRateSeries, HeartRateSummary, Kg, PositiveDuration, RepCount},
-    normalised::{EditOverlay, RefusalLocus, RefusalReason, SetFigures, StartedAt, StatedZones},
+    normalised::{RefusalLocus, RefusalReason, StartedAt, StatedZones},
     sequence::NonEmpty,
 };
 use jiff::civil::DateTime;
@@ -96,10 +96,6 @@ pub(super) struct ActivityType {
 
 /// One activity's sets, as the second endpoint serves them.
 ///
-/// Visible to the rest of the adapter, so [`super::corrections`] reads a set's
-/// figures through the same shape the translator does: two readings of one
-/// payload that disagreed would offer the operator a correction the derivation
-/// will never apply.
 #[derive(Debug, Deserialize)]
 pub(super) struct ExerciseSets {
     #[serde(default, rename = "exerciseSets")]
@@ -135,23 +131,10 @@ pub(super) struct Candidate {
 
 /// Garmin's adapter for gym sessions.
 ///
-/// The zone arrives per call, as it does for every translator here. What this
-/// does hold is the edit overlay, because a correction is per observation and
-/// cannot be resolved without the operator's assertions in hand. [`Default`] is
-/// the empty overlay: a stream nobody has corrected reads exactly as it did
-/// before there was one.
-#[derive(Debug, Clone, Default)]
-pub struct GarminGymTranslator {
-    overlay: EditOverlay,
-}
-
-impl GarminGymTranslator {
-    /// Translation with the operator's corrections in hand.
-    #[must_use]
-    pub const fn correcting(overlay: EditOverlay) -> Self {
-        Self { overlay }
-    }
-}
+/// The zone arrives per call, as it does for every translator here, and it
+/// holds nothing else: the operator's edits are the canonical layer's (§ II.2).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GarminGymTranslator;
 
 impl Translator for GarminGymTranslator {
     type Account = ActivityAccount;
@@ -251,7 +234,7 @@ impl Translator for GarminGymTranslator {
             }
         };
 
-        let Some(recorded) = recorded(&activity, account, zones, &self.overlay, &mut scribe) else {
+        let Some(recorded) = recorded(&activity, account, zones, &mut scribe) else {
             return Ok(scribe.nothing_translatable());
         };
 
@@ -316,14 +299,13 @@ fn recorded(
     activity: &Activity,
     account: &ActivityAccount,
     zones: &StatedZones,
-    overlay: &EditOverlay,
     scribe: &mut Scribe,
 ) -> Option<Recorded> {
     let heart_rate = heart_rate(activity)
         .map(|stated| MeasuredHeartRate::new(stated, recorded_series(account, scribe)));
     let sets = account
         .sets()
-        .and_then(|landed| measured_sets(landed, zones, overlay, scribe));
+        .and_then(|landed| measured_sets(landed, zones, scribe));
 
     match (heart_rate, sets) {
         (Some(heart_rate), Some(sets)) => Some(Recorded::Both { heart_rate, sets }),
@@ -388,7 +370,6 @@ fn whole(stated: Option<&RawValue>) -> Option<&str> {
 fn measured_sets(
     landed: &LandedRecord,
     zones: &StatedZones,
-    overlay: &EditOverlay,
     scribe: &mut Scribe,
 ) -> Option<NonEmpty<MeasuredSet>> {
     let served: ExerciseSets = match serde_json::from_slice(landed.payload().as_bytes()) {
@@ -422,21 +403,12 @@ fn measured_sets(
         return None;
     }
 
-    let corrections = Corrections {
-        overlay,
-        record: landed.source_record_id(),
-    };
-
     let mut sets = Vec::with_capacity(active.len());
     for (ordinal, set) in active.iter().enumerate() {
         let at = u32::try_from(ordinal).unwrap_or(u32::MAX);
-        if let Some(measured) = measured_set(
-            set,
-            zones,
-            &corrections,
-            RefusalLocus::Ungrouped { set: at },
-            scribe,
-        ) {
+        if let Some(measured) =
+            measured_set(set, zones, RefusalLocus::Ungrouped { set: at }, scribe)
+        {
             sets.push(measured);
         }
     }
@@ -511,38 +483,10 @@ fn proposed_by(run: &[Working]) -> Option<Guess> {
     agreed
 }
 
-/// The operator's corrections, bound to the record whose sets are being read.
-///
-/// **Anchored on the instant Garmin states the set began**, which is the one
-/// thing it publishes about a set that is neither derived nor positional: a
-/// `messageIndex` is null on every set the operator's 2018 watch wrote, and an
-/// ordinal moves the moment a set is inserted. The figures the source recorded
-/// go with it, so a set that has changed at source is a correction that lapses
-/// rather than one that overwrites a number nobody ruled on.
-struct Corrections<'a> {
-    overlay: &'a EditOverlay,
-    record: &'a SourceRecordId,
-}
-
-impl Corrections<'_> {
-    /// What this set's figures read: the source's own, unless the operator has
-    /// said otherwise about exactly these. An effort he states is not read:
-    /// a watch's set carries none to correct.
-    fn figures(&self, set: &ServedSet, recorded: SetFigures) -> SetFigures {
-        let Some(term) = set.started_at.as_deref() else {
-            return recorded;
-        };
-        self.overlay
-            .set_for(self.record, term, recorded)
-            .map_or(recorded, |edit| edit.over(recorded))
-    }
-}
-
 /// One set, or the reason it is not one.
 fn measured_set(
     set: &ServedSet,
     zones: &StatedZones,
-    corrections: &Corrections<'_>,
     locus: RefusalLocus,
     scribe: &mut Scribe,
 ) -> Option<Working> {
@@ -581,23 +525,10 @@ fn measured_set(
         }
     };
 
-    // **Corrected before anything reads them**, which is the whole point of an
-    // overlay being an input: a bare category is placed by what the operator
-    // typed against it — a 32.5 kg row is a barbell row and a 15 kg row is not
-    // — so a corrected load has to reach the lookup, not just the stored set.
-    let figures = corrections.figures(
-        set,
-        SetFigures::new(
-            reps,
-            weight(set).map(|grams| Kg::from_grams(grams.unsigned_abs())),
-        ),
-    );
-    let reps = figures.reps();
-    let grams = figures
-        .load()
-        .map(|load| i64::try_from(load.as_grams()).unwrap_or(i64::MAX));
-
-    // The weight is read before the movement, not after, for the same reason.
+    // **The weight is read before the movement**: a bare category is placed
+    // by what the operator typed against it — a 32.5 kg row is a barbell row
+    // and a 15 kg row is not.
+    let grams = weight(set);
     let (guess, reading, unclassified) = guessed(set, grams, locus, scribe);
     let load = grams.map(|grams| load(grams, reading));
 
@@ -694,17 +625,6 @@ pub(super) fn seconds(stated: Option<&RawValue>) -> Stated {
         return Stated::Nothing;
     };
     PositiveDuration::from_seconds(seconds).map_or(Stated::NoLength, Stated::Length)
-}
-
-/// The figures a served set records, where it records a set at all.
-///
-/// [`None`] for the two things the translator refuses a set over — an absent
-/// count, and the zero Garmin writes for a set taken to no repetitions — so a
-/// correction cannot be asserted over a set no derivation will produce.
-pub(super) fn recorded_figures(set: &ServedSet) -> Option<SetFigures> {
-    let reps = RepCount::new(set.reps?).ok()?;
-    let load = weight(set).map(|grams| Kg::from_grams(grams.unsigned_abs()));
-    Some(SetFigures::new(reps, load))
 }
 
 /// A naive GMT stamp, placed.
