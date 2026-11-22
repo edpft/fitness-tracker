@@ -55,6 +55,7 @@ fn set(
         intensity: None,
         kind: None,
         rest_after: None,
+        sources: std::collections::BTreeSet::new(),
     })
 }
 
@@ -68,7 +69,7 @@ fn recorded(
         .iter()
         .map(|(reps, grams)| set(*reps, Some(*grams), who))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(CanonicalItem::Exercise(CanonicalExercise::ForReps {
+    Ok(CanonicalItem::exercise(CanonicalExercise::ForReps {
         identified: Attributed::new(
             Identified::Recorded(RepsExercise::try_from(key.to_owned())?),
             who,
@@ -87,7 +88,7 @@ fn guessed(
         .iter()
         .map(|(reps, grams)| set(*reps, Some(*grams), who))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(CanonicalItem::Exercise(CanonicalExercise::ForReps {
+    Ok(CanonicalItem::exercise(CanonicalExercise::ForReps {
         identified: Attributed::new(
             Identified::Guessed(GuessedExercise::Proposed(Guess::Exercise(
                 RepsExercise::try_from(key.to_owned())?,
@@ -846,4 +847,77 @@ fn a_change_reaches_two_days_either_side() {
         rebuilt_within(before, after.clone(), &reach),
         canonical_sessions(after)
     );
+}
+
+/// A superset of the exercises a log named, each with its sets as `(reps, grams)`.
+fn superset(
+    members: &[(&str, &[(u32, u64)])],
+    who: NormalisedSessionId,
+) -> Result<CanonicalItem, Failure> {
+    let mut exercises = Vec::new();
+    for (key, sets) in members {
+        match recorded(key, sets, who)? {
+            CanonicalItem::Exercise(exercise) => exercises.push(*exercise),
+            CanonicalItem::Superset(_) => return Err("a single exercise".into()),
+        }
+    }
+    Ok(CanonicalItem::Superset(Box::new(
+        domain::sequence::AtLeastTwo::new(exercises)?,
+    )))
+}
+
+/// 2025-02-26: Hevy grouped two exercises with a hanging knee raise and Beyond
+/// The White Board grouped the same two with toes-to-bar. The two shared
+/// exercises are in the session once, not once per account's grouping (#893).
+#[test]
+fn an_exercise_two_supersets_share_is_placed_once() {
+    let snatches: &[(u32, u64)] = &[(16, 15_000), (16, 15_000)];
+    let burpees: &[(u32, u64)] = &[(10, 0), (10, 0)];
+    let hevy = log(
+        1,
+        at("2025-02-26T07:00:05Z").unwrap(),
+        vec![
+            superset(
+                &[
+                    ("burpee", burpees),
+                    ("dumbbell-snatch", snatches),
+                    ("hanging-knee-raise", &[(8, 0), (8, 0)]),
+                ],
+                id(1).unwrap(),
+            )
+            .unwrap(),
+        ],
+    )
+    .unwrap();
+    let btwb = log(
+        2,
+        on("2025-02-26").unwrap(),
+        vec![
+            superset(
+                &[
+                    ("burpee", burpees),
+                    ("dumbbell-snatch", snatches),
+                    ("toes-to-bar", &[(8, 0), (8, 0)]),
+                ],
+                id(2).unwrap(),
+            )
+            .unwrap(),
+        ],
+    )
+    .unwrap();
+
+    let sessions = canonical_sessions(vec![hevy, btwb]);
+    let session = sessions.first().expect("one session");
+    let mut held = keys(session);
+    held.sort_unstable();
+    assert_eq!(
+        held,
+        vec![
+            "burpee",
+            "dumbbell-snatch",
+            "hanging-knee-raise",
+            "toes-to-bar"
+        ]
+    );
+    assert_eq!(session.set_count(), 8, "each set once");
 }

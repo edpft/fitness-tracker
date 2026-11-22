@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO canonical_gym_source_set (stream, record, term, session, exercise, canonical_set)\n        SELECT value ->> 0, value ->> 1, value ->> 2, value ->> 3, value ->> 4, value ->> 5\n          FROM json_each(?)\n        WHERE true\n        ON CONFLICT (stream, record, term) DO UPDATE\n           SET session = excluded.session,\n               exercise = excluded.exercise,\n               canonical_set = excluded.canonical_set\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "30107c36a6eb9e5d8eab1b99a70cc444ee3b41fd79b9ddef8a0bc7bcf0e73684"
+}

@@ -20,12 +20,15 @@
 //! [`ManualGymSession`]: super::ManualGymSession
 //! [`MeasuredGymSession`]: super::MeasuredGymSession
 
+use std::collections::BTreeSet;
+
 use crate::canonical::{Attributed, NormalisedSessionId, Occurred};
 use crate::measure::{PositiveDuration, RepCount};
 use crate::sequence::NonEmpty;
 
 use super::{
     canonical::{CanonicalExercise, CanonicalItem, CanonicalSet, Identified},
+    identity::SourceSet,
     measured::{GuessedExercise, MeasuredHeartRate, MeasuredSet},
     outcome::Performed,
 };
@@ -142,7 +145,8 @@ impl NormalisedGymSession {
         Self::new(id, Recorder::Operator, occurred, duration, None, items)
     }
 
-    /// A watch's session: its heart rate, and the sets it classified itself.
+    /// A watch's session: its heart rate, and the sets it classified itself,
+    /// each with the watch's own name for it.
     ///
     /// **Consecutive sets the classifier placed the same way are one
     /// exercise.** A watch records a flat run of sets and names no exercise
@@ -164,13 +168,13 @@ impl NormalisedGymSession {
         occurred: Occurred,
         duration: Option<Attributed<PositiveDuration>>,
         heart_rate: Option<Attributed<MeasuredHeartRate>>,
-        sets: &[MeasuredSet],
+        sets: &[(MeasuredSet, SourceSet)],
     ) -> Self {
         let mut items: Vec<CanonicalItem> = Vec::new();
         let mut run: Vec<CanonicalSet<RepCount>> = Vec::new();
         let mut placed: Option<GuessedExercise> = None;
 
-        for set in sets {
+        for (set, source) in sets {
             if placed != Some(set.guess) {
                 if let (Some(guess), Some(sets)) = (placed, NonEmpty::new(run).ok()) {
                     items.push(exercise_of(id, guess, sets));
@@ -185,6 +189,7 @@ impl NormalisedGymSession {
                 intensity: None,
                 kind: None,
                 rest_after: None,
+                sources: BTreeSet::from([source.clone()]),
             });
         }
         if let (Some(guess), Some(sets)) = (placed, NonEmpty::new(run).ok()) {
@@ -196,12 +201,12 @@ impl NormalisedGymSession {
 }
 
 /// One run of a watch's sets, as the exercise it was of.
-const fn exercise_of(
+fn exercise_of(
     id: NormalisedSessionId,
     guess: GuessedExercise,
     sets: NonEmpty<CanonicalSet<RepCount>>,
 ) -> CanonicalItem {
-    CanonicalItem::Exercise(CanonicalExercise::ForReps {
+    CanonicalItem::exercise(CanonicalExercise::ForReps {
         identified: Attributed::new(Identified::Guessed(guess), id),
         sets,
     })

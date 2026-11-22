@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT stream AS \"stream!: String\", source_record_id AS \"record!: String\"\n               FROM gym_workout WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "stream!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "stream"
+          }
+        }
+      },
+      {
+        "name": "record!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "gym_workout",
+            "name": "source_record_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "77461f936568bec725777fb605d5d8f9e7b9076871f78424edd53a5b10685ac2"
+}

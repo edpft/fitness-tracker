@@ -32,7 +32,7 @@
 //! projects the same tables and lives in `history.rs` because what it returns is
 //! a projection rather than the entity.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use application::{
     CanonicalGymSessionStore, CanonicalLayer, DeliveryReference, PerformedGymSessions,
@@ -46,12 +46,17 @@ use domain::{
         exercise::{
             Description, DistanceExercise, DurationExercise, Implement, Movement, RepsExercise,
         },
+        identity::{
+            self, CanonicalExerciseId, CanonicalSessionId, CanonicalSetId, Issued, Placed,
+            SessionIdentity, SourceSet,
+        },
     },
+    landing::{LandingStream, SourceRecordId},
     measure::{
         BeatsPerMinute, Distance, Duration, HeartRateSample, HeartRateSeries, HeartRateSummary,
         Metres, PositiveDuration, RepCount,
     },
-    normalised::{OperatorZone, StartedAt},
+    normalised::{OperatorZone, SourceTerm, StartedAt},
     sequence::{AtLeastTwo, NonEmpty},
 };
 use jiff::{Timestamp, civil::Date};
@@ -81,13 +86,7 @@ impl CanonicalGymSessionStore for SqliteCanonicalGymSessionStore {
             .map_err(|e| store_error(&e))?;
         clear(&mut tx).await?;
         let written = sessions.len();
-        for session in &sessions {
-            let id = write_session(&mut tx, session).await?;
-            write_heart_rate(&mut tx, id, session).await?;
-            for (position, item) in session.items().iter().enumerate() {
-                write_item(&mut tx, id, count_for_storage(position)?, item).await?;
-            }
-        }
+        write_all(&mut tx, &sessions).await?;
         tx.commit().await.map_err(|e| store_error(&e))?;
         Ok(SessionCount::from(written))
     }
@@ -106,13 +105,7 @@ impl CanonicalGymSessionStore for SqliteCanonicalGymSessionStore {
             .await
             .map_err(|e| store_error(&e))?;
         remove_on(&mut tx, reach.rebuilt()).await?;
-        for session in &sessions {
-            let id = write_session(&mut tx, session).await?;
-            write_heart_rate(&mut tx, id, session).await?;
-            for (position, item) in session.items().iter().enumerate() {
-                write_item(&mut tx, id, count_for_storage(position)?, item).await?;
-            }
-        }
+        write_all(&mut tx, &sessions).await?;
         super::canonical_changes::forget(&mut tx, CanonicalLayer::Gym, reach.changed()).await?;
         tx.commit().await.map_err(|e| store_error(&e))?;
         self.count().await
@@ -659,10 +652,172 @@ async fn remove_on(
     Ok(())
 }
 
-async fn write_session(
+/// The ids one session is written under: its own, and each exercise's with its
+/// sets', exercises in the order [`CanonicalGymSession::exercises`] gives them.
+struct Ids {
+    session: i64,
+    exercises: Vec<(i64, Vec<i64>)>,
+}
+
+/// Every session, each under the ids it keeps from the last build that held
+/// its source sets, or new ones (#893).
+///
+/// **Where each source set was placed outlives the layer.** A normalised
+/// writer empties these tables before the layer is rebuilt, so the last
+/// placing cannot be read off the rows it replaces; `canonical_gym_source_set`
+/// is never emptied, and is brought up to date here as each session is
+/// written.
+async fn write_all(
+    tx: &mut Transaction<'_, Sqlite>,
+    sessions: &[CanonicalGymSession],
+) -> Result<(), StoreError> {
+    let placed = placed(tx).await?;
+    let identities = identity::identify(sessions, &placed);
+    for (session, identity) in sessions.iter().zip(identities) {
+        let ids = issue(tx, identity).await?;
+        write_session(tx, ids.session, session).await?;
+        write_heart_rate(tx, ids.session, session).await?;
+        let mut exercises = ids.exercises.iter();
+        for (position, item) in session.items().iter().enumerate() {
+            write_item(
+                tx,
+                ids.session,
+                count_for_storage(position)?,
+                item,
+                &mut exercises,
+            )
+            .await?;
+        }
+        place(tx, session, &ids).await?;
+    }
+    Ok(())
+}
+
+/// Where every source set was last placed, leaving out any whose ids the
+/// layer still holds: a session on a day this build does not rebuild keeps
+/// its ids, and no rebuilt one can take them.
+async fn placed(
+    tx: &mut Transaction<'_, Sqlite>,
+) -> Result<BTreeMap<SourceSet, Placed>, StoreError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT p.stream AS "stream!", p.record AS "record!", p.term AS "term!",
+               p.session AS "session!", p.exercise AS "exercise!",
+               p.canonical_set AS "canonical_set!"
+        FROM canonical_gym_source_set AS p
+        WHERE NOT EXISTS (SELECT 1 FROM canonical_gym_session WHERE id = p.session)
+          AND NOT EXISTS (SELECT 1 FROM canonical_gym_exercise WHERE id = p.exercise)
+          AND NOT EXISTS (SELECT 1 FROM canonical_gym_set WHERE id = p.canonical_set)
+        "#
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|e| store_error(&e))?;
+    let mut placed = BTreeMap::new();
+    for row in rows {
+        placed.insert(
+            source_set(&row.stream, row.record, row.term)?,
+            Placed {
+                session: CanonicalSessionId::try_from(row.session).map_err(|e| corrupt(&e))?,
+                exercise: CanonicalExerciseId::try_from(row.exercise).map_err(|e| corrupt(&e))?,
+                set: CanonicalSetId::try_from(row.canonical_set).map_err(|e| corrupt(&e))?,
+            },
+        );
+    }
+    Ok(placed)
+}
+
+/// The ids a session's identity keeps, and new ones where it needs them.
+async fn issue(
+    tx: &mut Transaction<'_, Sqlite>,
+    identity: SessionIdentity,
+) -> Result<Ids, StoreError> {
+    let session = match identity.session {
+        Issued::Kept(id) => id.as_i64(),
+        Issued::New => sqlx::query_scalar!(
+            r#"INSERT INTO canonical_gym_session_identity DEFAULT VALUES RETURNING id AS "id!""#
+        )
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| store_error(&e))?,
+    };
+    let mut exercises = Vec::with_capacity(identity.exercises.len());
+    for exercise in identity.exercises {
+        let id = match exercise.exercise {
+            Issued::Kept(id) => id.as_i64(),
+            Issued::New => sqlx::query_scalar!(
+                r#"INSERT INTO canonical_gym_exercise_identity DEFAULT VALUES RETURNING id AS "id!""#
+            )
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|e| store_error(&e))?,
+        };
+        let mut sets = Vec::with_capacity(exercise.sets.len());
+        for set in exercise.sets {
+            sets.push(match set {
+                Issued::Kept(id) => id.as_i64(),
+                Issued::New => sqlx::query_scalar!(
+                    r#"INSERT INTO canonical_gym_set_identity DEFAULT VALUES RETURNING id AS "id!""#
+                )
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|e| store_error(&e))?,
+            });
+        }
+        exercises.push((id, sets));
+    }
+    Ok(Ids { session, exercises })
+}
+
+/// Record where each of a session's source sets now is, in one statement.
+async fn place(
     tx: &mut Transaction<'_, Sqlite>,
     session: &CanonicalGymSession,
-) -> Result<i64, StoreError> {
+    ids: &Ids,
+) -> Result<(), StoreError> {
+    let mut rows: Vec<(String, &str, &str, i64, i64, i64)> = Vec::new();
+    for (exercise, (exercise_id, set_ids)) in session.exercises().zip(&ids.exercises) {
+        for (sources, set_id) in exercise.set_sources().into_iter().zip(set_ids) {
+            for source in sources {
+                rows.push((
+                    source.stream.to_string(),
+                    source.record.as_str(),
+                    source.term.as_str(),
+                    ids.session,
+                    *exercise_id,
+                    *set_id,
+                ));
+            }
+        }
+    }
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let rows = serde_json::to_string(&rows).map_err(|e| corrupt(&e))?;
+    sqlx::query!(
+        r#"
+        INSERT INTO canonical_gym_source_set (stream, record, term, session, exercise, canonical_set)
+        SELECT value ->> 0, value ->> 1, value ->> 2, value ->> 3, value ->> 4, value ->> 5
+          FROM json_each(?)
+        WHERE true
+        ON CONFLICT (stream, record, term) DO UPDATE
+           SET session = excluded.session,
+               exercise = excluded.exercise,
+               canonical_set = excluded.canonical_set
+        "#,
+        rows
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| store_error(&e))?;
+    Ok(())
+}
+
+async fn write_session(
+    tx: &mut Transaction<'_, Sqlite>,
+    id: i64,
+    session: &CanonicalGymSession,
+) -> Result<(), StoreError> {
     let (started_at_utc, zone, on_day) = match session.occurred() {
         Occurred::At(started_at) => (
             Some(started_at.instant().to_string()),
@@ -689,15 +844,15 @@ async fn write_session(
                     Some(heart_rate.normalised_session().as_i64()),
                 )
             });
-    let id = sqlx::query!(
+    sqlx::query!(
         r#"
         INSERT INTO canonical_gym_session (
-            started_at_utc, zone, on_day, duration_seconds, duration_normalised_session,
+            id, started_at_utc, zone, on_day, duration_seconds, duration_normalised_session,
             average_bpm, highest_bpm, heart_rate_normalised_session
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        RETURNING id AS "id!"
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
+        id,
         started_at_utc,
         zone,
         on_day,
@@ -707,11 +862,10 @@ async fn write_session(
         highest_bpm,
         heart_rate_normalised_session
     )
-    .fetch_one(&mut **tx)
+    .execute(&mut **tx)
     .await
-    .map_err(|e| store_error(&e))?
-    .id;
-    Ok(id)
+    .map_err(|e| store_error(&e))?;
+    Ok(())
 }
 
 /// The watch's beats, as the canonical session holds them.
@@ -758,6 +912,7 @@ async fn write_item(
     session: i64,
     position: i64,
     item: &CanonicalItem,
+    ids: &mut std::slice::Iter<'_, (i64, Vec<i64>)>,
 ) -> Result<(), StoreError> {
     let is_superset = i64::from(matches!(item, CanonicalItem::Superset(_)));
     sqlx::query!(
@@ -770,7 +925,15 @@ async fn write_item(
     .await
     .map_err(|e| store_error(&e))?;
     for (ordinal, exercise) in item.exercises().enumerate() {
-        write_exercise(tx, session, position, count_for_storage(ordinal)?, exercise).await?;
+        let (id, sets) = ids.next().ok_or_else(|| StoreError::Corrupt {
+            detail: "a canonical exercise with no id issued for it".to_owned(),
+        })?;
+        let at = Position {
+            session,
+            item: position,
+            exercise: count_for_storage(ordinal)?,
+        };
+        write_exercise(tx, at, *id, sets, exercise).await?;
     }
     Ok(())
 }
@@ -807,13 +970,26 @@ fn identity_columns(
     }
 }
 
+/// Where an exercise sits: its session, its item and its place in the item.
+#[derive(Clone, Copy)]
+struct Position {
+    session: i64,
+    item: i64,
+    exercise: i64,
+}
+
 async fn write_exercise(
     tx: &mut Transaction<'_, Sqlite>,
-    session: i64,
-    item_position: i64,
-    position: i64,
+    at: Position,
+    id: i64,
+    set_ids: &[i64],
     exercise: &CanonicalExercise,
 ) -> Result<(), StoreError> {
+    let Position {
+        session,
+        item: item_position,
+        exercise: position,
+    } = at;
     let measure = exercise.measure();
     let (identified, named, movement, implement) = match exercise {
         CanonicalExercise::ForReps { identified, .. } => identity_columns(identified.copied()),
@@ -828,11 +1004,12 @@ async fn write_exercise(
     sqlx::query!(
         r#"
         INSERT INTO canonical_gym_exercise (
-            session, item_position, position, measure,
+            id, session, item_position, position, measure,
             identified, exercise, movement, implement, identified_normalised_session
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
+        id,
         session,
         item_position,
         position,
@@ -849,75 +1026,99 @@ async fn write_exercise(
 
     match exercise {
         CanonicalExercise::ForReps { sets, .. } => {
-            for (ordinal, set) in sets.iter().enumerate() {
-                let reps = set
-                    .outcome
-                    .value()
-                    .completed()
-                    .and_then(|reps| reps.map(|reps| i64::from(reps.as_u32())));
-                write_set(
-                    tx,
-                    session,
-                    item_position,
-                    position,
-                    count_for_storage(ordinal)?,
-                    set,
-                )
-                .reps(reps)
-                .execute()
-                .await?;
-            }
+            write_sets(tx, at, set_ids, sets, |reps| {
+                Ok(Measure::Reps(i64::from(reps.as_u32())))
+            })
+            .await?;
         }
         CanonicalExercise::ForDuration { sets, .. } => {
-            for (ordinal, set) in sets.iter().enumerate() {
-                let seconds = match set.outcome.value().completed().copied().flatten() {
-                    Some(duration) => {
-                        Some(i64::try_from(duration.as_seconds()).map_err(|e| corrupt(&e))?)
-                    }
-                    None => None,
-                };
-                write_set(
-                    tx,
-                    session,
-                    item_position,
-                    position,
-                    count_for_storage(ordinal)?,
-                    set,
-                )
-                .duration(seconds)
-                .execute()
-                .await?;
-            }
+            write_sets(tx, at, set_ids, sets, |duration| {
+                Ok(Measure::Duration(
+                    i64::try_from(duration.as_seconds()).map_err(|e| corrupt(&e))?,
+                ))
+            })
+            .await?;
         }
         CanonicalExercise::ForDistance { sets, .. } => {
-            for (ordinal, set) in sets.iter().enumerate() {
-                let millimetres = match set.outcome.value().completed().copied().flatten() {
-                    Some(distance) => Some(
-                        i64::try_from(distance.metres.as_millimetres()).map_err(|e| corrupt(&e))?,
-                    ),
-                    None => None,
-                };
-                write_set(
-                    tx,
-                    session,
-                    item_position,
-                    position,
-                    count_for_storage(ordinal)?,
-                    set,
-                )
-                .distance(millimetres)
-                .execute()
-                .await?;
-            }
+            write_sets(tx, at, set_ids, sets, |distance| {
+                Ok(Measure::Distance(
+                    i64::try_from(distance.metres.as_millimetres()).map_err(|e| corrupt(&e))?,
+                ))
+            })
+            .await?;
         }
     }
     Ok(())
+}
+
+/// A completed set's measure, in the column its exercise counts it in.
+enum Measure {
+    Reps(i64),
+    Duration(i64),
+    Distance(i64),
+}
+
+/// Every set of one exercise, each under the id issued for it.
+async fn write_sets<M: Copy + Sync>(
+    tx: &mut Transaction<'_, Sqlite>,
+    at: Position,
+    set_ids: &[i64],
+    sets: &NonEmpty<CanonicalSet<M>>,
+    measure: impl Fn(M) -> Result<Measure, StoreError> + Send,
+) -> Result<(), StoreError> {
+    for (ordinal, set) in sets.iter().enumerate() {
+        let measured = match set.outcome.value().completed().copied().flatten() {
+            Some(amount) => Some(measure(amount)?),
+            None => None,
+        };
+        let row = write_set(
+            tx,
+            SetAt {
+                session: at.session,
+                item_position: at.item,
+                exercise_position: at.exercise,
+                position: count_for_storage(ordinal)?,
+                id: set_id(set_ids, ordinal)?,
+            },
+            set,
+        )?;
+        let row = match measured {
+            Some(Measure::Reps(reps)) => row.reps(Some(reps)),
+            Some(Measure::Duration(seconds)) => row.duration(Some(seconds)),
+            Some(Measure::Distance(millimetres)) => row.distance(Some(millimetres)),
+            None => row,
+        };
+        row.execute().await?;
+    }
+    Ok(())
+}
+
+/// The id issued for the `ordinal`th set of an exercise.
+fn set_id(set_ids: &[i64], ordinal: usize) -> Result<i64, StoreError> {
+    set_ids
+        .get(ordinal)
+        .copied()
+        .ok_or_else(|| StoreError::Corrupt {
+            detail: "a canonical set with no id issued for it".to_owned(),
+        })
+}
+
+/// Where a set sits, and the id it is written under.
+#[derive(Clone, Copy)]
+struct SetAt {
+    session: i64,
+    item_position: i64,
+    exercise_position: i64,
+    position: i64,
+    id: i64,
 }
 
 /// A set row under construction: everything but the measure, which the caller
 /// supplies because only it knows which column the measure belongs in.
 struct SetRow<'tx, 'c> {
     tx: &'tx mut Transaction<'c, Sqlite>,
+    id: i64,
+    sources: String,
     session: i64,
     item_position: i64,
     exercise_position: i64,
@@ -943,12 +1144,16 @@ struct SetRow<'tx, 'c> {
 
 fn write_set<'tx, 'c, M>(
     tx: &'tx mut Transaction<'c, Sqlite>,
-    session: i64,
-    item_position: i64,
-    exercise_position: i64,
-    position: i64,
+    at: SetAt,
     set: &CanonicalSet<M>,
-) -> SetRow<'tx, 'c> {
+) -> Result<SetRow<'tx, 'c>, StoreError> {
+    let SetAt {
+        session,
+        item_position,
+        exercise_position,
+        position,
+        id,
+    } = at;
     let (load_kind, load_grams) = match set.load.as_ref().map(Attributed::copied) {
         Some(Load::Absolute(mass)) => (
             Some("absolute"),
@@ -957,8 +1162,10 @@ fn write_set<'tx, 'c, M>(
         Some(Load::Relative(delta)) => (Some("relative"), Some(delta.as_grams())),
         None => (None, None),
     };
-    SetRow {
+    Ok(SetRow {
         tx,
+        id,
+        sources: sources_for_storage(&set.sources)?,
         session,
         item_position,
         exercise_position,
@@ -1010,7 +1217,7 @@ fn write_set<'tx, 'c, M>(
         reps: None,
         duration_seconds: None,
         distance_mm: None,
-    }
+    })
 }
 
 impl SetRow<'_, '_> {
@@ -1033,15 +1240,17 @@ impl SetRow<'_, '_> {
         sqlx::query!(
             r#"
             INSERT INTO canonical_gym_set (
-                session, item_position, exercise_position, position,
+                id, sources, session, item_position, exercise_position, position,
                 outcome, reps, duration_seconds, distance_mm, outcome_normalised_session,
                 load_kind, load_grams, load_normalised_session,
                 began_at_utc, began_zone, began_normalised_session,
                 rir, rir_normalised_session, set_kind, set_kind_normalised_session,
                 rest_after_seconds, rest_after_normalised_session
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
+            self.id,
+            self.sources,
             self.session,
             self.item_position,
             self.exercise_position,
@@ -1156,7 +1365,7 @@ async fn read_items(
                 .ok_or_else(|| StoreError::Corrupt {
                     detail: "a canonical item with no exercise".to_owned(),
                 })?;
-            CanonicalItem::Exercise(one)
+            CanonicalItem::exercise(one)
         });
     }
     NonEmpty::new(built).map_err(|e| corrupt(&e))
@@ -1300,6 +1509,7 @@ pub(super) struct StoredSet {
     pub(super) set_kind_normalised_session: Option<i64>,
     pub(super) rest_after_seconds: Option<i64>,
     pub(super) rest_after_normalised_session: Option<i64>,
+    pub(super) sources: BTreeSet<SourceSet>,
 }
 
 async fn read_sets(
@@ -1315,7 +1525,7 @@ async fn read_sets(
                load_kind, load_grams, load_normalised_session,
                began_at_utc, began_zone, began_normalised_session,
                rir, rir_normalised_session, set_kind, set_kind_normalised_session,
-               rest_after_seconds, rest_after_normalised_session
+               rest_after_seconds, rest_after_normalised_session, sources AS "sources!"
         FROM canonical_gym_set
         WHERE session = ? AND item_position = ? AND exercise_position = ?
         ORDER BY position
@@ -1328,9 +1538,9 @@ async fn read_sets(
     .await
     .map_err(|e| store_error(&e))?;
 
-    Ok(rows
-        .into_iter()
-        .map(|row| StoredSet {
+    let mut sets = Vec::with_capacity(rows.len());
+    for row in rows {
+        sets.push(StoredSet {
             outcome: row.outcome,
             reps: row.reps,
             duration_seconds: row.duration_seconds,
@@ -1348,8 +1558,48 @@ async fn read_sets(
             set_kind_normalised_session: row.set_kind_normalised_session,
             rest_after_seconds: row.rest_after_seconds,
             rest_after_normalised_session: row.rest_after_normalised_session,
+            sources: sources_from_storage(&row.sources)?,
+        });
+    }
+    Ok(sets)
+}
+
+/// A set's source sets, as the `sources` column holds them: a JSON array of
+/// `[stream, record, term]`.
+fn sources_from_storage(stored: &str) -> Result<BTreeSet<SourceSet>, StoreError> {
+    let named: Vec<(String, String, String)> =
+        serde_json::from_str(stored).map_err(|e| corrupt(&e))?;
+    named
+        .into_iter()
+        .map(|(stream, record, term)| source_set(&stream, record, term))
+        .collect()
+}
+
+/// One source set from its three stored parts.
+pub(super) fn source_set(
+    stream: &str,
+    record: String,
+    term: String,
+) -> Result<SourceSet, StoreError> {
+    Ok(SourceSet {
+        stream: LandingStream::try_from(stream).map_err(|e| corrupt(&e))?,
+        record: SourceRecordId::try_from(record).map_err(|e| corrupt(&e))?,
+        term: SourceTerm::try_from(term).map_err(|e| corrupt(&e))?,
+    })
+}
+
+fn sources_for_storage(sources: &BTreeSet<SourceSet>) -> Result<String, StoreError> {
+    let named: Vec<(String, &str, &str)> = sources
+        .iter()
+        .map(|source| {
+            (
+                source.stream.to_string(),
+                source.record.as_str(),
+                source.term.as_str(),
+            )
         })
-        .collect())
+        .collect();
+    serde_json::to_string(&named).map_err(|e| corrupt(&e))
 }
 
 /// Everything about a set but its measure, which its exercise's variant fixes.
@@ -1429,6 +1679,7 @@ fn common<M>(
         intensity,
         kind,
         rest_after,
+        sources: row.sources.clone(),
     })
 }
 

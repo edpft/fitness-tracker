@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT p.stream AS \"stream!\", p.record AS \"record!\", p.term AS \"term!\",\n               p.session AS \"session!\", p.exercise AS \"exercise!\",\n               p.canonical_set AS \"canonical_set!\"\n        FROM canonical_gym_source_set AS p\n        WHERE NOT EXISTS (SELECT 1 FROM canonical_gym_session WHERE id = p.session)\n          AND NOT EXISTS (SELECT 1 FROM canonical_gym_exercise WHERE id = p.exercise)\n          AND NOT EXISTS (SELECT 1 FROM canonical_gym_set WHERE id = p.canonical_set)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "stream!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_source_set",
+            "name": "stream"
+          }
+        }
+      },
+      {
+        "name": "record!",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_source_set",
+            "name": "record"
+          }
+        }
+      },
+      {
+        "name": "term!",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_source_set",
+            "name": "term"
+          }
+        }
+      },
+      {
+        "name": "session!",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_source_set",
+            "name": "session"
+          }
+        }
+      },
+      {
+        "name": "exercise!",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_source_set",
+            "name": "exercise"
+          }
+        }
+      },
+      {
+        "name": "canonical_set!",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_source_set",
+            "name": "canonical_set"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9a51a52553b4aa87e9a22194c4722c2adb165e9ca269b843b665242113d1020f"
+}
