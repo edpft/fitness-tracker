@@ -418,7 +418,7 @@ impl SqliteNormalisedGymSessionReader {
                 reps: row.reps,
                 duration_seconds: row.duration_seconds,
                 distance_mm: row.distance_mm,
-                outcome_normalised_session: named,
+                outcome_normalised_session: Some(named),
                 load_normalised_session: row.load_kind.as_ref().map(|_| named),
                 load_kind: row.load_kind,
                 load_grams: row.load_grams,

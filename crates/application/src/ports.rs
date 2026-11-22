@@ -28,6 +28,7 @@ use domain::cycling::{
     CyclingSession, DeliveredRide, Ftp, PublishedProgramme, RideVenue, Watts,
 };
 use domain::drinking::{Day, OwnDrink};
+use domain::gym::edit::{Edit, Edits};
 use domain::gym::{CanonicalGymSession, NormalisedGymSession, Performance, exercise::RepsExercise};
 use domain::landing::{
     EventCount, ExtractionRun, FetchedAt, LandedRecord, LandingRecord, LandingRecordId,
@@ -867,6 +868,10 @@ pub trait CanonicalGymSessionStore {
     /// [`NormalisedEntityStore::replace`] gives: § II says a derivation is never
     /// mutated in place.
     ///
+    /// **The operator's edits are applied as each session is written**, to
+    /// the ids it keeps (§ II.2): an edit is anchored to a canonical id, and
+    /// which id a rebuilt session keeps is only known as it is written.
+    ///
     /// # Errors
     ///
     /// [`StoreError`] if the store is unavailable, or if a session names a
@@ -874,6 +879,7 @@ pub trait CanonicalGymSessionStore {
     fn replace(
         &self,
         sessions: Vec<CanonicalGymSession>,
+        edits: &Edits,
     ) -> impl Future<Output = Result<SessionCount, StoreError>> + Send;
 
     /// What the normalised layer's changes since this layer was last derived
@@ -901,7 +907,16 @@ pub trait CanonicalGymSessionStore {
         &self,
         reach: &Reach,
         sessions: Vec<CanonicalGymSession>,
+        edits: &Edits,
     ) -> impl Future<Output = Result<SessionCount, StoreError>> + Send;
+
+    /// Every edit the operator has made to the layer, in the order asserted
+    /// (§ II.2).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable or holds something unreadable.
+    fn edits(&self) -> impl Future<Output = Result<Vec<Edit>, StoreError>> + Send;
 
     /// Every canonical session, oldest first.
     ///

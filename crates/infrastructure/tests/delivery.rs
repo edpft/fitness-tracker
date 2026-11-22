@@ -271,7 +271,7 @@ async fn ready_with(plan: domain::plan::Plan) -> Result<Ready, Box<dyn std::erro
     let normalisation = application::normalise::Normalisation::new(
         application::normalise::NormalisationPorts {
             raw: HevySessionAccountReader::new(pool.clone())?,
-            translator: HevySessionTranslator::default(),
+            translator: HevySessionTranslator,
             workouts: SqliteGymSessionStore::new(pool.clone())?,
             refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),

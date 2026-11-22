@@ -39,16 +39,17 @@ use application::{
     PerformedSessionLog, PrescribedWorkoutId, StoreError,
 };
 use domain::{
-    canonical::{Attributed, NormalisedSessionId, Occurred, Reach, SessionCount},
+    canonical::{Attributed, NormalisedSessionId, Occurred, Reach, SessionCount, TakenFrom},
     gym::{
         self, CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Guess,
         GuessedExercise, Identified, Load, MeasuredHeartRate, Performed, SetKind,
+        edit::{Edit, Edits},
         exercise::{
             Description, DistanceExercise, DurationExercise, Implement, Movement, RepsExercise,
         },
         identity::{
-            self, CanonicalExerciseId, CanonicalSessionId, CanonicalSetId, Issued, Placed,
-            SessionIdentity, SourceSet,
+            self, CanonicalExerciseId, CanonicalSessionId, CanonicalSetId, ExerciseIds, Issued,
+            Placed, SessionIdentity, SessionIds, SourceSet,
         },
     },
     landing::{LandingStream, SourceRecordId},
@@ -74,19 +75,24 @@ impl SqliteCanonicalGymSessionStore {
     pub const fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
+
+    pub(super) const fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
 }
 
 impl CanonicalGymSessionStore for SqliteCanonicalGymSessionStore {
     async fn replace(
         &self,
         sessions: Vec<CanonicalGymSession>,
+        edits: &Edits,
     ) -> Result<SessionCount, StoreError> {
         let mut tx = super::writing(&self.pool)
             .await
             .map_err(|e| store_error(&e))?;
         clear(&mut tx).await?;
         let written = sessions.len();
-        write_all(&mut tx, &sessions).await?;
+        write_all(&mut tx, &sessions, edits).await?;
         tx.commit().await.map_err(|e| store_error(&e))?;
         Ok(SessionCount::from(written))
     }
@@ -100,15 +106,20 @@ impl CanonicalGymSessionStore for SqliteCanonicalGymSessionStore {
         &self,
         reach: &Reach,
         sessions: Vec<CanonicalGymSession>,
+        edits: &Edits,
     ) -> Result<SessionCount, StoreError> {
         let mut tx = super::writing(&self.pool)
             .await
             .map_err(|e| store_error(&e))?;
         remove_on(&mut tx, reach.rebuilt()).await?;
-        write_all(&mut tx, &sessions).await?;
+        write_all(&mut tx, &sessions, edits).await?;
         super::canonical_changes::forget(&mut tx, CanonicalLayer::Gym, reach.changed()).await?;
         tx.commit().await.map_err(|e| store_error(&e))?;
         self.count().await
+    }
+
+    async fn edits(&self) -> Result<Vec<Edit>, StoreError> {
+        super::canonical_gym_edits::all(&self.pool).await
     }
 
     async fn all(&self) -> Result<Vec<CanonicalGymSession>, StoreError> {
@@ -652,43 +663,43 @@ async fn remove_on(
     Ok(())
 }
 
-/// The ids one session is written under: its own, and each exercise's with its
-/// sets', exercises in the order [`CanonicalGymSession::exercises`] gives them.
-struct Ids {
-    session: i64,
-    exercises: Vec<(i64, Vec<i64>)>,
-}
-
 /// Every session, each under the ids it keeps from the last build that held
-/// its source sets, or new ones (#893).
+/// its source sets, or new ones (#893), and with the operator's edits over it
+/// (§ II.2).
 ///
 /// **Where each source set was placed outlives the layer.** A normalised
 /// writer empties these tables before the layer is rebuilt, so the last
 /// placing cannot be read off the rows it replaces; `canonical_gym_source_set`
 /// is never emptied, and is brought up to date here as each session is
 /// written.
+///
+/// **Edits are applied here, after the ids are issued**, because an edit is
+/// anchored to the id an entity keeps and which one it keeps is decided only
+/// now. The edit names the id; it does not take part in deciding it.
 async fn write_all(
     tx: &mut Transaction<'_, Sqlite>,
     sessions: &[CanonicalGymSession],
+    edits: &Edits,
 ) -> Result<(), StoreError> {
     let placed = placed(tx).await?;
     let identities = identity::identify(sessions, &placed);
     for (session, identity) in sessions.iter().zip(identities) {
         let ids = issue(tx, identity).await?;
-        write_session(tx, ids.session, session).await?;
-        write_heart_rate(tx, ids.session, session).await?;
+        let edited;
+        let written = if edits.reach(&ids) {
+            edited = edits.apply(session, &ids);
+            &edited
+        } else {
+            session
+        };
+        let id = ids.session.as_i64();
+        write_session(tx, id, written).await?;
+        write_heart_rate(tx, id, written).await?;
         let mut exercises = ids.exercises.iter();
-        for (position, item) in session.items().iter().enumerate() {
-            write_item(
-                tx,
-                ids.session,
-                count_for_storage(position)?,
-                item,
-                &mut exercises,
-            )
-            .await?;
+        for (position, item) in written.items().iter().enumerate() {
+            write_item(tx, id, count_for_storage(position)?, item, &mut exercises).await?;
         }
-        place(tx, session, &ids).await?;
+        place(tx, written, &ids).await?;
     }
     Ok(())
 }
@@ -731,61 +742,71 @@ async fn placed(
 async fn issue(
     tx: &mut Transaction<'_, Sqlite>,
     identity: SessionIdentity,
-) -> Result<Ids, StoreError> {
+) -> Result<SessionIds, StoreError> {
     let session = match identity.session {
-        Issued::Kept(id) => id.as_i64(),
-        Issued::New => sqlx::query_scalar!(
-            r#"INSERT INTO canonical_gym_session_identity DEFAULT VALUES RETURNING id AS "id!""#
-        )
-        .fetch_one(&mut **tx)
-        .await
-        .map_err(|e| store_error(&e))?,
+        Issued::Kept(id) => id,
+        Issued::New => issued(
+            sqlx::query_scalar!(
+                r#"INSERT INTO canonical_gym_session_identity DEFAULT VALUES RETURNING id AS "id!""#
+            )
+            .fetch_one(&mut **tx)
+            .await,
+        )?,
     };
     let mut exercises = Vec::with_capacity(identity.exercises.len());
     for exercise in identity.exercises {
         let id = match exercise.exercise {
-            Issued::Kept(id) => id.as_i64(),
-            Issued::New => sqlx::query_scalar!(
-                r#"INSERT INTO canonical_gym_exercise_identity DEFAULT VALUES RETURNING id AS "id!""#
-            )
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(|e| store_error(&e))?,
+            Issued::Kept(id) => id,
+            Issued::New => issued(
+                sqlx::query_scalar!(
+                    r#"INSERT INTO canonical_gym_exercise_identity DEFAULT VALUES RETURNING id AS "id!""#
+                )
+                .fetch_one(&mut **tx)
+                .await,
+            )?,
         };
         let mut sets = Vec::with_capacity(exercise.sets.len());
         for set in exercise.sets {
             sets.push(match set {
-                Issued::Kept(id) => id.as_i64(),
-                Issued::New => sqlx::query_scalar!(
-                    r#"INSERT INTO canonical_gym_set_identity DEFAULT VALUES RETURNING id AS "id!""#
-                )
-                .fetch_one(&mut **tx)
-                .await
-                .map_err(|e| store_error(&e))?,
+                Issued::Kept(id) => id,
+                Issued::New => issued(
+                    sqlx::query_scalar!(
+                        r#"INSERT INTO canonical_gym_set_identity DEFAULT VALUES RETURNING id AS "id!""#
+                    )
+                    .fetch_one(&mut **tx)
+                    .await,
+                )?,
             });
         }
-        exercises.push((id, sets));
+        exercises.push(ExerciseIds { exercise: id, sets });
     }
-    Ok(Ids { session, exercises })
+    Ok(SessionIds { session, exercises })
+}
+
+/// A newly issued id, as the type it identifies.
+fn issued<I: TryFrom<i64, Error = identity::InvalidCanonicalId>>(
+    inserted: Result<i64, sqlx::Error>,
+) -> Result<I, StoreError> {
+    I::try_from(inserted.map_err(|e| store_error(&e))?).map_err(|e| corrupt(&e))
 }
 
 /// Record where each of a session's source sets now is, in one statement.
 async fn place(
     tx: &mut Transaction<'_, Sqlite>,
     session: &CanonicalGymSession,
-    ids: &Ids,
+    ids: &SessionIds,
 ) -> Result<(), StoreError> {
     let mut rows: Vec<(String, &str, &str, i64, i64, i64)> = Vec::new();
-    for (exercise, (exercise_id, set_ids)) in session.exercises().zip(&ids.exercises) {
-        for (sources, set_id) in exercise.set_sources().into_iter().zip(set_ids) {
+    for (exercise, held) in session.exercises().zip(&ids.exercises) {
+        for (sources, set_id) in exercise.set_sources().into_iter().zip(&held.sets) {
             for source in sources {
                 rows.push((
                     source.stream.to_string(),
                     source.record.as_str(),
                     source.term.as_str(),
-                    ids.session,
-                    *exercise_id,
-                    *set_id,
+                    ids.session.as_i64(),
+                    held.exercise.as_i64(),
+                    set_id.as_i64(),
                 ));
             }
         }
@@ -912,7 +933,7 @@ async fn write_item(
     session: i64,
     position: i64,
     item: &CanonicalItem,
-    ids: &mut std::slice::Iter<'_, (i64, Vec<i64>)>,
+    ids: &mut std::slice::Iter<'_, ExerciseIds>,
 ) -> Result<(), StoreError> {
     let is_superset = i64::from(matches!(item, CanonicalItem::Superset(_)));
     sqlx::query!(
@@ -925,7 +946,7 @@ async fn write_item(
     .await
     .map_err(|e| store_error(&e))?;
     for (ordinal, exercise) in item.exercises().enumerate() {
-        let (id, sets) = ids.next().ok_or_else(|| StoreError::Corrupt {
+        let held = ids.next().ok_or_else(|| StoreError::Corrupt {
             detail: "a canonical exercise with no id issued for it".to_owned(),
         })?;
         let at = Position {
@@ -933,7 +954,7 @@ async fn write_item(
             item: position,
             exercise: count_for_storage(ordinal)?,
         };
-        write_exercise(tx, at, *id, sets, exercise).await?;
+        write_exercise(tx, at, held, exercise).await?;
     }
     Ok(())
 }
@@ -981,10 +1002,11 @@ struct Position {
 async fn write_exercise(
     tx: &mut Transaction<'_, Sqlite>,
     at: Position,
-    id: i64,
-    set_ids: &[i64],
+    ids: &ExerciseIds,
     exercise: &CanonicalExercise,
 ) -> Result<(), StoreError> {
+    let id = ids.exercise.as_i64();
+    let set_ids = ids.sets.as_slice();
     let Position {
         session,
         item: item_position,
@@ -1000,7 +1022,7 @@ async fn write_exercise(
             ("recorded", Some(exercise.copied().as_str()), None, None)
         }
     };
-    let normalised_session = exercise.identified_by().as_i64();
+    let normalised_session = exercise.identified_by().map(NormalisedSessionId::as_i64);
     sqlx::query!(
         r#"
         INSERT INTO canonical_gym_exercise (
@@ -1062,7 +1084,7 @@ enum Measure {
 async fn write_sets<M: Copy + Sync>(
     tx: &mut Transaction<'_, Sqlite>,
     at: Position,
-    set_ids: &[i64],
+    set_ids: &[CanonicalSetId],
     sets: &NonEmpty<CanonicalSet<M>>,
     measure: impl Fn(M) -> Result<Measure, StoreError> + Send,
 ) -> Result<(), StoreError> {
@@ -1094,10 +1116,10 @@ async fn write_sets<M: Copy + Sync>(
 }
 
 /// The id issued for the `ordinal`th set of an exercise.
-fn set_id(set_ids: &[i64], ordinal: usize) -> Result<i64, StoreError> {
+fn set_id(set_ids: &[CanonicalSetId], ordinal: usize) -> Result<i64, StoreError> {
     set_ids
         .get(ordinal)
-        .copied()
+        .map(|id| id.as_i64())
         .ok_or_else(|| StoreError::Corrupt {
             detail: "a canonical set with no id issued for it".to_owned(),
         })
@@ -1124,7 +1146,7 @@ struct SetRow<'tx, 'c> {
     exercise_position: i64,
     position: i64,
     outcome: &'static str,
-    outcome_normalised_session: i64,
+    outcome_normalised_session: Option<i64>,
     load_kind: Option<&'static str>,
     load_grams: Option<i64>,
     load_normalised_session: Option<i64>,
@@ -1171,13 +1193,14 @@ fn write_set<'tx, 'c, M>(
         exercise_position,
         position,
         outcome: set.outcome.value().as_str(),
-        outcome_normalised_session: set.outcome.normalised_session().as_i64(),
+        outcome_normalised_session: set.outcome.normalised().map(NormalisedSessionId::as_i64),
         load_kind,
         load_grams,
         load_normalised_session: set
             .load
             .as_ref()
-            .map(|load| load.normalised_session().as_i64()),
+            .and_then(Attributed::normalised)
+            .map(NormalisedSessionId::as_i64),
         began_at_utc: set
             .began
             .as_ref()
@@ -1189,7 +1212,8 @@ fn write_set<'tx, 'c, M>(
         began_normalised_session: set
             .began
             .as_ref()
-            .map(|began| began.normalised_session().as_i64()),
+            .and_then(Attributed::normalised)
+            .map(NormalisedSessionId::as_i64),
         rir: set
             .intensity
             .as_ref()
@@ -1197,7 +1221,8 @@ fn write_set<'tx, 'c, M>(
         rir_normalised_session: set
             .intensity
             .as_ref()
-            .map(|rir| rir.normalised_session().as_i64()),
+            .and_then(Attributed::normalised)
+            .map(NormalisedSessionId::as_i64),
         set_kind: set.kind.as_ref().map(|kind| match kind.copied() {
             SetKind::Working => "working",
             SetKind::Warmup => "warmup",
@@ -1205,7 +1230,8 @@ fn write_set<'tx, 'c, M>(
         set_kind_normalised_session: set
             .kind
             .as_ref()
-            .map(|kind| kind.normalised_session().as_i64()),
+            .and_then(Attributed::normalised)
+            .map(NormalisedSessionId::as_i64),
         rest_after_seconds: set
             .rest_after
             .as_ref()
@@ -1213,7 +1239,8 @@ fn write_set<'tx, 'c, M>(
         rest_after_normalised_session: set
             .rest_after
             .as_ref()
-            .map(|rest| rest.normalised_session().as_i64()),
+            .and_then(Attributed::normalised)
+            .map(NormalisedSessionId::as_i64),
         reps: None,
         duration_seconds: None,
         distance_mm: None,
@@ -1379,7 +1406,7 @@ async fn read_exercises(
     let rows = sqlx::query!(
         r#"
         SELECT position AS "position!", measure AS "measure!", identified AS "identified!",
-               exercise, movement, implement, identified_normalised_session AS "identified_normalised_session!"
+               exercise, movement, implement, identified_normalised_session
         FROM canonical_gym_exercise
         WHERE session = ? AND item_position = ?
         ORDER BY position
@@ -1393,7 +1420,7 @@ async fn read_exercises(
 
     let mut built = Vec::with_capacity(rows.len());
     for row in rows {
-        let identified_by = normalised_session_from_storage(row.identified_normalised_session)?;
+        let identified_by = taken_from(row.identified_normalised_session)?;
         let sets = read_sets(connection, session, item_position, row.position).await?;
         built.push(match row.measure.as_str() {
             "reps" => {
@@ -1496,7 +1523,7 @@ pub(super) struct StoredSet {
     pub(super) reps: Option<i64>,
     pub(super) duration_seconds: Option<i64>,
     pub(super) distance_mm: Option<i64>,
-    pub(super) outcome_normalised_session: i64,
+    pub(super) outcome_normalised_session: Option<i64>,
     pub(super) load_kind: Option<String>,
     pub(super) load_grams: Option<i64>,
     pub(super) load_normalised_session: Option<i64>,
@@ -1521,7 +1548,7 @@ async fn read_sets(
     let rows = sqlx::query!(
         r#"
         SELECT outcome AS "outcome!", reps, duration_seconds, distance_mm,
-               outcome_normalised_session AS "outcome_normalised_session!",
+               outcome_normalised_session,
                load_kind, load_grams, load_normalised_session,
                began_at_utc, began_zone, began_normalised_session,
                rir, rir_normalised_session, set_kind, set_kind_normalised_session,
@@ -1612,15 +1639,15 @@ fn common<M>(
         row.load_grams,
         row.load_normalised_session,
     ) {
-        (Some("absolute"), Some(grams), Some(session)) => Some(Attributed::new(
+        (Some("absolute"), Some(grams), session) => Some(Attributed::new(
             Load::absolute(domain::measure::Kg::from_grams(
                 u64::try_from(grams).map_err(|e| corrupt(&e))?,
             )),
-            normalised_session_from_storage(session)?,
+            taken_from(session)?,
         )),
-        (Some("relative"), Some(grams), Some(session)) => Some(Attributed::new(
+        (Some("relative"), Some(grams), session) => Some(Attributed::new(
             Load::relative(domain::gym::SignedKg::from_grams(grams)),
-            normalised_session_from_storage(session)?,
+            taken_from(session)?,
         )),
         (None, None, None) => None,
         _ => {
@@ -1645,11 +1672,11 @@ fn common<M>(
         _ => None,
     };
     let intensity = match (row.rir.as_deref(), row.rir_normalised_session) {
-        (Some(rir), Some(session)) => Some(Attributed::new(
+        (Some(rir), session) => Some(Attributed::new(
             domain::gym::Rir::try_from(rir.to_owned()).map_err(|e| corrupt(&e))?,
-            normalised_session_from_storage(session)?,
+            taken_from(session)?,
         )),
-        _ => None,
+        (None, _) => None,
     };
     let kind = match (row.set_kind.as_deref(), row.set_kind_normalised_session) {
         (Some("working"), Some(session)) => Some(Attributed::new(
@@ -1670,16 +1697,22 @@ fn common<M>(
         _ => None,
     };
     Ok(CanonicalSet {
-        outcome: Attributed::new(
-            outcome,
-            normalised_session_from_storage(row.outcome_normalised_session)?,
-        ),
+        outcome: Attributed::new(outcome, taken_from(row.outcome_normalised_session)?),
         load,
         began,
         intensity,
         kind,
         rest_after,
         sources: row.sources.clone(),
+    })
+}
+
+/// Where a field the operator can edit was taken from: the normalised session
+/// its column names, or his edit where it names none (§ II.2).
+fn taken_from(session: Option<i64>) -> Result<TakenFrom, StoreError> {
+    Ok(match session {
+        Some(session) => TakenFrom::Normalised(normalised_session_from_storage(session)?),
+        None => TakenFrom::Edit,
     })
 }
 

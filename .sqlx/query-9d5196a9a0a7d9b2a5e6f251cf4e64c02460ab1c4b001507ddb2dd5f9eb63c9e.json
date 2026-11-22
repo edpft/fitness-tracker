@@ -1,0 +1,69 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT e.id AS \"exercise!\", s.started_at_utc, s.zone, s.on_day,\n                   (SELECT json_group_array(st.id) FROM (\n                        SELECT id FROM canonical_gym_set\n                         WHERE session = e.session AND item_position = e.item_position\n                           AND exercise_position = e.position\n                         ORDER BY position) AS st) AS \"sets!: String\"\n            FROM canonical_gym_exercise AS e\n            JOIN canonical_gym_session AS s ON s.id = e.session\n            WHERE e.id IN (SELECT value FROM json_each(?))\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "exercise!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "started_at_utc",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "on_day",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "on_day"
+          }
+        }
+      },
+      {
+        "name": "sets!: String",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "9d5196a9a0a7d9b2a5e6f251cf4e64c02460ab1c4b001507ddb2dd5f9eb63c9e"
+}

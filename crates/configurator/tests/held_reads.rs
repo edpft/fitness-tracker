@@ -8,33 +8,18 @@
     reason = "a second pool stands for another process writing the store"
 )]
 
-use configurator::{catalogue, corrections, wiring};
-use domain::{
-    gym::exercise::{Exercise, RepsExercise},
-    landing::SourceRecordId,
-    normalised::{CorrectedTerm, CorrectionReason, OperatorZone, SourceTerm},
-    sequence::NonEmpty,
-};
-use infrastructure::{
-    HevyWorkoutLandingStore, SqliteEditOverlayStore, SqliteOperatorSettingsStore, connect,
-};
+use configurator::{catalogue, wiring};
+use domain::normalised::OperatorZone;
+use infrastructure::{SqliteOperatorSettingsStore, connect};
 
 type Fallible<T> = Result<T, Box<dyn std::error::Error>>;
 
-fn a_term(id: &str) -> Fallible<NonEmpty<CorrectedTerm>> {
-    Ok(NonEmpty::new(vec![CorrectedTerm::new(
-        SourceRecordId::try_from(id.to_owned())?,
-        SourceTerm::try_from("1B2B1E7C")?,
-    )])?)
-}
-
 /// What Hevy's layer is derived from: as first read, after another process
-/// asserts a correction, after this one does, and from a store opened after.
+/// states a zone, after this one does, and from a store opened after.
 async fn around_two_writers(database: &std::path::Path) -> Fallible<[application::DerivedFrom; 4]> {
     let zone = OperatorZone::try_from("Europe/London".to_owned())?;
     let hevy = catalogue::lookup("hevy.workouts").ok_or("hevy is catalogued")?;
     let store = configurator::store::Store::open(database).await?;
-    let reason = CorrectionReason::try_from("Hevy had no neutral grip pull up")?;
 
     // Opening commits the migrations, and a read is only kept once every
     // commit has settled, which happens as each connection goes back to the
@@ -42,25 +27,14 @@ async fn around_two_writers(database: &std::path::Path) -> Fallible<[application
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     let first = wiring::inputs(hevy, &store, &zone).await?;
 
-    let elsewhere_term = a_term("from-another-process")?;
-    let here_term = a_term("from-this-process")?;
-    SqliteEditOverlayStore::new(connect(database).await?, HevyWorkoutLandingStore::STREAM)?
-        .assert(
-            Exercise::Reps(RepsExercise::NeutralGripPullUp),
-            "2026-10-18T09:00:00Z".parse()?,
-            &reason,
-            &elsewhere_term,
-        )
+    SqliteOperatorSettingsStore::new(connect(database).await?)
+        .author("2026-09-15T13:29:25Z".parse()?, "Pacific/Auckland")
         .await?;
     let elsewhere = wiring::inputs(hevy, &store, &zone).await?;
 
-    corrections::assert_exercise(
-        &store,
-        Exercise::Reps(RepsExercise::NeutralGripPullUp),
-        &reason,
-        &here_term,
-    )
-    .await?;
+    store
+        .state_timezone("2026-10-18T09:00:00Z".parse()?, "Europe/London")
+        .await?;
     let here = wiring::inputs(hevy, &store, &zone).await?;
 
     let reopened = wiring::inputs(
@@ -87,87 +61,6 @@ fn a_read_is_kept_until_this_process_writes() {
     assert_eq!(first, elsewhere, "another process's write is not seen");
     assert_ne!(elsewhere, here, "this process's write is");
     assert_eq!(here, reopened, "and reads as a store opened afresh does");
-}
-
-/// What Hevy's and Withings' layers are derived from: first, after another
-/// process states a zone and this one asserts a correction to Hevy, and from
-/// a store opened after.
-async fn around_a_correction_to_hevy(
-    database: &std::path::Path,
-) -> Fallible<[application::DerivedFrom; 6]> {
-    let zone = OperatorZone::try_from("Europe/London".to_owned())?;
-    let hevy = catalogue::lookup("hevy.workouts").ok_or("hevy is catalogued")?;
-    let withings = catalogue::lookup("withings.measurements").ok_or("withings is catalogued")?;
-    let store = configurator::store::Store::open(database).await?;
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    let hevy_first = wiring::inputs(hevy, &store, &zone).await?;
-    let withings_first = wiring::inputs(withings, &store, &zone).await?;
-
-    SqliteOperatorSettingsStore::new(connect(database).await?)
-        .author("2026-09-15T13:29:25Z".parse()?, "Pacific/Auckland")
-        .await?;
-    let term = a_term("from-this-process")?;
-    let reason = CorrectionReason::try_from("Hevy had no neutral grip pull up")?;
-    let overlay = application::graph::Node::Edits(domain::landing::LandingStream::try_from(
-        HevyWorkoutLandingStore::STREAM,
-    )?);
-    infrastructure::moving(
-        [overlay].into(),
-        corrections::assert_exercise(
-            &store,
-            Exercise::Reps(RepsExercise::NeutralGripPullUp),
-            &reason,
-            &term,
-        ),
-    )
-    .await?;
-    let hevy_after = wiring::inputs(hevy, &store, &zone).await?;
-    let withings_after = wiring::inputs(withings, &store, &zone).await?;
-
-    let reopened = configurator::store::Store::open(database).await?;
-    Ok([
-        hevy_first,
-        hevy_after,
-        wiring::inputs(hevy, &reopened, &zone).await?,
-        withings_first,
-        withings_after,
-        wiring::inputs(withings, &reopened, &zone).await?,
-    ])
-}
-
-/// **A write moves what is derived from what it wrote, and nothing else**:
-/// the operator, 2026-11-18, *"for Withings, I would expect, say, body weight
-/// to update but not, say, sleep."* A correction to Hevy is read again, with
-/// zones still as they were first read, and Withings is too.
-#[test]
-fn a_write_moves_only_what_is_derived_from_it() {
-    let directory = tempfile::tempdir().expect("a scratch directory");
-    let [
-        hevy_first,
-        hevy_after,
-        hevy_reopened,
-        withings_first,
-        withings_after,
-        withings_reopened,
-    ] = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("a runtime")
-        .block_on(around_a_correction_to_hevy(
-            &directory.path().join("test.db"),
-        ))
-        .expect("the store answers");
-
-    assert_ne!(hevy_first, hevy_after, "the correction is read");
-    assert_ne!(
-        hevy_after, hevy_reopened,
-        "and the zones it reads are still held"
-    );
-    assert_eq!(withings_first, withings_after, "Withings is still held");
-    assert_ne!(
-        withings_after, withings_reopened,
-        "though the zone another process stated would move it"
-    );
 }
 
 /// What Withings' layer is derived from, and the diary: first, after another

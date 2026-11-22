@@ -1388,14 +1388,29 @@ where
         .await
     }
 
+    /// The gym's also names the edits over it, each with how much it reaches,
+    /// so making, retracting or narrowing one is a change to rebuild from.
     async fn inputs(&self, layer: CanonicalLayer) -> Result<DerivedFrom, StoreError> {
         let written_by = match layer {
             CanonicalLayer::Gym => self.normalised_gym.written_by().await,
             CanonicalLayer::Cycling => self.normalised_cycling.written_by().await,
             CanonicalLayer::WeighIns => self.normalised_weigh_ins.written_by().await,
         }?;
+        let edits = match layer {
+            CanonicalLayer::Gym => {
+                let edits: Vec<String> = self
+                    .canonical_gym
+                    .edits()
+                    .await?
+                    .iter()
+                    .map(|edit| format!("{}:{}", edit.id, edit.edited.reaches()))
+                    .collect();
+                format!("; edits {}", edits.join(","))
+            }
+            CanonicalLayer::Cycling | CanonicalLayer::WeighIns => String::new(),
+        };
         Ok(DerivedFrom::from(format!(
-            "version {}; {}",
+            "version {}; {}{edits}",
             layer.version(),
             written_by.as_str()
         )))
@@ -1408,7 +1423,7 @@ impl<GR: Input, GC, CR: Input, CC, WR: Input, WC> CanonicalPorts<GR, GC, CR, CC,
     #[must_use]
     pub fn reads(layer: CanonicalLayer) -> Reads {
         match layer {
-            CanonicalLayer::Gym => GR::reads(),
+            CanonicalLayer::Gym => GR::reads().and(Reads::of([Node::Edits(CanonicalLayer::Gym)])),
             CanonicalLayer::Cycling => CR::reads(),
             CanonicalLayer::WeighIns => WR::reads(),
         }

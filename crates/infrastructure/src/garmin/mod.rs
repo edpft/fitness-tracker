@@ -17,7 +17,6 @@ pub mod activities;
 pub mod activity;
 pub mod auth;
 mod connect;
-pub mod corrections;
 pub mod days;
 pub mod devices;
 pub mod exercise_sets;
@@ -39,7 +38,6 @@ pub use account::{ActivityAccount, DayAccount, NightAccount, SleepAccount, days,
 pub use activities::{ActivityPage, GarminActivities};
 pub use activity::{ActivityDevices, GarminActivityEntity, GarminActivityTranslator};
 pub use auth::{GarminAuth, GarminCredentials};
-pub use corrections::{FoundSet, GarminRecordedSets};
 pub use exercise_sets::{ExerciseSetPage, GarminExerciseSets};
 pub use files::{ActivityFilePage, GarminActivityFiles};
 pub use gym::GarminGymTranslator;

@@ -123,6 +123,22 @@ pub struct SessionIdentity {
     pub exercises: Vec<ExerciseIdentity>,
 }
 
+/// The ids one written session holds: its own, and each exercise's with its
+/// sets', exercises in the order [`CanonicalGymSession::exercises`] gives them
+/// and sets in the order performed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionIds {
+    pub session: CanonicalSessionId,
+    pub exercises: Vec<ExerciseIds>,
+}
+
+/// The ids one written exercise and its sets hold, sets in order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExerciseIds {
+    pub exercise: CanonicalExerciseId,
+    pub sets: Vec<CanonicalSetId>,
+}
+
 /// Which ids each of `sessions` keeps, given where every source set was last
 /// placed.
 ///

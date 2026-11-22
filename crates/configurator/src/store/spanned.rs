@@ -44,6 +44,7 @@ use domain::cycling::{
     CyclingSession, DeliveredRide, Ftp, RideVenue,
 };
 use domain::drinking::{Day, OwnDrink};
+use domain::gym::edit::{Edit, Edits};
 use domain::gym::{CanonicalGymSession, NormalisedGymSession, Performance, exercise::RepsExercise};
 use domain::landing::{
     ExtractionRun, FetchedAt, LandingRecord, LandingRecordId, LandingStream, PayloadDigest,
@@ -441,9 +442,10 @@ spanned! {
 
 spanned! {
     CanonicalGymSessionStore {
-        fn replace(&self, sessions: Vec<CanonicalGymSession>) -> Result<SessionCount, StoreError>;
+        fn replace(&self, sessions: Vec<CanonicalGymSession>, edits: &Edits) -> Result<SessionCount, StoreError>;
         fn reach(&self) -> Result<Reach, StoreError>;
-        fn replace_within(&self, reach: &Reach, sessions: Vec<CanonicalGymSession>) -> Result<SessionCount, StoreError>;
+        fn replace_within(&self, reach: &Reach, sessions: Vec<CanonicalGymSession>, edits: &Edits) -> Result<SessionCount, StoreError>;
+        fn edits(&self) -> Result<Vec<Edit>, StoreError>;
         fn all(&self) -> Result<Vec<CanonicalGymSession>, StoreError>;
         fn count(&self) -> Result<SessionCount, StoreError>;
     }

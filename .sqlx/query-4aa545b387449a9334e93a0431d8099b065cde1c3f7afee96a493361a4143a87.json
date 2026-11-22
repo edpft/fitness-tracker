@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT position AS \"position!\", measure AS \"measure!\", identified AS \"identified!\",\n               exercise, movement, implement, identified_normalised_session AS \"identified_normalised_session!\"\n        FROM canonical_gym_exercise\n        WHERE session = ? AND item_position = ?\n        ORDER BY position\n        ",
+  "query": "\n        SELECT position AS \"position!\", measure AS \"measure!\", identified AS \"identified!\",\n               exercise, movement, implement, identified_normalised_session\n        FROM canonical_gym_exercise\n        WHERE session = ? AND item_position = ?\n        ORDER BY position\n        ",
   "describe": {
     "columns": [
       {
@@ -70,7 +70,7 @@
         }
       },
       {
-        "name": "identified_normalised_session!",
+        "name": "identified_normalised_session",
         "ordinal": 6,
         "type_info": "Integer",
         "origin": {
@@ -91,8 +91,8 @@
       true,
       true,
       true,
-      false
+      true
     ]
   },
-  "hash": "cdc5ed43c253988157e323a4b14376bc8cc39ec60709136d38b6c8f1c724c29d"
+  "hash": "4aa545b387449a9334e93a0431d8099b065cde1c3f7afee96a493361a4143a87"
 }

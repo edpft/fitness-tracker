@@ -7,14 +7,10 @@
 //! entity from the answer.
 //!
 //! Deterministic and total: the record's values plus the mapping plus the
-//! declared zone plus the edit overlay resolve the entity with no further
-//! input. There is no clock and no request in reach, which is what § 9 means
-//! and is why this takes `&self` and returns without awaiting anything.
-//!
-//! **The overlay arrives at construction, already read.** It is data, not a
-//! lookup this performs, so translation stays the pure function § 9 requires
-//! while § II.3 gets its third input. A translator built without one corrects
-//! nothing, which is the ordinary case.
+//! declared zone resolve the entity with no further input. There is no clock
+//! and no request in reach, which is what § 9 means and is why this takes
+//! `&self` and returns without awaiting anything. The operator's edits are the
+//! canonical layer's (§ II.2), not this one's.
 //!
 //! **What cannot be expressed is rejected, never coerced.** The grammatical
 //! part of a record translates, the ungrammatical part does not, and
@@ -33,7 +29,7 @@ use domain::{
     },
     landing::{EventKind, LandedRecord},
     measure::{Distance, Duration, Kg, Metres, PositiveDuration, RepCount},
-    normalised::{EditOverlay, Refusal, RefusalLocus, RefusalReason, StatedLoad, StatedZones},
+    normalised::{Refusal, RefusalLocus, RefusalReason, StatedZones},
     prescription::DeliveryReference,
     sequence::{AtLeastTwo, NonEmpty},
 };
@@ -51,26 +47,11 @@ use super::{
 
 /// The Hevy adapter's translator.
 ///
-/// It holds no connection and no cache — the zone still arrives per call, so
-/// the same translator answers for any declared configuration and a test can
-/// pin both sides of a switchover without building two of them.
-///
-/// What it does hold is the edit overlay, because a correction is per
-/// observation and cannot be resolved without the operator's assertions in
-/// hand. [`Default`] is the empty overlay: a stream nobody has corrected reads
-/// exactly as it did before there was one.
-#[derive(Debug, Clone, Default)]
-pub struct HevySessionTranslator {
-    overlay: EditOverlay,
-}
-
-impl HevySessionTranslator {
-    /// Translation with the operator's corrections in hand.
-    #[must_use]
-    pub const fn correcting(overlay: EditOverlay) -> Self {
-        Self { overlay }
-    }
-}
+/// It holds nothing — no connection, no cache, and the zone arrives per call,
+/// so the same translator answers for any declared configuration and a test
+/// can pin both sides of a switchover without building two of them.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HevySessionTranslator;
 
 impl Translator for HevySessionTranslator {
     type Account = SessionAccount;
@@ -132,7 +113,7 @@ impl Translator for HevySessionTranslator {
 
         for record in account.workouts().iter() {
             let mut scribe = Scribe::new(record);
-            match Self::workout(record, zones, &self.overlay, &mut scribe)? {
+            match Self::workout(record, zones, &mut scribe)? {
                 Some(workout) => workouts.push(workout),
                 None => refused = true,
             }
@@ -168,7 +149,6 @@ impl HevySessionTranslator {
     fn workout(
         record: &LandedRecord,
         zones: &StatedZones,
-        overlay: &EditOverlay,
         scribe: &mut Scribe,
     ) -> Result<Option<GymWorkout>, NormalisationError> {
         let envelope = match WorkoutEnvelope::read(record.payload().as_bytes()) {
@@ -204,7 +184,7 @@ impl HevySessionTranslator {
             return Ok(None);
         };
 
-        let items = Self::items(&workout.exercises, overlay, scribe, record)?;
+        let items = Self::items(&workout.exercises, scribe, record)?;
         let Ok(items) = NonEmpty::new(items) else {
             // A workout whose every entry refused. The entry-level reasons are
             // already on the scribe; this only covers a record with no entries
@@ -290,7 +270,6 @@ impl HevySessionTranslator {
     /// The workout's ordered items, with groupings resolved.
     fn items(
         entries: &[ExerciseEntry<'_>],
-        overlay: &EditOverlay,
         scribe: &mut Scribe,
         record: &LandedRecord,
     ) -> Result<Vec<WorkoutItem>, NormalisationError> {
@@ -301,7 +280,7 @@ impl HevySessionTranslator {
         let mut pending_group: Option<u32> = None;
 
         for entry in entries {
-            let Some(exercise) = Self::entry(entry, overlay, scribe, record)? else {
+            let Some(exercise) = Self::entry(entry, scribe, record)? else {
                 // A refused entry ends any run it was part of, because the
                 // members either side of it are no longer back to back.
                 flush(&mut items, &mut pending, &mut pending_group);
@@ -329,7 +308,6 @@ impl HevySessionTranslator {
     /// One exercise entry with its sets, or nothing if none of them survived.
     fn entry(
         entry: &ExerciseEntry<'_>,
-        overlay: &EditOverlay,
         scribe: &mut Scribe,
         record: &LandedRecord,
     ) -> Result<Option<PerformedExercise>, NormalisationError> {
@@ -343,21 +321,6 @@ impl HevySessionTranslator {
             });
         };
 
-        // **The correction replaces the movement and nothing else.** The load
-        // reading stays the template's, because the number was typed into the
-        // template: 139 of the corrected pull-up sets are under Hevy's assisted
-        // template, which records weight taken off, and carrying the corrected
-        // exercise's own convention across would read 42kg of assistance as
-        // 42kg of added weight. § 8 says the same thing from the other end —
-        // assistance is a load axis of a pull-up, not a different exercise — so
-        // correcting the grip leaves the axis alone.
-        let mapped = overlay
-            .exercise_for(record.source_record_id(), &entry.exercise_template_id)
-            .map_or(mapped, |exercise| Mapped {
-                exercise,
-                load: mapped.load,
-            });
-
         if entry.sets.is_empty() {
             scribe.note_for(
                 RefusalLocus::Entry { entry: entry.index },
@@ -367,12 +330,7 @@ impl HevySessionTranslator {
             return Ok(None);
         }
 
-        Ok(Self::sets(
-            entry,
-            mapped,
-            scribe,
-            &Corrections { overlay, record },
-        ))
+        Ok(Self::sets(entry, mapped, scribe))
     }
 
     /// The entry's sets, in the measure its exercise is counted in.
@@ -385,32 +343,22 @@ impl HevySessionTranslator {
         entry: &ExerciseEntry<'_>,
         mapped: Mapped,
         scribe: &mut Scribe,
-        corrections: &Corrections<'_>,
     ) -> Option<PerformedExercise> {
         match mapped.exercise {
             Exercise::Reps(exercise) => {
-                let sets = Self::collect(entry, mapped, scribe, reps_of)
-                    .into_iter()
-                    .map(|(index, set)| corrections.apply(entry, index, mapped, set))
-                    .collect::<Vec<_>>();
+                let sets = Self::collect(entry, mapped, scribe, reps_of);
                 NonEmpty::new(sets)
                     .ok()
                     .map(|sets| PerformedExercise::ForReps { exercise, sets })
             }
             Exercise::Duration(exercise) => {
-                let sets = Self::collect(entry, mapped, scribe, duration_of)
-                    .into_iter()
-                    .map(|(_, set)| set)
-                    .collect::<Vec<_>>();
+                let sets = Self::collect(entry, mapped, scribe, duration_of);
                 NonEmpty::new(sets)
                     .ok()
                     .map(|sets| PerformedExercise::ForDuration { exercise, sets })
             }
             Exercise::Distance(exercise) => {
-                let sets = Self::collect(entry, mapped, scribe, distance_of)
-                    .into_iter()
-                    .map(|(_, set)| set)
-                    .collect::<Vec<_>>();
+                let sets = Self::collect(entry, mapped, scribe, distance_of);
                 NonEmpty::new(sets)
                     .ok()
                     .map(|sets| PerformedExercise::ForDistance { exercise, sets })
@@ -428,15 +376,15 @@ impl HevySessionTranslator {
         mapped: Mapped,
         scribe: &mut Scribe,
         measure_of: fn(&PerformedSet<'_>) -> Result<Performed<M>, RefusalReason>,
-    ) -> Vec<(usize, Set<M>)> {
+    ) -> Vec<Set<M>> {
         let mut translated = Vec::with_capacity(entry.sets.len());
-        for (position, set) in entry.sets.iter().enumerate() {
+        for set in &entry.sets {
             let locus = RefusalLocus::Set {
                 entry: entry.index,
                 set: set.index,
             };
             match Self::one_set(set, mapped, measure_of) {
-                Ok(translated_set) => translated.push((position, translated_set)),
+                Ok(translated_set) => translated.push(translated_set),
                 Err(reason) => scribe.note_for(locus, Some(mapped.exercise), reason),
             }
         }
@@ -464,78 +412,6 @@ impl HevySessionTranslator {
             rest_after: None,
         })
     }
-}
-
-/// The edit overlay, and the record a set's correction is anchored in.
-struct Corrections<'a> {
-    overlay: &'a EditOverlay,
-    record: &'a LandedRecord,
-}
-
-impl Corrections<'_> {
-    /// A set as the operator corrected it, where he has and the source still
-    /// records what he corrected (#453): each field he changed, and the
-    /// source's own for the rest (#892).
-    fn apply(
-        &self,
-        entry: &ExerciseEntry<'_>,
-        position: usize,
-        mapped: Mapped,
-        set: Set<RepCount>,
-    ) -> Set<RepCount> {
-        let Some(served) = entry.sets.get(position) else {
-            return set;
-        };
-        let Some(recorded) = recorded_figures(served) else {
-            return set;
-        };
-        let Some(edit) = self.overlay.set_for(
-            self.record.source_record_id(),
-            &set_term(&entry.exercise_template_id, served.index),
-            recorded,
-        ) else {
-            return set;
-        };
-        let load = edit
-            .load()
-            .map_or(set.load, |stated| match (stated, mapped.load) {
-                (StatedLoad::Nothing, LoadReading::Absolute) => Load::UNLOADED,
-                (StatedLoad::Nothing, _) => Load::BODYWEIGHT,
-                (StatedLoad::Assistance(mass), _)
-                | (StatedLoad::Mass(mass), LoadReading::RelativeNegated) => {
-                    Load::relative(SignedKg::from(mass).negated())
-                }
-                (StatedLoad::Mass(mass), LoadReading::Absolute) => Load::absolute(mass),
-                (StatedLoad::Mass(mass), LoadReading::Relative) => {
-                    Load::relative(SignedKg::from(mass))
-                }
-            });
-        Set {
-            load,
-            outcome: edit.reps().map_or(set.outcome, Performed::Completed),
-            intensity: edit.effort().or(set.intensity),
-            ..set
-        }
-    }
-}
-
-/// What a figures correction anchors a Hevy set by: the template it was
-/// logged on and Hevy's own index for it. Hevy names a set by nothing else.
-#[must_use]
-pub fn set_term(template_id: &str, index: u32) -> String {
-    format!("{template_id}/{index}")
-}
-
-/// The figures a Hevy set records, as a correction names them: a completed
-/// count, and the mass typed against it if any.
-#[must_use]
-pub fn recorded_figures(set: &PerformedSet<'_>) -> Option<domain::normalised::SetFigures> {
-    let reps = RepCount::new(set.reps?).ok()?;
-    let load = match number(set.weight_kg) {
-        None => None,
-        Some(token) => Some(Kg::try_from(token).ok()?),
-    };
-    Some(domain::normalised::SetFigures::new(reps, load))
 }
 
 /// What a source called a set, in our two kinds.
@@ -743,12 +619,9 @@ fn flush(
     }
 }
 
-/// The corrections asserted on the workouts landed (#809).
+/// Nothing beyond the accounts it is handed (#809).
 impl application::Input for HevySessionTranslator {
     fn reads() -> application::Reads {
-        domain::landing::LandingStream::try_from(crate::HevyWorkoutLandingStore::STREAM)
-            .map(application::Node::Edits)
-            .into_iter()
-            .collect()
+        application::Reads::default()
     }
 }

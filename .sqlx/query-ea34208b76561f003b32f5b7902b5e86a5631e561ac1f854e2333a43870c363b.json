@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE canonical_gym_exercise_edit\n               SET sets = (SELECT json_group_array(value) FROM (\n                             SELECT value FROM json_each(sets)\n                             UNION SELECT ?\n                             ORDER BY value))\n             WHERE exercise = ?\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "ea34208b76561f003b32f5b7902b5e86a5631e561ac1f854e2333a43870c363b"
+}

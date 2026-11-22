@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT edit AS \"edit!\", exercise AS \"exercise!\", becomes, read, sets\n        FROM canonical_gym_exercise_edit\n        ORDER BY edit, exercise\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "edit!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise_edit",
+            "name": "edit"
+          }
+        }
+      },
+      {
+        "name": "exercise!",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise_edit",
+            "name": "exercise"
+          }
+        }
+      },
+      {
+        "name": "becomes",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise_edit",
+            "name": "becomes"
+          }
+        }
+      },
+      {
+        "name": "read",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise_edit",
+            "name": "read"
+          }
+        }
+      },
+      {
+        "name": "sets",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise_edit",
+            "name": "sets"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4393df33d0c1f051066a09907ebe0f8714b453784031b6e499fda6a67b9453d3"
+}

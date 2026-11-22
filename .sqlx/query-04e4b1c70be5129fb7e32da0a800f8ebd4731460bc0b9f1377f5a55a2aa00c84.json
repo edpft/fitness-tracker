@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT session AS \"session!\" FROM canonical_gym_set WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "session!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set",
+            "name": "session"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "04e4b1c70be5129fb7e32da0a800f8ebd4731460bc0b9f1377f5a55a2aa00c84"
+}

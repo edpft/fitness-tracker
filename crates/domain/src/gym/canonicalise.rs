@@ -40,7 +40,7 @@ use std::collections::BTreeMap;
 
 use jiff::civil::Date;
 
-use crate::canonical::{Attributed, NormalisedSessionId, Occurred, Reach};
+use crate::canonical::{Attributed, NormalisedSessionId, Occurred, Reach, TakenFrom};
 use crate::measure::PositiveDuration;
 use crate::sequence::{AtLeastTwo, NonEmpty};
 
@@ -906,11 +906,14 @@ fn fold(
 /// classifier says what it made of it, and `Identified` keeps them apart
 /// precisely so the second cannot pass for the first. Between two records, or
 /// two guesses, the lowest id.
-fn name(mine: Attributed<Identified>, theirs: &Attributed<Identified>) -> Attributed<Identified> {
+fn name(
+    mine: Attributed<Identified, TakenFrom>,
+    theirs: &Attributed<Identified, TakenFrom>,
+) -> Attributed<Identified, TakenFrom> {
     match (mine.copied().is_recorded(), theirs.copied().is_recorded()) {
         (true, false) => mine,
         (false, true) => *theirs,
-        _ if theirs.normalised_session() < mine.normalised_session() => *theirs,
+        _ if theirs.taken_from() < mine.taken_from() => *theirs,
         _ => mine,
     }
 }
@@ -997,10 +1000,10 @@ fn combine<M: Copy + PartialEq>(
 
 /// What became of the set: a stated amount over an unstated one.
 fn outcome<M: Copy>(
-    mine: &Attributed<Performed<Option<M>>>,
-    theirs: &Attributed<Performed<Option<M>>>,
+    mine: &Attributed<Performed<Option<M>>, TakenFrom>,
+    theirs: &Attributed<Performed<Option<M>>, TakenFrom>,
     meta: &BTreeMap<NormalisedSessionId, Meta>,
-) -> Attributed<Performed<Option<M>>> {
+) -> Attributed<Performed<Option<M>>, TakenFrom> {
     match (mine.value(), theirs.value()) {
         (Performed::Completed(None), Performed::Completed(Some(_))) => *theirs,
         (Performed::Completed(Some(_)), Performed::Completed(None)) => *mine,
@@ -1015,18 +1018,20 @@ fn outcome<M: Copy>(
 /// across the exercise is the one recording what happened; failing that, the
 /// watch, which reads the bar as the set is performed.
 fn load(
-    mine: Option<&Attributed<Load>>,
-    theirs: Option<&Attributed<Load>>,
+    mine: Option<&Attributed<Load, TakenFrom>>,
+    theirs: Option<&Attributed<Load, TakenFrom>>,
     meta: &BTreeMap<NormalisedSessionId, Meta>,
-) -> Option<Attributed<Load>> {
+) -> Option<Attributed<Load, TakenFrom>> {
     let (Some(mine), Some(theirs)) = (mine, theirs) else {
         return mine.or(theirs).copied();
     };
     if one_value(mine.copied(), theirs.copied()) {
         return Some(*finer(mine, theirs, meta));
     }
-    let varies = |value: &Attributed<Load>| {
-        meta.get(&value.normalised_session())
+    let varies = |value: &Attributed<Load, TakenFrom>| {
+        value
+            .normalised()
+            .and_then(|session| meta.get(&session))
             .is_some_and(|meta| meta.varies)
     };
     match (varies(mine), varies(theirs)) {
@@ -1042,22 +1047,24 @@ fn load(
 /// rounded to its dial, so the other is the same value stated to the
 /// kilogramme the bar actually held.
 fn finer<'v>(
-    mine: &'v Attributed<Load>,
-    theirs: &'v Attributed<Load>,
+    mine: &'v Attributed<Load, TakenFrom>,
+    theirs: &'v Attributed<Load, TakenFrom>,
     meta: &BTreeMap<NormalisedSessionId, Meta>,
-) -> &'v Attributed<Load> {
+) -> &'v Attributed<Load, TakenFrom> {
     recorded_by(mine, theirs, meta, Recorder::Operator)
 }
 
 /// Whichever of the two came from the given kind of record, else the lowest id.
 fn recorded_by<'v, T>(
-    mine: &'v Attributed<T>,
-    theirs: &'v Attributed<T>,
+    mine: &'v Attributed<T, TakenFrom>,
+    theirs: &'v Attributed<T, TakenFrom>,
     meta: &BTreeMap<NormalisedSessionId, Meta>,
     wanted: Recorder,
-) -> &'v Attributed<T> {
-    let is = |value: &Attributed<T>| {
-        meta.get(&value.normalised_session())
+) -> &'v Attributed<T, TakenFrom> {
+    let is = |value: &Attributed<T, TakenFrom>| {
+        value
+            .normalised()
+            .and_then(|session| meta.get(&session))
             .is_some_and(|meta| meta.recorder == wanted)
     };
     match (is(mine), is(theirs)) {
@@ -1069,10 +1076,10 @@ fn recorded_by<'v, T>(
 
 /// Whichever account states the field at all; the operator's where both do.
 fn either<T: Clone>(
-    mine: Option<&Attributed<T>>,
-    theirs: Option<&Attributed<T>>,
+    mine: Option<&Attributed<T, TakenFrom>>,
+    theirs: Option<&Attributed<T, TakenFrom>>,
     meta: &BTreeMap<NormalisedSessionId, Meta>,
-) -> Option<Attributed<T>> {
+) -> Option<Attributed<T, TakenFrom>> {
     match (mine, theirs) {
         (Some(mine), Some(theirs)) => {
             Some(recorded_by(mine, theirs, meta, Recorder::Operator).clone())
@@ -1084,18 +1091,20 @@ fn either<T: Clone>(
 /// The operator's record over a watch's, and the lowest id where that does not
 /// decide it — so a rebuild gives the same answer.
 fn prefer<'v, T>(
-    mine: &'v Attributed<T>,
-    theirs: &'v Attributed<T>,
+    mine: &'v Attributed<T, TakenFrom>,
+    theirs: &'v Attributed<T, TakenFrom>,
     meta: &BTreeMap<NormalisedSessionId, Meta>,
-) -> &'v Attributed<T> {
-    let operator = |value: &Attributed<T>| {
-        meta.get(&value.normalised_session())
+) -> &'v Attributed<T, TakenFrom> {
+    let operator = |value: &Attributed<T, TakenFrom>| {
+        value
+            .normalised()
+            .and_then(|session| meta.get(&session))
             .is_some_and(|meta| meta.recorder == Recorder::Operator)
     };
     match (operator(mine), operator(theirs)) {
         (true, false) => mine,
         (false, true) => theirs,
-        _ if theirs.normalised_session() < mine.normalised_session() => theirs,
+        _ if theirs.taken_from() < mine.taken_from() => theirs,
         _ => mine,
     }
 }

@@ -1,20 +1,27 @@
-//! Changing what an exercise in an opened session was (#754).
+//! Changing what an exercise in an opened session was (#754, #893).
 //!
 //! The operator's reference is his budgeting app (2026-11-10): *"it allows me
 //! to edit a transaction and then asks me if I want this edit to apply to more
 //! than one transaction."* So the change is two steps: what it was and why,
 //! then whether it goes for this session alone or for the similar ones too,
 //! listed by day with the button saying how many sets it changes. Then what
-//! was changed.
+//! was changed, and a way to undo it.
 //!
-//! **Similar is every other entry that reads as the same exercise**, which is
-//! what a stand-in is: Hevy had no entry for what he did, so he logged it
-//! under the nearest one, every time.
+//! **Whatever source the session was drawn from.** An edit is anchored to the
+//! canonical exercise (§ II.2), so a session only the watch and a sheet
+//! recorded is changed exactly as one logged in Hevy is.
+//!
+//! **Similar is every other exercise that reads as the same one**, which is
+//! what a stand-in is: the source had no entry for what he did, so he logged
+//! it under the nearest one, every time.
 //!
 //! **What arrives later is not changed** (§ II.2, *"overrides do not
-//! propagate"*): the entries are the ones listed when he changes them.
+//! propagate"*): the exercises are the ones listed when he changes them.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use application::history::{Number, opened};
 use axum::{
@@ -23,16 +30,17 @@ use axum::{
     response::{IntoResponse as _, Redirect, Response},
 };
 use configurator::{
-    corrections::{self, CorrectionError, StandIn},
+    edits::{self, HeldExercise},
     store::Store,
 };
 use domain::{
     gym::{
         CanonicalExercise,
+        edit::{EditId, EditReason, Edited, ExerciseEdit},
         exercise::{DistanceExercise, DurationExercise, Exercise, RepsExercise},
+        identity::CanonicalExerciseId,
     },
-    landing::SourceRecordId,
-    normalised::{CorrectedTerm, CorrectionId, CorrectionReason, OperatorZone, SourceTerm},
+    normalised::OperatorZone,
     sequence::NonEmpty,
 };
 use jiff::civil::Date;
@@ -48,27 +56,26 @@ use crate::{
 /// Where an exercise of an opened session is changed.
 pub const ROUTE: &str = "/history/{on}/{number}/exercise/{position}";
 
-/// Where what a change changed is shown.
-pub const CHANGED: &str = "/history/{on}/{number}/changed/{correction}";
+/// Where what a change changed is shown, and undone.
+pub const CHANGED: &str = "/history/{on}/{number}/changed/{edit}";
 
 const TITLE: &str = "Change exercise";
 
-/// Recounts the sets the button changes as entries are ticked.
+/// Recounts the sets the button changes as exercises are ticked.
 const SCRIPT: &str = "
 function recount(form) {
-  const chosen = [...form.querySelectorAll('input[name=entry]')]
-    .filter((entry) => entry.type === 'hidden' || entry.checked);
-  const sets = chosen.reduce((total, entry) => total + Number(entry.dataset.sets), 0);
-  const days = new Set(chosen.map((entry) => entry.dataset.day)).size;
+  const chosen = [...form.querySelectorAll('input[name=exercise]')]
+    .filter((exercise) => exercise.type === 'hidden' || exercise.checked);
+  const sets = chosen.reduce((total, exercise) => total + Number(exercise.dataset.sets), 0);
+  const days = new Set(chosen.map((exercise) => exercise.dataset.day)).size;
   form.querySelector('button.all').textContent =
     'Change ' + counted(sets, 'set') + ' over ' + counted(days, 'session');
 }
 function counted(count, what) { return count === 1 ? '1 ' + what : count + ' ' + what + 's'; }
 ";
 
-/// Where what correction `id` changed is shown, from the session it was made
-/// on.
-pub fn changed_address(on: Date, number: Number, id: CorrectionId) -> String {
+/// Where what edit `id` changed is shown, from the session it was made on.
+pub fn changed_address(on: Date, number: Number, id: EditId) -> String {
     format!("{}/changed/{id}", history::address(on, number))
 }
 
@@ -101,7 +108,7 @@ fn instead(exercise: Exercise) -> Vec<Exercise> {
 pub fn choose(
     session: &str,
     exercise: Exercise,
-    this: &[StandIn],
+    this: &HeldExercise,
     typed: &Typed,
     refused: Option<&Refusal>,
 ) -> Markup {
@@ -112,7 +119,7 @@ pub fn choose(
         TITLE,
         &html! {
             h2 { (exercise.name()) }
-            p.sub { (logged(this)) }
+            p.sub { (counted(this.sets.len(), "set")) }
             form.card method="get" {
                 (input::field("to", "to", "It was", &html! {
                     select id="to" name="to" {
@@ -136,13 +143,11 @@ pub fn choose(
 /// The second step: this session alone, or the similar ones too.
 pub fn scope(session: &str, change: &Change<'_>, refused: Option<&Refusal>) -> Markup {
     let similar = by_day(change.similar);
-    let sets: usize = change
-        .this
-        .iter()
+    let sets: usize = std::iter::once(change.this)
         .chain(change.similar)
-        .map(|entry| entry.sets)
+        .map(|held| held.sets.len())
         .sum();
-    let days = days(change.this.iter().chain(change.similar));
+    let days = days(std::iter::once(change.this).chain(change.similar));
     input::page(
         session,
         TITLE,
@@ -153,23 +158,21 @@ pub fn scope(session: &str, change: &Change<'_>, refused: Option<&Refusal>) -> M
                 input type="hidden" name="to" value=(change.to.as_str());
                 input type="hidden" name="because" value=(change.because);
                 h2 { "This session" }
-                p { (logged(change.this)) }
-                @for entry in change.this {
-                    input type="hidden" name="entry" value=(entry_value(entry))
-                        data-sets=(entry.sets) data-day=(entry.day);
-                }
+                p { (counted(change.this.sets.len(), "set")) }
+                input type="hidden" name="exercise" value=(change.this.exercise)
+                    data-sets=(change.this.sets.len()) data-day=(change.this.day);
                 button name="only" value="this" { "Change this session only" }
                 @if !similar.is_empty() {
                     h2 { "Similar" }
-                    p.sub { "Every other session where " (change.exercise.name()) " was logged." }
-                    @for (day, entries) in &similar {
+                    p.sub { "Every other session where " (change.exercise.name()) " was performed." }
+                    @for (day, exercises) in &similar {
                         fieldset.field {
                             legend { (day.0.strftime("%a %-d %b %Y")) }
-                            @for entry in entries {
+                            @for held in exercises {
                                 label {
-                                    input type="checkbox" name="entry" value=(entry_value(entry))
-                                        data-sets=(entry.sets) data-day=(entry.day) checked;
-                                    " " (sets_logged(entry))
+                                    input type="checkbox" name="exercise" value=(held.exercise)
+                                        data-sets=(held.sets.len()) data-day=(held.day) checked;
+                                    " " (counted(held.sets.len(), "set"))
                                 }
                             }
                         }
@@ -185,44 +188,39 @@ pub fn scope(session: &str, change: &Change<'_>, refused: Option<&Refusal>) -> M
     )
 }
 
-/// An exercise that cannot be changed yet, and why.
-pub fn not_hevy(session: &str, on: Date, exercise: Exercise) -> Markup {
+/// What an edit changed, and the button that undoes it.
+fn changed(session: &str, undo: &str, said: &Markup) -> Markup {
     input::page(
         session,
-        TITLE,
+        "Changed",
         &html! {
-            p {
-                "Nothing logged in Hevy on " (on.strftime("%-d %b %Y")) " reads as " (exercise.name())
-                ", and only what was logged in Hevy can be changed so far."
+            (said)
+            form method="post" action=(undo) {
+                button { "Undo this change" }
             }
             p { a href=(session) { "Back to the session" } }
         },
     )
 }
 
-/// What a change changed.
-pub fn changed(session: &str, exercise: Exercise, reached: &[StandIn]) -> Markup {
-    let sets: usize = reached.iter().map(|entry| entry.sets).sum();
+/// What an exercise edit changed: how many sets, over which sessions.
+fn exercises_changed(exercise: Exercise, reached: &[HeldExercise]) -> Markup {
+    let sets: usize = reached.iter().map(|held| held.sets.len()).sum();
     let by_day = by_day(reached);
-    input::page(
-        session,
-        "Changed",
-        &html! {
-            p {
-                (counted(sets, "set")) " over " (counted(by_day.len(), "session"))
-                " now read as " (exercise.name()) "."
-            }
-            ul.sessions {
-                @for (day, entries) in &by_day {
-                    li {
-                        (day.0.strftime("%a %-d %b %Y")) ": "
-                        (counted(entries.iter().map(|entry| entry.sets).sum(), "set"))
-                    }
+    html! {
+        p {
+            (counted(sets, "set")) " over " (counted(by_day.len(), "session"))
+            " now read as " (exercise.name()) "."
+        }
+        ul.sessions {
+            @for (day, exercises) in &by_day {
+                li {
+                    (day.0.strftime("%a %-d %b %Y")) ": "
+                    (counted(exercises.iter().map(|held| held.sets.len()).sum(), "set"))
                 }
             }
-            p { a href=(session) { "Back to the session" } }
-        },
-    )
+        }
+    }
 }
 
 /// What the first step was given, as typed.
@@ -251,9 +249,9 @@ impl Typed {
 pub struct Change<'a> {
     pub exercise: Exercise,
     pub to: Exercise,
-    pub because: &'a CorrectionReason,
-    pub this: &'a [StandIn],
-    pub similar: &'a [StandIn],
+    pub because: &'a EditReason,
+    pub this: &'a HeldExercise,
+    pub similar: &'a [HeldExercise],
 }
 
 /// What the first step asks: the exercise it was, and why.
@@ -261,7 +259,7 @@ pub struct Change<'a> {
 /// # Errors
 ///
 /// [`Refusal`] beside the field at fault.
-pub fn asked(exercise: Exercise, typed: &Typed) -> Result<(Exercise, CorrectionReason), Refusal> {
+pub fn asked(exercise: Exercise, typed: &Typed) -> Result<(Exercise, EditReason), Refusal> {
     let to = typed
         .to
         .ok_or_else(|| Refusal::of("to", "choose the exercise it was".to_owned()))?;
@@ -277,43 +275,47 @@ pub fn asked(exercise: Exercise, typed: &Typed) -> Result<(Exercise, CorrectionR
             format!("{} is not measured as {} is", to.name(), exercise.name()),
         ));
     }
-    let because = CorrectionReason::try_from(typed.because.clone())
+    let because = EditReason::try_from(typed.because.clone())
         .map_err(|_| Refusal::of("because", "say why".to_owned()))?;
     Ok((to, because))
 }
 
-/// The entries a post chose, each one that was offered.
+/// The exercises a post chose, each one that was offered.
 ///
-/// **Only what was offered**: an entry posted that is not among those found
-/// now is a page drawn before the record changed, and is refused rather than
-/// asserted over.
+/// **Only what was offered**: an exercise posted that is not among those
+/// found now is a page drawn before the record changed, and is refused rather
+/// than asserted over.
 ///
 /// # Errors
 ///
 /// [`Refusal`] if none was chosen or one was not offered.
-pub fn chosen(
+pub fn chosen<'a>(
     form: &[(String, String)],
-    this: &[StandIn],
-    similar: &[StandIn],
-) -> Result<Vec<CorrectedTerm>, Refusal> {
+    this: &'a HeldExercise,
+    similar: &'a [HeldExercise],
+) -> Result<Vec<&'a HeldExercise>, Refusal> {
     let only_this = form
         .iter()
         .any(|(key, value)| key == "only" && value == "this");
-    let offered: Vec<&StandIn> = this.iter().chain(similar).collect();
-    let mut chosen = Vec::new();
+    let mut chosen: Vec<&HeldExercise> = Vec::new();
     for (key, value) in form {
-        if key != "entry" {
+        if key != "exercise" {
             continue;
         }
-        let term = parse_entry(value).ok_or_else(stale)?;
-        if !offered.iter().any(|entry| entry.term == term) {
-            return Err(stale());
-        }
-        if only_this && !this.iter().any(|entry| entry.term == term) {
+        let id = value
+            .parse::<i64>()
+            .ok()
+            .and_then(|id| CanonicalExerciseId::try_from(id).ok())
+            .ok_or_else(stale)?;
+        let offered = std::iter::once(this)
+            .chain(similar)
+            .find(|held| held.exercise == id)
+            .ok_or_else(stale)?;
+        if only_this && offered.exercise != this.exercise {
             continue;
         }
-        if !chosen.contains(&term) {
-            chosen.push(term);
+        if !chosen.iter().any(|held| held.exercise == id) {
+            chosen.push(offered);
         }
     }
     if chosen.is_empty() {
@@ -326,48 +328,21 @@ fn stale() -> Refusal {
     Refusal::whole("the record has changed since this page was drawn; open it again".to_owned())
 }
 
-/// An entry as a form posts it: the workout, then the source's term for the
-/// exercise in it.
-fn entry_value(entry: &StandIn) -> String {
-    format!("{}|{}", entry.term.record(), entry.term.term())
-}
-
-fn parse_entry(value: &str) -> Option<CorrectedTerm> {
-    let (record, term) = value.split_once('|')?;
-    Some(CorrectedTerm::new(
-        SourceRecordId::try_from(record).ok()?,
-        SourceTerm::try_from(term).ok()?,
-    ))
-}
-
-fn by_day(entries: &[StandIn]) -> BTreeMap<std::cmp::Reverse<Date>, Vec<&StandIn>> {
-    let mut days: BTreeMap<std::cmp::Reverse<Date>, Vec<&StandIn>> = BTreeMap::new();
-    for entry in entries {
-        days.entry(std::cmp::Reverse(entry.day))
+fn by_day(exercises: &[HeldExercise]) -> BTreeMap<std::cmp::Reverse<Date>, Vec<&HeldExercise>> {
+    let mut days: BTreeMap<std::cmp::Reverse<Date>, Vec<&HeldExercise>> = BTreeMap::new();
+    for held in exercises {
+        days.entry(std::cmp::Reverse(held.day))
             .or_default()
-            .push(entry);
+            .push(held);
     }
     days
 }
 
-fn days<'a>(entries: impl Iterator<Item = &'a StandIn>) -> usize {
-    entries
-        .map(|entry| entry.day)
-        .collect::<std::collections::BTreeSet<_>>()
+fn days<'a>(exercises: impl Iterator<Item = &'a HeldExercise>) -> usize {
+    exercises
+        .map(|held| held.day)
+        .collect::<BTreeSet<_>>()
         .len()
-}
-
-/// How this session logged it: its sets, under Hevy's own name.
-fn logged(entries: &[StandIn]) -> String {
-    entries
-        .iter()
-        .map(sets_logged)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn sets_logged(entry: &StandIn) -> String {
-    format!("{} logged as {}", counted(entry.sets, "set"), entry.title)
 }
 
 fn counted(count: usize, what: &str) -> String {
@@ -402,57 +377,67 @@ impl At {
     }
 }
 
-/// The exercise there.
-async fn located(store: &Store, zone: &OperatorZone, at: &At) -> Result<Option<Exercise>, String> {
+/// The exercise there, as the opened session reads it.
+pub async fn located(
+    store: &Store,
+    zone: &OperatorZone,
+    on: Date,
+    number: Number,
+    position: usize,
+) -> Result<Option<CanonicalExercise>, String> {
     let activity = configurator::history::Opened::open(store, zone)
-        .activity(at.on, at.number)
+        .activity(on, number)
         .await
         .map_err(|error| error.to_string())?;
     let Some(opened::Activity::Gym { session, .. }) = activity else {
         return Ok(None);
     };
-    Ok(session
-        .exercises()
-        .nth(at.position - 1)
-        .and_then(CanonicalExercise::exercise_key)
-        .and_then(Exercise::named))
-}
-
-/// Every other entry that reads as `exercise`.
-async fn similar(
-    store: &Store,
-    zone: &OperatorZone,
-    exercise: Exercise,
-    this: &[StandIn],
-) -> Result<Vec<StandIn>, CorrectionError> {
-    Ok(corrections::reading_as(store, exercise, zone, None, None)
-        .await?
-        .into_iter()
-        .filter(|entry| !this.contains(entry))
-        .collect())
+    Ok(session.exercises().nth(position - 1).cloned())
 }
 
 /// What a change is asked of, read from the store: the exercise and this
-/// session's entries of it, or the page to show instead.
+/// session's own, or the page to show instead.
 async fn found(
     store: &Store,
     zone: &OperatorZone,
     at: &At,
-) -> Result<(Exercise, Vec<StandIn>), Response> {
+) -> Result<(Exercise, HeldExercise), Response> {
     let session = at.session();
     let unreadable = |error: &str| input::unreadable(&session, TITLE, error).into_response();
-    let exercise = match located(store, zone, at).await {
-        Ok(Some(exercise)) => exercise,
+    let canonical = match located(store, zone, at.on, at.number, at.position).await {
+        Ok(Some(canonical)) => canonical,
         Ok(None) => return Err(Redirect::to(&session).into_response()),
         Err(error) => return Err(unreadable(&error)),
     };
-    let this = corrections::in_session(store, exercise, zone, at.on)
+    let Some(exercise) = canonical.exercise_key().and_then(Exercise::named) else {
+        return Err(Redirect::to(&session).into_response());
+    };
+    let ids = edits::ids_of(store, &canonical)
         .await
-        .map_err(|error| unreadable(&error.to_string()))?;
-    if this.is_empty() {
-        return Err(not_hevy(&session, at.on, exercise).into_response());
-    }
-    Ok((exercise, this))
+        .map_err(|error| unreadable(&error.to_string()))?
+        .ok_or_else(|| unreadable("the session is being rebuilt; open it again in a moment"))?;
+    Ok((
+        exercise,
+        HeldExercise {
+            exercise: ids.exercise,
+            day: at.on,
+            sets: ids.sets,
+        },
+    ))
+}
+
+/// Every other exercise that reads as `exercise`.
+async fn similar(
+    store: &Store,
+    exercise: Exercise,
+    this: &HeldExercise,
+) -> Result<Vec<HeldExercise>, String> {
+    Ok(edits::reading_as(store, exercise)
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|held| held.exercise != this.exercise)
+        .collect())
 }
 
 /// The change, at the step its query has reached.
@@ -485,7 +470,7 @@ pub async fn shown(
             return choose(&session, exercise, &this, &typed, Some(&refusal)).into_response();
         }
     };
-    match similar(store, zone, exercise, &this).await {
+    match similar(store, exercise, &this).await {
         Ok(similar) => scope(
             &session,
             &Change {
@@ -498,7 +483,7 @@ pub async fn shown(
             None,
         )
         .into_response(),
-        Err(error) => input::unreadable(&session, TITLE, &error.to_string()).into_response(),
+        Err(error) => input::unreadable(&session, TITLE, &error).into_response(),
     }
 }
 
@@ -529,11 +514,9 @@ pub async fn posted(
             return choose(&session, exercise, &this, &typed, Some(&refusal)).into_response();
         }
     };
-    let similar = match similar(store, zone, exercise, &this).await {
+    let similar = match similar(store, exercise, &this).await {
         Ok(similar) => similar,
-        Err(error) => {
-            return input::unreadable(&session, TITLE, &error.to_string()).into_response();
-        }
+        Err(error) => return input::unreadable(&session, TITLE, &error).into_response(),
     };
     let refused = |refusal: &Refusal| {
         scope(
@@ -549,12 +532,23 @@ pub async fn posted(
         )
         .into_response()
     };
-    let terms = match chosen(&form, &this, &similar).map(NonEmpty::new) {
-        Ok(Ok(terms)) => terms,
-        Ok(Err(_)) => return refused(&Refusal::whole("choose at least one session".to_owned())),
+    let chosen = match chosen(&form, &this, &similar) {
+        Ok(chosen) => chosen,
         Err(refusal) => return refused(&refusal),
     };
-    match corrections::assert_exercise(store, to, &because, &terms).await {
+    let edits: Vec<ExerciseEdit> = chosen
+        .into_iter()
+        .map(|held| ExerciseEdit {
+            exercise: held.exercise,
+            becomes: to,
+            read: exercise,
+            sets: held.sets.iter().copied().collect(),
+        })
+        .collect();
+    let Ok(edits) = NonEmpty::new(edits) else {
+        return refused(&Refusal::whole("choose at least one session".to_owned()));
+    };
+    match edits::assert_exercises(store, &because, &edits).await {
         Ok(id) => {
             // What History collects, so the session is drawn again from the
             // layers derived under the change by the time it is opened.
@@ -565,62 +559,85 @@ pub async fn posted(
     }
 }
 
+/// The edit a `changed` address names, and the session it was made from.
+fn edit_at(on: &str, number: &str, edit: &str) -> Option<(At, EditId)> {
+    Some((
+        At::of(on, number, "1")?,
+        EditId::from(edit.parse::<i64>().ok()?),
+    ))
+}
+
 /// What a change made from this session changed.
 pub async fn made(
     State(runs): State<Arc<Runs>>,
-    Path((on, number, correction)): Path<(String, String, String)>,
+    Path((on, number, edit)): Path<(String, String, String)>,
 ) -> Response {
-    let (Some(at), Ok(id)) = (At::of(&on, &number, "1"), correction.parse::<i64>()) else {
+    let Some((at, id)) = edit_at(&on, &number, &edit) else {
         return Redirect::to(Place::History.path()).into_response();
     };
     let store = &runs.setting().store;
-    let zone = &runs.setting().zone;
     let session = at.session();
+    let undo = format!("{session}/changed/{id}");
     let shown = async {
-        let Some(correction) = corrections::one(store, CorrectionId::from(id)).await? else {
+        let Some(edit) = edits::one(store, id).await.map_err(|e| e.to_string())? else {
             return Ok(None);
         };
-        let (exercise, entries) = match correction.corrected() {
-            domain::normalised::Corrected::Exercise { exercise, entries } => (exercise, entries),
-            domain::normalised::Corrected::Set { recorded, edit, .. } => {
-                return Ok(Some(crate::change_set::changed(&session, *recorded, *edit)));
+        let said = match &edit.edited {
+            Edited::Exercises(exercises) => {
+                let ids: BTreeSet<CanonicalExerciseId> =
+                    exercises.iter().map(|edited| edited.exercise).collect();
+                let reached = edits::exercises_held(store, &ids)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                exercises_changed(exercises.first().becomes, &reached)
             }
+            Edited::Set { edit, .. } => html! { p { "The set now reads " (edit) "." } },
         };
-        let reached: Vec<StandIn> = corrections::reading_as(store, *exercise, zone, None, None)
-            .await?
-            .into_iter()
-            .filter(|entry| entries.iter().any(|term| *term == entry.term))
-            .collect();
-        Ok::<_, CorrectionError>(Some(changed(&session, *exercise, &reached)))
+        Ok::<_, String>(Some(changed(&session, &undo, &said)))
     };
     match shown.await {
         Ok(Some(page)) => page.into_response(),
         Ok(None) => Redirect::to(&session).into_response(),
+        Err(error) => input::unreadable(&session, "Changed", &error).into_response(),
+    }
+}
+
+/// Undo a change made from this session, then go back to it.
+pub async fn undone(
+    State(runs): State<Arc<Runs>>,
+    Path((on, number, edit)): Path<(String, String, String)>,
+) -> Response {
+    let Some((at, id)) = edit_at(&on, &number, &edit) else {
+        return Redirect::to(Place::History.path()).into_response();
+    };
+    let session = at.session();
+    match edits::retract(&runs.setting().store, id).await {
+        Ok(_) => {
+            runs.start(&Asked::Only(configurator::history::collects()));
+            Redirect::to(&session).into_response()
+        }
         Err(error) => input::unreadable(&session, "Changed", &error.to_string()).into_response(),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use configurator::corrections::StandIn;
-    use domain::{
-        gym::exercise::{DurationExercise, Exercise, RepsExercise},
-        landing::SourceRecordId,
-        normalised::{CorrectedTerm, SourceTerm},
+    use configurator::edits::HeldExercise;
+    use domain::gym::{
+        exercise::{DurationExercise, Exercise, RepsExercise},
+        identity::{CanonicalExerciseId, CanonicalSetId},
     };
     use jiff::civil::date;
 
-    use super::{Typed, asked, chosen, entry_value};
+    use super::{Typed, asked, chosen};
 
-    fn entry(record: &str, day: i8, sets: usize) -> StandIn {
-        StandIn {
-            term: CorrectedTerm::new(
-                SourceRecordId::try_from(record).expect("a record"),
-                SourceTerm::try_from("A1B2").expect("a term"),
-            ),
+    fn held(id: i64, day: i8, sets: i64) -> HeldExercise {
+        HeldExercise {
+            exercise: CanonicalExerciseId::try_from(id).expect("an id"),
             day: date(2025, 3, day),
-            title: "Triceps Extension (Cable)".to_owned(),
-            sets,
+            sets: (1..=sets)
+                .map(|set| CanonicalSetId::try_from(id * 100 + set).expect("an id"))
+                .collect(),
         }
     }
 
@@ -667,34 +684,49 @@ mod tests {
         );
     }
 
-    /// **"This session only" changes this session's entries whatever is
+    /// **"This session only" changes this session's exercise whatever is
     /// ticked**, and otherwise what is ticked is changed.
     #[test]
     fn this_session_only_leaves_the_similar_ones() {
-        let this = [entry("this", 2, 3)];
-        let similar = [entry("other", 1, 4), entry("another", 3, 2)];
+        let this = held(1, 2, 3);
+        let similar = [held(2, 1, 4), held(3, 3, 2)];
         let all = posted(&[
-            ("entry", entry_value(&this[0])),
-            ("entry", entry_value(&similar[0])),
+            ("exercise", this.exercise.to_string()),
+            ("exercise", similar[0].exercise.to_string()),
         ]);
 
-        let ticked = chosen(&all, &this, &similar).expect("offered entries");
-        assert_eq!(ticked, vec![this[0].term.clone(), similar[0].term.clone()]);
+        let ticked: Vec<CanonicalExerciseId> = chosen(&all, &this, &similar)
+            .expect("offered exercises")
+            .iter()
+            .map(|held| held.exercise)
+            .collect();
+        assert_eq!(ticked, vec![this.exercise, similar[0].exercise]);
 
         let mut only = all;
         only.push(("only".to_owned(), "this".to_owned()));
-        let alone = chosen(&only, &this, &similar).expect("offered entries");
-        assert_eq!(alone, vec![this[0].term.clone()]);
+        let alone: Vec<CanonicalExerciseId> = chosen(&only, &this, &similar)
+            .expect("offered exercises")
+            .iter()
+            .map(|held| held.exercise)
+            .collect();
+        assert_eq!(alone, vec![this.exercise]);
     }
 
-    /// **An entry that was not offered is refused**, rather than asserted
+    /// **An exercise that was not offered is refused**, rather than asserted
     /// over: the page was drawn from a record that has since changed.
     #[test]
-    fn an_entry_not_offered_is_refused() {
-        let this = [entry("this", 2, 3)];
-        let gone = entry("gone", 1, 4);
+    fn an_exercise_not_offered_is_refused() {
+        let this = held(1, 2, 3);
+        let gone = held(9, 1, 4);
 
-        assert!(chosen(&posted(&[("entry", entry_value(&gone))]), &this, &[]).is_err());
+        assert!(
+            chosen(
+                &posted(&[("exercise", gone.exercise.to_string())]),
+                &this,
+                &[]
+            )
+            .is_err()
+        );
         assert!(chosen(&posted(&[]), &this, &[]).is_err());
     }
 }

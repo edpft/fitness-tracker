@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT session AS \"session!\", exercise AS \"exercise!\", canonical_set AS \"set!\"\n            FROM canonical_gym_source_set\n            WHERE stream = ? AND record = ? AND term = ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "session!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_source_set",
+            "name": "session"
+          }
+        }
+      },
+      {
+        "name": "exercise!",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_source_set",
+            "name": "exercise"
+          }
+        }
+      },
+      {
+        "name": "set!",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_source_set",
+            "name": "canonical_set"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "88ecf7519ec5ebe3518dc897e6620def2f748f90c9e4749652e7641614a31030"
+}

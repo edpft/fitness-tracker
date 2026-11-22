@@ -3,7 +3,7 @@
 //!
 //! § II.4's second derivation, and the shortest use case in the crate: read
 //! every normalised gym session, match and merge them, replace the canonical
-//! layer with the result. Or, once a layer stands, only the days the normalised
+//! layer with the result, the operator's edits over it (§ II.2). Or, once a layer stands, only the days the normalised
 //! layer's changes reach (#610). It contacts nothing and refuses nothing — matching
 //! reads entities already in our terms, so there is no translation to fail and
 //! nothing to refuse (§ 9).
@@ -64,10 +64,13 @@ pub async fn gym_sessions<
     canonical: &C,
     rederivation: Rederivation,
 ) -> Result<Canonicalised, StoreError> {
+    let edits = gym::edit::Edits::of(&canonical.edits().await?);
     if rederivation == Rederivation::Whole {
         let accounts = normalised.all().await?;
         let read = SessionCount::from(accounts.len());
-        let written = canonical.replace(gym::canonical_sessions(accounts)).await?;
+        let written = canonical
+            .replace(gym::canonical_sessions(accounts), &edits)
+            .await?;
         return Ok(Canonicalised { read, written });
     }
     let reach = canonical.reach().await?;
@@ -80,7 +83,7 @@ pub async fn gym_sessions<
     let accounts = normalised.on(reach.read()).await?;
     let read = SessionCount::from(accounts.len());
     let sessions = gym::canonical_sessions_within(accounts, &reach);
-    let written = canonical.replace_within(&reach, sessions).await?;
+    let written = canonical.replace_within(&reach, sessions, &edits).await?;
     Ok(Canonicalised { read, written })
 }
 

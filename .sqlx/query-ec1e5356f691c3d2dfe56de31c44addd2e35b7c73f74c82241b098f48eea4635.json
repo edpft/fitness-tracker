@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        DELETE FROM canonical_gym_edit\n        WHERE id NOT IN (SELECT edit FROM canonical_gym_exercise_edit)\n          AND id NOT IN (SELECT edit FROM canonical_gym_set_edit)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "ec1e5356f691c3d2dfe56de31c44addd2e35b7c73f74c82241b098f48eea4635"
+}

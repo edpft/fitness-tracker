@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM canonical_gym_exercise_edit WHERE exercise = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "fe9d3ae82efc3716a7d4acb0feb1ac1a33b5019418ccc30204a6e2d13e00e551"
+}

@@ -4,6 +4,7 @@
 //! Tests return `()` and assert by panicking. See `store.rs` for why.
 
 use crate::support;
+use domain::gym::edit::Edits;
 
 use application::{CanonicalGymSessionStore as _, Performances as _};
 use domain::{
@@ -135,7 +136,7 @@ fn each_set_is_the_one_thing_it_is_and_one_without_a_kind_is_not_read() {
             .expect("a session"),
         ];
         SqliteCanonicalGymSessionStore::new(pool.clone())
-            .replace(sessions)
+            .replace(sessions, &Edits::default())
             .await
             .expect("a write");
 

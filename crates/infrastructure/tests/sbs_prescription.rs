@@ -14,6 +14,7 @@
 //! Tests return `()` and assert by panicking. See `store.rs` for why.
 
 use crate::support;
+use domain::gym::edit::Edits;
 
 use application::{
     CanonicalGymSessionStore as _, MesocycleStore as _, PlanAuthor as _, WorkoutPrescriber as _,
@@ -213,7 +214,7 @@ async fn ready_with(
     for &(day, recorded) in performed {
         sessions.push(session(day, recorded, stands_on)?);
     }
-    canonical.replace(sessions).await?;
+    canonical.replace(sessions, &Edits::default()).await?;
 
     Ok((
         Prescribing::new(PrescriptionPorts {

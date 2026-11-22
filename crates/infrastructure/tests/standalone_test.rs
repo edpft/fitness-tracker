@@ -118,7 +118,7 @@ async fn landed_store() -> Result<(tempfile::TempDir, SqlitePool), Box<dyn std::
     let normalisation = Normalisation::new(
         NormalisationPorts {
             raw: HevySessionAccountReader::new(pool.clone())?,
-            translator: HevySessionTranslator::default(),
+            translator: HevySessionTranslator,
             workouts: SqliteGymSessionStore::new(pool.clone())?,
             refusals: SqliteRefusalStore::new(pool.clone(), HevyWorkoutLandingStore::STREAM)?,
             runs: SqliteNormalisationRunLog::new(pool.clone()),

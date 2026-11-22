@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT edit AS \"edit!\", canonical_set, reps, load_kind, load_grams, rir\n        FROM canonical_gym_set_edit\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "edit!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set_edit",
+            "name": "edit"
+          }
+        }
+      },
+      {
+        "name": "canonical_set",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set_edit",
+            "name": "canonical_set"
+          }
+        }
+      },
+      {
+        "name": "reps",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set_edit",
+            "name": "reps"
+          }
+        }
+      },
+      {
+        "name": "load_kind",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set_edit",
+            "name": "load_kind"
+          }
+        }
+      },
+      {
+        "name": "load_grams",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set_edit",
+            "name": "load_grams"
+          }
+        }
+      },
+      {
+        "name": "rir",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set_edit",
+            "name": "rir"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "e5757fc8774c0bbab1fa04339439ed2bb3c81e1324b581a9e7aaa8f4fbfe6029"
+}
