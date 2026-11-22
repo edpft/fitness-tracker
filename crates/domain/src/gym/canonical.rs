@@ -45,6 +45,7 @@
 //! No prescription either — § 11 stores prescribed and performed separately,
 //! and what a workout was performed against is the normalised workout's.
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 use crate::canonical::{Attributed, NormalisedSessionId, Occurred};
@@ -54,6 +55,7 @@ use crate::sequence::{AtLeastTwo, NonEmpty};
 
 use super::{
     exercise::{DistanceExercise, DurationExercise, RepsExercise},
+    identity::SourceSet,
     intensity::Rir,
     load::Load,
     measured::{GuessedExercise, MeasuredHeartRate},
@@ -148,6 +150,9 @@ pub struct CanonicalSet<M> {
     /// working would file a warm-up as volume.
     pub kind: Option<Attributed<SetKind>>,
     pub rest_after: Option<Attributed<Duration>>,
+    /// The source sets it was built from, by the sources' own names: what it
+    /// is across a rebuild ([`super::identity`]).
+    pub sources: BTreeSet<SourceSet>,
 }
 
 impl<M> CanonicalSet<M> {
@@ -255,6 +260,15 @@ impl CanonicalExercise {
         }
     }
 
+    /// Each set's source sets, sets in order.
+    pub fn set_sources(&self) -> Vec<&BTreeSet<SourceSet>> {
+        match self {
+            Self::ForReps { sets, .. } => sets.iter().map(|set| &set.sources).collect(),
+            Self::ForDuration { sets, .. } => sets.iter().map(|set| &set.sources).collect(),
+            Self::ForDistance { sets, .. } => sets.iter().map(|set| &set.sources).collect(),
+        }
+    }
+
     /// Every normalised session this exercise and its sets drew a field from, each once.
     pub fn normalised_sessions(&self) -> Vec<NormalisedSessionId> {
         let mut sessions = vec![self.identified_by()];
@@ -296,23 +310,28 @@ impl fmt::Display for CanonicalExercise {
 /// Hevy records 360 superset items of 807 and the gym's log 55 of 99, and no
 /// spreadsheet or watch records one at all.
 ///
-/// **The superset is boxed and the single exercise is not**, because
-/// [`AtLeastTwo`] holds its first two members inline and a canonical exercise
-/// is large: every field of every set carries the normalised session it came from, and
-/// each set's clock carries the zone it was read in. Unboxed, every item in
-/// the sequence would be the size of two exercises whether or not it held
-/// them, and the common item — 447 of Hevy's 807 — holds one.
+/// **Both are boxed**, because a canonical exercise is large: every field of
+/// every set carries the normalised session it came from, each set's clock
+/// carries the zone it was read in, and each set the source sets it was built
+/// from. [`AtLeastTwo`] holds its first two members inline, so an unboxed
+/// superset would make every item the size of two exercises; and once a set
+/// named its sources (#893) an unboxed single exercise was most of that again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CanonicalItem {
-    Exercise(CanonicalExercise),
+    Exercise(Box<CanonicalExercise>),
     Superset(Box<AtLeastTwo<CanonicalExercise>>),
 }
 
 impl CanonicalItem {
+    /// One exercise, performed on its own.
+    pub fn exercise(exercise: CanonicalExercise) -> Self {
+        Self::Exercise(Box::new(exercise))
+    }
+
     /// Every exercise in this item, in order: one, or a superset's members.
     pub fn exercises(&self) -> Box<dyn Iterator<Item = &CanonicalExercise> + Send + '_> {
         match self {
-            Self::Exercise(exercise) => Box::new(std::iter::once(exercise)),
+            Self::Exercise(exercise) => Box::new(std::iter::once(exercise.as_ref())),
             Self::Superset(members) => Box::new(members.iter()),
         }
     }
@@ -471,6 +490,7 @@ mod tests {
             intensity: None,
             kind: None,
             rest_after: None,
+            sources: BTreeSet::new(),
         })
     }
 
@@ -507,7 +527,7 @@ mod tests {
         };
         let session = CanonicalGymSession::new(
             Occurred::On("2020-10-09".parse().expect("a day")),
-            NonEmpty::of(CanonicalItem::Exercise(exercise), vec![]),
+            NonEmpty::of(CanonicalItem::exercise(exercise), vec![]),
             None,
             None,
         );
@@ -533,7 +553,7 @@ mod tests {
         };
         let session = CanonicalGymSession::new(
             Occurred::At(StartedAt::new(instant, zone().expect("a zone"))),
-            NonEmpty::of(CanonicalItem::Exercise(exercise), vec![]),
+            NonEmpty::of(CanonicalItem::exercise(exercise), vec![]),
             Some(Attributed::new(
                 MeasuredHeartRate::new(
                     HeartRateSummary::new(
@@ -581,6 +601,7 @@ mod tests {
             intensity: None,
             kind: Some(Attributed::new(SetKind::Working, sheet)),
             rest_after: None,
+            sources: BTreeSet::new(),
         };
 
         assert_eq!(

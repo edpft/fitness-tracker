@@ -486,9 +486,22 @@ fn merge_items(accounts: &[NormalisedGymSession]) -> Vec<CanonicalItem> {
         // A superset is a thing a source recorded, never worked out here, so
         // one account recording it is enough and its members are that
         // account's. Lowest id where two did, as every other tie is broken.
+        //
+        // **A member already placed is not placed again** (#893). On
+        // 2025-02-26 Hevy grouped jump rope and dumbbell snatch with a hanging
+        // knee raise and Beyond The White Board grouped the same two with
+        // toes-to-bar, and building each account's superset in turn put both
+        // of the shared exercises in the session twice, every set counted
+        // double.
         let grouped = flattened
             .iter()
-            .find_map(|account| account.superset_with(slot));
+            .find_map(|account| account.superset_with(slot))
+            .map(|members| {
+                members
+                    .into_iter()
+                    .filter(|member| !done.contains(member))
+                    .collect::<Vec<_>>()
+            });
         match grouped {
             Some(members) if members.len() > 1 => {
                 let merged: Vec<CanonicalExercise> = members
@@ -502,7 +515,7 @@ fn merge_items(accounts: &[NormalisedGymSession]) -> Vec<CanonicalItem> {
                     // not performed back to back with anything.
                     Err(_) => {
                         if let Some(one) = merge_slot(&flattened, slot) {
-                            items.push(CanonicalItem::Exercise(one));
+                            items.push(CanonicalItem::exercise(one));
                         }
                     }
                 }
@@ -510,7 +523,7 @@ fn merge_items(accounts: &[NormalisedGymSession]) -> Vec<CanonicalItem> {
             _ => {
                 done.push(slot);
                 if let Some(exercise) = merge_slot(&flattened, slot) {
-                    items.push(CanonicalItem::Exercise(exercise));
+                    items.push(CanonicalItem::exercise(exercise));
                 }
             }
         }
@@ -978,6 +991,7 @@ fn combine<M: Copy + PartialEq>(
         intensity: either(mine.intensity.as_ref(), theirs.intensity.as_ref(), meta),
         kind: either(mine.kind.as_ref(), theirs.kind.as_ref(), meta),
         rest_after: either(mine.rest_after.as_ref(), theirs.rest_after.as_ref(), meta),
+        sources: mine.sources.union(&theirs.sources).cloned().collect(),
     }
 }
 

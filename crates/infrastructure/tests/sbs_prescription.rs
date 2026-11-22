@@ -128,6 +128,7 @@ fn set(grams: u64, reps: u32, on: NormalisedSessionId) -> Result<CanonicalSet<Re
         intensity: None,
         kind: Some(Attributed::new(SetKind::Working, on)),
         rest_after: None,
+        sources: std::collections::BTreeSet::new(),
     })
 }
 
@@ -156,7 +157,7 @@ fn session(
             format!("{day}T18:30:00Z").parse()?,
             OperatorZone::try_from("Europe/London".to_owned())?,
         )),
-        NonEmpty::of(CanonicalItem::Exercise(squat), vec![]),
+        NonEmpty::of(CanonicalItem::exercise(squat), vec![]),
         None,
         None,
     ))

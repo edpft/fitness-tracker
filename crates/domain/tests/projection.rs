@@ -81,6 +81,7 @@ fn set_of<M: std::fmt::Debug + Clone + 'static>(
                 ACCOUNT,
             )),
             rest_after: None,
+            sources: std::collections::BTreeSet::new(),
         },
     )
 }
@@ -134,7 +135,7 @@ fn exercise_for(slot: SlotId) -> BoxedStrategy<CanonicalExercise> {
 /// One item, shaped as the position it fills.
 fn item_for(position: Position) -> BoxedStrategy<CanonicalItem> {
     if let Position::Single(slot) = position {
-        return exercise_for(slot).prop_map(CanonicalItem::Exercise).boxed();
+        return exercise_for(slot).prop_map(CanonicalItem::exercise).boxed();
     }
     let members: Vec<BoxedStrategy<CanonicalExercise>> =
         position.slots().map(exercise_for).collect();
@@ -220,7 +221,7 @@ fn one_exercise(exercise: CanonicalExercise) -> Option<CanonicalGymSession> {
     let zone = OperatorZone::try_from("Europe/London").ok()?;
     Some(CanonicalGymSession::new(
         Occurred::At(StartedAt::new(jiff::Timestamp::from_second(0).ok()?, zone)),
-        NonEmpty::of(CanonicalItem::Exercise(exercise), Vec::new()),
+        NonEmpty::of(CanonicalItem::exercise(exercise), Vec::new()),
         None,
         None,
     ))
@@ -239,6 +240,7 @@ fn bare_set(
         intensity: None,
         kind: kind.map(|kind| Attributed::new(kind, ACCOUNT)),
         rest_after: None,
+        sources: std::collections::BTreeSet::new(),
     }
 }
 

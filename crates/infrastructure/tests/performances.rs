@@ -59,6 +59,7 @@ fn set(
         intensity: rir.map(|rir| Attributed::new(rir, by)),
         kind: kind.map(|kind| Attributed::new(kind, by)),
         rest_after: None,
+        sources: std::collections::BTreeSet::new(),
     })
 }
 
@@ -71,7 +72,7 @@ fn session(
     Ok(CanonicalGymSession::new(
         Occurred::On(on),
         NonEmpty::of(
-            CanonicalItem::Exercise(CanonicalExercise::ForReps {
+            CanonicalItem::exercise(CanonicalExercise::ForReps {
                 identified: Attributed::new(Identified::Recorded(lift), by),
                 sets: NonEmpty::new(sets)?,
             }),

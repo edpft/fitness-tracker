@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT outcome AS \"outcome!: String\", reps, duration_seconds, distance_mm,\n                   load_kind, load_grams, rir, set_kind AS \"set_kind!: String\",\n                   rest_after_seconds\n            FROM performed_set\n            WHERE workout = ? AND item_position = ? AND exercise_position = ?\n            ORDER BY position\n            ",
+  "query": "\n            SELECT outcome AS \"outcome!: String\", reps, duration_seconds, distance_mm,\n                   load_kind, load_grams, rir, set_kind AS \"set_kind!: String\",\n                   rest_after_seconds, position AS \"position!: i64\",\n                   landing_record_id, sheet, cell\n            FROM performed_set\n            WHERE workout = ? AND item_position = ? AND exercise_position = ?\n            ORDER BY position\n            ",
   "describe": {
     "columns": [
       {
@@ -101,6 +101,50 @@
             "name": "rest_after_seconds"
           }
         }
+      },
+      {
+        "name": "position!: i64",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "name": "landing_record_id",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "landing_record_id"
+          }
+        }
+      },
+      {
+        "name": "sheet",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "sheet"
+          }
+        }
+      },
+      {
+        "name": "cell",
+        "ordinal": 12,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "performed_set",
+            "name": "cell"
+          }
+        }
       }
     ],
     "parameters": {
@@ -115,8 +159,12 @@
       true,
       true,
       false,
+      true,
+      false,
+      true,
+      true,
       true
     ]
   },
-  "hash": "fe0c0b370001697b6a78bbaa7b8eed1aac8b4a93fe15d3e36fe854442f16980e"
+  "hash": "e7999802d0d1c1abd446a494765e5b876279464315a31b4dce7999605460b5c2"
 }

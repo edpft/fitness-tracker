@@ -13,6 +13,7 @@ pub mod canonical;
 pub mod canonicalise;
 pub mod equipment;
 pub mod exercise;
+pub mod identity;
 pub mod intensity;
 pub mod load;
 pub mod manual;

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO canonical_gym_set_identity DEFAULT VALUES RETURNING id AS \"id!\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set_identity",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f61600e058180e41f85cdbe8e521fb9086623f443c00e306cbaa2b2a26122aac"
+}

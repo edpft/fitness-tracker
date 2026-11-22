@@ -31,7 +31,7 @@ use sqlx::{SqliteConnection, SqlitePool};
 use super::{
     canonical_gym::{
         StoredSet, beats, distance_sets, duration_sets, identified_from_storage,
-        normalised_session_from_storage, occurred, reps_sets,
+        normalised_session_from_storage, occurred, reps_sets, source_set,
     },
     corrupt, store_error,
 };
@@ -217,6 +217,22 @@ impl SqliteNormalisedGymSessionReader {
             _ => None,
         };
         let sets = Self::measured_sets(connection, workout).await?;
+        let recorded = sqlx::query!(
+            r#"SELECT stream AS "stream!: String", source_record_id AS "record!: String"
+               FROM gym_workout WHERE id = ?"#,
+            workout
+        )
+        .fetch_one(&mut *connection)
+        .await
+        .map_err(|error| store_error(&error))?;
+        let mut named = Vec::with_capacity(sets.len());
+        for set in sets {
+            // A watch names a set by the instant it states the set began.
+            let term = set.at.instant().to_string();
+            let source = source_set(&recorded.stream, recorded.record.clone(), term)?;
+            named.push((set, source));
+        }
+        let sets = named;
         Ok(NormalisedGymSession::from_watch(
             id, when, duration, heart_rate, &sets,
         ))
@@ -311,7 +327,9 @@ impl SqliteNormalisedGymSessionReader {
     ) -> Result<Vec<CanonicalItem>, StoreError> {
         let rows = sqlx::query!(
             r#"
-            SELECT w.id AS "workout!: i64", i.position AS "item_position!: i64",
+            SELECT w.id AS "workout!: i64", w.stream AS "stream!: String",
+                   w.source_record_id AS "record!: String",
+                   i.position AS "item_position!: i64",
                    i.is_superset AS "is_superset!: i64",
                    e.position AS "exercise_position!: i64",
                    e.exercise AS "exercise!: String", e.measure AS "measure!: String"
@@ -341,14 +359,14 @@ impl SqliteNormalisedGymSessionReader {
                 }
                 at = Some(here);
             }
-            let sets = Self::sets(
-                connection,
-                row.workout,
-                row.item_position,
-                row.exercise_position,
-                id,
-            )
-            .await?;
+            let at = LoggedAt {
+                workout: row.workout,
+                stream: &row.stream,
+                record: &row.record,
+                item_position: row.item_position,
+                exercise_position: row.exercise_position,
+            };
+            let sets = Self::sets(connection, &at, id).await?;
             pending.push(exercise_of(&row.exercise, &row.measure, sets, id)?);
         }
         if let Some((_, _, superset)) = at {
@@ -360,32 +378,42 @@ impl SqliteNormalisedGymSessionReader {
     /// One exercise's sets, every field of them named for `id`.
     async fn sets(
         connection: &mut SqliteConnection,
-        workout: i64,
-        item_position: i64,
-        exercise_position: i64,
+        at: &LoggedAt<'_>,
         id: NormalisedSessionId,
     ) -> Result<Vec<StoredSet>, StoreError> {
         let rows = sqlx::query!(
             r#"
             SELECT outcome AS "outcome!: String", reps, duration_seconds, distance_mm,
                    load_kind, load_grams, rir, set_kind AS "set_kind!: String",
-                   rest_after_seconds
+                   rest_after_seconds, position AS "position!: i64",
+                   landing_record_id, sheet, cell
             FROM performed_set
             WHERE workout = ? AND item_position = ? AND exercise_position = ?
             ORDER BY position
             "#,
-            workout,
-            item_position,
-            exercise_position
+            at.workout,
+            at.item_position,
+            at.exercise_position
         )
         .fetch_all(&mut *connection)
         .await
         .map_err(|error| store_error(&error))?;
 
         let named = id.as_i64();
-        Ok(rows
-            .into_iter()
-            .map(|row| StoredSet {
+        let mut sets = Vec::with_capacity(rows.len());
+        for row in rows {
+            // A log names a set by where it sits in the record; a sheet by its
+            // copy, sheet and cell too, since one cell can hold several sets.
+            let place = format!(
+                "{}.{}.{}",
+                at.item_position, at.exercise_position, row.position
+            );
+            let term = match (row.landing_record_id, &row.sheet, &row.cell) {
+                (Some(copy), Some(sheet), Some(cell)) => format!("{copy}/{sheet}!{cell}/{place}"),
+                _ => place,
+            };
+            let source = source_set(at.stream, at.record.to_owned(), term)?;
+            sets.push(StoredSet {
                 outcome: row.outcome,
                 reps: row.reps,
                 duration_seconds: row.duration_seconds,
@@ -405,9 +433,20 @@ impl SqliteNormalisedGymSessionReader {
                 set_kind: Some(row.set_kind),
                 rest_after_normalised_session: row.rest_after_seconds.map(|_| named),
                 rest_after_seconds: row.rest_after_seconds,
-            })
-            .collect())
+                sources: BTreeSet::from([source]),
+            });
+        }
+        Ok(sets)
     }
+}
+
+/// Where a log's exercise sits, and the record that holds it.
+struct LoggedAt<'a> {
+    workout: i64,
+    stream: &'a str,
+    record: &'a str,
+    item_position: i64,
+    exercise_position: i64,
 }
 
 /// One item, from the exercises read for it.
@@ -421,7 +460,7 @@ fn push_item(
         items.push(CanonicalItem::Superset(Box::new(members)));
     } else {
         for exercise in exercises {
-            items.push(CanonicalItem::Exercise(exercise));
+            items.push(CanonicalItem::exercise(exercise));
         }
     }
     Ok(())

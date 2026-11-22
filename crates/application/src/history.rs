@@ -441,6 +441,7 @@ mod tests {
             intensity: None,
             kind: None,
             rest_after: None,
+            sources: std::collections::BTreeSet::new(),
         };
         let exercise = CanonicalExercise::ForReps {
             identified: Attributed::new(
@@ -451,7 +452,7 @@ mod tests {
         };
         Ok(CanonicalGymSession::new(
             occurred,
-            NonEmpty::new(vec![CanonicalItem::Exercise(exercise)])?,
+            NonEmpty::new(vec![CanonicalItem::exercise(exercise)])?,
             None,
             None,
         ))
