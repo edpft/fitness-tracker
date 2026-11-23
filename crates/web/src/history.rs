@@ -376,9 +376,6 @@ fn exercise_sets(
         ),
     };
     let loaded = rows.iter().any(|row| row.load.is_some());
-    // A set is changed from its row (#892), whichever source recorded it
-    // (#893), where it is counted in reps.
-    let editable = matches!(exercise, CanonicalExercise::ForReps { .. });
     let rated = rows.iter().any(|row| row.reserve.is_some());
     let mut working = 0;
     html! {
@@ -396,7 +393,7 @@ fn exercise_sets(
                 @if loaded { th { "kg" } }
                 th { (measure) }
                 @if rated { th { "In reserve" } }
-                @if editable { th.pen aria-label="Change" {} }
+                th.pen aria-label="Change" {}
             } }
             tbody {
                 @for (index, row) in rows.iter().enumerate() {
@@ -409,14 +406,14 @@ fn exercise_sets(
                         @if loaded { td { (row.load.as_deref().unwrap_or("–")) } }
                         td { (row.performed) }
                         @if rated { td { (row.reserve.as_deref().unwrap_or("–")) } }
-                        @if editable {
-                            td.pen {
-                                // A failed attempt has no reps to anchor a
-                                // change on, so it is not offered one.
-                                @if !row.failed {
-                                    a.edit href=(crate::change_set::address(here, position, index + 1))
-                                        aria-label="Change" title="Change" { (PEN) }
-                                }
+                        // A set is changed from its row, whichever source
+                        // recorded it and whatever it is counted in (#892,
+                        // #893, #901), but not a failed attempt: it has no
+                        // count to change.
+                        td.pen {
+                            @if !row.failed {
+                                a.edit href=(crate::change_set::address(here, position, index + 1))
+                                    aria-label="Change" title="Change" { (PEN) }
                             }
                         }
                     }
@@ -427,7 +424,7 @@ fn exercise_sets(
 }
 
 /// What an exercise reads as: a guess is marked as one.
-fn exercise_name(exercise: &CanonicalExercise) -> String {
+pub fn exercise_name(exercise: &CanonicalExercise) -> String {
     match exercise {
         CanonicalExercise::ForReps { identified, .. } => match identified.value() {
             domain::gym::Identified::Recorded(exercise) => exercise.name().to_owned(),
@@ -491,7 +488,7 @@ fn said(session: &CanonicalGymSession, here: Here) -> String {
 }
 
 /// Which of an exercise's sets were warm-ups, in order.
-fn warm_ups(exercise: &CanonicalExercise) -> Vec<bool> {
+pub fn warm_ups(exercise: &CanonicalExercise) -> Vec<bool> {
     fn warm_up<M>(set: &CanonicalSet<M>) -> bool {
         set.kind.as_ref().map(|kind| *kind.value()) == Some(SetKind::Warmup)
     }

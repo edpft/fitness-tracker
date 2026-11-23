@@ -15,8 +15,8 @@
 //! from.
 //!
 //! **Two kinds so far.** An exercise edit says what an exercise was, and
-//! reaches every set it holds; a set edit says what one set's reps, load or
-//! effort were. "Similar" is how one assertion reaches many exercises: one
+//! reaches every set it holds; a set edit says what one set's measure, load
+//! or effort were. "Similar" is how one assertion reaches many exercises: one
 //! exercise edit per exercise found reading as the same thing, under one
 //! [`EditId`] so it is retracted as it was made.
 //!
@@ -33,7 +33,7 @@ use jiff::Timestamp;
 
 use crate::canonical::Attributed;
 use crate::landing::InvalidIdentifier;
-use crate::measure::{Kg, RepCount};
+use crate::measure::{Distance, Duration, Kg, RepCount};
 use crate::newtype::string_name;
 use crate::sequence::NonEmpty;
 
@@ -159,10 +159,55 @@ impl fmt::Display for StatedLoad {
     }
 }
 
+/// How much of a set was done, in whatever its exercise is counted in: reps,
+/// a length of time, or ground covered (#901).
+///
+/// **One per kind of [`Exercise`]**, so a set edit states the measure of the
+/// set it edits, and a measure of another kind reaches nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Measure {
+    Reps(RepCount),
+    Duration(Duration),
+    Distance(Distance),
+}
+
+impl Measure {
+    const fn reps(self) -> Option<RepCount> {
+        match self {
+            Self::Reps(reps) => Some(reps),
+            Self::Duration(_) | Self::Distance(_) => None,
+        }
+    }
+
+    const fn duration(self) -> Option<Duration> {
+        match self {
+            Self::Duration(duration) => Some(duration),
+            Self::Reps(_) | Self::Distance(_) => None,
+        }
+    }
+
+    const fn distance(self) -> Option<Distance> {
+        match self {
+            Self::Distance(distance) => Some(distance),
+            Self::Reps(_) | Self::Duration(_) => None,
+        }
+    }
+}
+
+impl fmt::Display for Measure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Reps(reps) => write!(f, "{reps} reps"),
+            Self::Duration(duration) => write!(f, "{} s", duration.as_seconds()),
+            Self::Distance(distance) => write!(f, "{distance}"),
+        }
+    }
+}
+
 /// One field of a set an edit can state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum SetField {
-    Reps,
+    Measure,
     Load,
     Effort,
 }
@@ -173,7 +218,7 @@ enum SetField {
 /// [`SetEdit::new`] refuses one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetEdit {
-    reps: Option<RepCount>,
+    measure: Option<Measure>,
     load: Option<Load>,
     effort: Option<Rir>,
 }
@@ -182,18 +227,22 @@ impl SetEdit {
     /// The fields changed, or [`None`] where none is.
     #[must_use]
     pub const fn new(
-        reps: Option<RepCount>,
+        measure: Option<Measure>,
         load: Option<Load>,
         effort: Option<Rir>,
     ) -> Option<Self> {
-        if reps.is_none() && load.is_none() && effort.is_none() {
+        if measure.is_none() && load.is_none() && effort.is_none() {
             return None;
         }
-        Some(Self { reps, load, effort })
+        Some(Self {
+            measure,
+            load,
+            effort,
+        })
     }
 
-    pub const fn reps(self) -> Option<RepCount> {
-        self.reps
+    pub const fn measure(self) -> Option<Measure> {
+        self.measure
     }
 
     pub const fn load(self) -> Option<Load> {
@@ -207,7 +256,7 @@ impl SetEdit {
     /// The fields it states.
     fn stated(self) -> impl Iterator<Item = SetField> {
         [
-            self.reps.map(|_| SetField::Reps),
+            self.measure.map(|_| SetField::Measure),
             self.load.map(|_| SetField::Load),
             self.effort.map(|_| SetField::Effort),
         ]
@@ -220,9 +269,9 @@ impl SetEdit {
     #[must_use]
     pub const fn then(self, later: Self) -> Self {
         Self {
-            reps: match later.reps {
-                Some(reps) => Some(reps),
-                None => self.reps,
+            measure: match later.measure {
+                Some(measure) => Some(measure),
+                None => self.measure,
             },
             load: match later.load {
                 Some(load) => Some(load),
@@ -236,16 +285,16 @@ impl SetEdit {
     }
 
     /// `set` with each field this edit states over it, attributed to the
-    /// edit. Reps reach only a set counted in reps, which `reps` says how to
-    /// hold.
+    /// edit. A measure reaches only a set counted in it, which `counted`
+    /// picks out.
     fn over<M: Clone>(
         self,
         set: &CanonicalSet<M>,
-        reps: impl Fn(RepCount) -> Option<M>,
+        counted: impl Fn(Measure) -> Option<M>,
     ) -> CanonicalSet<M> {
         let mut edited = set.clone();
-        if let Some(count) = self.reps.and_then(reps) {
-            edited.outcome = Attributed::edited(Performed::Completed(Some(count)));
+        if let Some(measure) = self.measure.and_then(counted) {
+            edited.outcome = Attributed::edited(Performed::Completed(Some(measure)));
         }
         if let Some(load) = self.load {
             edited.load = Some(Attributed::edited(load));
@@ -260,8 +309,8 @@ impl SetEdit {
 impl fmt::Display for SetEdit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut parts = Vec::new();
-        if let Some(reps) = self.reps {
-            parts.push(format!("{reps} reps"));
+        if let Some(measure) = self.measure {
+            parts.push(measure.to_string());
         }
         if let Some(load) = self.load {
             parts.push(load.to_string());
@@ -451,7 +500,7 @@ impl Edits {
                     _ => *identified,
                 },
                 sets: sets.map_indexed(|index, held| {
-                    set(index).map_or_else(|| held.clone(), |edit| edit.over(held, Some))
+                    set(index).map_or_else(|| held.clone(), |edit| edit.over(held, Measure::reps))
                 }),
             },
             CanonicalExercise::ForDuration {
@@ -463,7 +512,8 @@ impl Edits {
                     _ => *named,
                 },
                 sets: sets.map_indexed(|index, held| {
-                    set(index).map_or_else(|| held.clone(), |edit| edit.over(held, |_| None))
+                    set(index)
+                        .map_or_else(|| held.clone(), |edit| edit.over(held, Measure::duration))
                 }),
             },
             CanonicalExercise::ForDistance {
@@ -475,7 +525,8 @@ impl Edits {
                     _ => *named,
                 },
                 sets: sets.map_indexed(|index, held| {
-                    set(index).map_or_else(|| held.clone(), |edit| edit.over(held, |_| None))
+                    set(index)
+                        .map_or_else(|| held.clone(), |edit| edit.over(held, Measure::distance))
                 }),
             },
         }
@@ -516,7 +567,7 @@ mod tests {
     use super::*;
     use crate::canonical::{NormalisedSessionId, Occurred};
     use crate::gym::canonical::CanonicalItem;
-    use crate::gym::exercise::RepsExercise;
+    use crate::gym::exercise::{DurationExercise, RepsExercise};
 
     fn exercise_id(id: i64) -> CanonicalExerciseId {
         CanonicalExerciseId::try_from(id).expect("an id")
@@ -621,6 +672,88 @@ mod tests {
         assert_eq!(sets.first().intensity, None);
     }
 
+    /// **A hold is given a length and a load** (#901): 25 Sep's 40 s dead
+    /// hang becomes 45 s with 10 kg, each attributed to the edit, while a
+    /// count of reps stated of it reaches nothing.
+    #[test]
+    fn a_timed_set_takes_a_length_and_a_load() {
+        let sheet = NormalisedSessionId::FIRST;
+        let hang = CanonicalGymSession::new(
+            Occurred::On("2026-09-25".parse().expect("a day")),
+            NonEmpty::of(
+                CanonicalItem::exercise(CanonicalExercise::ForDuration {
+                    exercise: Attributed::new(DurationExercise::DeadHang, sheet),
+                    sets: NonEmpty::of(
+                        CanonicalSet {
+                            outcome: Attributed::new(
+                                Performed::Completed(Some(Duration::from_seconds(40))),
+                                sheet,
+                            ),
+                            load: Some(Attributed::new(Load::UNLOADED, sheet)),
+                            began: None,
+                            intensity: None,
+                            kind: None,
+                            rest_after: None,
+                            sources: BTreeSet::new(),
+                        },
+                        vec![],
+                    ),
+                }),
+                vec![],
+            ),
+            None,
+            None,
+        );
+        let ids = SessionIds {
+            session: crate::gym::identity::CanonicalSessionId::try_from(1).expect("an id"),
+            exercises: vec![ExerciseIds {
+                exercise: exercise_id(10),
+                sets: vec![set_id(100)],
+            }],
+        };
+        let length = |stated| {
+            let edited =
+                Edits::of(&[set_edit(1, "2026-11-23T09:00:00Z", 100, stated)]).apply(&hang, &ids);
+            let CanonicalExercise::ForDuration { sets, .. } =
+                edited.exercises().next().expect("one")
+            else {
+                panic!("a timed exercise");
+            };
+            let set = sets.first().clone();
+            (
+                set.outcome.value().completed().copied().flatten(),
+                set.outcome.is_edited(),
+                set.load.map(|load| load.copied()),
+            )
+        };
+
+        let longer = SetEdit::new(
+            Some(Measure::Duration(Duration::from_seconds(45))),
+            Some(Load::absolute(Kg::from_grams(10_000))),
+            None,
+        )
+        .expect("two fields");
+        assert_eq!(
+            length(longer),
+            (
+                Some(Duration::from_seconds(45)),
+                true,
+                Some(Load::absolute(Kg::from_grams(10_000)))
+            )
+        );
+        assert_eq!(longer.to_string(), "45 s, 10 kg");
+
+        let counted = SetEdit::new(Some(Measure::Reps(reps(3))), None, None).expect("a count");
+        assert_eq!(
+            length(counted),
+            (
+                Some(Duration::from_seconds(40)),
+                false,
+                Some(Load::UNLOADED)
+            )
+        );
+    }
+
     /// **An exercise edit reaches every set it holds**, and names the
     /// exercise as the edit's.
     #[test]
@@ -657,7 +790,8 @@ mod tests {
     #[test]
     fn a_session_lists_the_edits_still_saying_something_about_it() {
         let rated = |rir| SetEdit::new(None, None, Some(rir)).expect("an effort");
-        let both = SetEdit::new(Some(reps(3)), None, Some(Rir::Two)).expect("two fields");
+        let both =
+            SetEdit::new(Some(Measure::Reps(reps(3))), None, Some(Rir::Two)).expect("two fields");
         let edits = [
             set_edit(1, "2026-11-21T09:00:00Z", 100, rated(Rir::One)),
             set_edit(2, "2026-11-21T09:30:00Z", 101, both),
@@ -722,7 +856,7 @@ mod tests {
     #[test]
     fn a_later_edit_of_a_set_keeps_the_fields_it_left() {
         let rated = SetEdit::new(None, None, Some(Rir::One)).expect("an effort");
-        let recounted = SetEdit::new(Some(reps(2)), None, None).expect("a count");
+        let recounted = SetEdit::new(Some(Measure::Reps(reps(2))), None, None).expect("a count");
         let earlier = set_edit(1, "2026-11-21T09:00:00Z", 100, rated);
         let later = set_edit(2, "2026-11-21T10:00:00Z", 100, recounted);
 
@@ -732,7 +866,7 @@ mod tests {
         ] {
             let edit = edits.set(set_id(100)).expect("an edit");
             assert_eq!(edit.effort(), Some(Rir::One));
-            assert_eq!(edit.reps(), Some(reps(2)));
+            assert_eq!(edit.measure(), Some(Measure::Reps(reps(2))));
         }
         assert_eq!(SetEdit::new(None, None, None), None);
     }
@@ -760,7 +894,7 @@ mod tests {
                 2,
                 "2026-11-22T09:01:00Z",
                 999,
-                SetEdit::new(Some(reps(6)), None, None).expect("a count"),
+                SetEdit::new(Some(Measure::Reps(reps(6))), None, None).expect("a count"),
             ),
         ]);
 

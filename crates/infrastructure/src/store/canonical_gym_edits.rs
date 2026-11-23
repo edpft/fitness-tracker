@@ -21,11 +21,11 @@ use application::{Authors, CanonicalLayer, Node, StoreError};
 use domain::{
     gym::{
         Load, Rir, SignedKg,
-        edit::{Edit, EditId, EditReason, Edited, ExerciseEdit, SetEdit},
+        edit::{Edit, EditId, EditReason, Edited, ExerciseEdit, Measure, SetEdit},
         exercise::Exercise,
         identity::{CanonicalExerciseId, CanonicalSessionId, CanonicalSetId, Placed, SourceSet},
     },
-    measure::{Kg, RepCount},
+    measure::{Distance, Duration, Kg, Metres, RepCount},
     sequence::NonEmpty,
 };
 use jiff::{Timestamp, civil::Date};
@@ -80,7 +80,8 @@ pub(super) async fn all(pool: &SqlitePool) -> Result<Vec<Edit>, StoreError> {
     .map_err(|e| store_error(&e))?;
     let sets = sqlx::query!(
         r#"
-        SELECT edit AS "edit!", canonical_set, reps, load_kind, load_grams, rir
+        SELECT edit AS "edit!", canonical_set, reps, duration_seconds, distance_mm,
+               load_kind, load_grams, rir
         FROM canonical_gym_set_edit
         "#
     )
@@ -115,18 +116,12 @@ pub(super) async fn all(pool: &SqlitePool) -> Result<Vec<Edit>, StoreError> {
                 });
             }
         };
-        let reps = match row.reps {
-            Some(reps) => Some(
-                RepCount::new(u32::try_from(reps).map_err(|e| corrupt(&e))?)
-                    .map_err(|e| corrupt(&e))?,
-            ),
-            None => None,
-        };
+        let measure = measured(row.reps, row.duration_seconds, row.distance_mm)?;
         let effort = match row.rir {
             Some(rir) => Some(Rir::try_from(rir).map_err(|e| corrupt(&e))?),
             None => None,
         };
-        let edit = SetEdit::new(reps, load, effort).ok_or_else(|| StoreError::Corrupt {
+        let edit = SetEdit::new(measure, load, effort).ok_or_else(|| StoreError::Corrupt {
             detail: "a set edit that changes nothing".to_owned(),
         })?;
         set_edits.insert(
@@ -161,6 +156,30 @@ pub(super) async fn all(pool: &SqlitePool) -> Result<Vec<Edit>, StoreError> {
         });
     }
     Ok(read)
+}
+
+/// A set edit's measure, from whichever of its three columns holds one.
+fn measured(
+    reps: Option<i64>,
+    seconds: Option<i64>,
+    millimetres: Option<i64>,
+) -> Result<Option<Measure>, StoreError> {
+    match (reps, seconds, millimetres) {
+        (Some(reps), None, None) => Ok(Some(Measure::Reps(
+            RepCount::new(u32::try_from(reps).map_err(|e| corrupt(&e))?)
+                .map_err(|e| corrupt(&e))?,
+        ))),
+        (None, Some(seconds), None) => Ok(Some(Measure::Duration(Duration::from_seconds(
+            u64::try_from(seconds).map_err(|e| corrupt(&e))?,
+        )))),
+        (None, None, Some(millimetres)) => Ok(Some(Measure::Distance(Distance {
+            metres: Metres::from_millimetres(u64::try_from(millimetres).map_err(|e| corrupt(&e))?),
+        }))),
+        (None, None, None) => Ok(None),
+        _ => Err(StoreError::Corrupt {
+            detail: "a set edit states two measures".to_owned(),
+        }),
+    }
 }
 
 fn exercise(key: &str) -> Result<Exercise, StoreError> {
@@ -382,7 +401,20 @@ impl SqliteCanonicalGymSessionStore {
         let mut tx = writing(self.pool()).await?;
         let id = begin(&mut tx, at, reason).await?;
         let canonical_set = set.as_i64();
-        let reps = edit.reps().map(|reps| i64::from(reps.as_u32()));
+        let (reps, duration_seconds, distance_mm) = match edit.measure() {
+            Some(Measure::Reps(reps)) => (Some(i64::from(reps.as_u32())), None, None),
+            Some(Measure::Duration(duration)) => (
+                None,
+                Some(i64::try_from(duration.as_seconds()).map_err(|e| corrupt(&e))?),
+                None,
+            ),
+            Some(Measure::Distance(distance)) => (
+                None,
+                None,
+                Some(i64::try_from(distance.metres.as_millimetres()).map_err(|e| corrupt(&e))?),
+            ),
+            None => (None, None, None),
+        };
         let (load_kind, load_grams) = match edit.load() {
             Some(Load::Absolute(mass)) => (
                 Some("absolute"),
@@ -394,12 +426,15 @@ impl SqliteCanonicalGymSessionStore {
         let rir = edit.effort().map(Rir::as_str);
         sqlx::query!(
             r#"
-            INSERT INTO canonical_gym_set_edit (edit, canonical_set, reps, load_kind, load_grams, rir)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO canonical_gym_set_edit
+                (edit, canonical_set, reps, duration_seconds, distance_mm, load_kind, load_grams, rir)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             id,
             canonical_set,
             reps,
+            duration_seconds,
+            distance_mm,
             load_kind,
             load_grams,
             rir
