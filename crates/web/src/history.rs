@@ -8,7 +8,7 @@ use application::{
     PlayedPadelMatch,
     history::{Activity, Day, Number, Page as Listed, opened},
 };
-use configurator::edits::ToSettle;
+use configurator::edits::{Here, InForce, ToSettle};
 use domain::{
     cycling::{CanonicalBikePlusRide, CanonicalCyclingSession},
     gym::{
@@ -230,16 +230,24 @@ fn length(duration: Duration) -> String {
     }
 }
 
-/// One activity opened, or why it could not be.
-pub fn session(here: &str, on: Date, session: &Result<Option<opened::Activity>, String>) -> Markup {
+/// One activity opened, with the changes in force on it, or why it could not
+/// be.
+pub fn session(
+    here: &str,
+    on: Date,
+    session: &Result<(Option<opened::Activity>, Vec<InForce>), String>,
+) -> Markup {
+    let session = session
+        .as_ref()
+        .map(|(activity, changes)| (activity.as_ref(), changes));
     let title = match session {
-        Ok(Some(session)) => opened_name(session),
-        Ok(None) | Err(_) => "Activity",
+        Ok((Some(session), _)) => opened_name(session),
+        Ok((None, _)) | Err(_) => "Activity",
     };
     let marked = session
         .as_ref()
         .ok()
-        .and_then(Option::as_ref)
+        .and_then(|(activity, _)| *activity)
         .and_then(opened_test);
     html! {
         (DOCTYPE)
@@ -250,10 +258,13 @@ pub fn session(here: &str, on: Date, session: &Result<Option<opened::Activity>, 
                     (page::header(here, title))
                     @if let Some(test) = marked { p.test { (test) } }
                     @match session {
-                        Ok(Some(opened::Activity::Gym { session, tested })) => (gym(here, on, session, tested)),
-                        Ok(Some(opened::Activity::Cycling(session))) => (cycling(session)),
-                        Ok(Some(opened::Activity::Padel(played))) => (padel(played)),
-                        Ok(None) => p.sub { "No such activity on " (on.strftime("%A %-d %B %Y")) "." },
+                        Ok((Some(opened::Activity::Gym { session, tested }), changes)) => {
+                            (gym(here, on, session, tested))
+                            (edits(here, session, changes))
+                        }
+                        Ok((Some(opened::Activity::Cycling(session)), _)) => (cycling(session)),
+                        Ok((Some(opened::Activity::Padel(played)), _)) => (padel(played)),
+                        Ok((None, _)) => p.sub { "No such activity on " (on.strftime("%A %-d %B %Y")) "." },
                         Err(error) => p.failed { "The activity could not be read: " (error) },
                     }
                     (page::bar(here))
@@ -343,29 +354,21 @@ fn exercise_sets(
     let is_tested = tested
         .iter()
         .any(|lift| exercise.exercise_key() == Some(lift.as_str()));
-    let (named, measure, rows): (String, &str, Vec<Row>) = match exercise {
-        CanonicalExercise::ForReps { identified, sets } => (
-            match identified.value() {
-                domain::gym::Identified::Recorded(exercise) => exercise.name().to_owned(),
-                domain::gym::Identified::Guessed(guess) => guess.exercise().map_or_else(
-                    || guess.to_string(),
-                    |exercise| format!("{}?", exercise.name()),
-                ),
-            },
+    let named = exercise_name(exercise);
+    let (measure, rows): (&str, Vec<Row>) = match exercise {
+        CanonicalExercise::ForReps { sets, .. } => (
             "Reps",
             sets.iter()
                 .map(|set| row(set, RepCount::to_string))
                 .collect(),
         ),
-        CanonicalExercise::ForDuration { exercise, sets } => (
-            exercise.value().name().to_owned(),
+        CanonicalExercise::ForDuration { sets, .. } => (
             "Time",
             sets.iter()
                 .map(|set| row(set, |held| length(*held)))
                 .collect(),
         ),
-        CanonicalExercise::ForDistance { exercise, sets } => (
-            exercise.value().name().to_owned(),
+        CanonicalExercise::ForDistance { sets, .. } => (
             "Distance",
             sets.iter()
                 .map(|set| row(set, ToString::to_string))
@@ -420,6 +423,82 @@ fn exercise_sets(
                 }
             }
         }
+    }
+}
+
+/// What an exercise reads as: a guess is marked as one.
+fn exercise_name(exercise: &CanonicalExercise) -> String {
+    match exercise {
+        CanonicalExercise::ForReps { identified, .. } => match identified.value() {
+            domain::gym::Identified::Recorded(exercise) => exercise.name().to_owned(),
+            domain::gym::Identified::Guessed(guess) => guess.exercise().map_or_else(
+                || guess.to_string(),
+                |exercise| format!("{}?", exercise.name()),
+            ),
+        },
+        CanonicalExercise::ForDuration { exercise, .. } => exercise.value().name().to_owned(),
+        CanonicalExercise::ForDistance { exercise, .. } => exercise.value().name().to_owned(),
+    }
+}
+
+/// The changes in force on a session, each with why and a way to undo it
+/// (#895); nothing where there are none.
+fn edits(here: &str, session: &CanonicalGymSession, changes: &[InForce]) -> Markup {
+    html! {
+        @if !changes.is_empty() {
+            section.card.edits {
+                h2 { "Changes" }
+                ul {
+                    @for change in changes {
+                        li {
+                            p { (said(session, change.here)) }
+                            p.sub { "Because " (change.edit.reason) }
+                            form method="post" action=(format!("{here}/changed/{}", change.edit.id)) {
+                                button {
+                                    @if change.sessions > 1 {
+                                        "Undo over " (counted(change.sessions, "session"))
+                                    } @else { "Undo" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// What a change says about the session, as its exercises and sets are
+/// named on it.
+fn said(session: &CanonicalGymSession, here: Here) -> String {
+    match here {
+        Here::Exercise { read, becomes } => format!("{} to {}", read.name(), becomes.name()),
+        Here::Set {
+            position,
+            set,
+            edit,
+        } => session.exercises().nth(position - 1).map_or_else(
+            || format!("Set {set}: {edit}"),
+            |exercise| {
+                format!(
+                    "{}, {}: {edit}",
+                    exercise_name(exercise),
+                    crate::change_set::named(&warm_ups(exercise), set - 1)
+                )
+            },
+        ),
+    }
+}
+
+/// Which of an exercise's sets were warm-ups, in order.
+fn warm_ups(exercise: &CanonicalExercise) -> Vec<bool> {
+    fn warm_up<M>(set: &CanonicalSet<M>) -> bool {
+        set.kind.as_ref().map(|kind| *kind.value()) == Some(SetKind::Warmup)
+    }
+    match exercise {
+        CanonicalExercise::ForReps { sets, .. } => sets.iter().map(warm_up).collect(),
+        CanonicalExercise::ForDuration { sets, .. } => sets.iter().map(warm_up).collect(),
+        CanonicalExercise::ForDistance { sets, .. } => sets.iter().map(warm_up).collect(),
     }
 }
 
@@ -598,10 +677,10 @@ pub struct Opened {
 impl crate::drawn::Drawn for Opened {
     const ROUTE: &'static str = "/history/{on}/{number}";
     const OPENS: bool = false;
-    type Read = Option<opened::Activity>;
+    type Read = (Option<opened::Activity>, Vec<InForce>);
 
     fn reads() -> application::graph::Reads {
-        configurator::history::opened_reads()
+        configurator::history::opened_page_reads()
     }
 
     fn asked(
@@ -632,9 +711,18 @@ impl crate::drawn::Drawn for Opened {
         store: &configurator::store::Store,
         zone: &domain::normalised::OperatorZone,
     ) -> Result<Self::Read, crate::drawn::Unreadable> {
-        Ok(configurator::history::Opened::open(store, zone)
+        let activity = configurator::history::Opened::open(store, zone)
             .activity(self.on, self.number)
-            .await?)
+            .await?;
+        let changes = match &activity {
+            Some(opened::Activity::Gym { session, .. }) => {
+                configurator::history::Changes::open(store, zone)
+                    .of(session)
+                    .await?
+            }
+            _ => Vec::new(),
+        };
+        Ok((activity, changes))
     }
 
     fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {

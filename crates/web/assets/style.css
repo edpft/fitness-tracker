@@ -266,6 +266,10 @@ p.badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 3px
 p.badge.test { background: var(--ink2); color: var(--bg); margin: -4px 0 10px 68px; }
 table.sets { width: calc(100% - 0px); margin: 0 0 8px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .card.exercise > table.sets { margin-left: 0; margin-right: 0; width: 100%; }
+.card.edits ul { list-style: none; padding: 0; margin: 8px 0 0; }
+.card.edits li { padding: 12px 0; border-top: 1px solid var(--grid); }
+.card.edits li p { margin: 0 0 4px; }
+.card.edits form { margin-top: 8px; }
 table.sets th { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); text-align: center; padding: 0 4px 6px; }
 table.sets td { text-align: center; padding: 10px 4px; font-size: 16px; }
 table.sets th:first-child, table.sets td:first-child { width: 56px; padding-left: 16px; text-align: left; }
