@@ -9,7 +9,11 @@
 
 use std::collections::BTreeSet;
 
-use application::{CanonicalGymSessionStore as _, StoreError};
+use application::{
+    CanonicalGymSessionStore as _, CanonicalLayer, Input, Node, Reads, StoreError,
+    graph::NotRaw,
+    history::{Number, opened::Activity},
+};
 use domain::{
     gym::{
         CanonicalExercise,
@@ -17,12 +21,159 @@ use domain::{
         exercise::Exercise,
         identity::{CanonicalExerciseId, CanonicalSetId, ExerciseIds},
     },
+    normalised::OperatorZone,
     sequence::NonEmpty,
 };
 use infrastructure::SqliteCanonicalGymSessionStore;
-use jiff::Timestamp;
+use jiff::{Timestamp, civil::Date};
 
 use crate::store::Store;
+
+/// An edit a rebuild left standing on something it did not stand on when it
+/// was made, for the operator to settle (§ II.2, #905).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToSettle {
+    /// A set a source added under an edited exercise, reading as the edit
+    /// says: kept, or the exercise's edit removed.
+    Added {
+        set: CanonicalSetId,
+        edit: ExerciseEdit,
+        /// Where it is opened; [`None`] where the layer is being rebuilt under
+        /// the page.
+        at: Option<Located>,
+    },
+    /// An edited exercise no session holds any more.
+    ExerciseGone(ExerciseEdit),
+    /// An edited set no exercise holds any more.
+    SetGone { set: CanonicalSetId, edit: SetEdit },
+}
+
+/// Where a set is opened: its session, and its place among its exercise's
+/// sets, from one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Located {
+    pub on: Date,
+    pub number: Number,
+    pub set: usize,
+}
+
+/// The edits, and the layer they are applied to, as what is to settle reads
+/// them.
+pub struct Overlay {
+    store: Store,
+    zone: OperatorZone,
+}
+
+/// **The edits themselves**, which a page otherwise reads only through the
+/// layer they are applied to.
+impl Input for Overlay {
+    fn reads() -> Reads {
+        Reads::of([Node::Edits(CanonicalLayer::Gym)])
+            .and(<SqliteCanonicalGymSessionStore as Input>::reads())
+            .and(crate::history::opened_reads())
+    }
+}
+
+impl NotRaw for Overlay {}
+
+impl Overlay {
+    #[must_use]
+    pub fn open(store: &Store, zone: &OperatorZone) -> Self {
+        Self {
+            store: store.clone(),
+            zone: zone.clone(),
+        }
+    }
+
+    /// What the layer, as it now stands, leaves the edits for the operator
+    /// to settle.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub async fn to_settle(&self) -> Result<Vec<ToSettle>, StoreError> {
+        let edits = Edits::of(&all(&self.store).await?);
+        if edits.is_empty() {
+            return Ok(Vec::new());
+        }
+        let held = self
+            .store
+            .adapter(SqliteCanonicalGymSessionStore::new)
+            .call(
+                "SqliteCanonicalGymSessionStore::held",
+                SqliteCanonicalGymSessionStore::held,
+            )
+            .await?;
+        let mut settle = Vec::new();
+        for conflict in edits.conflicts(&held) {
+            match conflict {
+                Conflict::Added { exercise, set } => {
+                    if let Some(edit) = edits.exercise(exercise) {
+                        settle.push(ToSettle::Added {
+                            set,
+                            edit: edit.clone(),
+                            at: self.located(exercise, set).await?,
+                        });
+                    }
+                }
+                Conflict::ExerciseGone(exercise) => {
+                    settle.extend(
+                        edits
+                            .exercise(exercise)
+                            .cloned()
+                            .map(ToSettle::ExerciseGone),
+                    );
+                }
+                Conflict::SetGone(set) => {
+                    settle.extend(edits.set(set).map(|edit| ToSettle::SetGone { set, edit }));
+                }
+            }
+        }
+        Ok(settle)
+    }
+
+    /// Where `set`, held by `exercise`, is opened: found by opening each
+    /// activity of its day in turn, which is rare enough to afford.
+    async fn located(
+        &self,
+        exercise: CanonicalExerciseId,
+        set: CanonicalSetId,
+    ) -> Result<Option<Located>, StoreError> {
+        let Some(held) = exercises_held(&self.store, &BTreeSet::from([exercise]))
+            .await?
+            .into_iter()
+            .next()
+        else {
+            return Ok(None);
+        };
+        let opened = crate::history::Opened::open(&self.store, &self.zone);
+        let mut counted = 1;
+        while let Ok(number) = Number::try_from(counted) {
+            counted += 1;
+            match opened.activity(held.day, number).await? {
+                None => break,
+                Some(Activity::Gym { session, .. }) => {
+                    for read in session.exercises() {
+                        let Some(ids) = ids_of(&self.store, read).await? else {
+                            continue;
+                        };
+                        if ids.exercise == exercise {
+                            return Ok(ids.sets.iter().position(|held| *held == set).map(
+                                |index| Located {
+                                    on: held.day,
+                                    number,
+                                    set: index + 1,
+                                },
+                            ));
+                        }
+                    }
+                }
+                Some(_) => {}
+            }
+        }
+        Ok(None)
+    }
+}
 
 /// One canonical exercise as an edit finds it: its day and its sets.
 pub use infrastructure::HeldExercise;
@@ -164,27 +315,6 @@ pub async fn retract(store: &Store, id: EditId) -> Result<bool, StoreError> {
             adapter.retract(id)
         })
         .await
-}
-
-/// What the layer, as it now stands, leaves the edits for the operator to
-/// settle.
-///
-/// # Errors
-///
-/// [`StoreError`] if the store cannot be read.
-pub async fn conflicts(store: &Store) -> Result<Vec<Conflict>, StoreError> {
-    let edits = Edits::of(&all(store).await?);
-    if edits.is_empty() {
-        return Ok(Vec::new());
-    }
-    let held = store
-        .adapter(SqliteCanonicalGymSessionStore::new)
-        .call(
-            "SqliteCanonicalGymSessionStore::held",
-            SqliteCanonicalGymSessionStore::held,
-        )
-        .await?;
-    Ok(edits.conflicts(&held))
 }
 
 /// Take a set a source added into its exercise's edits.

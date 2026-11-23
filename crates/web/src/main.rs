@@ -37,6 +37,7 @@ mod reporting;
 mod response;
 mod run;
 mod schedule;
+mod settle;
 mod sleep;
 mod summary;
 mod weight;
@@ -209,6 +210,7 @@ fn pages() -> Pages {
         .page::<history::Opened>()
         .form(change::ROUTE, get(change::shown).post(change::posted))
         .form(change::CHANGED, get(change::made).post(change::undone))
+        .form(settle::ROUTE, axum::routing::post(settle::posted))
         .form(
             change_set::ROUTE,
             get(change_set::shown).post(change_set::posted),

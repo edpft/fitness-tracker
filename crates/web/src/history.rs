@@ -8,6 +8,7 @@ use application::{
     PlayedPadelMatch,
     history::{Activity, Day, Number, Page as Listed, opened},
 };
+use configurator::edits::ToSettle;
 use domain::{
     cycling::{CanonicalBikePlusRide, CanonicalCyclingSession},
     gym::{
@@ -36,7 +37,7 @@ fn before_address(before: Date) -> String {
 /// **Scrolled in a page at a time** (operator, 2026-11-15: *"pagination on the
 /// backend and infinite scroll on the front end"*): the end of a page asks for
 /// the next as it comes into view, and the next replaces it.
-pub fn page(read: &Result<(Listed, Date), String>) -> Markup {
+pub fn page(read: &Result<(Listed, Date, Vec<ToSettle>), String>) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -45,8 +46,14 @@ pub fn page(read: &Result<(Listed, Date), String>) -> Markup {
                 main.history {
                     h1 { (Place::History.name()) }
                     @match read {
-                        Ok((listed, _)) if listed.days.is_empty() => p.sub { "No activity is recorded." },
-                        Ok((listed, today)) => (days(listed, *today)),
+                        Ok((listed, today, settle)) => {
+                            (crate::settle::list(settle, *today))
+                            @if listed.days.is_empty() {
+                                p.sub { "No activity is recorded." }
+                            } @else {
+                                (days(listed, *today))
+                            }
+                        }
                         Err(error) => p.failed { "History could not be read: " (error) },
                     }
                     (page::bar(Place::History.path()))
@@ -93,7 +100,7 @@ fn feed_day(day: &Day, today: Date) -> Markup {
 }
 
 /// The day, with its year where it is not this one.
-fn day_name(on: Date, today: Date) -> String {
+pub fn day_name(on: Date, today: Date) -> String {
     if on.year() == today.year() {
         on.strftime("%a %-d %b").to_string()
     } else {
@@ -525,7 +532,7 @@ pub struct Page {
 
 impl crate::drawn::Drawn for Page {
     const ROUTE: &'static str = Place::History.path();
-    type Read = (Listed, Date);
+    type Read = (Listed, Date, Vec<ToSettle>);
 
     fn reads() -> application::graph::Reads {
         configurator::history::reads()
@@ -561,7 +568,16 @@ impl crate::drawn::Drawn for Page {
         zone: &domain::normalised::OperatorZone,
     ) -> Result<Self::Read, crate::drawn::Unreadable> {
         let list = configurator::history::List::open(store, zone);
-        Ok((list.page(self.before).await?, list.today()))
+        // Settled from the top of the list, so not on a page scrolled to.
+        let settle = match self.before {
+            None => {
+                configurator::history::Settling::open(store, zone)
+                    .to_settle()
+                    .await?
+            }
+            Some(_) => Vec::new(),
+        };
+        Ok((list.page(self.before).await?, list.today(), settle))
     }
 
     fn render(&self, read: Result<Self::Read, crate::drawn::Unreadable>) -> Markup {

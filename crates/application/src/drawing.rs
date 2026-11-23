@@ -191,12 +191,12 @@ where
                 }
                 Some(stated)
             }
-            Node::Authored(_) | Node::Generation(_) => {
+            Node::Authored(_) | Node::Generation(_) | Node::Edits(_) => {
                 Some(self.revisions.revision(node).await?.value().to_string())
             }
             Node::Date => Some(now.date.to_string()),
             Node::DayPart => Some(format!("{now:?}")),
-            Node::Landing(_) | Node::Edits(_) | Node::Interpretive(_) => None,
+            Node::Landing(_) | Node::Interpretive(_) => None,
         })
     }
 }
@@ -241,7 +241,7 @@ pub fn unversioned(graph: &Graph, node: &Node) -> bool {
         Node::Analysis(_) => graph
             .reads(node)
             .is_none_or(|reads| reads.nodes().any(|read| unversioned(graph, read))),
-        Node::Landing(_) | Node::Edits(_) | Node::Interpretive(_) => true,
+        Node::Landing(_) | Node::Interpretive(_) => true,
         Node::Table(_) => graph.reads(node).is_none_or(|writers| {
             writers
                 .nodes()
@@ -249,6 +249,7 @@ pub fn unversioned(graph: &Graph, node: &Node) -> bool {
         }),
         Node::Normalised(_)
         | Node::Canonical(_)
+        | Node::Edits(_)
         | Node::Authored(_)
         | Node::Generation(_)
         | Node::Date

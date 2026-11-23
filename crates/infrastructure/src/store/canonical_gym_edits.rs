@@ -10,10 +10,14 @@
 //! `*_normalised_session` column in the layer is empty while the value beside
 //! it is not, which is how an edited field reads back as the edit's
 //! ([`domain::canonical::TakenFrom::Edit`]).
+//!
+//! **Every write moves the overlay's revision** (#905), so a page reading the
+//! edits themselves, as History's list of edits to settle does, is drawn again
+//! the moment one is kept or removed rather than after the next run.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use application::{CanonicalLayer, StoreError};
+use application::{Authors, CanonicalLayer, Node, StoreError};
 use domain::{
     gym::{
         Load, Rir, SignedKg,
@@ -27,8 +31,25 @@ use domain::{
 use jiff::{Timestamp, civil::Date};
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
+use super::authoring::{Authoring, Writing};
 use super::canonical_gym::{SqliteCanonicalGymSessionStore, occurred};
 use super::{corrupt, store_error};
+
+/// What a write of the edits authors: the overlay, and nothing else. The
+/// layer it is applied to moves when a run rebuilds the days it reaches.
+pub struct Overlay;
+
+impl Authors for Overlay {
+    fn authors() -> BTreeSet<Node> {
+        [Node::Edits(CanonicalLayer::Gym)].into()
+    }
+}
+
+/// A write of the edits, holding the store's write lock from its first
+/// statement.
+async fn writing(pool: &SqlitePool) -> Result<Writing<Overlay>, StoreError> {
+    Authoring::new(pool.clone()).writing::<Overlay>().await
+}
 
 /// One canonical exercise as an edit finds it: the day it was performed and
 /// the sets it holds, in order.
@@ -319,9 +340,7 @@ impl SqliteCanonicalGymSessionStore {
         reason: &EditReason,
         edits: &NonEmpty<ExerciseEdit>,
     ) -> Result<EditId, StoreError> {
-        let mut tx = super::writing(self.pool())
-            .await
-            .map_err(|e| store_error(&e))?;
+        let mut tx = writing(self.pool()).await?;
         let id = begin(&mut tx, at, reason).await?;
         for edit in edits.iter() {
             let exercise = edit.exercise.as_i64();
@@ -339,12 +358,12 @@ impl SqliteCanonicalGymSessionStore {
                 read,
                 sets
             )
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|e| store_error(&e))?;
         }
         changed(&mut tx, id).await?;
-        tx.commit().await.map_err(|e| store_error(&e))?;
+        tx.commit().await?;
         Ok(EditId::from(id))
     }
 
@@ -360,9 +379,7 @@ impl SqliteCanonicalGymSessionStore {
         set: CanonicalSetId,
         edit: SetEdit,
     ) -> Result<EditId, StoreError> {
-        let mut tx = super::writing(self.pool())
-            .await
-            .map_err(|e| store_error(&e))?;
+        let mut tx = writing(self.pool()).await?;
         let id = begin(&mut tx, at, reason).await?;
         let canonical_set = set.as_i64();
         let reps = edit.reps().map(|reps| i64::from(reps.as_u32()));
@@ -387,11 +404,11 @@ impl SqliteCanonicalGymSessionStore {
             load_grams,
             rir
         )
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|e| store_error(&e))?;
         changed(&mut tx, id).await?;
-        tx.commit().await.map_err(|e| store_error(&e))?;
+        tx.commit().await?;
         Ok(EditId::from(id))
     }
 
@@ -402,16 +419,14 @@ impl SqliteCanonicalGymSessionStore {
     /// [`StoreError`] if the store cannot be written.
     pub async fn retract(&self, edit: EditId) -> Result<bool, StoreError> {
         let id = edit.as_i64();
-        let mut tx = super::writing(self.pool())
-            .await
-            .map_err(|e| store_error(&e))?;
+        let mut tx = writing(self.pool()).await?;
         changed(&mut tx, id).await?;
         let removed = sqlx::query!("DELETE FROM canonical_gym_edit WHERE id = ?", id)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|e| store_error(&e))?
             .rows_affected();
-        tx.commit().await.map_err(|e| store_error(&e))?;
+        tx.commit().await?;
         Ok(removed > 0)
     }
 
@@ -428,6 +443,7 @@ impl SqliteCanonicalGymSessionStore {
     ) -> Result<(), StoreError> {
         let exercise = exercise.as_i64();
         let set = set.as_i64();
+        let mut tx = writing(self.pool()).await?;
         sqlx::query!(
             r#"
             UPDATE canonical_gym_exercise_edit
@@ -440,10 +456,10 @@ impl SqliteCanonicalGymSessionStore {
             set,
             exercise
         )
-        .execute(self.pool())
+        .execute(&mut **tx)
         .await
         .map_err(|e| store_error(&e))?;
-        Ok(())
+        tx.commit().await
     }
 
     /// Remove every edit of one exercise, and any assertion left editing
@@ -454,14 +470,12 @@ impl SqliteCanonicalGymSessionStore {
     /// [`StoreError`] if the store cannot be written.
     pub async fn unedit_exercise(&self, exercise: CanonicalExerciseId) -> Result<(), StoreError> {
         let exercise = exercise.as_i64();
-        let mut tx = super::writing(self.pool())
-            .await
-            .map_err(|e| store_error(&e))?;
+        let mut tx = writing(self.pool()).await?;
         let sessions = sqlx::query_scalar!(
             r#"SELECT session AS "session!" FROM canonical_gym_exercise WHERE id = ?"#,
             exercise
         )
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await
         .map_err(|e| store_error(&e))?;
         record_sessions(&mut tx, sessions).await?;
@@ -469,11 +483,11 @@ impl SqliteCanonicalGymSessionStore {
             "DELETE FROM canonical_gym_exercise_edit WHERE exercise = ?",
             exercise
         )
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|e| store_error(&e))?;
         empty_assertions(&mut tx).await?;
-        tx.commit().await.map_err(|e| store_error(&e))
+        tx.commit().await
     }
 
     /// Remove every edit of one set.
@@ -483,14 +497,12 @@ impl SqliteCanonicalGymSessionStore {
     /// [`StoreError`] if the store cannot be written.
     pub async fn unedit_set(&self, set: CanonicalSetId) -> Result<(), StoreError> {
         let set = set.as_i64();
-        let mut tx = super::writing(self.pool())
-            .await
-            .map_err(|e| store_error(&e))?;
+        let mut tx = writing(self.pool()).await?;
         let sessions = sqlx::query_scalar!(
             r#"SELECT session AS "session!" FROM canonical_gym_set WHERE id = ?"#,
             set
         )
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await
         .map_err(|e| store_error(&e))?;
         record_sessions(&mut tx, sessions).await?;
@@ -498,11 +510,11 @@ impl SqliteCanonicalGymSessionStore {
             "DELETE FROM canonical_gym_set_edit WHERE canonical_set = ?",
             set
         )
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|e| store_error(&e))?;
         empty_assertions(&mut tx).await?;
-        tx.commit().await.map_err(|e| store_error(&e))
+        tx.commit().await
     }
 }
 
