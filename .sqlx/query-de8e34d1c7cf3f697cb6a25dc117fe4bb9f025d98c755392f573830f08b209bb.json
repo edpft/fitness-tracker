@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT edit AS \"edit!\", canonical_set, reps, load_kind, load_grams, rir\n        FROM canonical_gym_set_edit\n        ",
+  "query": "\n        SELECT edit AS \"edit!\", canonical_set, reps, duration_seconds, distance_mm,\n               load_kind, load_grams, rir\n        FROM canonical_gym_set_edit\n        ",
   "describe": {
     "columns": [
       {
@@ -37,8 +37,30 @@
         }
       },
       {
-        "name": "load_kind",
+        "name": "duration_seconds",
         "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set_edit",
+            "name": "duration_seconds"
+          }
+        }
+      },
+      {
+        "name": "distance_mm",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set_edit",
+            "name": "distance_mm"
+          }
+        }
+      },
+      {
+        "name": "load_kind",
+        "ordinal": 5,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -49,7 +71,7 @@
       },
       {
         "name": "load_grams",
-        "ordinal": 4,
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -60,7 +82,7 @@
       },
       {
         "name": "rir",
-        "ordinal": 5,
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -79,8 +101,10 @@
       true,
       true,
       true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "e5757fc8774c0bbab1fa04339439ed2bb3c81e1324b581a9e7aaa8f4fbfe6029"
+  "hash": "de8e34d1c7cf3f697cb6a25dc117fe4bb9f025d98c755392f573830f08b209bb"
 }

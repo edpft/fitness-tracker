@@ -830,3 +830,75 @@ fn an_edit_stands_on_the_same_ids_across_a_rebuild() {
         assert!(read_sets.iter().all(|set| set.intensity.is_none()));
     });
 }
+
+/// **A set edit's measure is read back as it was stated** (#901): a length,
+/// a distance and a count each round-trip, with the load beside them.
+#[test]
+fn a_set_edit_s_measure_round_trips() {
+    use domain::gym::{
+        Load,
+        edit::{EditReason, Edited, Measure, SetEdit},
+    };
+    use domain::measure::{Distance, Duration, Kg, Metres, RepCount};
+
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (_directory, pool) = support::store::derived_and_authored()
+            .await
+            .expect("a derived store");
+        let ids = normalised(&pool).await.expect("normalised sessions");
+        let store = SqliteCanonicalGymSessionStore::new(pool.clone());
+        store
+            .replace(
+                vec![two_squat_sets(ids[0]).expect("a session")],
+                &Edits::default(),
+            )
+            .await
+            .expect("a whole build");
+        let held = store.held().await.expect("the layer's ids");
+        let set = *held
+            .values()
+            .next()
+            .and_then(|sets| sets.iter().next())
+            .expect("a set");
+        let reason = EditReason::try_from("timed it wrong".to_owned()).expect("a reason");
+        let stated = [
+            Measure::Duration(Duration::from_seconds(45)),
+            Measure::Distance(Distance {
+                metres: Metres::from_millimetres(20_500),
+            }),
+            Measure::Reps(RepCount::new(6).expect("a count")),
+        ];
+        for (minute, measure) in stated.iter().enumerate() {
+            let edit = SetEdit::new(
+                Some(*measure),
+                Some(Load::absolute(Kg::from_grams(10_000))),
+                None,
+            )
+            .expect("an edit");
+            store
+                .assert_set(
+                    format!("2026-11-23T09:0{minute}:00Z")
+                        .parse()
+                        .expect("an instant"),
+                    &reason,
+                    set,
+                    edit,
+                )
+                .await
+                .expect("an edit");
+        }
+
+        let read: Vec<Option<Measure>> = store
+            .edits()
+            .await
+            .expect("the edits")
+            .iter()
+            .map(|edit| match edit.edited {
+                Edited::Set { edit, .. } => edit.measure(),
+                Edited::Exercises(_) => None,
+            })
+            .collect();
+        assert_eq!(read, stated.map(Some));
+    });
+}

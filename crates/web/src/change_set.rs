@@ -1,5 +1,6 @@
-//! Changing one set of an opened session: its reps, its load, whether the
-//! load was assistance, and its effort (#892, #893).
+//! Changing one set of an opened session: its reps, or its length where it is
+//! counted in time or distance, its load, whether the load was assistance,
+//! and its effort where it is counted in reps (#892, #893, #901).
 //!
 //! **One set, never the similar ones.** The operator, 2026-11-21: *"There's
 //! nothing necessarily similar about two different sets of 10 x 70kg. The
@@ -25,12 +26,12 @@ use configurator::{edits, store::Store};
 use domain::{
     canonical::Attributed,
     gym::{
-        CanonicalExercise, CanonicalSet, Identified, Load, Performed, SetKind,
-        edit::{EditReason, SetEdit, StatedLoad},
+        CanonicalExercise, CanonicalSet, Load, Performed, SetKind,
+        edit::{EditReason, Measure, SetEdit, StatedLoad},
         identity::CanonicalSetId,
         intensity::Rir,
     },
-    measure::{Kg, RepCount},
+    measure::{Distance, Duration, Kg, Metres, RepCount},
     normalised::OperatorZone,
 };
 use jiff::civil::Date;
@@ -54,26 +55,104 @@ pub fn address(session: &str, position: usize, set: usize) -> String {
     format!("{session}/exercise/{position}/set/{set}")
 }
 
+/// What a set is counted in, as the form asks for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Counted {
+    Reps,
+    Seconds,
+    Metres,
+}
+
+impl Counted {
+    /// The field's name, and its label.
+    const fn field(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Reps => ("reps", "Reps"),
+            Self::Seconds => ("seconds", "Seconds"),
+            Self::Metres => ("metres", "Metres"),
+        }
+    }
+
+    const fn inputmode(self) -> &'static str {
+        match self {
+            Self::Reps | Self::Seconds => "numeric",
+            Self::Metres => "decimal",
+        }
+    }
+
+    /// The measure typed, which is never nought: a set of none of anything
+    /// was not done.
+    fn parsed(self, typed: &str) -> Result<Measure, Refusal> {
+        let (field, _) = self.field();
+        match self {
+            Self::Reps => typed
+                .parse::<u32>()
+                .ok()
+                .and_then(|reps| RepCount::new(reps).ok())
+                .map(Measure::Reps)
+                .ok_or_else(|| Refusal::of(field, "a whole number above nought".to_owned())),
+            Self::Seconds => typed
+                .parse::<u64>()
+                .ok()
+                .filter(|seconds| *seconds > 0)
+                .map(|seconds| Measure::Duration(Duration::from_seconds(seconds)))
+                .ok_or_else(|| {
+                    Refusal::of(field, "a whole number of seconds above nought".to_owned())
+                }),
+            Self::Metres => typed
+                .parse::<Metres>()
+                .ok()
+                .filter(|metres| *metres != Metres::ZERO)
+                .map(|metres| Measure::Distance(Distance { metres }))
+                .ok_or_else(|| Refusal::of(field, "metres above nought, as 20 or 12.5".to_owned())),
+        }
+    }
+
+    /// How `measure` is typed into the field.
+    fn typed(measure: Measure) -> String {
+        match measure {
+            Measure::Reps(reps) => reps.to_string(),
+            Measure::Duration(duration) => duration.as_seconds().to_string(),
+            Measure::Distance(distance) => {
+                distance.metres.to_string().trim_end_matches('m').to_owned()
+            }
+        }
+    }
+}
+
 /// What a set reads as now.
 ///
 /// **Each may be unstated**: a sheet that wrote "Burpee" and not how many, a
 /// set no source put a load on, a set nobody rated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Reads {
-    pub reps: Option<RepCount>,
+    pub counted: Counted,
+    pub measure: Option<Measure>,
     pub load: Option<Load>,
     pub effort: Option<Rir>,
-    /// Whether it can be given an effort: not a warm-up.
+    /// Whether it can be given an effort: a working set, counted in reps.
     pub rated: bool,
 }
 
 impl Reads {
-    fn of(set: &CanonicalSet<RepCount>) -> Self {
+    fn of<M: Copy>(
+        set: &CanonicalSet<M>,
+        counted: Counted,
+        measure: impl Fn(M) -> Measure,
+    ) -> Self {
         Self {
-            reps: set.outcome.value().completed().copied().flatten(),
+            counted,
+            measure: set
+                .outcome
+                .value()
+                .completed()
+                .copied()
+                .flatten()
+                .map(measure),
             load: set.load.as_ref().map(Attributed::copied),
             effort: set.intensity.as_ref().map(Attributed::copied),
-            rated: set.kind.as_ref().map(Attributed::copied) != Some(SetKind::Warmup),
+            rated: counted == Counted::Reps
+                && set.kind.as_ref().map(Attributed::copied) != Some(SetKind::Warmup),
         }
     }
 }
@@ -81,7 +160,7 @@ impl Reads {
 /// The form as posted or as first drawn.
 #[derive(Debug, Default)]
 pub struct Typed {
-    pub reps: String,
+    pub measure: String,
     pub kg: String,
     pub assistance: bool,
     pub effort: String,
@@ -96,7 +175,7 @@ impl Typed {
             Some(StatedLoad::Assistance(mass)) => (mass.to_string(), true),
         };
         Self {
-            reps: reads.reps.map(|reps| reps.to_string()).unwrap_or_default(),
+            measure: reads.measure.map(Counted::typed).unwrap_or_default(),
             kg,
             assistance,
             effort: reads.effort.map(Rir::as_str).unwrap_or_default().to_owned(),
@@ -108,7 +187,7 @@ impl Typed {
         let mut typed = Self::default();
         for (key, value) in form {
             match key.as_str() {
-                "reps" => value.trim().clone_into(&mut typed.reps),
+                "reps" | "seconds" | "metres" => value.trim().clone_into(&mut typed.measure),
                 "kg" => value.trim().clone_into(&mut typed.kg),
                 "assistance" => typed.assistance = true,
                 "effort" => value.clone_into(&mut typed.effort),
@@ -131,17 +210,10 @@ impl Typed {
 /// [`Refusal`] beside the field at fault, or of the whole form if nothing was
 /// changed.
 pub fn asked(reads: Reads, typed: &Typed) -> Result<(SetEdit, EditReason), Refusal> {
-    let reps = if typed.reps.is_empty() && reads.reps.is_none() {
+    let measure = if typed.measure.is_empty() && reads.measure.is_none() {
         None
     } else {
-        Some(
-            typed
-                .reps
-                .parse::<u32>()
-                .ok()
-                .and_then(|reps| RepCount::new(reps).ok())
-                .ok_or_else(|| Refusal::of("reps", "a whole number above nought".to_owned()))?,
-        )
+        Some(reads.counted.parsed(&typed.measure)?)
     };
     let stated = if typed.kg.is_empty() {
         if typed.assistance {
@@ -165,16 +237,21 @@ pub fn asked(reads: Reads, typed: &Typed) -> Result<(SetEdit, EditReason), Refus
             Rir::from_str(&typed.effort)
                 .map_err(|_| Refusal::of("effort", "choose how many were in reserve".to_owned()))?,
         )
-    } else {
+    } else if reads.counted == Counted::Reps {
         return Err(Refusal::of(
             "effort",
             "only a working set has an effort".to_owned(),
+        ));
+    } else {
+        return Err(Refusal::of(
+            "effort",
+            "only a set counted in reps has an effort".to_owned(),
         ));
     };
     let because = EditReason::try_from(typed.because.clone())
         .map_err(|_| Refusal::of("because", "say why".to_owned()))?;
     let edit = SetEdit::new(
-        reps.filter(|reps| Some(*reps) != reads.reps),
+        measure.filter(|measure| Some(*measure) != reads.measure),
         load.filter(|load| Some(*load) != reads.load),
         effort.filter(|effort| Some(*effort) != reads.effort),
     )
@@ -206,8 +283,9 @@ pub fn form(session: &str, found: &Found, typed: &Typed, refused: Option<&Refusa
         &html! {
             h2 { (found.exercise) ", " (found.name) }
             form.card method="post" {
-                (input::field("reps", "reps", "Reps", &html! {
-                    input id="reps" name="reps" inputmode="numeric" value=(typed.reps);
+                @let (counted, label) = found.reads.counted.field();
+                (input::field(counted, counted, label, &html! {
+                    input id=(counted) name=(counted) inputmode=(found.reads.counted.inputmode()) value=(typed.measure);
                 }, refused))
                 (input::field("kg", "kg", "kg", &html! {
                     input id="kg" name="kg" inputmode="decimal" value=(typed.kg);
@@ -280,43 +358,50 @@ async fn found(store: &Store, zone: &OperatorZone, at: &At) -> Result<Found, Res
     let session = at.session();
     let unreadable = |error: &str| input::unreadable(&session, TITLE, error).into_response();
     let canonical = match change::located(store, zone, at.on, at.number, at.position).await {
-        Ok(Some(canonical @ CanonicalExercise::ForReps { .. })) => canonical,
-        Ok(_) => return Err(Redirect::to(&session).into_response()),
+        Ok(Some(canonical)) => canonical,
+        Ok(None) => return Err(Redirect::to(&session).into_response()),
         Err(error) => return Err(unreadable(&error)),
     };
-    let CanonicalExercise::ForReps { identified, sets } = &canonical else {
+    let index = at.set - 1;
+    let reads = match &canonical {
+        CanonicalExercise::ForReps { sets, .. } => sets
+            .iter()
+            .nth(index)
+            .filter(|set| completed(set))
+            .map(|set| Reads::of(set, Counted::Reps, Measure::Reps)),
+        CanonicalExercise::ForDuration { sets, .. } => sets
+            .iter()
+            .nth(index)
+            .filter(|set| completed(set))
+            .map(|set| Reads::of(set, Counted::Seconds, Measure::Duration)),
+        CanonicalExercise::ForDistance { sets, .. } => sets
+            .iter()
+            .nth(index)
+            .filter(|set| completed(set))
+            .map(|set| Reads::of(set, Counted::Metres, Measure::Distance)),
+    };
+    let Some(reads) = reads else {
         return Err(Redirect::to(&session).into_response());
     };
-    let Some(set) = sets.iter().nth(at.set - 1) else {
-        return Err(Redirect::to(&session).into_response());
-    };
-    // A failed attempt has no reps to change, and is not offered a pen.
-    if matches!(set.outcome.value(), Performed::Failed) {
-        return Err(Redirect::to(&session).into_response());
-    }
     let ids = edits::ids_of(store, &canonical)
         .await
         .map_err(|error| unreadable(&error.to_string()))?
         .ok_or_else(|| unreadable("the session is being rebuilt; open it again in a moment"))?;
-    let Some(id) = ids.sets.get(at.set - 1).copied() else {
+    let Some(id) = ids.sets.get(index).copied() else {
         return Err(Redirect::to(&session).into_response());
     };
-    let warm_ups: Vec<bool> = sets
-        .iter()
-        .map(|set| set.kind.as_ref().map(Attributed::copied) == Some(SetKind::Warmup))
-        .collect();
     Ok(Found {
-        exercise: match identified.value() {
-            Identified::Recorded(exercise) => exercise.name().to_owned(),
-            Identified::Guessed(guess) => guess.exercise().map_or_else(
-                || guess.to_string(),
-                |exercise| format!("{}?", exercise.name()),
-            ),
-        },
-        name: named(&warm_ups, at.set - 1),
+        exercise: history::exercise_name(&canonical),
+        name: named(&history::warm_ups(&canonical), index),
         id,
-        reads: Reads::of(set),
+        reads,
     })
+}
+
+/// Whether a set was done. A failed attempt has nothing to change its count
+/// from, and is not offered a pen.
+const fn completed<M>(set: &CanonicalSet<M>) -> bool {
+    !matches!(set.outcome.value(), Performed::Failed)
 }
 
 /// The form, filled with what the set reads as now.
@@ -378,21 +463,24 @@ mod tests {
         measure::{Kg, RepCount},
     };
 
-    use super::{Reads, Typed, asked};
+    use domain::gym::edit::Measure;
+
+    use super::{Counted, Reads, Typed, asked};
 
     /// 25 Sep's 90 kg front squat single, unrated.
     fn single() -> Reads {
         Reads {
-            reps: Some(RepCount::new(1).expect("one")),
+            counted: Counted::Reps,
+            measure: Some(Measure::Reps(RepCount::new(1).expect("one"))),
             load: Some(Load::absolute(Kg::from_grams(90_000))),
             effort: None,
             rated: true,
         }
     }
 
-    fn typed(reps: &str, kg: &str, effort: &str) -> Typed {
+    fn typed(measure: &str, kg: &str, effort: &str) -> Typed {
         Typed {
-            reps: reps.to_owned(),
+            measure: measure.to_owned(),
             kg: kg.to_owned(),
             assistance: false,
             effort: effort.to_owned(),
@@ -406,7 +494,7 @@ mod tests {
     fn rating_a_set_asserts_only_its_effort() {
         let (edit, _) = asked(single(), &typed("1", "90", "1")).expect("an edit");
 
-        assert_eq!(edit.reps(), None);
+        assert_eq!(edit.measure(), None);
         assert_eq!(edit.load(), None);
         assert_eq!(edit.effort(), Some(Rir::One));
     }
@@ -445,7 +533,7 @@ mod tests {
     fn a_changed_load_is_asserted_on_the_set_s_axis() {
         let (edit, _) = asked(single(), &typed("1", "92.5", "")).expect("an edit");
         assert_eq!(edit.load(), Some(Load::absolute(Kg::from_grams(92_500))));
-        assert_eq!(edit.reps(), None);
+        assert_eq!(edit.measure(), None);
 
         let pull_up = Reads {
             load: Some(Load::BODYWEIGHT),
@@ -470,5 +558,59 @@ mod tests {
 
         assert_eq!(edit.load(), None);
         assert_eq!(edit.effort(), Some(Rir::Two));
+    }
+
+    /// 25 Sep's dead hang: 40 s, no load, as Hevy recorded it.
+    fn hang() -> Reads {
+        Reads {
+            counted: Counted::Seconds,
+            measure: Some(Measure::Duration(domain::measure::Duration::from_seconds(
+                40,
+            ))),
+            load: Some(Load::UNLOADED),
+            effort: None,
+            rated: false,
+        }
+    }
+
+    /// **A hold takes a length and a load** (#901), and only what changed:
+    /// 45 s with 10 kg, or 10 kg alone with the 40 s left as it was.
+    #[test]
+    fn a_hold_is_given_a_length_and_a_load() {
+        let (edit, _) = asked(hang(), &typed("45", "10", "")).expect("an edit");
+        assert_eq!(edit.to_string(), "45 s, 10 kg");
+
+        let (edit, _) = asked(hang(), &typed("40", "10", "")).expect("an edit");
+        assert_eq!(edit.measure(), None);
+        assert_eq!(edit.load(), Some(Load::absolute(Kg::from_grams(10_000))));
+    }
+
+    /// A hold of nought seconds was not done, and a hold has no reps in
+    /// reserve to give it.
+    #[test]
+    fn a_hold_is_refused_nought_seconds_and_an_effort() {
+        let refused = |typed| asked(hang(), &typed).map_err(|refusal| refusal.field);
+
+        assert_eq!(refused(typed("0", "", "")), Err(Some("seconds")));
+        assert_eq!(refused(typed("40", "", "1")), Err(Some("effort")));
+    }
+
+    /// A distance is typed in metres, to the millimetre.
+    #[test]
+    fn a_carry_is_given_metres() {
+        let carry = Reads {
+            counted: Counted::Metres,
+            measure: Some(Measure::Distance(domain::measure::Distance {
+                metres: domain::measure::Metres::from_millimetres(20_000),
+            })),
+            ..hang()
+        };
+        let (edit, _) = asked(carry, &typed("12.5", "", "")).expect("an edit");
+
+        assert_eq!(edit.to_string(), "12.5m");
+        assert_eq!(
+            super::Counted::typed(carry.measure.expect("a distance")),
+            "20"
+        );
     }
 }
