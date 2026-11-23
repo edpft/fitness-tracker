@@ -49,6 +49,32 @@ page! {
     }
 }
 
+page! {
+    /// What the list of edits to settle reads: the edits, and the layer
+    /// they are applied to (#905).
+    pub struct Settling {
+        overlay: crate::edits::Overlay,
+    }
+}
+
+impl Settling {
+    #[must_use]
+    pub fn open(store: &Store, zone: &OperatorZone) -> Self {
+        Self {
+            overlay: crate::edits::Overlay::open(store, zone).into(),
+        }
+    }
+
+    /// Each edit a rebuild left for the operator to settle.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub async fn to_settle(&self) -> Result<Vec<crate::edits::ToSettle>, StoreError> {
+        read!(self.overlay.to_settle()).await
+    }
+}
+
 /// The parts a run collecting what the list reads takes.
 #[must_use]
 pub fn collects() -> Scope {
@@ -59,6 +85,7 @@ pub fn collects() -> Scope {
 #[must_use]
 pub fn reads() -> application::graph::Reads {
     <List as application::graph::Input>::reads()
+        .and(<Settling as application::graph::Input>::reads())
 }
 
 /// What an opened activity reads.
