@@ -16,8 +16,8 @@ use application::{
 };
 use domain::{
     gym::{
-        CanonicalExercise,
-        edit::{Conflict, Edit, EditId, EditReason, Edits, ExerciseEdit, SetEdit},
+        CanonicalExercise, CanonicalGymSession,
+        edit::{self, Conflict, Edit, EditId, EditReason, Edited, Edits, ExerciseEdit, SetEdit},
         exercise::Exercise,
         identity::{CanonicalExerciseId, CanonicalSetId, ExerciseIds},
     },
@@ -172,6 +172,107 @@ impl Overlay {
             }
         }
         Ok(None)
+    }
+}
+
+/// An edit in force on an opened session, and where on it (#895).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InForce {
+    pub edit: Edit,
+    pub here: Here,
+    /// How many sessions it reaches, this one among them: what undoing it
+    /// undoes, since it is retracted as it was made.
+    pub sessions: usize,
+}
+
+/// Where on the session an edit says something.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Here {
+    /// One of its exercises: what it read as when it was changed, and what
+    /// it became.
+    Exercise { read: Exercise, becomes: Exercise },
+    /// The set at this place, from one, of the exercise at `position`.
+    Set {
+        position: usize,
+        set: usize,
+        edit: SetEdit,
+    },
+}
+
+impl Overlay {
+    /// The edits in force on `session`, newest first, with where on it each
+    /// says something; an exercise whose sets the layer is placing under the
+    /// page has none listed.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub async fn in_force(
+        &self,
+        session: &CanonicalGymSession,
+    ) -> Result<Vec<InForce>, StoreError> {
+        let every = all(&self.store).await?;
+        if every.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut placed: Vec<(usize, ExerciseIds)> = Vec::new();
+        for (index, exercise) in session.exercises().enumerate() {
+            if let Some(ids) = ids_of(&self.store, exercise).await? {
+                placed.push((index + 1, ids));
+            }
+        }
+        let ids: Vec<ExerciseIds> = placed.iter().map(|(_, ids)| ids.clone()).collect();
+        let mut listed = Vec::new();
+        for edit in edit::in_force(&every, &ids) {
+            let Some(here) = here(&edit.edited, &placed) else {
+                continue;
+            };
+            let sessions = match &edit.edited {
+                Edited::Exercises(exercises) => {
+                    let reached: BTreeSet<CanonicalExerciseId> =
+                        exercises.iter().map(|edited| edited.exercise).collect();
+                    exercises_held(&self.store, &reached)
+                        .await?
+                        .iter()
+                        .map(|held| held.day)
+                        .collect::<BTreeSet<_>>()
+                        .len()
+                        .max(1)
+                }
+                Edited::Set { .. } => 1,
+            };
+            listed.push(InForce {
+                edit: edit.clone(),
+                here,
+                sessions,
+            });
+        }
+        Ok(listed)
+    }
+}
+
+/// Where on a session holding `placed` an edit says something.
+fn here(edited: &Edited, placed: &[(usize, ExerciseIds)]) -> Option<Here> {
+    match edited {
+        Edited::Exercises(exercises) => exercises.iter().find_map(|edited| {
+            placed
+                .iter()
+                .any(|(_, ids)| ids.exercise == edited.exercise)
+                .then_some(Here::Exercise {
+                    read: edited.read,
+                    becomes: edited.becomes,
+                })
+        }),
+        Edited::Set { set, edit } => placed.iter().find_map(|(position, ids)| {
+            ids.sets
+                .iter()
+                .position(|held| held == set)
+                .map(|index| Here::Set {
+                    position: *position,
+                    set: index + 1,
+                    edit: *edit,
+                })
+        }),
     }
 }
 

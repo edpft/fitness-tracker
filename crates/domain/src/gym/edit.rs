@@ -159,6 +159,14 @@ impl fmt::Display for StatedLoad {
     }
 }
 
+/// One field of a set an edit can state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum SetField {
+    Reps,
+    Load,
+    Effort,
+}
+
 /// What the operator changed about one set, and only that (#892).
 ///
 /// **Never empty**: an edit that changes nothing is not an edit, so
@@ -194,6 +202,17 @@ impl SetEdit {
 
     pub const fn effort(self) -> Option<Rir> {
         self.effort
+    }
+
+    /// The fields it states.
+    fn stated(self) -> impl Iterator<Item = SetField> {
+        [
+            self.reps.map(|_| SetField::Reps),
+            self.load.map(|_| SetField::Load),
+            self.effort.map(|_| SetField::Effort),
+        ]
+        .into_iter()
+        .flatten()
     }
 
     /// This edit with a later one's fields over it: what the later one
@@ -281,6 +300,52 @@ pub struct Edit {
     pub asserted_at: Timestamp,
     pub reason: EditReason,
     pub edited: Edited,
+}
+
+/// Which of `edits` are in force on a session whose exercises hold `ids`,
+/// newest first (#895).
+///
+/// **In force is what still says something about the session**: the last
+/// edit of each of its exercises, and of each field of each of its sets. An
+/// edit a later one has wholly overruled is not listed, since undoing it would
+/// change nothing; undoing the later one brings it back.
+#[must_use]
+pub fn in_force<'a>(edits: &'a [Edit], ids: &[ExerciseIds]) -> Vec<&'a Edit> {
+    let mut ordered: Vec<&Edit> = edits.iter().collect();
+    ordered.sort_by_key(|edit| (edit.asserted_at, edit.id));
+    let exercises: BTreeSet<CanonicalExerciseId> = ids.iter().map(|held| held.exercise).collect();
+    let sets: BTreeSet<CanonicalSetId> = ids
+        .iter()
+        .flat_map(|held| held.sets.iter().copied())
+        .collect();
+    let mut exercise_by: BTreeMap<CanonicalExerciseId, EditId> = BTreeMap::new();
+    let mut field_by: BTreeMap<(CanonicalSetId, SetField), EditId> = BTreeMap::new();
+    for edit in &ordered {
+        match &edit.edited {
+            Edited::Exercises(edited) => {
+                for exercise in edited {
+                    if exercises.contains(&exercise.exercise) {
+                        exercise_by.insert(exercise.exercise, edit.id);
+                    }
+                }
+            }
+            Edited::Set { set, edit: fields } if sets.contains(set) => {
+                for field in fields.stated() {
+                    field_by.insert((*set, field), edit.id);
+                }
+            }
+            Edited::Set { .. } => {}
+        }
+    }
+    let standing: BTreeSet<EditId> = exercise_by
+        .into_values()
+        .chain(field_by.into_values())
+        .collect();
+    ordered
+        .into_iter()
+        .rev()
+        .filter(|edit| standing.contains(&edit.id))
+        .collect()
 }
 
 /// What a rebuild changed under an edit, for the operator to settle.
@@ -583,6 +648,69 @@ mod tests {
         );
         assert_eq!(exercise.identified_by(), None);
         assert!(edits.conflicts(&held()).is_empty());
+    }
+
+    /// **A session lists what still says something about it, newest first**:
+    /// an edit of a set elsewhere is not listed, and an earlier edit of a
+    /// set's effort that a later one restated is not either, while one whose
+    /// count still stands is.
+    #[test]
+    fn a_session_lists_the_edits_still_saying_something_about_it() {
+        let rated = |rir| SetEdit::new(None, None, Some(rir)).expect("an effort");
+        let both = SetEdit::new(Some(reps(3)), None, Some(Rir::Two)).expect("two fields");
+        let edits = [
+            set_edit(1, "2026-11-21T09:00:00Z", 100, rated(Rir::One)),
+            set_edit(2, "2026-11-21T09:30:00Z", 101, both),
+            set_edit(3, "2026-11-21T10:00:00Z", 100, rated(Rir::Two)),
+            set_edit(4, "2026-11-21T10:30:00Z", 101, rated(Rir::Three)),
+            set_edit(5, "2026-11-21T11:00:00Z", 999, rated(Rir::Two)),
+        ];
+
+        let listed: Vec<EditId> = in_force(&edits, &ids().exercises)
+            .iter()
+            .map(|edit| edit.id)
+            .collect();
+        assert_eq!(listed, [4, 3, 2].map(EditId::from));
+    }
+
+    /// **An exercise edit stands until a later one restates the exercise**,
+    /// and an edit of the similar ones is listed on each session it reaches.
+    #[test]
+    fn an_exercise_edit_is_listed_until_a_later_one_restates_it() {
+        let renamed = |id, when, becomes| Edit {
+            id: EditId::from(id),
+            asserted_at: at(when),
+            reason: reason(),
+            edited: Edited::Exercises(NonEmpty::of(
+                ExerciseEdit {
+                    exercise: exercise_id(10),
+                    becomes: Exercise::Reps(becomes),
+                    read: Exercise::Reps(RepsExercise::DeadliftBarbell),
+                    sets: BTreeSet::from([set_id(100), set_id(101)]),
+                },
+                vec![ExerciseEdit {
+                    exercise: exercise_id(20),
+                    becomes: Exercise::Reps(becomes),
+                    read: Exercise::Reps(RepsExercise::DeadliftBarbell),
+                    sets: BTreeSet::new(),
+                }],
+            )),
+        };
+        let first = renamed(
+            1,
+            "2026-11-21T09:00:00Z",
+            RepsExercise::RomanianDeadliftBarbell,
+        );
+        let second = renamed(2, "2026-11-21T10:00:00Z", RepsExercise::DeadliftBarbell);
+
+        let listed = |edits: &[Edit]| -> Vec<EditId> {
+            in_force(edits, &ids().exercises)
+                .iter()
+                .map(|edit| edit.id)
+                .collect()
+        };
+        assert_eq!(listed(std::slice::from_ref(&first)), [EditId::from(1)]);
+        assert_eq!(listed(&[second, first]), [EditId::from(2)]);
     }
 
     fn held() -> BTreeMap<CanonicalExerciseId, BTreeSet<CanonicalSetId>> {

@@ -184,7 +184,7 @@ pub fn asked(reads: Reads, typed: &Typed) -> Result<(SetEdit, EditReason), Refus
 
 /// What the session calls the set: a warm-up, or its place among the working
 /// sets, as its table numbers them.
-fn named(warm_ups: &[bool], index: usize) -> String {
+pub fn named(warm_ups: &[bool], index: usize) -> String {
     match warm_ups.get(index) {
         Some(true) => "a warm-up".to_owned(),
         _ => format!(

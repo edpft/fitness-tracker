@@ -75,6 +75,35 @@ impl Settling {
     }
 }
 
+page! {
+    /// What an opened session's list of its changes reads: the edits, and the
+    /// layer they are applied to (#895).
+    pub struct Changes {
+        overlay: crate::edits::Overlay,
+    }
+}
+
+impl Changes {
+    #[must_use]
+    pub fn open(store: &Store, zone: &OperatorZone) -> Self {
+        Self {
+            overlay: crate::edits::Overlay::open(store, zone).into(),
+        }
+    }
+
+    /// The edits in force on `session`, newest first.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub async fn of(
+        &self,
+        session: &domain::gym::CanonicalGymSession,
+    ) -> Result<Vec<crate::edits::InForce>, StoreError> {
+        read!(self.overlay.in_force(session)).await
+    }
+}
+
 /// The parts a run collecting what the list reads takes.
 #[must_use]
 pub fn collects() -> Scope {
@@ -92,6 +121,12 @@ pub fn reads() -> application::graph::Reads {
 #[must_use]
 pub fn opened_reads() -> application::graph::Reads {
     <Opened as application::graph::Input>::reads()
+}
+
+/// What an opened activity's page reads: it, and the changes in force on it.
+#[must_use]
+pub fn opened_page_reads() -> application::graph::Reads {
+    opened_reads().and(<Changes as application::graph::Input>::reads())
 }
 
 impl List {
