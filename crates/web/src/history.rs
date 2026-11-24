@@ -133,7 +133,7 @@ const ONE_REP_MAX_TEST: &str = "1RM test";
 const FTP_TEST: &str = "FTP test";
 const GYM: &str = "Gym session";
 const PELOTON: &str = "Peloton session";
-const PADEL: &str = "Padel match";
+const PADEL: &str = "Padel session";
 
 /// What the activity is: the classes a cycling session was ridden to are on
 /// its page, not its name.

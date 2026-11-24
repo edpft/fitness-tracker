@@ -540,17 +540,31 @@ impl CanonicalGymSession {
             let recording = self
                 .accounts
                 .iter()
-                .find(|account| account.normalised == heart_rate.normalised_session())
+                .find(|account| account.normalised == heart_rate.normalised_session());
+            let began = recording
                 .and_then(|account| account.occurred.instant())
                 .map(StartedAt::instant);
-            match (recording, start, end) {
-                (Some(recording), Some(start), Some(end)) => Attributed::new(
-                    heart_rate.value().between(
-                        start.as_second() - recording.as_second(),
-                        end.as_second() - recording.as_second(),
-                    ),
-                    heart_rate.normalised_session(),
-                ),
+            let finished = recording.and_then(Account::ended);
+            // Only a bound moved inside the recording reads it again: one
+            // outside it, or where the watch put it, cuts nothing, since the
+            // watch writes readings a second or so past the length it states.
+            match (began, start, end) {
+                (Some(began), Some(start), Some(end)) => {
+                    let from = if start > began {
+                        start.as_second() - began.as_second()
+                    } else {
+                        i64::MIN
+                    };
+                    let to = if finished.is_none_or(|finished| end < finished) {
+                        end.as_second() - began.as_second()
+                    } else {
+                        i64::MAX
+                    };
+                    Attributed::new(
+                        heart_rate.value().between(from, to),
+                        heart_rate.normalised_session(),
+                    )
+                }
                 _ => heart_rate.clone(),
             }
         });

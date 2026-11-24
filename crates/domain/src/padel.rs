@@ -186,8 +186,14 @@ impl PlayedPadelSession {
         if edit.started.wall_clock().date() != self.recorded.wall_clock().date() {
             return self;
         }
-        let from = edit.started.instant().as_second() - self.recorded.instant().as_second();
-        let to = from + i64::try_from(edit.duration.as_seconds()).unwrap_or(i64::MAX);
+        let start = edit.started.instant().as_second() - self.recorded.instant().as_second();
+        let end = start + i64::try_from(edit.duration.as_seconds()).unwrap_or(i64::MAX);
+        let recorded = i64::try_from(self.duration.as_seconds()).unwrap_or(i64::MAX);
+        // Only a bound moved inward reads the readings again: one moved
+        // outward, or left where the watch put it, cuts nothing, since the
+        // watch writes readings a second or so past the length it states.
+        let from = if start > 0 { start } else { i64::MIN };
+        let to = if end < recorded { end } else { i64::MAX };
         Self {
             heart_rate: self
                 .heart_rate
@@ -288,13 +294,15 @@ mod tests {
     }
 
     /// The session of 22 March 2026 as the watch recorded it, from 19:12:44
-    /// for 3,030 seconds, with readings at its start, ten minutes in and
-    /// fifty minutes in.
+    /// for 3,030 seconds, with readings at its start, ten minutes in, fifty
+    /// minutes in and a second past the length it stated, as the watch's own
+    /// recording of that session has.
     fn twenty_second_of_march() -> PlayedPadelSession {
-        let readings = [(0, 100), (600, 150), (3000, 90)].map(|(at, rate)| HeartRateSample {
-            at: Duration::from_seconds(at),
-            beats_per_minute: beats(rate),
-        });
+        let readings =
+            [(0, 100), (600, 150), (3000, 90), (3031, 95)].map(|(at, rate)| HeartRateSample {
+                at: Duration::from_seconds(at),
+                beats_per_minute: beats(rate),
+            });
         PlayedPadelSession::recorded(
             SourceRecordId::try_from("1".to_owned()).expect("an id"),
             london("2026-03-22T19:12:44Z"),

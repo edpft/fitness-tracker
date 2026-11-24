@@ -1417,6 +1417,15 @@ mod tests {
                 .map(crate::measure::PositiveDuration::as_seconds),
             Some(801)
         );
+        assert_eq!(
+            edited
+                .heart_rate()
+                .map(|heart_rate| heart_rate.value().clone()),
+            bracketed()
+                .heart_rate()
+                .map(|heart_rate| heart_rate.value().clone()),
+            "the watch's own start and an end past its own leave its figures standing"
+        );
     }
 
     /// **An end the operator states is the edit's**, and the heart rate is
