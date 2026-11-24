@@ -2,9 +2,17 @@
 //! counted in time or distance, its load, whether the load was assistance,
 //! and its effort where it is counted in reps (#892, #893, #901).
 //!
-//! **One set, never the similar ones.** The operator, 2026-11-21: *"There's
-//! nothing necessarily similar about two different sets of 10 x 70kg. The
-//! idea behind similar sets was to be able to change exercises."*
+//! **This set, and the other sets of its exercise in this session** (#906),
+//! ticked by default: one mistake in a session is usually one cause for the
+//! whole exercise, as Hevy having no assisted variant left every set of 12
+//! Oct 2026's front lever raise without its band. Only the fields changed are
+//! applied to each, so each keeps its own reps, and each is its own change,
+//! undone on its own.
+//!
+//! **Never another session's, nor another exercise's.** The operator,
+//! 2026-11-21: *"There's nothing necessarily similar about two different sets
+//! of 10 x 70kg. The idea behind similar sets was to be able to change
+//! exercises."*
 //!
 //! **Whatever source recorded it.** The edit is anchored to the canonical set
 //! (§ II.2), so a set a sheet or a watch recorded takes a reps in reserve it
@@ -166,6 +174,9 @@ pub struct Typed {
     pub assistance: bool,
     pub effort: String,
     pub because: String,
+    /// The other sets ticked, by their ids as posted: [`None`] when the form
+    /// is first drawn, which ticks every one.
+    pub also: Option<Vec<String>>,
 }
 
 impl Typed {
@@ -181,11 +192,15 @@ impl Typed {
             assistance,
             effort: reads.effort.map(Rir::as_str).unwrap_or_default().to_owned(),
             because: String::new(),
+            also: None,
         }
     }
 
     fn of(form: &[(String, String)]) -> Self {
-        let mut typed = Self::default();
+        let mut typed = Self {
+            also: Some(Vec::new()),
+            ..Self::default()
+        };
         for (key, value) in form {
             match key.as_str() {
                 "reps" | "seconds" | "metres" => value.trim().clone_into(&mut typed.measure),
@@ -193,6 +208,7 @@ impl Typed {
                 "assistance" => typed.assistance = true,
                 "effort" => value.clone_into(&mut typed.effort),
                 "because" => value.clone_into(&mut typed.because),
+                "also" => typed.also.get_or_insert_default().push(value.clone()),
                 _ => {}
             }
         }
@@ -200,8 +216,36 @@ impl Typed {
     }
 }
 
-/// The edit a post asks for: each field that differs from what the set reads
-/// as now, and why.
+/// What a post changed on the set its pen is on: each field that differs
+/// from what that set reads as now, and nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Changed {
+    measure: Option<Measure>,
+    load: Option<StatedLoad>,
+    effort: Option<Rir>,
+}
+
+impl Changed {
+    /// The edit it makes to a set that reads `reads`: each changed field
+    /// that differs from what that set reads, the load on that set's own
+    /// axis. [`None`] where the set already reads as asked.
+    ///
+    /// **An effort reaches only a set that has one**, so a warm-up ticked
+    /// beside working sets takes their band and not their reps in reserve.
+    pub fn on(self, reads: Reads) -> Option<SparseSet> {
+        SparseSet::new(
+            self.measure
+                .filter(|measure| Some(*measure) != reads.measure),
+            self.load
+                .map(|stated| stated.on(reads.load))
+                .filter(|load| Some(*load) != reads.load),
+            self.effort
+                .filter(|effort| reads.rated && Some(*effort) != reads.effort),
+        )
+    }
+}
+
+/// What a post asks for, and why.
 ///
 /// **A field left blank where nothing was stated changes nothing**: an empty
 /// kg on a set no source put a load on is not a claim that there was none.
@@ -210,7 +254,7 @@ impl Typed {
 ///
 /// [`Refusal`] beside the field at fault, or of the whole form if nothing was
 /// changed.
-pub fn asked(reads: Reads, typed: &Typed) -> Result<(SparseSet, EditReason), Refusal> {
+pub fn asked(reads: Reads, typed: &Typed) -> Result<(Changed, EditReason), Refusal> {
     let measure = if typed.measure.is_empty() && reads.measure.is_none() {
         None
     } else {
@@ -230,7 +274,6 @@ pub fn asked(reads: Reads, typed: &Typed) -> Result<(SparseSet, EditReason), Ref
             StatedLoad::Mass(mass)
         })
     };
-    let load = stated.map(|stated| stated.on(reads.load));
     let effort = if typed.effort.is_empty() {
         None
     } else if reads.rated {
@@ -251,13 +294,41 @@ pub fn asked(reads: Reads, typed: &Typed) -> Result<(SparseSet, EditReason), Ref
     };
     let because = EditReason::try_from(typed.because.clone())
         .map_err(|_| Refusal::of("because", "say why".to_owned()))?;
-    let edit = SparseSet::new(
-        measure.filter(|measure| Some(*measure) != reads.measure),
-        load.filter(|load| Some(*load) != reads.load),
-        effort.filter(|effort| Some(*effort) != reads.effort),
-    )
-    .ok_or_else(|| Refusal::whole("nothing was changed".to_owned()))?;
-    Ok((edit, because))
+    let asked = Changed {
+        measure: measure.filter(|measure| Some(*measure) != reads.measure),
+        load: stated.filter(|stated| Some(stated.on(reads.load)) != reads.load),
+        effort: effort.filter(|effort| Some(*effort) != reads.effort),
+    };
+    asked
+        .on(reads)
+        .map(|_| (asked, because))
+        .ok_or_else(|| Refusal::whole("nothing was changed".to_owned()))
+}
+
+/// The other sets a post ticked, each one that was offered.
+///
+/// **Only what was offered**: a set posted that is not among those found now
+/// is a page drawn before the record changed, and is refused rather than
+/// asserted over.
+///
+/// # Errors
+///
+/// [`Refusal`] if one was not offered.
+pub fn ticked<'a>(typed: &Typed, others: &'a [Other]) -> Result<Vec<&'a Other>, Refusal> {
+    let stale = || {
+        Refusal::whole("the record has changed since this page was drawn; open it again".to_owned())
+    };
+    let mut ticked: Vec<&Other> = Vec::new();
+    for posted in typed.also.iter().flatten() {
+        let other = others
+            .iter()
+            .find(|other| other.id.to_string() == *posted)
+            .ok_or_else(stale)?;
+        if !ticked.iter().any(|already| already.id == other.id) {
+            ticked.push(other);
+        }
+    }
+    Ok(ticked)
 }
 
 /// What the session calls the set: a warm-up, or its place among the working
@@ -311,6 +382,19 @@ pub fn form(session: &str, found: &Found, typed: &Typed, refused: Option<&Refusa
                 (input::field("because", "because", "Because", &html! {
                     input id="because" name="because" value=(typed.because) required;
                 }, refused))
+                @if !found.others.is_empty() {
+                    fieldset.field {
+                        legend { "The other sets of " (found.exercise) " in this session" }
+                        @for other in &found.others {
+                            @let id = other.id.to_string();
+                            label {
+                                input type="checkbox" name="also" value=(id)
+                                    checked[typed.also.as_ref().is_none_or(|also| also.contains(&id))];
+                                " " (capitalised(&other.name)) (reading(other.reads))
+                            }
+                        }
+                    }
+                }
                 (input::whole(refused))
                 button { "Change" }
             }
@@ -346,6 +430,20 @@ impl At {
     }
 }
 
+/// What a set reads as, after its name: nothing where nothing was stated.
+fn reading(reads: Reads) -> String {
+    SparseSet::new(reads.measure, reads.load, reads.effort)
+        .map(|reading| format!(": {reading}"))
+        .unwrap_or_default()
+}
+
+fn capitalised(name: &str) -> String {
+    let mut chars = name.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
 /// The set a change is asked of, as the layer holds it.
 pub struct Found {
     exercise: String,
@@ -354,6 +452,17 @@ pub struct Found {
     exercise_id: CanonicalExerciseId,
     id: CanonicalSetId,
     reads: Reads,
+    /// The other sets of its exercise in this session that were done, in
+    /// order.
+    others: Vec<Other>,
+}
+
+/// Another set of the exercise in this session, offered beside it.
+#[derive(Debug, Clone)]
+pub struct Other {
+    pub id: CanonicalSetId,
+    pub name: String,
+    pub reads: Reads,
 }
 
 /// The set there, or the page to show instead.
@@ -366,24 +475,22 @@ async fn found(store: &Store, zone: &OperatorZone, at: &At) -> Result<Found, Res
         Err(error) => return Err(unreadable(&error)),
     };
     let index = at.set - 1;
-    let reads = match &canonical {
+    // Each set as it reads now, where it was done.
+    let every: Vec<Option<Reads>> = match &canonical {
         CanonicalExercise::ForReps { sets, .. } => sets
             .iter()
-            .nth(index)
-            .filter(|set| completed(set))
-            .map(|set| Reads::of(set, Counted::Reps, Measure::Reps)),
+            .map(|set| completed(set).then(|| Reads::of(set, Counted::Reps, Measure::Reps)))
+            .collect(),
         CanonicalExercise::ForDuration { sets, .. } => sets
             .iter()
-            .nth(index)
-            .filter(|set| completed(set))
-            .map(|set| Reads::of(set, Counted::Seconds, Measure::Duration)),
+            .map(|set| completed(set).then(|| Reads::of(set, Counted::Seconds, Measure::Duration)))
+            .collect(),
         CanonicalExercise::ForDistance { sets, .. } => sets
             .iter()
-            .nth(index)
-            .filter(|set| completed(set))
-            .map(|set| Reads::of(set, Counted::Metres, Measure::Distance)),
+            .map(|set| completed(set).then(|| Reads::of(set, Counted::Metres, Measure::Distance)))
+            .collect(),
     };
-    let Some(reads) = reads else {
+    let Some(reads) = every.get(index).copied().flatten() else {
         return Err(Redirect::to(&session).into_response());
     };
     let (held, ids) = edits::ids_of(store, &canonical)
@@ -393,13 +500,28 @@ async fn found(store: &Store, zone: &OperatorZone, at: &At) -> Result<Found, Res
     let Some(id) = ids.sets.get(index).copied() else {
         return Err(Redirect::to(&session).into_response());
     };
+    let warm_ups = history::warm_ups(&canonical);
+    let others = every
+        .iter()
+        .zip(&ids.sets)
+        .enumerate()
+        .filter(|(other, _)| *other != index)
+        .filter_map(|(other, (reads, id))| {
+            reads.map(|reads| Other {
+                id: *id,
+                name: named(&warm_ups, other),
+                reads,
+            })
+        })
+        .collect();
     Ok(Found {
         exercise: history::exercise_name(&canonical),
-        name: named(&history::warm_ups(&canonical), index),
+        name: named(&warm_ups, index),
         session: held,
         exercise_id: ids.exercise,
         id,
         reads,
+        others,
     })
 }
 
@@ -446,20 +568,39 @@ pub async fn posted(
     };
     let typed = Typed::of(&form_posted);
     let refused = |refusal: &Refusal| form(&session, &found, &typed, Some(refusal)).into_response();
-    let (edit, because) = match asked(found.reads, &typed) {
+    let (asked, because) = match asked(found.reads, &typed) {
         Ok(asked) => asked,
         Err(refusal) => return refused(&refusal),
     };
-    let sessions = BTreeMap::from([(
-        found.session,
-        SparseGymSession::exercise(found.exercise_id, SparseExercise::set(found.id, edit)),
-    )]);
-    match edits::assert(store, &because, &sessions, &BTreeMap::new()).await {
-        Ok(id) => {
+    let ticked = match ticked(&typed, &found.others) {
+        Ok(ticked) => ticked,
+        Err(refusal) => return refused(&refusal),
+    };
+    // One change for each set it reaches, so each is undone on its own; a
+    // ticked set that already reads as asked has none.
+    let each: Vec<BTreeMap<_, _>> = std::iter::once((found.id, found.reads))
+        .chain(ticked.iter().map(|other| (other.id, other.reads)))
+        .filter_map(|(id, reads)| asked.on(reads).map(|edit| (id, edit)))
+        .map(|(id, edit)| {
+            BTreeMap::from([(
+                found.session,
+                SparseGymSession::exercise(found.exercise_id, SparseExercise::set(id, edit)),
+            )])
+        })
+        .collect();
+    match edits::assert_each(store, &because, &each).await {
+        Ok(ids) => {
             // What History collects, so the session is drawn again from the
             // layers derived under the change by the time it is opened.
             runs.start(&Asked::Only(configurator::history::collects()));
-            Redirect::to(&change::changed_address(at.on, at.number, id)).into_response()
+            // One set's change is shown with its undo; several are listed on
+            // the session, each with its own.
+            match ids.as_slice() {
+                [id] => {
+                    Redirect::to(&change::changed_address(at.on, at.number, *id)).into_response()
+                }
+                _ => Redirect::to(&session).into_response(),
+            }
         }
         Err(error) => refused(&Refusal::whole(error.to_string())),
     }
@@ -473,6 +614,8 @@ mod tests {
     };
 
     use domain::gym::edit::Measure;
+
+    use domain::gym::{edit::SparseSet, identity::CanonicalSetId};
 
     use super::{Counted, Reads, Typed, asked};
 
@@ -494,14 +637,21 @@ mod tests {
             assistance: false,
             effort: effort.to_owned(),
             because: "forgot to rate it".to_owned(),
+            also: None,
         }
+    }
+
+    /// The edit a post makes to the set its pen is on.
+    fn edit_of(reads: Reads, typed: &Typed) -> Option<SparseSet> {
+        let (changed, _) = asked(reads, typed).ok()?;
+        changed.on(reads)
     }
 
     /// **Only what was changed is asserted**: rating the 90 kg single leaves
     /// its reps and load out of the edit.
     #[test]
     fn rating_a_set_asserts_only_its_effort() {
-        let (edit, _) = asked(single(), &typed("1", "90", "1")).expect("an edit");
+        let edit = edit_of(single(), &typed("1", "90", "1")).expect("an edit");
 
         assert_eq!(edit.measure(), None);
         assert_eq!(edit.load(), None);
@@ -540,7 +690,7 @@ mod tests {
 
     #[test]
     fn a_changed_load_is_asserted_on_the_set_s_axis() {
-        let (edit, _) = asked(single(), &typed("1", "92.5", "")).expect("an edit");
+        let edit = edit_of(single(), &typed("1", "92.5", "")).expect("an edit");
         assert_eq!(edit.load(), Some(Load::absolute(Kg::from_grams(92_500))));
         assert_eq!(edit.measure(), None);
 
@@ -548,7 +698,7 @@ mod tests {
             load: Some(Load::BODYWEIGHT),
             ..single()
         };
-        let (edit, _) = asked(pull_up, &typed("1", "10", "")).expect("an edit");
+        let edit = edit_of(pull_up, &typed("1", "10", "")).expect("an edit");
         assert_eq!(
             edit.load(),
             Some(Load::relative(SignedKg::from_grams(10_000)))
@@ -563,7 +713,7 @@ mod tests {
             load: None,
             ..single()
         };
-        let (edit, _) = asked(sheet, &typed("1", "", "2")).expect("an edit");
+        let edit = edit_of(sheet, &typed("1", "", "2")).expect("an edit");
 
         assert_eq!(edit.load(), None);
         assert_eq!(edit.intensity(), Some(Rir::Two));
@@ -586,10 +736,10 @@ mod tests {
     /// 45 s with 10 kg, or 10 kg alone with the 40 s left as it was.
     #[test]
     fn a_hold_is_given_a_length_and_a_load() {
-        let (edit, _) = asked(hang(), &typed("45", "10", "")).expect("an edit");
+        let edit = edit_of(hang(), &typed("45", "10", "")).expect("an edit");
         assert_eq!(edit.to_string(), "45 s, 10 kg");
 
-        let (edit, _) = asked(hang(), &typed("40", "10", "")).expect("an edit");
+        let edit = edit_of(hang(), &typed("40", "10", "")).expect("an edit");
         assert_eq!(edit.measure(), None);
         assert_eq!(edit.load(), Some(Load::absolute(Kg::from_grams(10_000))));
     }
@@ -614,12 +764,110 @@ mod tests {
             })),
             ..hang()
         };
-        let (edit, _) = asked(carry, &typed("12.5", "", "")).expect("an edit");
+        let edit = edit_of(carry, &typed("12.5", "", "")).expect("an edit");
 
         assert_eq!(edit.to_string(), "12.5m");
         assert_eq!(
             super::Counted::typed(carry.measure.expect("a distance")),
             "20"
+        );
+    }
+
+    /// 12 Oct 2026's front lever raise, as Hevy recorded it: no variant
+    /// with assistance, so a set of `reps` at bodyweight.
+    fn front_lever(reps: u32) -> Reads {
+        Reads {
+            counted: Counted::Reps,
+            measure: Some(Measure::Reps(RepCount::new(reps).expect("reps"))),
+            load: Some(Load::BODYWEIGHT),
+            effort: None,
+            rated: true,
+        }
+    }
+
+    fn assisted(reps: u32, kg: &str) -> Typed {
+        Typed {
+            assistance: true,
+            ..typed(&reps.to_string(), kg, "")
+        }
+    }
+
+    /// **Only the fields changed reach the other sets** (#906): 21 kg of
+    /// assistance from the first set's pen gives a set of 5 its 21 kg and
+    /// leaves it 5 reps.
+    #[test]
+    fn the_other_sets_take_only_what_was_changed() {
+        let (changed, _) = asked(front_lever(6), &assisted(6, "21")).expect("a change");
+        let twenty_one = Some(Load::relative(SignedKg::from_grams(-21_000)));
+
+        let first = changed.on(front_lever(6)).expect("an edit");
+        assert_eq!((first.measure(), first.load()), (None, twenty_one));
+
+        let fewer = changed.on(front_lever(5)).expect("an edit");
+        assert_eq!((fewer.measure(), fewer.load()), (None, twenty_one));
+    }
+
+    /// A ticked set that already reads as asked is given no change, so it
+    /// has nothing to undo.
+    #[test]
+    fn a_set_already_as_asked_is_not_changed() {
+        let (changed, _) = asked(front_lever(6), &assisted(6, "21")).expect("a change");
+        let already = Reads {
+            load: Some(Load::relative(SignedKg::from_grams(-21_000))),
+            ..front_lever(6)
+        };
+
+        assert_eq!(changed.on(already), None);
+    }
+
+    /// **A warm-up ticked beside working sets takes their band, not their
+    /// reps in reserve**: it has no effort to give.
+    #[test]
+    fn a_warm_up_takes_the_load_and_not_the_effort() {
+        let (changed, _) = asked(
+            front_lever(6),
+            &Typed {
+                effort: "2".to_owned(),
+                ..assisted(6, "21")
+            },
+        )
+        .expect("a change");
+        let warm_up = Reads {
+            rated: false,
+            ..front_lever(6)
+        };
+
+        let edit = changed.on(warm_up).expect("an edit");
+        assert_eq!(edit.intensity(), None);
+        assert!(edit.load().is_some());
+    }
+
+    /// **Only the sets offered are changed**: a set posted that is not
+    /// among them is a page drawn before the record changed.
+    #[test]
+    fn a_set_not_offered_is_refused() {
+        let other = |id: i64| super::Other {
+            id: CanonicalSetId::try_from(id).expect("an id"),
+            name: format!("set {id}"),
+            reads: front_lever(6),
+        };
+        let others = [other(2), other(3)];
+        let posting = |also: &[&str]| Typed {
+            also: Some(also.iter().map(|id| (*id).to_owned()).collect()),
+            ..assisted(6, "21")
+        };
+
+        let ticked: Vec<_> = super::ticked(&posting(&["3"]), &others)
+            .expect("offered sets")
+            .iter()
+            .map(|other| other.id)
+            .collect();
+        assert_eq!(ticked, vec![others[1].id]);
+        assert!(super::ticked(&posting(&["9"]), &others).is_err());
+        assert!(
+            super::ticked(&posting(&[]), &others)
+                .expect("none ticked")
+                .is_empty()
         );
     }
 }

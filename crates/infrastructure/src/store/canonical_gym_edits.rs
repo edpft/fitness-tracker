@@ -514,26 +514,31 @@ impl SqliteCanonicalGymSessionStore {
         found: &BTreeMap<CanonicalExerciseId, Found>,
     ) -> Result<EditId, StoreError> {
         let mut tx = writing(self.pool()).await?;
-        let id = begin(&mut tx, at, reason).await?;
-        for (session, sparse) in sessions {
-            if sparse.started.is_some() || sparse.lasted.is_some() {
-                write_bounds(&mut tx, id, *session, sparse).await?;
-            }
-            for (exercise, fields) in &sparse.exercises {
-                if let Some(becomes) = fields.exercise {
-                    let as_found = found.get(exercise).ok_or_else(|| StoreError::Corrupt {
-                        detail: format!("exercise {exercise} is renamed with nothing found"),
-                    })?;
-                    write_exercise(&mut tx, id, *session, *exercise, becomes, as_found).await?;
-                }
-                for (set, set_fields) in &fields.sets {
-                    write_set(&mut tx, id, *session, *exercise, *set, *set_fields).await?;
-                }
-            }
-        }
-        changed(&mut tx, id).await?;
+        let id = write_assertion(&mut tx, at, reason, sessions, found).await?;
         tx.commit().await?;
-        Ok(EditId::from(id))
+        Ok(id)
+    }
+
+    /// Assert each of these apart, for one reason and in one write: each is
+    /// its own assertion, retracted on its own, and either all are made or
+    /// none is (#906).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be written.
+    pub async fn assert_each(
+        &self,
+        at: Timestamp,
+        reason: &EditReason,
+        each: &[BTreeMap<CanonicalSessionId, SparseGymSession>],
+    ) -> Result<Vec<EditId>, StoreError> {
+        let mut tx = writing(self.pool()).await?;
+        let mut ids = Vec::with_capacity(each.len());
+        for sessions in each {
+            ids.push(write_assertion(&mut tx, at, reason, sessions, &BTreeMap::new()).await?);
+        }
+        tx.commit().await?;
+        Ok(ids)
     }
 
     /// Retract one assertion whole. `false` if there is none.
@@ -835,6 +840,35 @@ async fn write_set(
 }
 
 /// The assertion's own row.
+/// One assertion, inside a write its caller commits.
+async fn write_assertion(
+    tx: &mut Transaction<'_, Sqlite>,
+    at: Timestamp,
+    reason: &EditReason,
+    sessions: &BTreeMap<CanonicalSessionId, SparseGymSession>,
+    found: &BTreeMap<CanonicalExerciseId, Found>,
+) -> Result<EditId, StoreError> {
+    let id = begin(tx, at, reason).await?;
+    for (session, sparse) in sessions {
+        if sparse.started.is_some() || sparse.lasted.is_some() {
+            write_bounds(tx, id, *session, sparse).await?;
+        }
+        for (exercise, fields) in &sparse.exercises {
+            if let Some(becomes) = fields.exercise {
+                let as_found = found.get(exercise).ok_or_else(|| StoreError::Corrupt {
+                    detail: format!("exercise {exercise} is renamed with nothing found"),
+                })?;
+                write_exercise(tx, id, *session, *exercise, becomes, as_found).await?;
+            }
+            for (set, set_fields) in &fields.sets {
+                write_set(tx, id, *session, *exercise, *set, *set_fields).await?;
+            }
+        }
+    }
+    changed(tx, id).await?;
+    Ok(EditId::from(id))
+}
+
 async fn begin(
     tx: &mut Transaction<'_, Sqlite>,
     at: Timestamp,

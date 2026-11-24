@@ -980,6 +980,74 @@ fn an_edit_stands_on_the_same_ids_across_a_rebuild() {
     });
 }
 
+/// **Changes asserted together are undone apart** (#906): both squat sets
+/// rated in one write are two assertions, and retracting the first leaves
+/// the second rated.
+#[test]
+fn changes_asserted_together_are_undone_apart() {
+    use domain::gym::{
+        Rir,
+        edit::{EditReason, SparseExercise, SparseGymSession, SparseSet},
+    };
+    use std::collections::BTreeMap;
+
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let (_directory, pool) = support::store::derived_and_authored()
+            .await
+            .expect("a derived store");
+        let ids = normalised(&pool).await.expect("normalised sessions");
+        let log = ids[0];
+        let store = SqliteCanonicalGymSessionStore::new(pool.clone());
+        let rebuild = async || {
+            let edits = Edits::of(&store.edits().await.expect("the edits"));
+            store
+                .replace(vec![two_squat_sets(log).expect("a session")], &edits)
+                .await
+                .expect("a whole build");
+        };
+        rebuild().await;
+        let held = store.held().await.expect("the layer's ids");
+        let (exercise, sets) = held.iter().next().expect("one exercise");
+        let session = only_session(&pool).await.expect("a session");
+        let rated = SparseSet::new(None, None, Some(Rir::Two)).expect("an effort");
+        let each: Vec<_> = sets
+            .iter()
+            .map(|set| {
+                BTreeMap::from([(
+                    session,
+                    SparseGymSession::exercise(*exercise, SparseExercise::set(*set, rated)),
+                )])
+            })
+            .collect();
+
+        let made = store
+            .assert_each(
+                "2026-11-24T09:00:00Z".parse().expect("an instant"),
+                &EditReason::try_from("forgot to rate them".to_owned()).expect("a reason"),
+                &each,
+            )
+            .await
+            .expect("two assertions");
+        assert_eq!(made.len(), 2);
+
+        assert!(store.retract(made[0]).await.expect("a retraction"));
+        rebuild().await;
+        let read = store.all().await.expect("a read");
+        let CanonicalExercise::ForReps {
+            sets: read_sets, ..
+        } = read[0].exercises().next().expect("an exercise")
+        else {
+            panic!("a reps exercise");
+        };
+        let efforts: Vec<_> = read_sets
+            .iter()
+            .map(|set| set.intensity.map(|rir| rir.copied()))
+            .collect();
+        assert_eq!(efforts, vec![None, Some(Rir::Two)]);
+    });
+}
+
 /// **A set edit's measure is read back as it was stated** (#901): a length,
 /// a distance and a count each round-trip, with the load beside them.
 #[test]
