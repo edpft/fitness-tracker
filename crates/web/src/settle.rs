@@ -14,7 +14,7 @@ use axum::{
     response::{IntoResponse as _, Redirect, Response},
 };
 use configurator::edits::{self, ToSettle};
-use domain::gym::identity::{CanonicalExerciseId, CanonicalSetId};
+use domain::gym::identity::{CanonicalExerciseId, CanonicalSessionId, CanonicalSetId};
 use jiff::civil::Date;
 use maud::{Markup, html};
 
@@ -75,6 +75,28 @@ fn entry_of(entry: &ToSettle, today: Date) -> Markup {
                 button name="settled" value="remove" { "Remove the edit" }
             }
         },
+        ToSettle::SessionGone(session) => html! {
+            p { "You changed when a session started or ended, and no session holds it any more." }
+            form method="post" action=(ROUTE) {
+                input type="hidden" name="session" value=(session.as_i64());
+                button name="settled" value="remove" { "Remove the edit" }
+            }
+        },
+        ToSettle::SourceGone { session, bounds } => html! {
+            p {
+                "You took when a session "
+                @match (&bounds.started, &bounds.ended) {
+                    (Some(_), Some(_)) => "started and ended",
+                    (Some(_), None) => "started",
+                    _ => "ended",
+                }
+                " from a source that no longer records it, so it reads as the sources say."
+            }
+            form method="post" action=(ROUTE) {
+                input type="hidden" name="session" value=(session.as_i64());
+                button name="settled" value="remove" { "Remove the edit" }
+            }
+        },
         ToSettle::SetGone { set, edit } => html! {
             p { "You changed a set to " (edit) ", and no session holds that set any more." }
             form method="post" action=(ROUTE) {
@@ -94,6 +116,8 @@ enum Settled {
     RemoveExercise(CanonicalExerciseId),
     /// The set's edit goes.
     RemoveSet(CanonicalSetId),
+    /// The edit of when a session started and ended goes.
+    RemoveBounds(CanonicalSessionId),
 }
 
 impl Settled {
@@ -106,6 +130,14 @@ impl Settled {
             .get("set")
             .and_then(|id| id.parse::<i64>().ok())
             .and_then(|id| CanonicalSetId::try_from(id).ok());
+        let session = form
+            .get("session")
+            .and_then(|id| id.parse::<i64>().ok())
+            .and_then(|id| CanonicalSessionId::try_from(id).ok());
+        if let (Some("remove"), Some(session)) = (form.get("settled").map(String::as_str), session)
+        {
+            return Some(Self::RemoveBounds(session));
+        }
         match (form.get("settled").map(String::as_str), exercise, set) {
             (Some("keep"), Some(exercise), Some(set)) => Some(Self::Keep(exercise, set)),
             (Some("remove"), Some(exercise), _) => Some(Self::RemoveExercise(exercise)),
@@ -129,6 +161,7 @@ pub async fn posted(
         Settled::Keep(exercise, set) => edits::keep(store, exercise, set).await,
         Settled::RemoveExercise(exercise) => edits::unedit_exercise(store, exercise).await,
         Settled::RemoveSet(set) => edits::unedit_set(store, set).await,
+        Settled::RemoveBounds(session) => edits::unedit_bounds(store, session).await,
     };
     match written {
         Ok(()) => {

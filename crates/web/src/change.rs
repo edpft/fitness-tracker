@@ -36,12 +36,11 @@ use configurator::{
 use domain::{
     gym::{
         CanonicalExercise,
-        edit::{EditId, EditReason, Edited, ExerciseEdit},
+        edit::{EditId, EditReason, Found, SparseExercise, SparseGymSession},
         exercise::{DistanceExercise, DurationExercise, Exercise, RepsExercise},
         identity::CanonicalExerciseId,
     },
     normalised::OperatorZone,
-    sequence::NonEmpty,
 };
 use jiff::civil::Date;
 use maud::{Markup, PreEscaped, html};
@@ -412,13 +411,14 @@ async fn found(
     let Some(exercise) = canonical.exercise_key().and_then(Exercise::named) else {
         return Err(Redirect::to(&session).into_response());
     };
-    let ids = edits::ids_of(store, &canonical)
+    let (held, ids) = edits::ids_of(store, &canonical)
         .await
         .map_err(|error| unreadable(&error.to_string()))?
         .ok_or_else(|| unreadable("the session is being rebuilt; open it again in a moment"))?;
     Ok((
         exercise,
         HeldExercise {
+            session: held,
             exercise: ids.exercise,
             day: at.on,
             sets: ids.sets,
@@ -536,19 +536,26 @@ pub async fn posted(
         Ok(chosen) => chosen,
         Err(refusal) => return refused(&refusal),
     };
-    let edits: Vec<ExerciseEdit> = chosen
-        .into_iter()
-        .map(|held| ExerciseEdit {
-            exercise: held.exercise,
-            becomes: to,
-            read: exercise,
-            sets: held.sets.iter().copied().collect(),
-        })
-        .collect();
-    let Ok(edits) = NonEmpty::new(edits) else {
+    if chosen.is_empty() {
         return refused(&Refusal::whole("choose at least one session".to_owned()));
-    };
-    match edits::assert_exercises(store, &because, &edits).await {
+    }
+    let mut sessions: BTreeMap<_, SparseGymSession> = BTreeMap::new();
+    let mut found = BTreeMap::new();
+    for held in chosen {
+        sessions
+            .entry(held.session)
+            .or_default()
+            .exercises
+            .insert(held.exercise, SparseExercise::was(to));
+        found.insert(
+            held.exercise,
+            Found {
+                read: exercise,
+                sets: held.sets.iter().copied().collect(),
+            },
+        );
+    }
+    match edits::assert(store, &because, &sessions, &found).await {
         Ok(id) => {
             // What History collects, so the session is drawn again from the
             // layers derived under the change by the time it is opened.
@@ -582,16 +589,20 @@ pub async fn made(
         let Some(edit) = edits::one(store, id).await.map_err(|e| e.to_string())? else {
             return Ok(None);
         };
-        let said = match &edit.edited {
-            Edited::Exercises(exercises) => {
-                let ids: BTreeSet<CanonicalExerciseId> =
-                    exercises.iter().map(|edited| edited.exercise).collect();
-                let reached = edits::exercises_held(store, &ids)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                exercises_changed(exercises.first().becomes, &reached)
+        let renamed: Vec<(CanonicalExerciseId, Exercise)> = edit.exercises().collect();
+        let said = if let Some((_, becomes)) = renamed.first() {
+            let ids: BTreeSet<CanonicalExerciseId> =
+                renamed.iter().map(|(exercise, _)| *exercise).collect();
+            let reached = edits::exercises_held(store, &ids)
+                .await
+                .map_err(|e| e.to_string())?;
+            exercises_changed(*becomes, &reached)
+        } else if edit.bounds().next().is_some() {
+            html! { p { "When the session started and ended is changed." } }
+        } else {
+            html! {
+                @for (_, fields) in edit.sets() { p { "The set now reads " (fields) "." } }
             }
-            Edited::Set { edit, .. } => html! { p { "The set now reads " (edit) "." } },
         };
         Ok::<_, String>(Some(changed(&session, &undo, &said)))
     };
@@ -625,7 +636,7 @@ mod tests {
     use configurator::edits::HeldExercise;
     use domain::gym::{
         exercise::{DurationExercise, Exercise, RepsExercise},
-        identity::{CanonicalExerciseId, CanonicalSetId},
+        identity::{CanonicalExerciseId, CanonicalSessionId, CanonicalSetId},
     };
     use jiff::civil::date;
 
@@ -633,6 +644,7 @@ mod tests {
 
     fn held(id: i64, day: i8, sets: i64) -> HeldExercise {
         HeldExercise {
+            session: CanonicalSessionId::try_from(id).expect("an id"),
             exercise: CanonicalExerciseId::try_from(id).expect("an id"),
             day: date(2025, 3, day),
             sets: (1..=sets)

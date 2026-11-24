@@ -42,7 +42,10 @@ use std::fmt;
 
 use crate::{
     landing::{LandingRecordId, Provenance, SourceRecordId},
-    measure::{HeartRateSeries, HeartRateSummary, PositiveDuration, RepCount},
+    measure::{
+        BeatsPerMinute, HeartRateSample, HeartRateSeries, HeartRateSummary, PositiveDuration,
+        RepCount,
+    },
     normalised::{NormalisedEntity, StartedAt},
     sequence::NonEmpty,
 };
@@ -246,6 +249,62 @@ impl MeasuredHeartRate {
     /// The readings themselves, where the recording landed and held any.
     pub const fn series(&self) -> Option<&HeartRateSeries> {
         self.series.as_ref()
+    }
+
+    /// Only what was read between `from` and `to`, each in seconds from the
+    /// start of the recording (#894): the session started late or ended early
+    /// against the watch, so what it recorded outside them was not the
+    /// session.
+    ///
+    /// **The summary is read again from the readings kept**, the average
+    /// weighting each by how long it held until the next, since the watch
+    /// writes at its own judgement rather than at a fixed rate. Where every
+    /// reading is kept, or there is no series to read, it is the source's
+    /// own figure unchanged.
+    #[must_use]
+    pub fn between(&self, from: i64, to: i64) -> Self {
+        let Some(series) = &self.series else {
+            return self.clone();
+        };
+        let within = |sample: &&HeartRateSample| {
+            i64::try_from(sample.at.as_seconds()).is_ok_and(|at| from <= at && at <= to)
+        };
+        let kept: Vec<HeartRateSample> = series.samples().iter().filter(within).copied().collect();
+        if kept.len() == series.samples().count() {
+            return self.clone();
+        }
+        let Ok(kept) = NonEmpty::new(kept) else {
+            return Self {
+                stated: self.stated,
+                series: None,
+            };
+        };
+        let highest = kept
+            .iter()
+            .map(|sample| sample.beats_per_minute)
+            .max()
+            .unwrap_or_else(|| self.stated.highest());
+        let mut weighted: u64 = 0;
+        let mut held: u64 = 0;
+        let samples: Vec<&HeartRateSample> = kept.iter().collect();
+        for (index, sample) in samples.iter().enumerate() {
+            let seconds = samples.get(index + 1).map_or(1, |next| {
+                next.at
+                    .as_seconds()
+                    .saturating_sub(sample.at.as_seconds())
+                    .max(1)
+            });
+            weighted += u64::from(sample.beats_per_minute.as_u32()) * seconds;
+            held += seconds;
+        }
+        let average = u32::try_from((weighted + held / 2) / held.max(1))
+            .ok()
+            .and_then(|beats| BeatsPerMinute::new(beats).ok())
+            .unwrap_or_else(|| self.stated.average());
+        Self {
+            stated: HeartRateSummary::new(average, highest),
+            series: Some(HeartRateSeries::new(kept)),
+        }
     }
 }
 

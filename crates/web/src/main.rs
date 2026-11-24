@@ -10,6 +10,7 @@ mod at_power;
 mod body;
 mod card;
 mod change;
+mod change_bounds;
 mod change_set;
 mod collected;
 mod composition;
@@ -214,6 +215,10 @@ fn pages() -> Pages {
         .form(
             change_set::ROUTE,
             get(change_set::shown).post(change_set::posted),
+        )
+        .form(
+            change_bounds::ROUTE,
+            get(change_bounds::shown).post(change_bounds::posted),
         )
         .file(body::REPLACED[0], get(to_body))
         .file(body::REPLACED[1], get(to_body))

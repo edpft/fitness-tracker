@@ -27,7 +27,8 @@ pub mod set;
 pub mod workout;
 
 pub use canonical::{
-    CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Identified,
+    Account, CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Identified,
+    InvalidBounds,
 };
 pub use canonicalise::{REACHES, canonical_sessions, canonical_sessions_within};
 pub use exercise::{

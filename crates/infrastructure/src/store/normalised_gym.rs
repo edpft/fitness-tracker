@@ -118,6 +118,8 @@ struct SpineRow {
     /// The workout a watch's recording hangs off, where this is a watch's
     /// session.
     measured_workout: Option<i64>,
+    /// Which source's account it is.
+    stream: String,
     /// How long the watch recorded for.
     ///
     /// **A watch states this on its own row, not on the workout**, and it is
@@ -142,6 +144,7 @@ impl SqliteNormalisedGymSessionReader {
         let rows = sqlx::query!(
             r#"
             SELECT s.id AS "id!: i64",
+                   s.stream AS "stream!: String",
                    MIN(w.started_at_utc) AS "started_at_utc?: String",
                    MIN(w.zone) AS "zone?: String",
                    MIN(w.on_day) AS "on_day?: String",
@@ -168,6 +171,7 @@ impl SqliteNormalisedGymSessionReader {
             .into_iter()
             .map(|row| SpineRow {
                 id: row.id,
+                stream: row.stream,
                 started_at_utc: row.started_at_utc,
                 zone: row.zone,
                 on_day: row.on_day,
@@ -185,6 +189,7 @@ impl SqliteNormalisedGymSessionReader {
         row: &SpineRow,
     ) -> Result<NormalisedGymSession, StoreError> {
         let id = normalised_session_from_storage(row.id)?;
+        let stream = row.stream.parse().map_err(|e| corrupt(&e))?;
         let when = occurred(
             row.started_at_utc.as_deref(),
             row.zone.as_deref(),
@@ -204,7 +209,9 @@ impl SqliteNormalisedGymSessionReader {
 
         let Some(workout) = row.measured_workout else {
             let items = Self::items(connection, row.id, id).await?;
-            return Ok(NormalisedGymSession::from_log(id, when, duration, items));
+            return Ok(NormalisedGymSession::from_log(
+                id, stream, when, duration, items,
+            ));
         };
 
         let heart_rate = match (row.average_bpm, row.highest_bpm) {
@@ -234,7 +241,7 @@ impl SqliteNormalisedGymSessionReader {
         }
         let sets = named;
         Ok(NormalisedGymSession::from_watch(
-            id, when, duration, heart_rate, &sets,
+            id, stream, when, duration, heart_rate, &sets,
         ))
     }
 

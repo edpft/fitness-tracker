@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT edit AS \"edit!\", exercise AS \"exercise!\", becomes, read, sets\n        FROM canonical_gym_exercise_edit\n        ORDER BY edit, exercise\n        ",
+  "query": "\n        SELECT edit AS \"edit!\", session AS \"session!\", exercise AS \"exercise!\", becomes, read, sets\n        FROM canonical_gym_exercise_edit\n        ORDER BY edit, exercise\n        ",
   "describe": {
     "columns": [
       {
@@ -15,8 +15,19 @@
         }
       },
       {
-        "name": "exercise!",
+        "name": "session!",
         "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise_edit",
+            "name": "session"
+          }
+        }
+      },
+      {
+        "name": "exercise!",
+        "ordinal": 2,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -27,7 +38,7 @@
       },
       {
         "name": "becomes",
-        "ordinal": 2,
+        "ordinal": 3,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -38,7 +49,7 @@
       },
       {
         "name": "read",
-        "ordinal": 3,
+        "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -49,7 +60,7 @@
       },
       {
         "name": "sets",
-        "ordinal": 4,
+        "ordinal": 5,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -67,8 +78,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "4393df33d0c1f051066a09907ebe0f8714b453784031b6e499fda6a67b9453d3"
+  "hash": "cbd6cc609ca1587e7e1c3b00fea7391859270133db213b283df39f86a3a5bc46"
 }

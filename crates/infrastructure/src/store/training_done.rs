@@ -50,9 +50,10 @@ impl TrainingDone for SqliteTrainingDone {
 
         let gym = sqlx::query!(
             r#"
-            SELECT started_at_utc, zone, on_day, duration_seconds AS "duration!: i64"
+            SELECT started_at_utc, zone, on_day,
+                   unixepoch(ended_at_utc) - unixepoch(started_at_utc) AS "duration!: i64"
             FROM canonical_gym_session
-            WHERE duration_seconds IS NOT NULL
+            WHERE ended_at_utc IS NOT NULL
             "#
         )
         .fetch_all(&self.pool)

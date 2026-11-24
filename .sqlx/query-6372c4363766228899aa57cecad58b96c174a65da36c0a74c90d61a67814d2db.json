@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT e.id AS \"exercise!\", s.started_at_utc, s.zone, s.on_day,\n                   (SELECT json_group_array(st.id) FROM (\n                        SELECT id FROM canonical_gym_set\n                         WHERE session = e.session AND item_position = e.item_position\n                           AND exercise_position = e.position\n                         ORDER BY position) AS st) AS \"sets!: String\"\n            FROM canonical_gym_exercise AS e\n            JOIN canonical_gym_session AS s ON s.id = e.session\n            WHERE e.exercise = ? AND e.measure = ?\n            ",
+  "query": "\n            SELECT e.id AS \"exercise!\", e.session AS \"session!\", s.started_at_utc, s.zone, s.on_day,\n                   (SELECT json_group_array(st.id) FROM (\n                        SELECT id FROM canonical_gym_set\n                         WHERE session = e.session AND item_position = e.item_position\n                           AND exercise_position = e.position\n                         ORDER BY position) AS st) AS \"sets!: String\"\n            FROM canonical_gym_exercise AS e\n            JOIN canonical_gym_session AS s ON s.id = e.session\n            WHERE e.id IN (SELECT value FROM json_each(?))\n            ",
   "describe": {
     "columns": [
       {
@@ -15,8 +15,19 @@
         }
       },
       {
-        "name": "started_at_utc",
+        "name": "session!",
         "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_exercise",
+            "name": "session"
+          }
+        }
+      },
+      {
+        "name": "started_at_utc",
+        "ordinal": 2,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -27,7 +38,7 @@
       },
       {
         "name": "zone",
-        "ordinal": 2,
+        "ordinal": 3,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -38,7 +49,7 @@
       },
       {
         "name": "on_day",
-        "ordinal": 3,
+        "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -49,21 +60,22 @@
       },
       {
         "name": "sets!: String",
-        "ordinal": 4,
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": "Expression"
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 1
     },
     "nullable": [
       false,
+      null,
       true,
       true,
       true,
       true
     ]
   },
-  "hash": "de337c009eb45ce53ea98835495401de08efe3b5fc61405e85a17bb7d4a7e8a2"
+  "hash": "6372c4363766228899aa57cecad58b96c174a65da36c0a74c90d61a67814d2db"
 }

@@ -154,13 +154,17 @@ fn session(
         sets: NonEmpty::of(first.clone(), rest.to_vec()),
     };
     Ok(CanonicalGymSession::new(
-        Occurred::At(StartedAt::new(
-            format!("{day}T18:30:00Z").parse()?,
-            OperatorZone::try_from("Europe/London".to_owned())?,
-        )),
+        domain::canonical::Attributed::new(
+            Occurred::At(StartedAt::new(
+                format!("{day}T18:30:00Z").parse()?,
+                OperatorZone::try_from("Europe/London".to_owned())?,
+            )),
+            domain::canonical::NormalisedSessionId::FIRST,
+        ),
         NonEmpty::of(CanonicalItem::exercise(squat), vec![]),
         None,
         None,
+        Vec::new(),
     ))
 }
 

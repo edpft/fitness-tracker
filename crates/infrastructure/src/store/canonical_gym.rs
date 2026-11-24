@@ -41,7 +41,7 @@ use application::{
 use domain::{
     canonical::{Attributed, NormalisedSessionId, Occurred, Reach, SessionCount, TakenFrom},
     gym::{
-        self, CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Guess,
+        self, Account, CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Guess,
         GuessedExercise, Identified, Load, MeasuredHeartRate, Performed, SetKind,
         edit::{Edit, Edits},
         exercise::{
@@ -143,8 +143,9 @@ struct SessionRow {
     started_at_utc: Option<String>,
     zone: Option<String>,
     on_day: Option<String>,
-    duration_seconds: Option<i64>,
-    duration_normalised_session: Option<i64>,
+    started_normalised_session: Option<i64>,
+    ended_at_utc: Option<String>,
+    ended_normalised_session: Option<i64>,
     average_bpm: Option<i64>,
     highest_bpm: Option<i64>,
     heart_rate_normalised_session: Option<i64>,
@@ -194,7 +195,7 @@ impl CanonicalGymReading {
             SessionRow,
             r#"
             SELECT id AS "id!", started_at_utc, zone, on_day,
-                   duration_seconds, duration_normalised_session,
+                   started_normalised_session, ended_at_utc, ended_normalised_session,
                    average_bpm, highest_bpm, heart_rate_normalised_session
             FROM canonical_gym_session
             ORDER BY COALESCE(started_at_utc, on_day), id
@@ -239,19 +240,24 @@ async fn session_of(
     connection: &mut SqliteConnection,
     row: &SessionRow,
 ) -> Result<CanonicalGymSession, StoreError> {
-    let occurred = occurred(
-        row.started_at_utc.as_deref(),
-        row.zone.as_deref(),
-        row.on_day.as_deref(),
-    )?;
-    let duration = match (row.duration_seconds, row.duration_normalised_session) {
-        (Some(seconds), Some(session)) => Some(Attributed::new(
-            PositiveDuration::from_seconds(u64::try_from(seconds).map_err(|e| corrupt(&e))?)
-                .map_err(|e| corrupt(&e))?,
-            normalised_session_from_storage(session)?,
-        )),
-        _ => None,
-    };
+    let occurred = Attributed::new(
+        occurred(
+            row.started_at_utc.as_deref(),
+            row.zone.as_deref(),
+            row.on_day.as_deref(),
+        )?,
+        taken_from(row.started_normalised_session)?,
+    );
+    let ended = row
+        .ended_at_utc
+        .as_deref()
+        .map(|ended| {
+            Ok::<_, StoreError>(Attributed::new(
+                ended.parse::<Timestamp>().map_err(|e| corrupt(&e))?,
+                taken_from(row.ended_normalised_session)?,
+            ))
+        })
+        .transpose()?;
     let heart_rate = match (
         row.average_bpm,
         row.highest_bpm,
@@ -268,8 +274,9 @@ async fn session_of(
         _ => None,
     };
     let items = read_items(connection, row.id).await?;
+    let accounts = read_accounts(connection, row.id).await?;
     Ok(CanonicalGymSession::new(
-        occurred, items, heart_rate, duration,
+        occurred, items, heart_rate, ended, accounts,
     ))
 }
 
@@ -290,7 +297,7 @@ async fn spine_between(
         SessionRow,
         r#"
             SELECT id AS "id!", started_at_utc, zone, on_day,
-                   duration_seconds, duration_normalised_session,
+                   started_normalised_session, ended_at_utc, ended_normalised_session,
                    average_bpm, highest_bpm, heart_rate_normalised_session
             FROM canonical_gym_session
             WHERE COALESCE(started_at_utc, on_day) >= ?
@@ -337,7 +344,9 @@ impl application::Activities for SqliteCanonicalGymSessionStore {
         let (lower, upper) = widened(from, to)?;
         let rows = sqlx::query!(
             r#"
-            SELECT s.started_at_utc, s.zone, s.on_day, s.duration_seconds, s.average_bpm,
+            SELECT s.started_at_utc, s.zone, s.on_day,
+                   unixepoch(s.ended_at_utc) - unixepoch(s.started_at_utc) AS "duration_seconds: i64",
+                   s.average_bpm,
                    (SELECT COUNT(*) FROM canonical_gym_exercise AS e
                      WHERE e.session = s.id) AS "exercises!: i64",
                    (SELECT COUNT(*) FROM canonical_gym_set AS t
@@ -496,7 +505,7 @@ async fn standing_on(
         SessionRow,
         r#"
             SELECT id AS "id!", started_at_utc, zone, on_day,
-                   duration_seconds, duration_normalised_session,
+                   started_normalised_session, ended_at_utc, ended_normalised_session,
                    average_bpm, highest_bpm, heart_rate_normalised_session
             FROM canonical_gym_session
             WHERE id IN (
@@ -512,12 +521,14 @@ async fn standing_on(
                     OR rest_after_normalised_session = ?
                 UNION
                 SELECT id FROM canonical_gym_session
-                 WHERE duration_normalised_session = ?
+                 WHERE started_normalised_session = ?
+                    OR ended_normalised_session = ?
                     OR heart_rate_normalised_session = ?
             )
             ORDER BY id
             LIMIT 1
             "#,
+        normalised,
         normalised,
         normalised,
         normalised,
@@ -587,6 +598,7 @@ pub(super) async fn clear(tx: &mut Transaction<'_, Sqlite>) -> Result<(), StoreE
         "DELETE FROM canonical_gym_exercise",
         "DELETE FROM canonical_gym_item",
         "DELETE FROM canonical_gym_session_heart_rate",
+        "DELETE FROM canonical_gym_session_account",
         "DELETE FROM canonical_gym_session",
     ] {
         sqlx::query(statement)
@@ -652,6 +664,8 @@ async fn remove_on(
         "DELETE FROM canonical_gym_item WHERE session IN (SELECT value FROM json_each(?))",
         "DELETE FROM canonical_gym_session_heart_rate \
          WHERE session IN (SELECT value FROM json_each(?))",
+        "DELETE FROM canonical_gym_session_account \
+         WHERE session IN (SELECT value FROM json_each(?))",
         "DELETE FROM canonical_gym_session WHERE id IN (SELECT value FROM json_each(?))",
     ] {
         sqlx::query(statement)
@@ -694,6 +708,7 @@ async fn write_all(
         };
         let id = ids.session.as_i64();
         write_session(tx, id, written).await?;
+        write_accounts(tx, id, written).await?;
         write_heart_rate(tx, id, written).await?;
         let mut exercises = ids.exercises.iter();
         for (position, item) in written.items().iter().enumerate() {
@@ -847,13 +862,15 @@ async fn write_session(
         ),
         Occurred::On(day) => (None, None, Some(day.to_string())),
     };
-    let (duration_seconds, duration_normalised_session) = match session.duration() {
-        Some(duration) => (
-            Some(i64::try_from(duration.copied().as_seconds()).map_err(|e| corrupt(&e))?),
-            Some(duration.normalised_session().as_i64()),
-        ),
-        None => (None, None),
-    };
+    let started_normalised_session = session
+        .started()
+        .normalised()
+        .map(NormalisedSessionId::as_i64);
+    let ended_at_utc = session.ended().map(|ended| ended.value().to_string());
+    let ended_normalised_session = session
+        .ended()
+        .and_then(Attributed::normalised)
+        .map(NormalisedSessionId::as_i64);
     let (average_bpm, highest_bpm, heart_rate_normalised_session) =
         session
             .heart_rate()
@@ -868,17 +885,19 @@ async fn write_session(
     sqlx::query!(
         r#"
         INSERT INTO canonical_gym_session (
-            id, started_at_utc, zone, on_day, duration_seconds, duration_normalised_session,
+            id, started_at_utc, zone, on_day, started_normalised_session,
+            ended_at_utc, ended_normalised_session,
             average_bpm, highest_bpm, heart_rate_normalised_session
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         id,
         started_at_utc,
         zone,
         on_day,
-        duration_seconds,
-        duration_normalised_session,
+        started_normalised_session,
+        ended_at_utc,
+        ended_normalised_session,
         average_bpm,
         highest_bpm,
         heart_rate_normalised_session
@@ -887,6 +906,99 @@ async fn write_session(
     .await
     .map_err(|e| store_error(&e))?;
     Ok(())
+}
+
+/// One account as it is written: its normalised session, its stream, its
+/// start's instant, zone or day, and its end.
+type AccountRow = (
+    i64,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+/// Each source's own start and end, in one statement.
+async fn write_accounts(
+    tx: &mut Transaction<'_, Sqlite>,
+    session: i64,
+    written: &CanonicalGymSession,
+) -> Result<(), StoreError> {
+    let mut rows: Vec<AccountRow> = Vec::new();
+    for account in written.accounts() {
+        let (started_at_utc, zone, on_day) = match &account.occurred {
+            Occurred::At(started_at) => (
+                Some(started_at.instant().to_string()),
+                Some(started_at.zone().id().to_owned()),
+                None,
+            ),
+            Occurred::On(day) => (None, None, Some(day.to_string())),
+        };
+        rows.push((
+            account.normalised.as_i64(),
+            account.stream.to_string(),
+            started_at_utc,
+            zone,
+            on_day,
+            account.ended.map(|ended| ended.to_string()),
+        ));
+    }
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let rows = serde_json::to_string(&rows).map_err(|e| corrupt(&e))?;
+    sqlx::query!(
+        r#"
+        INSERT INTO canonical_gym_session_account
+            (session, normalised_session, stream, started_at_utc, zone, on_day, ended_at_utc)
+        SELECT ?, value ->> 0, value ->> 1, value ->> 2, value ->> 3, value ->> 4, value ->> 5
+          FROM json_each(?)
+        "#,
+        session,
+        rows
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| store_error(&e))?;
+    Ok(())
+}
+
+/// Each source's own start and end, as the session holds them.
+async fn read_accounts(
+    connection: &mut SqliteConnection,
+    session: i64,
+) -> Result<Vec<Account>, StoreError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT normalised_session AS "normalised!", stream, started_at_utc, zone, on_day,
+               ended_at_utc
+        FROM canonical_gym_session_account
+        WHERE session = ?
+        ORDER BY normalised_session
+        "#,
+        session
+    )
+    .fetch_all(&mut *connection)
+    .await
+    .map_err(|e| store_error(&e))?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(Account {
+                stream: row.stream.parse().map_err(|e| corrupt(&e))?,
+                normalised: normalised_session_from_storage(row.normalised)?,
+                occurred: occurred(
+                    row.started_at_utc.as_deref(),
+                    row.zone.as_deref(),
+                    row.on_day.as_deref(),
+                )?,
+                ended: row
+                    .ended_at_utc
+                    .map(|ended| ended.parse::<Timestamp>().map_err(|e| corrupt(&e)))
+                    .transpose()?,
+            })
+        })
+        .collect()
 }
 
 /// The watch's beats, as the canonical session holds them.

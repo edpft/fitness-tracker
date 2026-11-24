@@ -7,7 +7,7 @@
 //! the session it shows: each set names the source sets it was built from,
 //! and the layer records where each was last placed.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use application::{
     CanonicalGymSessionStore as _, CanonicalLayer, Input, Node, Reads, StoreError,
@@ -17,17 +17,29 @@ use application::{
 use domain::{
     gym::{
         CanonicalExercise, CanonicalGymSession,
-        edit::{self, Conflict, Edit, EditId, EditReason, Edited, Edits, ExerciseEdit, SetEdit},
+        edit::{
+            self, Bounds, Conflict, Edit, EditId, EditReason, Edits, Found, SparseGymSession,
+            SparseSet,
+        },
         exercise::Exercise,
-        identity::{CanonicalExerciseId, CanonicalSetId, ExerciseIds},
+        identity::{
+            CanonicalExerciseId, CanonicalSessionId, CanonicalSetId, ExerciseIds, SessionIds,
+        },
     },
     normalised::OperatorZone,
-    sequence::NonEmpty,
 };
 use infrastructure::SqliteCanonicalGymSessionStore;
 use jiff::{Timestamp, civil::Date};
 
 use crate::store::Store;
+
+/// What an edit says one exercise was, and what it read as when edited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Renamed {
+    pub exercise: CanonicalExerciseId,
+    pub read: Exercise,
+    pub becomes: Exercise,
+}
 
 /// An edit a rebuild left standing on something it did not stand on when it
 /// was made, for the operator to settle (§ II.2, #905).
@@ -37,15 +49,36 @@ pub enum ToSettle {
     /// says: kept, or the exercise's edit removed.
     Added {
         set: CanonicalSetId,
-        edit: ExerciseEdit,
+        edit: Renamed,
         /// Where it is opened; [`None`] where the layer is being rebuilt under
         /// the page.
         at: Option<Located>,
     },
     /// An edited exercise no session holds any more.
-    ExerciseGone(ExerciseEdit),
+    ExerciseGone(Renamed),
     /// An edited set no exercise holds any more.
-    SetGone { set: CanonicalSetId, edit: SetEdit },
+    SetGone {
+        set: CanonicalSetId,
+        edit: SparseSet,
+    },
+    /// A session whose start or end was edited, which no rebuild holds any
+    /// more.
+    SessionGone(CanonicalSessionId),
+    /// A session whose start or end was taken from a source that no longer
+    /// accounts for it: it reads as derived until settled.
+    SourceGone {
+        session: CanonicalSessionId,
+        bounds: Bounds,
+    },
+}
+
+/// What the folded edits say `exercise` was, where they say anything.
+fn renamed(edits: &Edits, exercise: CanonicalExerciseId) -> Option<Renamed> {
+    edits.exercise(exercise).map(|(becomes, found)| Renamed {
+        exercise,
+        read: found.read,
+        becomes,
+    })
 }
 
 /// Where a set is opened: its session, and its place among its exercise's
@@ -96,36 +129,43 @@ impl Overlay {
         if edits.is_empty() {
             return Ok(Vec::new());
         }
-        let held = self
-            .store
-            .adapter(SqliteCanonicalGymSessionStore::new)
+        let adapter = self.store.adapter(SqliteCanonicalGymSessionStore::new);
+        let held = adapter
             .call(
                 "SqliteCanonicalGymSessionStore::held",
                 SqliteCanonicalGymSessionStore::held,
             )
             .await?;
+        let sessions = adapter
+            .call(
+                "SqliteCanonicalGymSessionStore::sessions_held",
+                SqliteCanonicalGymSessionStore::sessions_held,
+            )
+            .await?;
         let mut settle = Vec::new();
-        for conflict in edits.conflicts(&held) {
+        for conflict in edits.conflicts(&held, &sessions) {
             match conflict {
                 Conflict::Added { exercise, set } => {
-                    if let Some(edit) = edits.exercise(exercise) {
+                    if let Some(edit) = renamed(&edits, exercise) {
                         settle.push(ToSettle::Added {
                             set,
-                            edit: edit.clone(),
+                            edit,
                             at: self.located(exercise, set).await?,
                         });
                     }
                 }
                 Conflict::ExerciseGone(exercise) => {
-                    settle.extend(
-                        edits
-                            .exercise(exercise)
-                            .cloned()
-                            .map(ToSettle::ExerciseGone),
-                    );
+                    settle.extend(renamed(&edits, exercise).map(ToSettle::ExerciseGone));
                 }
                 Conflict::SetGone(set) => {
                     settle.extend(edits.set(set).map(|edit| ToSettle::SetGone { set, edit }));
+                }
+                Conflict::SessionGone(session) => settle.push(ToSettle::SessionGone(session)),
+                Conflict::SourceGone(session) => {
+                    settle.extend(edits.bounds(session).map(|bounds| ToSettle::SourceGone {
+                        session,
+                        bounds: bounds.clone(),
+                    }));
                 }
             }
         }
@@ -154,7 +194,7 @@ impl Overlay {
                 None => break,
                 Some(Activity::Gym { session, .. }) => {
                     for read in session.exercises() {
-                        let Some(ids) = ids_of(&self.store, read).await? else {
+                        let Some((_, ids)) = ids_of(&self.store, read).await? else {
                             continue;
                         };
                         if ids.exercise == exercise {
@@ -186,8 +226,10 @@ pub struct InForce {
 }
 
 /// Where on the session an edit says something.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Here {
+    /// When it started or ended.
+    Bounds(Bounds),
     /// One of its exercises: what it read as when it was changed, and what
     /// it became.
     Exercise { read: Exercise, becomes: Exercise },
@@ -195,7 +237,7 @@ pub enum Here {
     Set {
         position: usize,
         set: usize,
-        edit: SetEdit,
+        edit: SparseSet,
     },
 }
 
@@ -216,72 +258,80 @@ impl Overlay {
             return Ok(Vec::new());
         }
         let mut placed: Vec<(usize, ExerciseIds)> = Vec::new();
+        let mut held: Option<CanonicalSessionId> = None;
         for (index, exercise) in session.exercises().enumerate() {
-            if let Some(ids) = ids_of(&self.store, exercise).await? {
+            if let Some((session, ids)) = ids_of(&self.store, exercise).await? {
+                held.get_or_insert(session);
                 placed.push((index + 1, ids));
             }
         }
-        let ids: Vec<ExerciseIds> = placed.iter().map(|(_, ids)| ids.clone()).collect();
-        let mut listed = Vec::new();
-        for edit in edit::in_force(&every, &ids) {
-            let Some(here) = here(&edit.edited, &placed) else {
-                continue;
-            };
-            let sessions = match &edit.edited {
-                Edited::Exercises(exercises) => {
-                    let reached: BTreeSet<CanonicalExerciseId> =
-                        exercises.iter().map(|edited| edited.exercise).collect();
-                    exercises_held(&self.store, &reached)
-                        .await?
-                        .iter()
-                        .map(|held| held.day)
-                        .collect::<BTreeSet<_>>()
-                        .len()
-                        .max(1)
-                }
-                Edited::Set { .. } => 1,
-            };
-            listed.push(InForce {
-                edit: edit.clone(),
-                here,
-                sessions,
-            });
-        }
-        Ok(listed)
+        let Some(session) = held else {
+            return Ok(Vec::new());
+        };
+        let ids = SessionIds {
+            session,
+            exercises: placed.iter().map(|(_, ids)| ids.clone()).collect(),
+        };
+        Ok(edit::in_force(&every, &ids)
+            .into_iter()
+            .filter_map(|edit| {
+                here(edit, session, &placed).map(|here| InForce {
+                    edit: edit.clone(),
+                    here,
+                    sessions: edit.reaches(),
+                })
+            })
+            .collect())
     }
 }
 
-/// Where on a session holding `placed` an edit says something.
-fn here(edited: &Edited, placed: &[(usize, ExerciseIds)]) -> Option<Here> {
-    match edited {
-        Edited::Exercises(exercises) => exercises.iter().find_map(|edited| {
-            placed
-                .iter()
-                .any(|(_, ids)| ids.exercise == edited.exercise)
-                .then_some(Here::Exercise {
-                    read: edited.read,
-                    becomes: edited.becomes,
-                })
-        }),
-        Edited::Set { set, edit } => placed.iter().find_map(|(position, ids)| {
-            ids.sets
-                .iter()
-                .position(|held| held == set)
-                .map(|index| Here::Set {
-                    position: *position,
-                    set: index + 1,
-                    edit: *edit,
-                })
-        }),
+/// Where on a session holding `placed` an edit says something: an exercise
+/// it renames, before a set it changes.
+fn here(edit: &Edit, session: CanonicalSessionId, placed: &[(usize, ExerciseIds)]) -> Option<Here> {
+    let bounds = edit
+        .bounds()
+        .find(|(id, _, _)| *id == session)
+        .map(|(_, started, ended)| {
+            Here::Bounds(Bounds {
+                started: started.cloned(),
+                ended: ended.cloned(),
+            })
+        });
+    if bounds.is_some() {
+        return bounds;
     }
+    let renamed = edit.exercises().find_map(|(exercise, becomes)| {
+        let found = edit.found.get(&exercise)?;
+        placed
+            .iter()
+            .any(|(_, ids)| ids.exercise == exercise)
+            .then_some(Here::Exercise {
+                read: found.read,
+                becomes,
+            })
+    });
+    renamed.or_else(|| {
+        edit.sets().find_map(|(set, fields)| {
+            placed.iter().find_map(|(position, ids)| {
+                ids.sets
+                    .iter()
+                    .position(|held| *held == set)
+                    .map(|index| Here::Set {
+                        position: *position,
+                        set: index + 1,
+                        edit: fields,
+                    })
+            })
+        })
+    })
 }
 
 /// One canonical exercise as an edit finds it: its day and its sets.
 pub use infrastructure::HeldExercise;
 
-/// The ids an exercise read from the layer holds, found by its sets' sources:
-/// [`None`] where one of its sets was placed nowhere, which is a layer being
-/// rebuilt under the page.
+/// The session an exercise read from the layer is in, and the ids it holds,
+/// found by its sets' sources: [`None`] where one of its sets was placed
+/// nowhere, which is a layer being rebuilt under the page.
 ///
 /// # Errors
 ///
@@ -289,9 +339,9 @@ pub use infrastructure::HeldExercise;
 pub async fn ids_of(
     store: &Store,
     exercise: &CanonicalExercise,
-) -> Result<Option<ExerciseIds>, StoreError> {
+) -> Result<Option<(CanonicalSessionId, ExerciseIds)>, StoreError> {
     let adapter = store.adapter(SqliteCanonicalGymSessionStore::new);
-    let mut held: Option<CanonicalExerciseId> = None;
+    let mut held: Option<(CanonicalSessionId, CanonicalExerciseId)> = None;
     let mut sets = Vec::new();
     for sources in exercise.set_sources() {
         let Some(source) = sources.first() else {
@@ -305,12 +355,14 @@ pub async fn ids_of(
         else {
             return Ok(None);
         };
-        if *held.get_or_insert(placed.exercise) != placed.exercise {
+        if *held.get_or_insert((placed.session, placed.exercise))
+            != (placed.session, placed.exercise)
+        {
             return Ok(None);
         }
         sets.push(placed.set);
     }
-    Ok(held.map(|exercise| ExerciseIds { exercise, sets }))
+    Ok(held.map(|(session, exercise)| (session, ExerciseIds { exercise, sets })))
 }
 
 /// Every canonical exercise that reads as `exercise` now, oldest first.
@@ -348,40 +400,21 @@ pub async fn exercises_held(
         .await
 }
 
-/// Assert what exercises were, in one assertion.
+/// Assert what sessions were, in one assertion.
 ///
 /// # Errors
 ///
 /// [`StoreError`] if the store cannot be written.
-pub async fn assert_exercises(
+pub async fn assert(
     store: &Store,
     reason: &EditReason,
-    edits: &NonEmpty<ExerciseEdit>,
+    sessions: &BTreeMap<CanonicalSessionId, SparseGymSession>,
+    found: &BTreeMap<CanonicalExerciseId, Found>,
 ) -> Result<EditId, StoreError> {
     store
         .adapter(SqliteCanonicalGymSessionStore::new)
-        .call(
-            "SqliteCanonicalGymSessionStore::assert_exercises",
-            |adapter| adapter.assert_exercises(Timestamp::now(), reason, edits),
-        )
-        .await
-}
-
-/// Assert what one set was.
-///
-/// # Errors
-///
-/// [`StoreError`] if the store cannot be written.
-pub async fn assert_set(
-    store: &Store,
-    reason: &EditReason,
-    set: CanonicalSetId,
-    edit: SetEdit,
-) -> Result<EditId, StoreError> {
-    store
-        .adapter(SqliteCanonicalGymSessionStore::new)
-        .call("SqliteCanonicalGymSessionStore::assert_set", |adapter| {
-            adapter.assert_set(Timestamp::now(), reason, set, edit)
+        .call("SqliteCanonicalGymSessionStore::assert", |adapter| {
+            adapter.assert(Timestamp::now(), reason, sessions, found)
         })
         .await
 }
@@ -464,6 +497,20 @@ pub async fn unedit_set(store: &Store, set: CanonicalSetId) -> Result<(), StoreE
         .adapter(SqliteCanonicalGymSessionStore::new)
         .call("SqliteCanonicalGymSessionStore::unedit_set", |adapter| {
             adapter.unedit_set(set)
+        })
+        .await
+}
+
+/// Remove every edit of when one session started and ended.
+///
+/// # Errors
+///
+/// [`StoreError`] if the store cannot be written.
+pub async fn unedit_bounds(store: &Store, session: CanonicalSessionId) -> Result<(), StoreError> {
+    store
+        .adapter(SqliteCanonicalGymSessionStore::new)
+        .call("SqliteCanonicalGymSessionStore::unedit_bounds", |adapter| {
+            adapter.unedit_bounds(session)
         })
         .await
 }

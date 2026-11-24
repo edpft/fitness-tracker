@@ -71,7 +71,7 @@ fn session(
     by: NormalisedSessionId,
 ) -> Result<CanonicalGymSession, Failure> {
     Ok(CanonicalGymSession::new(
-        Occurred::On(on),
+        domain::canonical::Attributed::edited(Occurred::On(on)),
         NonEmpty::of(
             CanonicalItem::exercise(CanonicalExercise::ForReps {
                 identified: Attributed::new(Identified::Recorded(lift), by),
@@ -81,6 +81,7 @@ fn session(
         ),
         None,
         None,
+        Vec::new(),
     ))
 }
 

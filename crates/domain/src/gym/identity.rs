@@ -255,7 +255,10 @@ mod tests {
 
     fn session(sets: Vec<CanonicalSet<RepCount>>) -> CanonicalGymSession {
         CanonicalGymSession::new(
-            Occurred::On("2026-11-20".parse().expect("a day")),
+            crate::canonical::Attributed::new(
+                Occurred::On("2026-11-20".parse().expect("a day")),
+                crate::canonical::NormalisedSessionId::FIRST,
+            ),
             NonEmpty::of(
                 CanonicalItem::exercise(CanonicalExercise::ForReps {
                     identified: Attributed::new(
@@ -268,6 +271,7 @@ mod tests {
             ),
             None,
             None,
+            Vec::new(),
         )
     }
 
