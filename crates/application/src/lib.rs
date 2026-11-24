@@ -59,7 +59,7 @@ pub use error::{
     FillChangeError, NormalisationError, PrescriptionError, RunLockError, ScheduleError,
     SourceError, StatusError, StoreError,
 };
-pub use graph::{Authors, Calendar, Generation, Input, Node, NotRaw, Output, Reads, Table};
+pub use graph::{Authors, Calendar, Edited, Generation, Input, Node, NotRaw, Output, Reads, Table};
 pub use ports::{
     AccountReader, Activities, Activity, Authored, ByReason, CalendarPublisher, CalendarStore,
     CanonicalCyclingSessionStore, CanonicalGymSessionStore, CanonicalLayer, CanonicalWeighInStore,
@@ -74,8 +74,8 @@ pub use ports::{
     NormalisationSummary, NormalisedCyclingSessionReader, NormalisedEntityStore,
     NormalisedGymSessionReader, NormalisedLayers, NormalisedWeighInReader, Occupant,
     OvernightHrvHistory, Part, Performances, PerformedCyclingSessions, PerformedGymSessions,
-    PerformedSessionLog, Placed, PlanAuthor, PlanStore, PlannedWith, PlayedPadelMatch,
-    PlayedPadelMatches, PrescribedWorkoutId, PrescribedWorkoutStore, Prescription,
+    PerformedSessionLog, Placed, PlanAuthor, PlanStore, PlannedWith, PlayedPadelSession,
+    PlayedPadelSessions, PrescribedWorkoutId, PrescribedWorkoutStore, Prescription,
     PrescriptionDeliverer, PrescriptionDeliveryStore, PrescriptionDestination,
     PrescriptionLifecycle, ProgressionStore, PublishedCell, PublishedCycling, PublishedProgrammes,
     PublishedRead, PulseWaveVelocityHistory, RawExtent, Reached, ReadUpTo, Reading,

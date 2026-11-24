@@ -5,7 +5,7 @@
 //! *"Only sessions for now."*
 
 use application::{
-    PlayedPadelMatch,
+    PlayedPadelSession,
     history::{Activity, Day, Number, Page as Listed, opened},
 };
 use configurator::edits::{Here, InForce, ToSettle};
@@ -189,16 +189,6 @@ fn facts(activity: &Activity) -> String {
     facts.join(" · ")
 }
 
-fn padel_facts(played: &PlayedPadelMatch) -> Vec<String> {
-    let mut facts = vec![length(Duration::from_seconds(played.duration.as_seconds()))];
-    facts.extend(
-        played
-            .heart_rate
-            .map(|heart_rate| heart_rate.average().to_string()),
-    );
-    facts
-}
-
 /// How long every ride of the session took, warm-up and cool-down included.
 fn ridden(session: &CanonicalCyclingSession) -> Duration {
     Duration::from_seconds(
@@ -264,7 +254,7 @@ pub fn session(
                             (edits(here, session, changes))
                         }
                         Ok((Some(opened::Activity::Cycling(session)), _)) => (cycling(session)),
-                        Ok((Some(opened::Activity::Padel(played)), _)) => (padel(played)),
+                        Ok((Some(opened::Activity::Padel(played)), _)) => (padel(here, played)),
                         Ok((None, _)) => p.sub { "No such activity on " (on.strftime("%A %-d %B %Y")) "." },
                         Err(error) => p.failed { "The activity could not be read: " (error) },
                     }
@@ -275,12 +265,51 @@ pub fn session(
     }
 }
 
-fn padel(played: &PlayedPadelMatch) -> Markup {
+/// An opened padel session: when, how long, and its heart rate, with a pen
+/// to change when it started and ended, and the change in force (#894).
+fn padel(here: &str, played: &PlayedPadelSession) -> Markup {
+    let zone = played.started_at().zone().as_time_zone();
+    let when = played
+        .started_at()
+        .wall_clock()
+        .strftime("%A %-d %B %Y, %H:%M")
+        .to_string();
+    let mut figures: Vec<(&str, String)> = vec![(
+        "Duration",
+        length(Duration::from_seconds(played.duration().as_seconds())),
+    )];
+    if let Some(heart_rate) = played.heart_rate() {
+        let stated = heart_rate.stated();
+        figures.push(("Heart rate", stated.average().to_string()));
+        figures.push(("Highest", stated.highest().to_string()));
+    }
     html! {
-        p.sub { (played.started_at.wall_clock().strftime("%A %-d %B %Y, %H:%M")) }
-        p.sub { (padel_facts(played).join(" · ")) }
-        @if let Some(heart_rate) = played.heart_rate {
-            p.sub { "Highest " (heart_rate.highest()) }
+        div.named {
+            p.when { (CALENDAR) (when) }
+            a.edit href=(crate::change_bounds::address(here)) aria-label="Change when"
+                title="Change when" { (PEN) }
+        }
+        dl.figures {
+            @for (label, value) in &figures { div { dt { (label) } dd { (value) } } }
+        }
+        @if let Some(change) = played.change() {
+            section.card.edits {
+                h2 { "Changes" }
+                ul {
+                    li {
+                        p {
+                            "Started at "
+                            (change.started.instant().to_zoned(zone.clone()).strftime("%H:%M:%S"))
+                            "; ended at "
+                            (played.ended().to_zoned(zone).strftime("%H:%M:%S"))
+                        }
+                        p.sub { "Because " (change.reason) }
+                        form method="post" action=(crate::change_bounds::undo_address(here, change.id)) {
+                            button { "Undo" }
+                        }
+                    }
+                }
+            }
         }
     }
 }

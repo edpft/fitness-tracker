@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use application::{
-    CanonicalGymSessionStore as _, CanonicalLayer, Input, Node, Reads, StoreError,
+    CanonicalGymSessionStore as _, Input, Node, Reads, StoreError,
     graph::NotRaw,
     history::{Number, opened::Activity},
 };
@@ -101,7 +101,7 @@ pub struct Overlay {
 /// layer they are applied to.
 impl Input for Overlay {
     fn reads() -> Reads {
-        Reads::of([Node::Edits(CanonicalLayer::Gym)])
+        Reads::of([Node::Edits(application::Edited::Gym)])
             .and(<SqliteCanonicalGymSessionStore as Input>::reads())
             .and(crate::history::opened_reads())
     }
@@ -512,5 +512,38 @@ pub async fn unedit_bounds(store: &Store, session: CanonicalSessionId) -> Result
         .call("SqliteCanonicalGymSessionStore::unedit_bounds", |adapter| {
             adapter.unedit_bounds(session)
         })
+        .await
+}
+
+/// Change when the padel session the watch calls `session` started and how
+/// long it lasted (#894).
+///
+/// # Errors
+///
+/// [`StoreError`] if the store cannot be written.
+pub async fn change_padel(
+    store: &Store,
+    reason: &EditReason,
+    session: &domain::landing::SourceRecordId,
+    started: &domain::normalised::StartedAt,
+    duration: domain::measure::PositiveDuration,
+) -> Result<EditId, StoreError> {
+    store
+        .adapter(infrastructure::SqlitePadelSessions::new)
+        .call("SqlitePadelSessions::change", |adapter| {
+            adapter.change(Timestamp::now(), reason, session, started, duration)
+        })
+        .await
+}
+
+/// Undo a change of when a padel session started and ended.
+///
+/// # Errors
+///
+/// [`StoreError`] if the store cannot be written.
+pub async fn undo_padel(store: &Store, id: EditId) -> Result<(), StoreError> {
+    store
+        .adapter(infrastructure::SqlitePadelSessions::new)
+        .call("SqlitePadelSessions::undo", |adapter| adapter.undo(id))
         .await
 }

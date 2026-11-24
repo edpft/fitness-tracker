@@ -30,10 +30,8 @@ use std::fmt;
 use jiff::Timestamp;
 
 use crate::canonical::{Attributed, Occurred, TakenFrom};
-use crate::landing::InvalidIdentifier;
 use crate::landing::LandingStream;
 use crate::measure::{Distance, Duration, Kg, PositiveDuration, RepCount};
-use crate::newtype::string_name;
 
 use super::canonical::{
     CanonicalExercise, CanonicalGymSession, CanonicalSet, Identified, InvalidBounds, between,
@@ -46,52 +44,7 @@ use super::intensity::Rir;
 use super::load::{Load, SignedKg};
 use super::outcome::Performed;
 
-/// What the store calls one assertion.
-///
-/// A surrogate, and allowed to be: it identifies the *assertion* so the
-/// operator can retract it as he made it, and nothing is anchored by it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct EditId(i64);
-
-impl From<i64> for EditId {
-    fn from(id: i64) -> Self {
-        Self(id)
-    }
-}
-
-impl EditId {
-    pub const fn as_i64(self) -> i64 {
-        self.0
-    }
-}
-
-impl fmt::Display for EditId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// Why the operator made an edit.
-///
-/// Required, because § II.2 says an unexplained override is unreadable six
-/// months later. Non-empty is the whole of the validation.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct EditReason(String);
-
-impl TryFrom<String> for EditReason {
-    type Error = InvalidIdentifier;
-
-    fn try_from(reason: String) -> Result<Self, Self::Error> {
-        if reason.trim().is_empty() {
-            return Err(InvalidIdentifier::Empty {
-                field: "an edit's reason",
-            });
-        }
-        Ok(Self(reason))
-    }
-}
-
-string_name!(EditReason, InvalidIdentifier);
+pub use crate::canonical::edit::{EditId, EditReason};
 
 /// What a set's load was, as the operator states it.
 ///

@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id AS \"id!\", session, asserted_at, reason, started_at_utc, zone,\n                   duration_seconds\n            FROM padel_session_edit\n            ORDER BY id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "padel_session_edit",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "session",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "padel_session_edit",
+            "name": "session"
+          }
+        }
+      },
+      {
+        "name": "asserted_at",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "padel_session_edit",
+            "name": "asserted_at"
+          }
+        }
+      },
+      {
+        "name": "reason",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "padel_session_edit",
+            "name": "reason"
+          }
+        }
+      },
+      {
+        "name": "started_at_utc",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "padel_session_edit",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "padel_session_edit",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "duration_seconds",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "padel_session_edit",
+            "name": "duration_seconds"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "37a95e76c378098d2f6032e505401bf0d0605da8d37b7d4a14ddadecac30eff2"
+}

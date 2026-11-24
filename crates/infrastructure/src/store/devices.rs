@@ -5,7 +5,7 @@
 //! beside what it already derived: an activity's gym session and its devices
 //! are one derivation, as a day's resting heart rate and its wear are.
 //!
-//! **A padel match is written here too** (#517), for the same reason: it is
+//! **A padel session is written here too** (#517), for the same reason: it is
 //! what an activity derives where it is not a gym session.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,7 +17,7 @@ use domain::{
     landing::{InvalidStream, LandingRecordId, LandingStream},
     measure::MeasuredHeartRate,
     normalised::{NormalisationRunId, OperatorZone, StartedAt, WorkoutCount},
-    padel::PadelMatch,
+    padel::PadelSession,
 };
 use jiff::{Timestamp, civil::Date};
 use sqlx::{Sqlite, SqlitePool, Transaction};
@@ -80,11 +80,11 @@ impl NormalisedEntityStore for SqliteGarminActivityStore {
         for session in &sessions {
             write_session(&mut tx, run_id, &stream, session).await?;
         }
-        sqlx::query!("DELETE FROM padel_match_heart_rate")
+        sqlx::query!("DELETE FROM padel_session_heart_rate")
             .execute(&mut *tx)
             .await
             .map_err(|error| store_error(&error))?;
-        sqlx::query!("DELETE FROM padel_match")
+        sqlx::query!("DELETE FROM padel_session")
             .execute(&mut *tx)
             .await
             .map_err(|error| store_error(&error))?;
@@ -122,7 +122,7 @@ impl NormalisedEntityStore for SqliteGarminActivityStore {
         super::normalised::written(&mut tx, &stream, run_id).await?;
         let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
         sqlx::query!(
-            "DELETE FROM padel_match_heart_rate \
+            "DELETE FROM padel_session_heart_rate \
              WHERE landing_record_id IN (SELECT value FROM json_each(?))",
             removed
         )
@@ -130,7 +130,7 @@ impl NormalisedEntityStore for SqliteGarminActivityStore {
         .await
         .map_err(|error| store_error(&error))?;
         sqlx::query!(
-            "DELETE FROM padel_match WHERE landing_record_id IN (SELECT value FROM json_each(?))",
+            "DELETE FROM padel_session WHERE landing_record_id IN (SELECT value FROM json_each(?))",
             removed
         )
         .execute(&mut *tx)
@@ -173,27 +173,27 @@ fn split(
     entities: Vec<GarminActivityEntity>,
 ) -> (
     Vec<MeasuredGymSession>,
-    Vec<PadelMatch>,
+    Vec<PadelSession>,
     Vec<ActivityDevices>,
 ) {
     let mut sessions: Vec<MeasuredGymSession> = Vec::new();
-    let mut matches: Vec<PadelMatch> = Vec::new();
+    let mut matches: Vec<PadelSession> = Vec::new();
     let mut devices: Vec<ActivityDevices> = Vec::new();
     for entity in entities {
         match entity {
             GarminActivityEntity::GymSession(session) => sessions.push(*session),
-            GarminActivityEntity::PadelMatch(played) => matches.push(*played),
+            GarminActivityEntity::PadelSession(played) => matches.push(*played),
             GarminActivityEntity::Devices(found) => devices.push(*found),
         }
     }
     (sessions, matches, devices)
 }
 
-/// One match of padel.
+/// One session of padel.
 async fn write_match(
     tx: &mut Transaction<'_, Sqlite>,
     run_id: i64,
-    played: &PadelMatch,
+    played: &PadelSession,
 ) -> Result<(), StoreError> {
     let id = played.landed_as().as_i64();
     let source_record_id = played.source_record_id().as_str().to_owned();
@@ -210,7 +210,7 @@ async fn write_match(
     let event_time = event.occurred_at().map(|at| at.as_timestamp().to_string());
     sqlx::query!(
         r#"
-        INSERT INTO padel_match (
+        INSERT INTO padel_session (
             landing_record_id, source_record_id, started_at_utc, zone, duration_seconds,
             average_bpm, highest_bpm, endpoint, event_kind, event_time, run_id
         )
@@ -235,7 +235,7 @@ async fn write_match(
         let readings = super::garmin_gym::readings_json(series)?;
         sqlx::query!(
             r#"
-            INSERT INTO padel_match_heart_rate (landing_record_id, at_seconds, beats_per_minute)
+            INSERT INTO padel_session_heart_rate (landing_record_id, at_seconds, beats_per_minute)
             SELECT ?, value ->> 0, value ->> 1
               FROM json_each(?)
             "#,
@@ -499,12 +499,12 @@ impl application::Input for GarminWear {
 
 impl application::NotRaw for GarminWear {}
 
-/// The watch's gym sessions, its padel matches, and the devices each activity names (#809).
+/// The watch's gym sessions, its padel sessions, and the devices each activity names (#809).
 impl application::Output for SqliteGarminActivityStore {
     fn writes() -> std::collections::BTreeSet<application::Table> {
         super::writes(&[
             super::table::GYM_SESSION,
-            super::table::PADEL_MATCH,
+            super::table::PADEL_SESSION,
             super::table::DEVICE_SIGHTING,
         ])
     }

@@ -155,8 +155,8 @@ const PLAIN: &[&str] = &[
     "body_scan_heart",
     "body_scan_nerves",
     "body_scan_vascular",
-    "padel_match",
-    "padel_match_heart_rate",
+    "padel_session",
+    "padel_session_heart_rate",
 ];
 
 /// Every normalised table's rows, sorted, by table.

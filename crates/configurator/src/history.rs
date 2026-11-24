@@ -11,7 +11,7 @@ use application::{
 };
 use domain::normalised::OperatorZone;
 use infrastructure::{
-    SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore, SqlitePadelMatches,
+    SqliteCanonicalCyclingSessionStore, SqliteCanonicalGymSessionStore, SqlitePadelSessions,
 };
 use jiff::civil::Date;
 
@@ -30,7 +30,7 @@ page! {
         history: History<
             Spanned<SqliteCanonicalGymSessionStore>,
             Spanned<SqliteCanonicalCyclingSessionStore>,
-            Spanned<SqlitePadelMatches>,
+            Spanned<SqlitePadelSessions>,
             one_rep_max::Tests,
         >,
         today: Today,
@@ -43,7 +43,7 @@ page! {
         opened: opened::Opened<
             Spanned<SqliteCanonicalGymSessionStore>,
             Spanned<SqliteCanonicalCyclingSessionStore>,
-            Spanned<SqlitePadelMatches>,
+            Spanned<SqlitePadelSessions>,
             one_rep_max::Tests,
         >,
     }
@@ -137,7 +137,7 @@ impl List {
             history: History::new(
                 store.adapter(SqliteCanonicalGymSessionStore::new),
                 store.adapter(SqliteCanonicalCyclingSessionStore::new),
-                store.adapter(SqlitePadelMatches::new),
+                store.adapter(SqlitePadelSessions::new),
                 one_rep_max::tests(store, zone),
             )
             .into(),
@@ -179,7 +179,7 @@ impl Opened {
             opened: opened::Opened::new(
                 store.adapter(SqliteCanonicalGymSessionStore::new),
                 store.adapter(SqliteCanonicalCyclingSessionStore::new),
-                store.adapter(SqlitePadelMatches::new),
+                store.adapter(SqlitePadelSessions::new),
                 one_rep_max::tests(store, zone),
             )
             .into(),

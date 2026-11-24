@@ -27,7 +27,7 @@ use application::{
     NormalisationRunLog, NormalisedCyclingSessionReader, NormalisedEntityStore,
     NormalisedGymSessionReader, NormalisedWeighInReader, NotRaw, Occupant, Output,
     OvernightHrvHistory, Performances, PerformedCyclingSessions, PerformedGymSessions,
-    PerformedSessionLog, PlanStore, PlayedPadelMatch, PlayedPadelMatches, PrescribedWorkoutId,
+    PerformedSessionLog, PlanStore, PlayedPadelSession, PlayedPadelSessions, PrescribedWorkoutId,
     PrescribedWorkoutStore, PrescriptionDeliveryStore, PrescriptionLifecycle, ProgressionStore,
     PublishedCycling, PublishedProgrammes, PublishedRead, PulseWaveVelocityHistory, RawExtent,
     Reached, Reading, Reads, RecordedDevices, RefusalStore, RenderingDigest,
@@ -541,8 +541,8 @@ spanned! {
 }
 
 spanned! {
-    PlayedPadelMatches {
-        fn between(&self, from: Date, to: Date) -> Result<Vec<PlayedPadelMatch>, StoreError>;
+    PlayedPadelSessions {
+        fn between(&self, from: Date, to: Date) -> Result<Vec<PlayedPadelSession>, StoreError>;
     }
 }
 

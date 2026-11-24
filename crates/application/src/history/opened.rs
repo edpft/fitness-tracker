@@ -10,13 +10,15 @@ use jiff::civil::Date;
 use super::{Number, Tested, days};
 use crate::{
     error::StoreError,
-    ports::{PerformedCyclingSessions, PerformedGymSessions, PlayedPadelMatch, PlayedPadelMatches},
+    ports::{
+        PerformedCyclingSessions, PerformedGymSessions, PlayedPadelSession, PlayedPadelSessions,
+    },
 };
 
 /// One activity, the whole of it.
 ///
-/// **The canonical sessions boxed**: a cycling session holds three rides inline
-/// and a gym session its clock and heart rate.
+/// **The sessions boxed**: a cycling session holds three rides inline, and a
+/// gym session and a padel session their clock and heart rate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Activity {
     /// A gym session, and the lifts whose 1RM it tested.
@@ -25,7 +27,7 @@ pub enum Activity {
         tested: Vec<RepsExercise>,
     },
     Cycling(Box<CanonicalCyclingSession>),
-    Padel(PlayedPadelMatch),
+    Padel(Box<PlayedPadelSession>),
 }
 
 impl Activity {
@@ -54,7 +56,7 @@ impl<G, C, P, T> Opened<G, C, P, T>
 where
     G: PerformedGymSessions + Sync,
     C: PerformedCyclingSessions + Sync,
-    P: PlayedPadelMatches + Sync,
+    P: PlayedPadelSessions + Sync,
     T: Tested + Sync,
 {
     pub const fn new(gym: G, cycling: C, padel: P, tested: T) -> Self {
@@ -114,8 +116,8 @@ where
         );
         read.extend(self.padel.between(on, on).await?.into_iter().map(|played| {
             (
-                Occurred::At(played.started_at.clone()),
-                Activity::Padel(played),
+                Occurred::At(played.started_at().clone()),
+                Activity::Padel(Box::new(played)),
             )
         }));
         Ok(days(read)

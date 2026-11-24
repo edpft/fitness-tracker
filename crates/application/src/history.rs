@@ -3,11 +3,11 @@
 //!
 //! **Activities, of which a session is one kind.** The operator, 2026-11-15:
 //! *"The history holds activities, which could be gym sessions, cycling
-//! sessions, padel matches, yoga, etc. Session is my word of a focused piece of
+//! sessions, padel sessions, yoga, etc. Session is my word of a focused piece of
 //! training, which could, in theory, contain more than one workout or ride or
 //! whatever."* A gym or cycling session is the canonical one, so a ride's
 //! warm-up and cool-down are already parts of it rather than activities of
-//! their own; a padel match is the normalised one, which only the watch
+//! their own; a padel session is the normalised one, which only the watch
 //! records. Nothing measured is here (#749), and nothing is written.
 //!
 //! **A session is a period at a venue.** The operator, 2026-11-15: *"within
@@ -294,8 +294,8 @@ mod tests {
         PrescribedWorkoutId,
         error::StoreError,
         ports::{
-            Activities, PerformedCyclingSessions, PerformedGymSessions, PlayedPadelMatch,
-            PlayedPadelMatches,
+            Activities, PerformedCyclingSessions, PerformedGymSessions, PlayedPadelSession,
+            PlayedPadelSessions,
         },
     };
 
@@ -396,14 +396,18 @@ mod tests {
         }
     }
 
-    struct Padel(Vec<PlayedPadelMatch>);
+    struct Padel(Vec<PlayedPadelSession>);
 
-    impl PlayedPadelMatches for Padel {
-        async fn between(&self, from: Date, to: Date) -> Result<Vec<PlayedPadelMatch>, StoreError> {
+    impl PlayedPadelSessions for Padel {
+        async fn between(
+            &self,
+            from: Date,
+            to: Date,
+        ) -> Result<Vec<PlayedPadelSession>, StoreError> {
             Ok(self
                 .0
                 .iter()
-                .filter(|played| (from..=to).contains(&played.started_at.wall_clock().date()))
+                .filter(|played| (from..=to).contains(&played.started_at().wall_clock().date()))
                 .cloned()
                 .collect())
         }

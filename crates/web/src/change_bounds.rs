@@ -12,7 +12,10 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
-use application::history::{Number, opened};
+use application::{
+    PlayedPadelSession,
+    history::{Number, opened},
+};
 use axum::{
     Form,
     extract::{Path, State},
@@ -23,9 +26,10 @@ use domain::{
     canonical::{Occurred, TakenFrom},
     gym::{
         CanonicalGymSession,
-        edit::{self, EditReason, SparseGymSession, Taken, Unmoved},
+        edit::{self, EditId, EditReason, SparseGymSession, Taken, Unmoved},
     },
     landing::LandingStream,
+    measure::PositiveDuration,
     normalised::{OperatorZone, StartedAt},
 };
 use jiff::{
@@ -46,9 +50,17 @@ pub const ROUTE: &str = "/history/{on}/{number}/when";
 
 const TITLE: &str = "Change when";
 
+/// Where a padel session's change of when is undone (#894).
+pub const UNDO: &str = "/history/{on}/{number}/when/{edit}";
+
 /// Where the session at `session` has its start and end changed.
 pub fn address(session: &str) -> String {
     format!("{session}/when")
+}
+
+/// Where the change `edit` to the padel session at `session` is undone.
+pub fn undo_address(session: &str, edit: EditId) -> String {
+    format!("{session}/when/{edit}")
 }
 
 /// What the operator calls a source.
@@ -300,21 +312,89 @@ impl At {
     }
 }
 
-/// The opened gym session, or the page to show instead.
-async fn found(
-    store: &Store,
-    zone: &OperatorZone,
-    at: &At,
-) -> Result<CanonicalGymSession, Response> {
+/// An opened session whose start and end can be changed.
+enum Bounded {
+    Gym(Box<CanonicalGymSession>),
+    Padel(Box<PlayedPadelSession>),
+}
+
+/// The opened session, or the page to show instead.
+async fn found(store: &Store, zone: &OperatorZone, at: &At) -> Result<Bounded, Response> {
     let here = at.session();
     let activity = configurator::history::Opened::open(store, zone)
         .activity(at.on, at.number)
         .await
         .map_err(|error| input::unreadable(&here, TITLE, &error.to_string()).into_response())?;
     match activity {
-        Some(opened::Activity::Gym { session, .. }) => Ok(*session),
+        Some(opened::Activity::Gym { session, .. }) => Ok(Bounded::Gym(session)),
+        Some(opened::Activity::Padel(played)) => Ok(Bounded::Padel(played)),
         _ => Err(Redirect::to(&here).into_response()),
     }
+}
+
+/// A padel session's start and end as the page shows them, in the zone it
+/// started in.
+fn padel_reading(played: &PlayedPadelSession) -> Typed {
+    let zone = played.started_at().zone();
+    Typed {
+        started_at: clock(played.started_at().instant(), zone),
+        ended_at: clock(played.ended(), zone),
+        ..Typed::default()
+    }
+}
+
+/// The change a post asks of a padel session, and why: both times, read on
+/// its day in its zone, as a start and how long it lasted.
+///
+/// # Errors
+///
+/// [`Refusal`] beside the time at fault, or of the whole form where the two
+/// cannot be the session's or nothing was changed.
+pub fn padel_asked(
+    played: &PlayedPadelSession,
+    typed: &Typed,
+) -> Result<(StartedAt, PositiveDuration, EditReason), Refusal> {
+    let on = played.started_at().wall_clock().date();
+    let zone = played.started_at().zone();
+    let start = instant(&typed.started_at, on, zone, "started_at")?;
+    let end = instant(&typed.ended_at, on, zone, "ended_at")?;
+    let because = EditReason::try_from(typed.because.clone())
+        .map_err(|_| Refusal::of("because", "say why".to_owned()))?;
+    let (started, duration) = played
+        .moved(start, end)
+        .map_err(|unmoved| Refusal::whole(unmoved.to_string()))?;
+    Ok((started, duration, because))
+}
+
+/// The form for a padel session: the watch is its only source, so there is
+/// a start and an end to type and nothing to choose.
+fn padel_form(
+    here: &str,
+    played: &PlayedPadelSession,
+    typed: &Typed,
+    refused: Option<&Refusal>,
+) -> Markup {
+    input::page(
+        here,
+        TITLE,
+        &html! {
+            h2 { (played.started_at().wall_clock().strftime("%A %-d %B %Y")) }
+            form.card method="post" {
+                (input::field("started_at", "started_at", "Start time", &html! {
+                    input id="started_at" name="started_at" type="time" step="1" value=(typed.started_at) required;
+                }, refused))
+                (input::field("ended_at", "ended_at", "End time", &html! {
+                    input id="ended_at" name="ended_at" type="time" step="1" value=(typed.ended_at) required;
+                }, refused))
+                (input::field("because", "because", "Because", &html! {
+                    input id="because" name="because" value=(typed.because) required;
+                }, refused))
+                (input::whole(refused))
+                button { "Change" }
+            }
+            p { a href=(here) { "Back to the session" } }
+        },
+    )
 }
 
 /// The form, filled with what the session reads as now.
@@ -327,7 +407,7 @@ pub async fn shown(
     };
     let zone = &runs.setting().zone;
     match found(&runs.setting().store, zone, &at).await {
-        Ok(session) => form(
+        Ok(Bounded::Gym(session)) => form(
             &at.session(),
             &session,
             zone,
@@ -335,6 +415,9 @@ pub async fn shown(
             None,
         )
         .into_response(),
+        Ok(Bounded::Padel(played)) => {
+            padel_form(&at.session(), &played, &padel_reading(&played), None).into_response()
+        }
         Err(shown) => shown,
     }
 }
@@ -353,7 +436,28 @@ pub async fn posted(
     let zone = &runs.setting().zone;
     let here = at.session();
     let session = match found(store, zone, &at).await {
-        Ok(session) => session,
+        Ok(Bounded::Gym(session)) => session,
+        Ok(Bounded::Padel(played)) => {
+            let typed = Typed::of(&form_posted);
+            let (started, duration, because) = match padel_asked(&played, &typed) {
+                Ok(asked) => asked,
+                Err(refusal) => {
+                    return padel_form(&here, &played, &typed, Some(&refusal)).into_response();
+                }
+            };
+            return match edits::change_padel(store, &because, played.session(), &started, duration)
+                .await
+            {
+                Ok(_) => Redirect::to(&here).into_response(),
+                Err(error) => padel_form(
+                    &here,
+                    &played,
+                    &typed,
+                    Some(&Refusal::whole(error.to_string())),
+                )
+                .into_response(),
+            };
+        }
         Err(shown) => return shown,
     };
     let typed = Typed::of(&form_posted);
@@ -383,5 +487,24 @@ pub async fn posted(
             Redirect::to(&change::changed_address(at.on, at.number, id)).into_response()
         }
         Err(error) => refused(&Refusal::whole(error.to_string())),
+    }
+}
+
+/// Undo a change of when a padel session started and ended, then go back to
+/// it.
+pub async fn undone(
+    State(runs): State<Arc<Runs>>,
+    Path((on, number, edit)): Path<(String, String, String)>,
+) -> Response {
+    let (Some(at), Some(id)) = (
+        At::of(&on, &number),
+        edit.parse::<i64>().ok().map(EditId::from),
+    ) else {
+        return Redirect::to(Place::History.path()).into_response();
+    };
+    let here = at.session();
+    match edits::undo_padel(&runs.setting().store, id).await {
+        Ok(()) => Redirect::to(&here).into_response(),
+        Err(error) => input::unreadable(&here, TITLE, &error.to_string()).into_response(),
     }
 }

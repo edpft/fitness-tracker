@@ -46,6 +46,11 @@ const PINNED: &[(&str, u32, &str)] = &[
         "ca87596b53830f7ab6d28a75fc3b2f2bbb227617b9cf5c5492ed73c29c7e47c4",
     ),
     (
+        "GarminActivityTranslator",
+        5,
+        "557ddcb9afa8ae346d5d428c17b61f9a06e9657a04ecd60177e378b00c20a7f1",
+    ),
+    (
         "GarminDailyHeartRateTranslator",
         1,
         "89bf67ba268f1a421ac7968131fa630e76fe1130047177170067d67fc536d2e7",

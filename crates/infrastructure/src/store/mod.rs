@@ -42,7 +42,7 @@ pub mod myfitnesspal_normalised;
 pub mod normalisation_run_log;
 pub mod normalised;
 pub mod normalised_gym;
-pub mod padel_match;
+pub mod padel_session;
 pub mod parameters;
 pub mod peloton_account_landing;
 pub mod peloton_class;
@@ -118,7 +118,7 @@ pub use myfitnesspal_normalised::{MyFitnessPalExportAccountReader, SqliteMyFitne
 pub use normalisation_run_log::SqliteNormalisationRunLog;
 pub use normalised::{HevySessionAccountReader, SqliteGymSessionStore};
 pub use normalised_gym::SqliteNormalisedGymSessionReader;
-pub use padel_match::SqlitePadelMatches;
+pub use padel_session::SqlitePadelSessions;
 pub use parameters::SqliteGenerationParameterStore;
 pub use peloton_account_landing::PelotonAccountLandingStore;
 pub use peloton_class::{Held, SqlitePelotonClassStore};
@@ -354,6 +354,6 @@ pub(crate) mod table {
     pub const WEAR_DAY: Table = Table::named("wear_day");
     pub const SLEEP: Table = Table::named("sleep");
     pub const STRESS: Table = Table::named("stress");
-    pub const PADEL_MATCH: Table = Table::named("padel_match");
+    pub const PADEL_SESSION: Table = Table::named("padel_session");
     pub const DEVICE_SIGHTING: Table = Table::named("device_sighting");
 }

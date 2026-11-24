@@ -409,7 +409,7 @@ async fn write_readings(
 /// A series as one JSON array of `[at_seconds, beats_per_minute]` pairs.
 ///
 /// **One statement per session, the series handed over as a JSON array**, as
-/// the canonical rides' are (#560); a padel match's go the same way (#919).
+/// the canonical rides' are (#560); a padel session's go the same way (#919).
 pub(super) fn readings_json(series: &HeartRateSeries) -> Result<String, StoreError> {
     let mut rows = Vec::with_capacity(series.samples().count());
     for reading in series.samples().iter() {

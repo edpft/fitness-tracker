@@ -20,7 +20,7 @@
 //!
 //! ## A training slot is interchangeable time, not merely free time
 //!
-//! That is the whole of the distinction. A padel match on a Sunday evening
+//! That is the whole of the distinction. A padel session on a Sunday evening
 //! occupies the day and is *not* a slot, because it cannot be swapped with
 //! Monday's — it constrains the week without joining the pool. What is recorded
 //! here is the residue: the times something could be *scheduled into*.

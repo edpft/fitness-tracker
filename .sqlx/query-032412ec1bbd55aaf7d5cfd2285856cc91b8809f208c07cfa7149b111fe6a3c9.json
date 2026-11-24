@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT landing_record_id AS \"landed!: i64\",\n                   source_record_id AS \"session!: String\",\n                   started_at_utc AS \"started_at!: String\",\n                   zone AS \"zone!: String\",\n                   duration_seconds AS \"duration!: i64\",\n                   average_bpm, highest_bpm\n            FROM padel_session\n            WHERE started_at_utc >= ? AND started_at_utc < ?\n            ORDER BY started_at_utc, landing_record_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "landed!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "padel_session",
+            "name": "landing_record_id"
+          }
+        }
+      },
+      {
+        "name": "session!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "padel_session",
+            "name": "source_record_id"
+          }
+        }
+      },
+      {
+        "name": "started_at!: String",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "padel_session",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone!: String",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "padel_session",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "duration!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "padel_session",
+            "name": "duration_seconds"
+          }
+        }
+      },
+      {
+        "name": "average_bpm",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "padel_session",
+            "name": "average_bpm"
+          }
+        }
+      },
+      {
+        "name": "highest_bpm",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "padel_session",
+            "name": "highest_bpm"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "032412ec1bbd55aaf7d5cfd2285856cc91b8809f208c07cfa7149b111fe6a3c9"
+}

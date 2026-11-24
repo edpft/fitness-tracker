@@ -1641,21 +1641,14 @@ pub trait PerformedSessionLog {
     ) -> impl Future<Output = Result<Vec<Occurred>, StoreError>> + Send;
 }
 
-/// One padel match, as History shows it (#772): when it started, how long it
-/// took, and the heart rate the watch stated over it.
-///
-/// **A projection, for [`WeighInHistory`]'s reason**: the match's landing
-/// record and provenance have no reader here.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlayedPadelMatch {
-    pub started_at: domain::normalised::StartedAt,
-    pub duration: PositiveDuration,
-    pub heart_rate: Option<domain::measure::HeartRateSummary>,
-}
+/// One padel session, as History shows it (#772): the watch's account, with
+/// the operator's change of when it started and ended over it (#894).
+pub use domain::padel::PlayedPadelSession;
 
-/// The padel matches the normalised layer holds, which only the watch records.
-pub trait PlayedPadelMatches {
-    /// Each match played between the two days, both included, by the day it
+/// The padel sessions the normalised layer holds, which only the watch
+/// records, each with the operator's change in force over it.
+pub trait PlayedPadelSessions {
+    /// Each session played between the two days, both included, by the day it
     /// started on in the zone it was played in, oldest first.
     ///
     /// # Errors
@@ -1665,7 +1658,7 @@ pub trait PlayedPadelMatches {
         &self,
         from: Date,
         to: Date,
-    ) -> impl Future<Output = Result<Vec<PlayedPadelMatch>, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Vec<PlayedPadelSession>, StoreError>> + Send;
 }
 
 /// One activity, as the list shows it: enough of it to recognise it by.
@@ -1844,7 +1837,7 @@ pub trait StressHistory {
 }
 
 /// Every session of training done (#517): the gym and cycling sessions the
-/// canonical layers hold and the padel matches the normalised does, each as the
+/// canonical layers hold and the padel sessions the normalised does, each as the
 /// day it was performed on and how long it took.
 pub trait TrainingDone {
     /// Oldest first.

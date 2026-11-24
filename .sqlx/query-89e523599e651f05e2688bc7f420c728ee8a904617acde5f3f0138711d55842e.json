@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT at_seconds AS \"at_seconds!\", beats_per_minute AS \"beats_per_minute!\"\n            FROM padel_session_heart_rate\n            WHERE landing_record_id = ?\n            ORDER BY at_seconds\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "at_seconds!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "padel_session_heart_rate",
+            "name": "at_seconds"
+          }
+        }
+      },
+      {
+        "name": "beats_per_minute!",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "padel_session_heart_rate",
+            "name": "beats_per_minute"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "89e523599e651f05e2688bc7f420c728ee8a904617acde5f3f0138711d55842e"
+}

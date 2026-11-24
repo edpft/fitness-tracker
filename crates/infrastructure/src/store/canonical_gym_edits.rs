@@ -42,7 +42,7 @@ pub struct Overlay;
 
 impl Authors for Overlay {
     fn authors() -> BTreeSet<Node> {
-        [Node::Edits(CanonicalLayer::Gym)].into()
+        [Node::Edits(application::Edited::Gym)].into()
     }
 }
 
