@@ -493,8 +493,9 @@ fn said(session: &CanonicalGymSession, here: &Here) -> String {
                     Taken::Stated(at) => Some(*at),
                     Taken::From(_) => None,
                 };
+                let verb = if said.is_empty() { "Ended" } else { "ended" };
                 said.push(format!(
-                    "Ended {}",
+                    "{verb} {}",
                     taken(zone.as_ref(), ended.source(), at)
                 ));
             }
@@ -525,7 +526,7 @@ fn taken(
     at: Option<jiff::Timestamp>,
 ) -> String {
     match (source, at, zone) {
-        (Some(stream), _, _) => format!("as {}", crate::change_bounds::called(stream)),
+        (Some(stream), _, _) => format!("when {} says", crate::change_bounds::called(stream)),
         (None, Some(at), Some(zone)) => format!(
             "at {}",
             at.to_zoned(zone.as_time_zone()).strftime("%H:%M:%S")
