@@ -5,6 +5,8 @@
 
 use std::fmt;
 
+use crate::sequence::NonEmpty;
+
 use super::InvalidQuantity;
 
 /// A heart rate, in beats per minute.
@@ -217,5 +219,112 @@ impl HeartRateSeries {
 impl fmt::Display for HeartRateSeries {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} readings", self.samples.count())
+    }
+}
+
+/// A session's heart rate as a watch has it: what it states, and the recording
+/// itself.
+///
+/// **Two accounts of one measurement, from two of the source's responses.** The
+/// activity list states an average and a highest; the samples they summarise are
+/// in the FIT file the third walk lands, at whatever resolution the watch chose
+/// to write them. The operator, 2026-09-18: *"heart rate for the canonical
+/// session needs per-second samples, not `averageHR`/`maxHR`"*.
+///
+/// **The summary is kept rather than recomputed from the series.** § II.3 forbids
+/// aggregating component observations and says nothing against keeping what a
+/// source states — the same call [`HeartRateSummary`] records for a ride's
+/// average power. A mean of these samples would be our arithmetic standing in
+/// for the watch's, and on an irregular series it is not even the same number.
+///
+/// **Stated is required and the series is not**, because that is the only
+/// combination the record holds: on the operator's corpus the 531 strength
+/// activities that state a summary are exactly the 531 whose file holds samples,
+/// and the 20 that state none hold no reading anywhere. [`None`] is then a
+/// recording that has not landed, or one the watch wrote without a strap.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeasuredHeartRate {
+    stated: HeartRateSummary,
+    series: Option<HeartRateSeries>,
+}
+
+impl MeasuredHeartRate {
+    pub const fn new(stated: HeartRateSummary, series: Option<HeartRateSeries>) -> Self {
+        Self { stated, series }
+    }
+
+    /// What the source says the session came to.
+    pub const fn stated(&self) -> HeartRateSummary {
+        self.stated
+    }
+
+    /// The readings themselves, where the recording landed and held any.
+    pub const fn series(&self) -> Option<&HeartRateSeries> {
+        self.series.as_ref()
+    }
+
+    /// Only what was read between `from` and `to`, each in seconds from the
+    /// start of the recording (#894): the session started late or ended early
+    /// against the watch, so what it recorded outside them was not the
+    /// session.
+    ///
+    /// **The summary is read again from the readings kept**, the average
+    /// weighting each by how long it held until the next, since the watch
+    /// writes at its own judgement rather than at a fixed rate. Where every
+    /// reading is kept, or there is no series to read, it is the source's
+    /// own figure unchanged.
+    #[must_use]
+    pub fn between(&self, from: i64, to: i64) -> Self {
+        let Some(series) = &self.series else {
+            return self.clone();
+        };
+        let within = |sample: &&HeartRateSample| {
+            i64::try_from(sample.at.as_seconds()).is_ok_and(|at| from <= at && at <= to)
+        };
+        let kept: Vec<HeartRateSample> = series.samples().iter().filter(within).copied().collect();
+        if kept.len() == series.samples().count() {
+            return self.clone();
+        }
+        let Ok(kept) = NonEmpty::new(kept) else {
+            return Self {
+                stated: self.stated,
+                series: None,
+            };
+        };
+        let highest = kept
+            .iter()
+            .map(|sample| sample.beats_per_minute)
+            .max()
+            .unwrap_or_else(|| self.stated.highest());
+        let mut weighted: u64 = 0;
+        let mut held: u64 = 0;
+        let samples: Vec<&HeartRateSample> = kept.iter().collect();
+        for (index, sample) in samples.iter().enumerate() {
+            let seconds = samples.get(index + 1).map_or(1, |next| {
+                next.at
+                    .as_seconds()
+                    .saturating_sub(sample.at.as_seconds())
+                    .max(1)
+            });
+            weighted += u64::from(sample.beats_per_minute.as_u32()) * seconds;
+            held += seconds;
+        }
+        let average = u32::try_from((weighted + held / 2) / held.max(1))
+            .ok()
+            .and_then(|beats| BeatsPerMinute::new(beats).ok())
+            .unwrap_or_else(|| self.stated.average());
+        Self {
+            stated: HeartRateSummary::new(average, highest),
+            series: Some(HeartRateSeries::new(kept)),
+        }
+    }
+}
+
+impl fmt::Display for MeasuredHeartRate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.stated)?;
+        self.series
+            .as_ref()
+            .map_or(Ok(()), |series| write!(f, ", {series}"))
     }
 }

@@ -1439,6 +1439,12 @@ fn the_activity_version_names_what_it_translates() {
     let zones = StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("zone"));
     let mut accounts = suite().expect("the accounts");
     accounts.push(account(&padel("2026-07-04 23:30:00"), None, None).expect("a match"));
+    let readings = archive(&recording(
+        920_000_000,
+        &[(920_000_000, Some(96)), (920_000_009, Some(168))],
+    ))
+    .expect("an archive");
+    accounts.push(account(&padel("2026-07-04 23:30:00"), None, Some(&readings)).expect("a match"));
     accounts.push(
         account(
             &activity(
@@ -1511,6 +1517,7 @@ fn a_padel_match_is_a_padel_match() {
     assert_eq!(
         played
             .heart_rate()
+            .map(|measured| measured.stated())
             .map(|summary| (summary.average().as_u32(), summary.highest().as_u32())),
         Some((121, 168))
     );
@@ -1629,5 +1636,117 @@ fn a_padel_match_is_training_done_on_the_day_it_was_played() {
                 .await
                 .expect("a count");
         assert_eq!(refused, 0);
+    });
+}
+
+/// **A match holds the readings its recording holds** (#919), beside the
+/// average and highest the list states, which stay as stated. They reach the
+/// store, and a second derivation replaces them rather than adding to them.
+#[test]
+fn a_padel_match_holds_the_readings_its_recording_holds() {
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let file = archive(&recording(
+            920_000_000,
+            &[
+                (920_000_000, Some(96)),
+                (920_000_002, Some(0)),
+                (920_000_009, Some(168)),
+            ],
+        ))
+        .expect("an archive");
+        let played = padel("2026-07-04 23:30:00");
+
+        let translated = GarminActivityTranslator::default()
+            .translate(
+                &account(&played, None, Some(&file)).expect("an account"),
+                &StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("a zone")),
+            )
+            .expect("translated");
+        let Translation::Entities { entities, refusals } = translated else {
+            panic!("no match: {translated:?}");
+        };
+        assert!(refusals.is_empty(), "{refusals:?}");
+        let GarminActivityEntity::PadelMatch(translated) = entities.first() else {
+            panic!("not a match: {entities:?}");
+        };
+        let heart_rate = translated.heart_rate().expect("a heart rate");
+        assert_eq!(
+            (
+                heart_rate.stated().average().as_u32(),
+                heart_rate.stated().highest().as_u32()
+            ),
+            (121, 168),
+            "what the list said is what the list said",
+        );
+
+        let directory = tempfile::tempdir().expect("a directory");
+        let pool = connect(&directory.path().join("test.db"))
+            .await
+            .expect("a store");
+        let runs = SqliteExtractionRunLog::new(pool.clone());
+        append(
+            &GarminActivityLandingStore::new(pool.clone()).expect("a store"),
+            &runs,
+            record(
+                1,
+                PADEL,
+                "garmin.activities",
+                "/activitylist-service/activities/search/activities",
+                &played,
+            )
+            .expect("a record"),
+        )
+        .await
+        .expect("landed");
+        append(
+            &GarminActivityFileLandingStore::new(pool.clone()).expect("a store"),
+            &runs,
+            landed_recording(2, PADEL, &file).expect("a recording"),
+        )
+        .await
+        .expect("landed");
+
+        for _ in 0..2 {
+            Normalisation::new(
+                NormalisationPorts {
+                    raw: GarminGymAccountReader::new(pool.clone()).expect("a reader"),
+                    translator: GarminActivityTranslator::default(),
+                    workouts: SqliteGarminActivityStore::new(pool.clone()).expect("a store"),
+                    refusals: SqliteRefusalStore::new(pool.clone(), "garmin.activities")
+                        .expect("refusals"),
+                    runs: SqliteNormalisationRunLog::new(pool.clone()),
+                    clock: FixedClock,
+                },
+                StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("a zone")),
+            )
+            .normalise(application::Rederivation::Whole)
+            .await
+            .expect("normalised");
+        }
+
+        let readings = sqlx::query!(
+            r#"SELECT at_seconds AS "at!: i64", beats_per_minute AS "beats!: i64"
+               FROM padel_match_heart_rate ORDER BY at_seconds"#
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("its readings");
+        assert_eq!(
+            readings
+                .iter()
+                .map(|row| (row.at, row.beats))
+                .collect::<Vec<(i64, i64)>>(),
+            vec![(0, 96), (9, 168)],
+            "the gap is a gap, a zero is not a reading, and nothing doubled",
+        );
+        let stated = sqlx::query!(
+            r#"SELECT average_bpm AS "average!: i64", highest_bpm AS "highest!: i64"
+               FROM padel_match"#
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("a match");
+        assert_eq!((stated.average, stated.highest), (121, 168));
     });
 }

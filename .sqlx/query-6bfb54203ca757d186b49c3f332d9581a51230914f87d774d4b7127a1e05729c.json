@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM padel_match_heart_rate",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "6bfb54203ca757d186b49c3f332d9581a51230914f87d774d4b7127a1e05729c"
+}

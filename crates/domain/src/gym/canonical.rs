@@ -52,7 +52,7 @@ use jiff::Timestamp;
 
 use crate::canonical::{Attributed, NormalisedSessionId, Occurred, TakenFrom};
 use crate::landing::LandingStream;
-use crate::measure::{Distance, Duration, PositiveDuration, RepCount};
+use crate::measure::{Distance, Duration, MeasuredHeartRate, PositiveDuration, RepCount};
 use crate::normalised::StartedAt;
 use crate::sequence::{AtLeastTwo, NonEmpty};
 
@@ -61,7 +61,7 @@ use super::{
     identity::SourceSet,
     intensity::Rir,
     load::Load,
-    measured::{GuessedExercise, MeasuredHeartRate},
+    measured::GuessedExercise,
     outcome::Performed,
     set::SetKind,
 };

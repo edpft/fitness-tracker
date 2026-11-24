@@ -33,11 +33,14 @@
 use application::{NormalisationError, Translation, ports::Translator};
 use domain::{
     gym::{
-        ComposedFrom, Guess, GuessedExercise, Load, MeasuredGymSession, MeasuredHeartRate,
-        MeasuredSet, Recorded, SignedKg,
+        ComposedFrom, Guess, GuessedExercise, Load, MeasuredGymSession, MeasuredSet, Recorded,
+        SignedKg,
     },
     landing::{EventKind, LandedRecord},
-    measure::{BeatsPerMinute, HeartRateSeries, HeartRateSummary, Kg, PositiveDuration, RepCount},
+    measure::{
+        BeatsPerMinute, HeartRateSeries, HeartRateSummary, Kg, MeasuredHeartRate, PositiveDuration,
+        RepCount,
+    },
     normalised::{RefusalLocus, RefusalReason, StartedAt, StatedZones},
     sequence::NonEmpty,
 };
@@ -329,7 +332,10 @@ fn recorded(
 /// the activity list states about the heart rate is a claim of its own, and it
 /// stands whether or not the file behind it opens — so a bad archive is noted
 /// against the record and the summary is kept (§ 37).
-fn recorded_series(account: &ActivityAccount, scribe: &mut Scribe) -> Option<HeartRateSeries> {
+pub(super) fn recorded_series(
+    account: &ActivityAccount,
+    scribe: &mut Scribe,
+) -> Option<HeartRateSeries> {
     let landed = account.recording()?;
     match fit::heart_rate(landed.payload().as_bytes()) {
         Ok(samples) => samples.map(HeartRateSeries::new),

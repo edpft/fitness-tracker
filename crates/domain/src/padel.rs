@@ -11,15 +11,17 @@
 //! as a ride's and a gym session's do (operator, 2026-11-11: *"yes, all
 //! activity hours"*).
 //!
-//! **When, how long, and the heart rate the watch stated over it.** The
-//! operator's record holds 15, from 2026-03-22, every one recorded by the
-//! Forerunner 165.
+//! **When, how long, and the heart rate the watch recorded over it**: the
+//! average and highest it stated, and the readings its activity file holds
+//! (#919), as a gym session's are, so a match whose start or end moves can be
+//! read again between them (#894). The operator's record holds 16, from
+//! 2026-03-22, every one recorded by the Forerunner 165.
 
 use std::fmt;
 
 use crate::{
     landing::{LandingRecordId, Provenance, SourceRecordId},
-    measure::{HeartRateSummary, PositiveDuration},
+    measure::{MeasuredHeartRate, PositiveDuration},
     normalised::{NormalisedEntity, StartedAt},
 };
 
@@ -29,7 +31,7 @@ pub struct PadelMatchRecord {
     pub started_at: StartedAt,
     pub duration: PositiveDuration,
     /// Absent where the watch stated none, as a gym session's is.
-    pub heart_rate: Option<HeartRateSummary>,
+    pub heart_rate: Option<MeasuredHeartRate>,
     pub landed_as: LandingRecordId,
     pub source_record_id: SourceRecordId,
     pub provenance: Provenance,
@@ -40,7 +42,7 @@ pub struct PadelMatchRecord {
 pub struct PadelMatch {
     started_at: StartedAt,
     duration: PositiveDuration,
-    heart_rate: Option<HeartRateSummary>,
+    heart_rate: Option<MeasuredHeartRate>,
     landed_as: LandingRecordId,
     source_record_id: SourceRecordId,
     provenance: Provenance,
@@ -66,8 +68,8 @@ impl PadelMatch {
         self.duration
     }
 
-    pub const fn heart_rate(&self) -> Option<HeartRateSummary> {
-        self.heart_rate
+    pub const fn heart_rate(&self) -> Option<&MeasuredHeartRate> {
+        self.heart_rate.as_ref()
     }
 
     pub const fn landed_as(&self) -> LandingRecordId {

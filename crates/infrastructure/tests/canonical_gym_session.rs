@@ -18,10 +18,12 @@ use domain::{
     canonical::{Attributed, NormalisedSessionId, Occurred, SessionCount, TakenFrom},
     gym::{
         CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Guess,
-        GuessedExercise, Identified, Load, MeasuredHeartRate, Performed, SetKind,
-        exercise::RepsExercise,
+        GuessedExercise, Identified, Load, Performed, SetKind, exercise::RepsExercise,
     },
-    measure::{HeartRateSample, HeartRateSeries, HeartRateSummary, Kg, PositiveDuration, RepCount},
+    measure::{
+        HeartRateSample, HeartRateSeries, HeartRateSummary, Kg, MeasuredHeartRate,
+        PositiveDuration, RepCount,
+    },
     normalised::{OperatorZone, StartedAt},
     sequence::{AtLeastTwo, NonEmpty},
 };

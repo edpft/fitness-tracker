@@ -41,13 +41,12 @@ use std::collections::BTreeMap;
 use jiff::civil::Date;
 
 use crate::canonical::{Attributed, NormalisedSessionId, Occurred, Reach, TakenFrom};
-use crate::measure::PositiveDuration;
+use crate::measure::{MeasuredHeartRate, PositiveDuration};
 use crate::sequence::{AtLeastTwo, NonEmpty};
 
 use super::{
     canonical::{CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Identified},
     load::Load,
-    measured::MeasuredHeartRate,
     normalised::{NormalisedGymSession, Recorder},
     outcome::Performed,
 };

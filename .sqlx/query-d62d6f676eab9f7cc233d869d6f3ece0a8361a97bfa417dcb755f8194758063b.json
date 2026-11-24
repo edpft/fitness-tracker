@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT at_seconds AS \"at!: i64\", beats_per_minute AS \"beats!: i64\"\n               FROM padel_match_heart_rate ORDER BY at_seconds",
+  "describe": {
+    "columns": [
+      {
+        "name": "at!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "padel_match_heart_rate",
+            "name": "at_seconds"
+          }
+        }
+      },
+      {
+        "name": "beats!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "padel_match_heart_rate",
+            "name": "beats_per_minute"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "d62d6f676eab9f7cc233d869d6f3ece0a8361a97bfa417dcb755f8194758063b"
+}
