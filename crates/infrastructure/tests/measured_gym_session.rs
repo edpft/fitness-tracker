@@ -1517,7 +1517,7 @@ fn a_padel_match_is_a_padel_match() {
     assert_eq!(
         played
             .heart_rate()
-            .map(|measured| measured.stated())
+            .map(domain::measure::MeasuredHeartRate::stated)
             .map(|summary| (summary.average().as_u32(), summary.highest().as_u32())),
         Some((121, 168))
     );
@@ -1639,47 +1639,63 @@ fn a_padel_match_is_training_done_on_the_day_it_was_played() {
     });
 }
 
+/// A match's recording: 96 at the start, a strap saying nothing, then 168.
+fn padel_recording() -> Result<Vec<u8>, Failure> {
+    archive(&recording(
+        920_000_000,
+        &[
+            (920_000_000, Some(96)),
+            (920_000_002, Some(0)),
+            (920_000_009, Some(168)),
+        ],
+    ))
+}
+
 /// **A match holds the readings its recording holds** (#919), beside the
-/// average and highest the list states, which stay as stated. They reach the
-/// store, and a second derivation replaces them rather than adding to them.
+/// average and highest the list states, which stay as stated.
 #[test]
 fn a_padel_match_holds_the_readings_its_recording_holds() {
+    let file = padel_recording().expect("an archive");
+    let translated = GarminActivityTranslator::default()
+        .translate(
+            &account(&padel("2026-07-04 23:30:00"), None, Some(&file)).expect("an account"),
+            &StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("a zone")),
+        )
+        .expect("translated");
+    let Translation::Entities { entities, refusals } = translated else {
+        panic!("no match: {translated:?}");
+    };
+    assert!(refusals.is_empty(), "{refusals:?}");
+    let GarminActivityEntity::PadelMatch(translated) = entities.first() else {
+        panic!("not a match: {entities:?}");
+    };
+    let heart_rate = translated.heart_rate().expect("a heart rate");
+    assert_eq!(
+        (
+            heart_rate.stated().average().as_u32(),
+            heart_rate.stated().highest().as_u32()
+        ),
+        (121, 168),
+        "what the list said is what the list said",
+    );
+    let readings: Vec<(u64, u32)> = heart_rate
+        .series()
+        .expect("its readings")
+        .samples()
+        .iter()
+        .map(|reading| (reading.at.as_seconds(), reading.beats_per_minute.as_u32()))
+        .collect();
+    assert_eq!(readings, vec![(0, 96), (9, 168)]);
+}
+
+/// A match's readings reach the store, and a second derivation replaces them
+/// rather than adding to them.
+#[test]
+fn a_padel_matchs_readings_reach_the_store() {
     let runtime = runtime().expect("a runtime");
     runtime.block_on(async {
-        let file = archive(&recording(
-            920_000_000,
-            &[
-                (920_000_000, Some(96)),
-                (920_000_002, Some(0)),
-                (920_000_009, Some(168)),
-            ],
-        ))
-        .expect("an archive");
+        let file = padel_recording().expect("an archive");
         let played = padel("2026-07-04 23:30:00");
-
-        let translated = GarminActivityTranslator::default()
-            .translate(
-                &account(&played, None, Some(&file)).expect("an account"),
-                &StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("a zone")),
-            )
-            .expect("translated");
-        let Translation::Entities { entities, refusals } = translated else {
-            panic!("no match: {translated:?}");
-        };
-        assert!(refusals.is_empty(), "{refusals:?}");
-        let GarminActivityEntity::PadelMatch(translated) = entities.first() else {
-            panic!("not a match: {entities:?}");
-        };
-        let heart_rate = translated.heart_rate().expect("a heart rate");
-        assert_eq!(
-            (
-                heart_rate.stated().average().as_u32(),
-                heart_rate.stated().highest().as_u32()
-            ),
-            (121, 168),
-            "what the list said is what the list said",
-        );
-
         let directory = tempfile::tempdir().expect("a directory");
         let pool = connect(&directory.path().join("test.db"))
             .await
