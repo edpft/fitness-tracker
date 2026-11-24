@@ -1,24 +1,22 @@
 //! The operator's edits to the canonical gym layer (§ II.2, #893).
 //!
-//! **An edit is applied on top of the canonical layer**, and anchored to a
-//! canonical exercise or set by the id it keeps across every rebuild
-//! ([`super::identity`]). The operator, 2026-11-21: *"I think edits should be
-//! applied on top of the canonical layer, that's why I keep saying they are
-//! sparse canonical gym sessions that can edit any field in a canonical gym
-//! session."* Anchoring one to a source instead meant giving sources fields
-//! they never had, such as an effort on a watch's set; on the canonical set it
-//! is one more field, whichever source the rest came from.
+//! **The overlay is a sparse canonical gym session**, applied on top of the
+//! canonical layer and keyed by the ids its entities keep across every
+//! rebuild ([`super::identity`]). The operator, 2026-11-21: *"I think edits
+//! should be applied on top of the canonical layer, that's why I keep saying
+//! they are sparse canonical gym sessions that can edit any field in a
+//! canonical gym session."* Anchoring one to a source instead meant giving
+//! sources fields they never had, such as an effort on a watch's set; on the
+//! canonical set it is one more field, whichever source the rest came from.
 //!
 //! **Sparse.** An edit holds only what it changes, and the rest of the entity
 //! stands as derived. A field an edit states is attributed to it
-//! ([`crate::canonical::TakenFrom::Edit`]) rather than to a normalised session it never came
-//! from.
+//! ([`crate::canonical::TakenFrom::Edit`]) rather than to a normalised session
+//! it never came from.
 //!
-//! **Two kinds so far.** An exercise edit says what an exercise was, and
-//! reaches every set it holds; a set edit says what one set's measure, load
-//! or effort were. "Similar" is how one assertion reaches many exercises: one
-//! exercise edit per exercise found reading as the same thing, under one
-//! [`EditId`] so it is retracted as it was made.
+//! **One assertion, one or many sessions.** "Similar" is how one assertion
+//! reaches many exercises: the same field in each session found reading as
+//! the same thing, under one [`EditId`] so it is retracted as it was made.
 //!
 //! **Where a rebuild changes what an edit stands on, the edit stands and the
 //! conflict is raised** ([`Conflict`]): a set a source adds to an edited
@@ -35,11 +33,12 @@ use crate::canonical::Attributed;
 use crate::landing::InvalidIdentifier;
 use crate::measure::{Distance, Duration, Kg, RepCount};
 use crate::newtype::string_name;
-use crate::sequence::NonEmpty;
 
 use super::canonical::{CanonicalExercise, CanonicalGymSession, CanonicalSet, Identified};
 use super::exercise::Exercise;
-use super::identity::{CanonicalExerciseId, CanonicalSetId, ExerciseIds, SessionIds};
+use super::identity::{
+    CanonicalExerciseId, CanonicalSessionId, CanonicalSetId, ExerciseIds, SessionIds,
+};
 use super::intensity::Rir;
 use super::load::{Load, SignedKg};
 use super::outcome::Performed;
@@ -90,20 +89,6 @@ impl TryFrom<String> for EditReason {
 }
 
 string_name!(EditReason, InvalidIdentifier);
-
-/// What one canonical exercise was.
-///
-/// **With what it read as when edited, and the sets it held.** The first says
-/// what was changed; the second is how a set a source adds later is told
-/// apart from the sets the operator ruled on, so it is raised rather than
-/// silently taken in (§ II.2, *"overrides do not propagate"*).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExerciseEdit {
-    pub exercise: CanonicalExerciseId,
-    pub becomes: Exercise,
-    pub read: Exercise,
-    pub sets: BTreeSet<CanonicalSetId>,
-}
 
 /// What a set's load was, as the operator states it.
 ///
@@ -162,7 +147,7 @@ impl fmt::Display for StatedLoad {
 /// How much of a set was done, in whatever its exercise is counted in: reps,
 /// a length of time, or ground covered (#901).
 ///
-/// **One per kind of [`Exercise`]**, so a set edit states the measure of the
+/// **One per kind of [`Exercise`]**, so a sparse set holds the measure of the
 /// set it edits, and a measure of another kind reaches nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Measure {
@@ -204,40 +189,42 @@ impl fmt::Display for Measure {
     }
 }
 
-/// One field of a set an edit can state.
+/// One set of a canonical gym session, sparse: each field is present only
+/// where the operator changed it (#892, #901).
+///
+/// **The canonical set's own fields**, as [`CanonicalSet`] names them, each
+/// optional. **Never empty**: a set the operator changed nothing about is
+/// not in the overlay, so [`SparseSet::new`] refuses one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SparseSet {
+    measure: Option<Measure>,
+    load: Option<Load>,
+    intensity: Option<Rir>,
+}
+
+/// One field of a set the overlay can hold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum SetField {
     Measure,
     Load,
-    Effort,
+    Intensity,
 }
 
-/// What the operator changed about one set, and only that (#892).
-///
-/// **Never empty**: an edit that changes nothing is not an edit, so
-/// [`SetEdit::new`] refuses one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SetEdit {
-    measure: Option<Measure>,
-    load: Option<Load>,
-    effort: Option<Rir>,
-}
-
-impl SetEdit {
+impl SparseSet {
     /// The fields changed, or [`None`] where none is.
     #[must_use]
     pub const fn new(
         measure: Option<Measure>,
         load: Option<Load>,
-        effort: Option<Rir>,
+        intensity: Option<Rir>,
     ) -> Option<Self> {
-        if measure.is_none() && load.is_none() && effort.is_none() {
+        if measure.is_none() && load.is_none() && intensity.is_none() {
             return None;
         }
         Some(Self {
             measure,
             load,
-            effort,
+            intensity,
         })
     }
 
@@ -249,22 +236,22 @@ impl SetEdit {
         self.load
     }
 
-    pub const fn effort(self) -> Option<Rir> {
-        self.effort
+    pub const fn intensity(self) -> Option<Rir> {
+        self.intensity
     }
 
-    /// The fields it states.
+    /// The fields it holds.
     fn stated(self) -> impl Iterator<Item = SetField> {
         [
             self.measure.map(|_| SetField::Measure),
             self.load.map(|_| SetField::Load),
-            self.effort.map(|_| SetField::Effort),
+            self.intensity.map(|_| SetField::Intensity),
         ]
         .into_iter()
         .flatten()
     }
 
-    /// This edit with a later one's fields over it: what the later one
+    /// This set with a later one's fields over it: what the later one
     /// changed, it changes; what it left, this one's still says.
     #[must_use]
     pub const fn then(self, later: Self) -> Self {
@@ -277,16 +264,15 @@ impl SetEdit {
                 Some(load) => Some(load),
                 None => self.load,
             },
-            effort: match later.effort {
-                Some(effort) => Some(effort),
-                None => self.effort,
+            intensity: match later.intensity {
+                Some(intensity) => Some(intensity),
+                None => self.intensity,
             },
         }
     }
 
-    /// `set` with each field this edit states over it, attributed to the
-    /// edit. A measure reaches only a set counted in it, which `counted`
-    /// picks out.
+    /// `set` with each field this holds over it, attributed to the edit. A
+    /// measure reaches only a set counted in it, which `counted` picks out.
     fn over<M: Clone>(
         self,
         set: &CanonicalSet<M>,
@@ -299,14 +285,14 @@ impl SetEdit {
         if let Some(load) = self.load {
             edited.load = Some(Attributed::edited(load));
         }
-        if let Some(effort) = self.effort {
-            edited.intensity = Some(Attributed::edited(effort));
+        if let Some(intensity) = self.intensity {
+            edited.intensity = Some(Attributed::edited(intensity));
         }
         edited
     }
 }
 
-impl fmt::Display for SetEdit {
+impl fmt::Display for SparseSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut parts = Vec::new();
         if let Some(measure) = self.measure {
@@ -315,81 +301,197 @@ impl fmt::Display for SetEdit {
         if let Some(load) = self.load {
             parts.push(load.to_string());
         }
-        if let Some(effort) = self.effort {
-            parts.push(format!("{effort} in reserve"));
+        if let Some(intensity) = self.intensity {
+            parts.push(format!("{intensity} in reserve"));
         }
         f.write_str(&parts.join(", "))
     }
 }
 
-/// What one assertion edits.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Edited {
-    /// What exercises were: one, or it and the similar ones.
-    Exercises(NonEmpty<ExerciseEdit>),
-    /// What one set was.
-    Set { set: CanonicalSetId, edit: SetEdit },
+/// One exercise of a canonical gym session, sparse: what it was, where the
+/// operator changed that, and the sets of it he changed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SparseExercise {
+    pub exercise: Option<Exercise>,
+    pub sets: BTreeMap<CanonicalSetId, SparseSet>,
 }
 
-impl Edited {
-    /// How many exercises or sets it reaches.
+impl SparseExercise {
+    /// One that says only what the exercise was.
     #[must_use]
-    pub const fn reaches(&self) -> usize {
-        match self {
-            Self::Exercises(exercises) => exercises.count(),
-            Self::Set { .. } => 1,
+    pub const fn was(exercise: Exercise) -> Self {
+        Self {
+            exercise: Some(exercise),
+            sets: BTreeMap::new(),
+        }
+    }
+
+    /// One that says only what one of its sets was.
+    #[must_use]
+    pub fn set(set: CanonicalSetId, fields: SparseSet) -> Self {
+        Self {
+            exercise: None,
+            sets: BTreeMap::from([(set, fields)]),
+        }
+    }
+
+    /// This exercise with a later one over it, field by field and set by set.
+    fn then(&mut self, later: &Self) {
+        if let Some(exercise) = later.exercise {
+            self.exercise = Some(exercise);
+        }
+        for (set, fields) in &later.sets {
+            let merged = self
+                .sets
+                .get(set)
+                .map_or(*fields, |held| held.then(*fields));
+            self.sets.insert(*set, merged);
         }
     }
 }
 
-/// One assertion by the operator.
+/// A canonical gym session, sparse: a field is present only where the
+/// operator changed it, and its presence is the edit.
+///
+/// The operator, 2026-11-21: *"the edit overlay is a sparse canonical gym
+/// session. Any field in a canonical gym session can be edited. It's presence
+/// in the edit overlay is the signal that it's a correctness. Fields that
+/// aren't included aren't edited."* Keyed by the ids each entity keeps
+/// across a rebuild ([`super::identity`]), since what the layer holds in
+/// order the overlay holds by name.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SparseGymSession {
+    pub exercises: BTreeMap<CanonicalExerciseId, SparseExercise>,
+}
+
+impl SparseGymSession {
+    /// One that says something about one exercise and nothing else.
+    #[must_use]
+    pub fn exercise(exercise: CanonicalExerciseId, sparse: SparseExercise) -> Self {
+        Self {
+            exercises: BTreeMap::from([(exercise, sparse)]),
+        }
+    }
+
+    /// This session with a later one over it, field by field.
+    fn then(&mut self, later: &Self) {
+        for (exercise, sparse) in &later.exercises {
+            self.exercises.entry(*exercise).or_default().then(sparse);
+        }
+    }
+}
+
+/// An exercise as an edit of what it was found it: what it read as, and the
+/// sets it held.
+///
+/// **Bookkeeping, not a field of the session.** The first says what was
+/// changed; the second is how a set a source adds later is told apart from
+/// the sets the operator ruled on, so it is raised rather than silently taken
+/// in (§ II.2, *"overrides do not propagate"*).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Found {
+    pub read: Exercise,
+    pub sets: BTreeSet<CanonicalSetId>,
+}
+
+/// One assertion by the operator: when, why, and what it says the sessions
+/// were.
+///
+/// **Usually one session.** "Similar ones too" is several, under one
+/// [`EditId`], so it is retracted as it was made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Edit {
     pub id: EditId,
     pub asserted_at: Timestamp,
     pub reason: EditReason,
-    pub edited: Edited,
+    pub sessions: BTreeMap<CanonicalSessionId, SparseGymSession>,
+    /// How each exercise whose name it states was found.
+    pub found: BTreeMap<CanonicalExerciseId, Found>,
 }
 
-/// Which of `edits` are in force on a session whose exercises hold `ids`,
-/// newest first (#895).
+impl Edit {
+    /// How many sessions it reaches.
+    #[must_use]
+    pub fn reaches(&self) -> usize {
+        self.sessions.len()
+    }
+
+    /// Every exercise whose name it states, with what it says it was.
+    pub fn exercises(&self) -> impl Iterator<Item = (CanonicalExerciseId, Exercise)> + '_ {
+        self.sessions.values().flat_map(|session| {
+            session
+                .exercises
+                .iter()
+                .filter_map(|(id, sparse)| sparse.exercise.map(|exercise| (*id, exercise)))
+        })
+    }
+
+    /// Every set it says something about, with what.
+    pub fn sets(&self) -> impl Iterator<Item = (CanonicalSetId, SparseSet)> + '_ {
+        self.sessions.values().flat_map(|session| {
+            session
+                .exercises
+                .values()
+                .flat_map(|exercise| exercise.sets.iter().map(|(id, set)| (*id, *set)))
+        })
+    }
+}
+
+/// One field of a session the overlay can hold, named by the entity it is
+/// on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Field {
+    Exercise(CanonicalExerciseId),
+    Set(CanonicalSetId, SetField),
+}
+
+impl Edit {
+    /// How many fields it holds, which narrowing it lowers.
+    #[must_use]
+    pub fn holds(&self) -> usize {
+        self.fields().count()
+    }
+
+    /// Each field it holds.
+    fn fields(&self) -> impl Iterator<Item = Field> + '_ {
+        self.exercises()
+            .map(|(exercise, _)| Field::Exercise(exercise))
+            .chain(
+                self.sets()
+                    .flat_map(|(set, fields)| fields.stated().map(move |f| Field::Set(set, f))),
+            )
+    }
+}
+
+/// Which of `edits` are in force on a session written under `ids`, newest
+/// first (#895).
 ///
-/// **In force is what still says something about the session**: the last
-/// edit of each of its exercises, and of each field of each of its sets. An
-/// edit a later one has wholly overruled is not listed, since undoing it would
-/// change nothing; undoing the later one brings it back.
+/// **In force is what still says something about the session**: an edit is
+/// listed while it is the latest to hold at least one of the session's
+/// fields. One a later edit has wholly overruled is not listed, since undoing
+/// it would change nothing; undoing the later one brings it back.
 #[must_use]
-pub fn in_force<'a>(edits: &'a [Edit], ids: &[ExerciseIds]) -> Vec<&'a Edit> {
+pub fn in_force<'a>(edits: &'a [Edit], ids: &SessionIds) -> Vec<&'a Edit> {
     let mut ordered: Vec<&Edit> = edits.iter().collect();
     ordered.sort_by_key(|edit| (edit.asserted_at, edit.id));
-    let exercises: BTreeSet<CanonicalExerciseId> = ids.iter().map(|held| held.exercise).collect();
+    let exercises: BTreeSet<CanonicalExerciseId> =
+        ids.exercises.iter().map(|held| held.exercise).collect();
     let sets: BTreeSet<CanonicalSetId> = ids
+        .exercises
         .iter()
         .flat_map(|held| held.sets.iter().copied())
         .collect();
-    let mut exercise_by: BTreeMap<CanonicalExerciseId, EditId> = BTreeMap::new();
-    let mut field_by: BTreeMap<(CanonicalSetId, SetField), EditId> = BTreeMap::new();
+    let on_session = |field: &Field| match field {
+        Field::Exercise(exercise) => exercises.contains(exercise),
+        Field::Set(set, _) => sets.contains(set),
+    };
+    let mut latest: BTreeMap<Field, EditId> = BTreeMap::new();
     for edit in &ordered {
-        match &edit.edited {
-            Edited::Exercises(edited) => {
-                for exercise in edited {
-                    if exercises.contains(&exercise.exercise) {
-                        exercise_by.insert(exercise.exercise, edit.id);
-                    }
-                }
-            }
-            Edited::Set { set, edit: fields } if sets.contains(set) => {
-                for field in fields.stated() {
-                    field_by.insert((*set, field), edit.id);
-                }
-            }
-            Edited::Set { .. } => {}
+        for field in edit.fields().filter(on_session) {
+            latest.insert(field, edit.id);
         }
     }
-    let standing: BTreeSet<EditId> = exercise_by
-        .into_values()
-        .chain(field_by.into_values())
-        .collect();
+    let standing: BTreeSet<EditId> = latest.into_values().collect();
     ordered
         .into_iter()
         .rev()
@@ -412,16 +514,21 @@ pub enum Conflict {
     SetGone(CanonicalSetId),
 }
 
-/// Every edit in force, ready for a rebuild to apply.
+/// Every edit in force, folded into one sparse session each, ready for a
+/// rebuild to apply.
 ///
-/// **Later wins where two edits name one entity**: the operator changing his
-/// mind. A set's edits merge field by field, since each holds only what it
-/// changed. Ordering is by when they were asserted, so the result does not
-/// depend on the order the store hands them back in.
+/// **Later wins field by field**: the operator changing his mind, and each
+/// edit holding only what it changed. Ordering is by when they were asserted,
+/// so the result does not depend on the order the store hands them back in.
+///
+/// **Applied by the ids the entities keep**, whichever session holds them
+/// now: an exercise follows its sets (§ [`super::identity`]), so the session
+/// an edit names is where it was, which is where it is unless a rebuild moved
+/// it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Edits {
-    exercises: BTreeMap<CanonicalExerciseId, ExerciseEdit>,
-    sets: BTreeMap<CanonicalSetId, SetEdit>,
+    exercises: BTreeMap<CanonicalExerciseId, (Exercise, Found)>,
+    sets: BTreeMap<CanonicalSetId, SparseSet>,
 }
 
 impl Edits {
@@ -429,19 +536,24 @@ impl Edits {
     pub fn of(edits: &[Edit]) -> Self {
         let mut ordered: Vec<&Edit> = edits.iter().collect();
         ordered.sort_by_key(|edit| (edit.asserted_at, edit.id));
-        let mut exercises = BTreeMap::new();
-        let mut sets: BTreeMap<CanonicalSetId, SetEdit> = BTreeMap::new();
+        let mut folded: BTreeMap<CanonicalSessionId, SparseGymSession> = BTreeMap::new();
+        let mut found: BTreeMap<CanonicalExerciseId, Found> = BTreeMap::new();
         for edit in ordered {
-            match &edit.edited {
-                Edited::Exercises(edited) => {
-                    for exercise in edited {
-                        exercises.insert(exercise.exercise, exercise.clone());
-                    }
+            for (session, sparse) in &edit.sessions {
+                folded.entry(*session).or_default().then(sparse);
+            }
+            for (exercise, as_found) in &edit.found {
+                found.insert(*exercise, as_found.clone());
+            }
+        }
+        let mut exercises = BTreeMap::new();
+        let mut sets = BTreeMap::new();
+        for session in folded.into_values() {
+            for (id, exercise) in session.exercises {
+                if let (Some(becomes), Some(as_found)) = (exercise.exercise, found.get(&id)) {
+                    exercises.insert(id, (becomes, as_found.clone()));
                 }
-                Edited::Set { set, edit } => {
-                    let merged = sets.get(set).map_or(*edit, |held| held.then(*edit));
-                    sets.insert(*set, merged);
-                }
+                sets.extend(exercise.sets);
             }
         }
         Self { exercises, sets }
@@ -452,15 +564,18 @@ impl Edits {
         self.exercises.is_empty() && self.sets.is_empty()
     }
 
-    /// The edit of one exercise, where there is one.
+    /// What one exercise was, and how the edit found it, where there is an
+    /// edit of it.
     #[must_use]
-    pub fn exercise(&self, exercise: CanonicalExerciseId) -> Option<&ExerciseEdit> {
-        self.exercises.get(&exercise)
+    pub fn exercise(&self, exercise: CanonicalExerciseId) -> Option<(Exercise, &Found)> {
+        self.exercises
+            .get(&exercise)
+            .map(|(becomes, found)| (*becomes, found))
     }
 
-    /// The edit of one set, where there is one.
+    /// What one set was, where there is an edit of it.
     #[must_use]
-    pub fn set(&self, set: CanonicalSetId) -> Option<SetEdit> {
+    pub fn set(&self, set: CanonicalSetId) -> Option<SparseSet> {
         self.sets.get(&set).copied()
     }
 
@@ -486,7 +601,10 @@ impl Edits {
     }
 
     fn exercise_over(&self, exercise: &CanonicalExercise, ids: &ExerciseIds) -> CanonicalExercise {
-        let becomes = self.exercises.get(&ids.exercise).map(|edit| edit.becomes);
+        let becomes = self
+            .exercises
+            .get(&ids.exercise)
+            .map(|(becomes, _)| *becomes);
         let set = |index: usize| {
             ids.sets
                 .get(index)
@@ -540,11 +658,11 @@ impl Edits {
         held: &BTreeMap<CanonicalExerciseId, BTreeSet<CanonicalSetId>>,
     ) -> Vec<Conflict> {
         let mut conflicts = Vec::new();
-        for (exercise, edit) in &self.exercises {
+        for (exercise, (_, found)) in &self.exercises {
             match held.get(exercise) {
                 None => conflicts.push(Conflict::ExerciseGone(*exercise)),
                 Some(sets) => {
-                    conflicts.extend(sets.difference(&edit.sets).map(|set| Conflict::Added {
+                    conflicts.extend(sets.difference(&found.sets).map(|set| Conflict::Added {
                         exercise: *exercise,
                         set: *set,
                     }));
@@ -568,6 +686,7 @@ mod tests {
     use crate::canonical::{NormalisedSessionId, Occurred};
     use crate::gym::canonical::CanonicalItem;
     use crate::gym::exercise::{DurationExercise, RepsExercise};
+    use crate::sequence::NonEmpty;
 
     fn exercise_id(id: i64) -> CanonicalExerciseId {
         CanonicalExerciseId::try_from(id).expect("an id")
@@ -618,7 +737,7 @@ mod tests {
 
     fn ids() -> SessionIds {
         SessionIds {
-            session: crate::gym::identity::CanonicalSessionId::try_from(1).expect("an id"),
+            session: session_id(),
             exercises: vec![ExerciseIds {
                 exercise: exercise_id(10),
                 sets: vec![set_id(100), set_id(101)],
@@ -634,15 +753,61 @@ mod tests {
         EditReason::try_from("forgot to rate it".to_owned()).expect("a reason")
     }
 
-    fn set_edit(id: i64, when: &str, set: i64, edit: SetEdit) -> Edit {
+    fn session_id() -> CanonicalSessionId {
+        CanonicalSessionId::try_from(1).expect("an id")
+    }
+
+    /// An edit of one set of exercise 10 of session 1, or of exercise 99
+    /// where the set is not one of exercise 10's.
+    fn set_edit(id: i64, when: &str, set: i64, fields: SparseSet) -> Edit {
+        let exercise = if set < 200 { 10 } else { 99 };
         Edit {
             id: EditId::from(id),
             asserted_at: at(when),
             reason: reason(),
-            edited: Edited::Set {
-                set: set_id(set),
-                edit,
-            },
+            sessions: BTreeMap::from([(
+                session_id(),
+                SparseGymSession::exercise(
+                    exercise_id(exercise),
+                    SparseExercise::set(set_id(set), fields),
+                ),
+            )]),
+            found: BTreeMap::new(),
+        }
+    }
+
+    /// An edit of what exercises were, each in a session of its own, found
+    /// holding `sets`.
+    fn exercise_edit(
+        id: i64,
+        when: &str,
+        becomes: RepsExercise,
+        exercises: &[(i64, &[i64])],
+    ) -> Edit {
+        let mut sessions = BTreeMap::new();
+        let mut found = BTreeMap::new();
+        for (session, (exercise, sets)) in (1..).zip(exercises) {
+            sessions.insert(
+                CanonicalSessionId::try_from(session).expect("an id"),
+                SparseGymSession::exercise(
+                    exercise_id(*exercise),
+                    SparseExercise::was(Exercise::Reps(becomes)),
+                ),
+            );
+            found.insert(
+                exercise_id(*exercise),
+                Found {
+                    read: Exercise::Reps(RepsExercise::DeadliftBarbell),
+                    sets: sets.iter().map(|set| set_id(*set)).collect(),
+                },
+            );
+        }
+        Edit {
+            id: EditId::from(id),
+            asserted_at: at(when),
+            reason: reason(),
+            sessions,
+            found,
         }
     }
 
@@ -650,7 +815,7 @@ mod tests {
     /// it came from the edit; the rest of the set is the sheet's still.
     #[test]
     fn an_effort_reaches_a_set_whatever_source_recorded_it() {
-        let rated = SetEdit::new(None, None, Some(Rir::Two)).expect("an effort");
+        let rated = SparseSet::new(None, None, Some(Rir::Two)).expect("an effort");
         let edits = Edits::of(&[set_edit(1, "2026-11-22T09:00:00Z", 101, rated)]);
 
         let edited = edits.apply(&session(), &ids());
@@ -705,7 +870,7 @@ mod tests {
             None,
         );
         let ids = SessionIds {
-            session: crate::gym::identity::CanonicalSessionId::try_from(1).expect("an id"),
+            session: session_id(),
             exercises: vec![ExerciseIds {
                 exercise: exercise_id(10),
                 sets: vec![set_id(100)],
@@ -727,7 +892,7 @@ mod tests {
             )
         };
 
-        let longer = SetEdit::new(
+        let longer = SparseSet::new(
             Some(Measure::Duration(Duration::from_seconds(45))),
             Some(Load::absolute(Kg::from_grams(10_000))),
             None,
@@ -743,7 +908,7 @@ mod tests {
         );
         assert_eq!(longer.to_string(), "45 s, 10 kg");
 
-        let counted = SetEdit::new(Some(Measure::Reps(reps(3))), None, None).expect("a count");
+        let counted = SparseSet::new(Some(Measure::Reps(reps(3))), None, None).expect("a count");
         assert_eq!(
             length(counted),
             (
@@ -758,20 +923,12 @@ mod tests {
     /// exercise as the edit's.
     #[test]
     fn an_exercise_edit_renames_the_exercise() {
-        let edits = Edits::of(&[Edit {
-            id: EditId::from(1),
-            asserted_at: at("2026-11-22T09:00:00Z"),
-            reason: reason(),
-            edited: Edited::Exercises(NonEmpty::of(
-                ExerciseEdit {
-                    exercise: exercise_id(10),
-                    becomes: Exercise::Reps(RepsExercise::RomanianDeadliftBarbell),
-                    read: Exercise::Reps(RepsExercise::DeadliftBarbell),
-                    sets: BTreeSet::from([set_id(100), set_id(101)]),
-                },
-                vec![],
-            )),
-        }]);
+        let edits = Edits::of(&[exercise_edit(
+            1,
+            "2026-11-22T09:00:00Z",
+            RepsExercise::RomanianDeadliftBarbell,
+            &[(10, &[100, 101])],
+        )]);
 
         let edited = edits.apply(&session(), &ids());
         let exercise = edited.exercises().next().expect("one");
@@ -789,9 +946,9 @@ mod tests {
     /// count still stands is.
     #[test]
     fn a_session_lists_the_edits_still_saying_something_about_it() {
-        let rated = |rir| SetEdit::new(None, None, Some(rir)).expect("an effort");
+        let rated = |rir| SparseSet::new(None, None, Some(rir)).expect("an effort");
         let both =
-            SetEdit::new(Some(Measure::Reps(reps(3))), None, Some(Rir::Two)).expect("two fields");
+            SparseSet::new(Some(Measure::Reps(reps(3))), None, Some(Rir::Two)).expect("two fields");
         let edits = [
             set_edit(1, "2026-11-21T09:00:00Z", 100, rated(Rir::One)),
             set_edit(2, "2026-11-21T09:30:00Z", 101, both),
@@ -800,7 +957,7 @@ mod tests {
             set_edit(5, "2026-11-21T11:00:00Z", 999, rated(Rir::Two)),
         ];
 
-        let listed: Vec<EditId> = in_force(&edits, &ids().exercises)
+        let listed: Vec<EditId> = in_force(&edits, &ids())
             .iter()
             .map(|edit| edit.id)
             .collect();
@@ -811,25 +968,8 @@ mod tests {
     /// and an edit of the similar ones is listed on each session it reaches.
     #[test]
     fn an_exercise_edit_is_listed_until_a_later_one_restates_it() {
-        let renamed = |id, when, becomes| Edit {
-            id: EditId::from(id),
-            asserted_at: at(when),
-            reason: reason(),
-            edited: Edited::Exercises(NonEmpty::of(
-                ExerciseEdit {
-                    exercise: exercise_id(10),
-                    becomes: Exercise::Reps(becomes),
-                    read: Exercise::Reps(RepsExercise::DeadliftBarbell),
-                    sets: BTreeSet::from([set_id(100), set_id(101)]),
-                },
-                vec![ExerciseEdit {
-                    exercise: exercise_id(20),
-                    becomes: Exercise::Reps(becomes),
-                    read: Exercise::Reps(RepsExercise::DeadliftBarbell),
-                    sets: BTreeSet::new(),
-                }],
-            )),
-        };
+        let renamed =
+            |id, when, becomes| exercise_edit(id, when, becomes, &[(10, &[100, 101]), (20, &[])]);
         let first = renamed(
             1,
             "2026-11-21T09:00:00Z",
@@ -838,10 +978,7 @@ mod tests {
         let second = renamed(2, "2026-11-21T10:00:00Z", RepsExercise::DeadliftBarbell);
 
         let listed = |edits: &[Edit]| -> Vec<EditId> {
-            in_force(edits, &ids().exercises)
-                .iter()
-                .map(|edit| edit.id)
-                .collect()
+            in_force(edits, &ids()).iter().map(|edit| edit.id).collect()
         };
         assert_eq!(listed(std::slice::from_ref(&first)), [EditId::from(1)]);
         assert_eq!(listed(&[second, first]), [EditId::from(2)]);
@@ -855,8 +992,8 @@ mod tests {
     /// not**, whichever order the store hands them back in.
     #[test]
     fn a_later_edit_of_a_set_keeps_the_fields_it_left() {
-        let rated = SetEdit::new(None, None, Some(Rir::One)).expect("an effort");
-        let recounted = SetEdit::new(Some(Measure::Reps(reps(2))), None, None).expect("a count");
+        let rated = SparseSet::new(None, None, Some(Rir::One)).expect("an effort");
+        let recounted = SparseSet::new(Some(Measure::Reps(reps(2))), None, None).expect("a count");
         let earlier = set_edit(1, "2026-11-21T09:00:00Z", 100, rated);
         let later = set_edit(2, "2026-11-21T10:00:00Z", 100, recounted);
 
@@ -865,10 +1002,10 @@ mod tests {
             Edits::of(&[later, earlier]),
         ] {
             let edit = edits.set(set_id(100)).expect("an edit");
-            assert_eq!(edit.effort(), Some(Rir::One));
+            assert_eq!(edit.intensity(), Some(Rir::One));
             assert_eq!(edit.measure(), Some(Measure::Reps(reps(2))));
         }
-        assert_eq!(SetEdit::new(None, None, None), None);
+        assert_eq!(SparseSet::new(None, None, None), None);
     }
 
     /// **What a rebuild changed under an edit is raised**: a set added to an
@@ -876,25 +1013,17 @@ mod tests {
     #[test]
     fn a_rebuild_that_moves_what_an_edit_stands_on_is_raised() {
         let edits = Edits::of(&[
-            Edit {
-                id: EditId::from(1),
-                asserted_at: at("2026-11-22T09:00:00Z"),
-                reason: reason(),
-                edited: Edited::Exercises(NonEmpty::of(
-                    ExerciseEdit {
-                        exercise: exercise_id(10),
-                        becomes: Exercise::Reps(RepsExercise::RomanianDeadliftBarbell),
-                        read: Exercise::Reps(RepsExercise::DeadliftBarbell),
-                        sets: BTreeSet::from([set_id(100)]),
-                    },
-                    vec![],
-                )),
-            },
+            exercise_edit(
+                1,
+                "2026-11-22T09:00:00Z",
+                RepsExercise::RomanianDeadliftBarbell,
+                &[(10, &[100])],
+            ),
             set_edit(
                 2,
                 "2026-11-22T09:01:00Z",
                 999,
-                SetEdit::new(Some(Measure::Reps(reps(6))), None, None).expect("a count"),
+                SparseSet::new(Some(Measure::Reps(reps(6))), None, None).expect("a count"),
             ),
         ]);
 

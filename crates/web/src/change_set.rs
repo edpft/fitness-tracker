@@ -14,9 +14,10 @@
 //! is left out of the edit, so what the sources said, or an earlier edit,
 //! still stands for it.
 
-use std::{str::FromStr as _, sync::Arc};
+use std::{collections::BTreeMap, str::FromStr as _, sync::Arc};
 
 use application::history::Number;
+
 use axum::{
     Form,
     extract::{Path, State},
@@ -27,8 +28,8 @@ use domain::{
     canonical::Attributed,
     gym::{
         CanonicalExercise, CanonicalSet, Load, Performed, SetKind,
-        edit::{EditReason, Measure, SetEdit, StatedLoad},
-        identity::CanonicalSetId,
+        edit::{EditReason, Measure, SparseExercise, SparseGymSession, SparseSet, StatedLoad},
+        identity::{CanonicalExerciseId, CanonicalSessionId, CanonicalSetId},
         intensity::Rir,
     },
     measure::{Distance, Duration, Kg, Metres, RepCount},
@@ -209,7 +210,7 @@ impl Typed {
 ///
 /// [`Refusal`] beside the field at fault, or of the whole form if nothing was
 /// changed.
-pub fn asked(reads: Reads, typed: &Typed) -> Result<(SetEdit, EditReason), Refusal> {
+pub fn asked(reads: Reads, typed: &Typed) -> Result<(SparseSet, EditReason), Refusal> {
     let measure = if typed.measure.is_empty() && reads.measure.is_none() {
         None
     } else {
@@ -250,7 +251,7 @@ pub fn asked(reads: Reads, typed: &Typed) -> Result<(SetEdit, EditReason), Refus
     };
     let because = EditReason::try_from(typed.because.clone())
         .map_err(|_| Refusal::of("because", "say why".to_owned()))?;
-    let edit = SetEdit::new(
+    let edit = SparseSet::new(
         measure.filter(|measure| Some(*measure) != reads.measure),
         load.filter(|load| Some(*load) != reads.load),
         effort.filter(|effort| Some(*effort) != reads.effort),
@@ -349,6 +350,8 @@ impl At {
 pub struct Found {
     exercise: String,
     name: String,
+    session: CanonicalSessionId,
+    exercise_id: CanonicalExerciseId,
     id: CanonicalSetId,
     reads: Reads,
 }
@@ -383,7 +386,7 @@ async fn found(store: &Store, zone: &OperatorZone, at: &At) -> Result<Found, Res
     let Some(reads) = reads else {
         return Err(Redirect::to(&session).into_response());
     };
-    let ids = edits::ids_of(store, &canonical)
+    let (held, ids) = edits::ids_of(store, &canonical)
         .await
         .map_err(|error| unreadable(&error.to_string()))?
         .ok_or_else(|| unreadable("the session is being rebuilt; open it again in a moment"))?;
@@ -393,6 +396,8 @@ async fn found(store: &Store, zone: &OperatorZone, at: &At) -> Result<Found, Res
     Ok(Found {
         exercise: history::exercise_name(&canonical),
         name: named(&history::warm_ups(&canonical), index),
+        session: held,
+        exercise_id: ids.exercise,
         id,
         reads,
     })
@@ -445,7 +450,11 @@ pub async fn posted(
         Ok(asked) => asked,
         Err(refusal) => return refused(&refusal),
     };
-    match edits::assert_set(store, &because, found.id, edit).await {
+    let sessions = BTreeMap::from([(
+        found.session,
+        SparseGymSession::exercise(found.exercise_id, SparseExercise::set(found.id, edit)),
+    )]);
+    match edits::assert(store, &because, &sessions, &BTreeMap::new()).await {
         Ok(id) => {
             // What History collects, so the session is drawn again from the
             // layers derived under the change by the time it is opened.
@@ -496,7 +505,7 @@ mod tests {
 
         assert_eq!(edit.measure(), None);
         assert_eq!(edit.load(), None);
-        assert_eq!(edit.effort(), Some(Rir::One));
+        assert_eq!(edit.intensity(), Some(Rir::One));
     }
 
     #[test]
@@ -557,7 +566,7 @@ mod tests {
         let (edit, _) = asked(sheet, &typed("1", "", "2")).expect("an edit");
 
         assert_eq!(edit.load(), None);
-        assert_eq!(edit.effort(), Some(Rir::Two));
+        assert_eq!(edit.intensity(), Some(Rir::Two));
     }
 
     /// 25 Sep's dead hang: 40 s, no load, as Hevy recorded it.

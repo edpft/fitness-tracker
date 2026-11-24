@@ -1403,7 +1403,7 @@ where
                     .edits()
                     .await?
                     .iter()
-                    .map(|edit| format!("{}:{}", edit.id, edit.edited.reaches()))
+                    .map(|edit| format!("{}:{}", edit.id, edit.holds()))
                     .collect();
                 format!("; edits {}", edits.join(","))
             }

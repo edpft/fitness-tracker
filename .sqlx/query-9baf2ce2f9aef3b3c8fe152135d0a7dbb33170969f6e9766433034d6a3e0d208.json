@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT edit AS \"edit!\", canonical_set, reps, duration_seconds, distance_mm,\n               load_kind, load_grams, rir\n        FROM canonical_gym_set_edit\n        ",
+  "query": "\n        SELECT edit AS \"edit!\", session AS \"session!\", exercise AS \"exercise!\",\n               canonical_set AS \"canonical_set!\", reps, duration_seconds, distance_mm,\n               load_kind, load_grams, rir\n        FROM canonical_gym_set_edit\n        ORDER BY edit, canonical_set\n        ",
   "describe": {
     "columns": [
       {
@@ -15,8 +15,30 @@
         }
       },
       {
-        "name": "canonical_set",
+        "name": "session!",
         "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set_edit",
+            "name": "session"
+          }
+        }
+      },
+      {
+        "name": "exercise!",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_set_edit",
+            "name": "exercise"
+          }
+        }
+      },
+      {
+        "name": "canonical_set!",
+        "ordinal": 3,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -27,7 +49,7 @@
       },
       {
         "name": "reps",
-        "ordinal": 2,
+        "ordinal": 4,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -38,7 +60,7 @@
       },
       {
         "name": "duration_seconds",
-        "ordinal": 3,
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -49,7 +71,7 @@
       },
       {
         "name": "distance_mm",
-        "ordinal": 4,
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -60,7 +82,7 @@
       },
       {
         "name": "load_kind",
-        "ordinal": 5,
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +93,7 @@
       },
       {
         "name": "load_grams",
-        "ordinal": 6,
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -82,7 +104,7 @@
       },
       {
         "name": "rir",
-        "ordinal": 7,
+        "ordinal": 9,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -98,6 +120,8 @@
     "nullable": [
       false,
       false,
+      false,
+      false,
       true,
       true,
       true,
@@ -106,5 +130,5 @@
       true
     ]
   },
-  "hash": "de8e34d1c7cf3f697cb6a25dc117fe4bb9f025d98c755392f573830f08b209bb"
+  "hash": "9baf2ce2f9aef3b3c8fe152135d0a7dbb33170969f6e9766433034d6a3e0d208"
 }
