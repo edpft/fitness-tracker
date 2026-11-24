@@ -380,10 +380,16 @@ pub struct CanonicalGymSession {
     /// quantities out of the merge: there is no single value two normalised sessions of it
     /// could reduce to.
     heart_rate: Option<Attributed<MeasuredHeartRate>>,
-    /// When the visit ended, where it started at an instant and a source
-    /// said how long it took. Hevy and a watch both do; a sheet and the
-    /// gym's log do not.
-    ended: Option<Attributed<Timestamp, TakenFrom>>,
+    /// How long the visit lasted, where it started at an instant and a
+    /// source said how long it took. Hevy and a watch both do; a sheet and
+    /// the gym's log do not.
+    ///
+    /// **A start and a duration, never an end** (operator, 2026-11-24:
+    /// *"internally, we should always store a start and a non-negative
+    /// duration, in the UI we can deal in start and end times"*). Attributed
+    /// to wherever its end was taken from, since that is what the operator
+    /// chooses.
+    lasted: Option<Attributed<PositiveDuration, TakenFrom>>,
     /// Each source's own account of when the visit started and ended, so an
     /// edit can take either from the one the operator chooses (#894).
     accounts: Vec<Account>,
@@ -402,9 +408,33 @@ pub struct Account {
     pub stream: LandingStream,
     pub normalised: NormalisedSessionId,
     pub occurred: Occurred,
-    /// Its start and the length it stated, where it stated both: what the
-    /// source recorded, with nothing trimmed.
-    pub ended: Option<Timestamp>,
+    /// How long it said the visit lasted, where it said: what the source
+    /// recorded, with nothing trimmed.
+    pub duration: Option<PositiveDuration>,
+}
+
+impl Account {
+    /// When it says the visit ended, where it says when it started and for
+    /// how long.
+    #[must_use]
+    pub fn ended(&self) -> Option<Timestamp> {
+        ended(self.occurred.instant()?.instant(), self.duration?)
+    }
+}
+
+/// `duration` after `start`.
+fn ended(start: Timestamp, duration: PositiveDuration) -> Option<Timestamp> {
+    let seconds = i64::try_from(duration.as_seconds()).ok()?;
+    start
+        .checked_add(jiff::SignedDuration::from_secs(seconds))
+        .ok()
+}
+
+/// From `start` to `end`, where that is any time at all.
+#[must_use]
+pub fn between(start: Timestamp, end: Timestamp) -> Option<PositiveDuration> {
+    let seconds = u64::try_from(end.as_second() - start.as_second()).ok()?;
+    PositiveDuration::from_seconds(seconds).ok()
 }
 
 /// Why a start and an end cannot be one session's.
@@ -425,14 +455,14 @@ impl CanonicalGymSession {
         occurred: Attributed<Occurred, TakenFrom>,
         exercises: NonEmpty<CanonicalItem>,
         heart_rate: Option<Attributed<MeasuredHeartRate>>,
-        ended: Option<Attributed<Timestamp, TakenFrom>>,
+        lasted: Option<Attributed<PositiveDuration, TakenFrom>>,
         accounts: Vec<Account>,
     ) -> Self {
         Self {
             occurred,
             exercises,
             heart_rate,
-            ended,
+            lasted,
             accounts,
         }
     }
@@ -447,9 +477,17 @@ impl CanonicalGymSession {
         &self.occurred
     }
 
-    /// When it ended, and where that was taken from.
-    pub const fn ended(&self) -> Option<&Attributed<Timestamp, TakenFrom>> {
-        self.ended.as_ref()
+    /// How long it lasted, and where its end was taken from.
+    pub const fn lasted(&self) -> Option<&Attributed<PositiveDuration, TakenFrom>> {
+        self.lasted.as_ref()
+    }
+
+    /// When it ended, and where that was taken from: its start and how long
+    /// it lasted, read as a time for the page.
+    pub fn ended(&self) -> Option<Attributed<Timestamp, TakenFrom>> {
+        let lasted = self.lasted.as_ref()?;
+        let end = ended(self.occurred().instant()?.instant(), lasted.copied())?;
+        Some(Attributed::new(end, lasted.taken_from()))
     }
 
     /// Each source's own start and end.
@@ -457,45 +495,43 @@ impl CanonicalGymSession {
         &self.accounts
     }
 
-    /// How long it lasted: from its start to its end.
+    /// How long it lasted.
     pub fn length(&self) -> Option<PositiveDuration> {
-        let started = self.occurred().instant()?.instant();
-        let ended = self.ended.as_ref()?.copied();
-        let seconds = u64::try_from(ended.as_second() - started.as_second()).ok()?;
-        PositiveDuration::from_seconds(seconds).ok()
+        self.lasted.as_ref().map(Attributed::copied)
     }
 
     pub const fn heart_rate(&self) -> Option<&Attributed<MeasuredHeartRate>> {
         self.heart_rate.as_ref()
     }
 
-    /// The same session started and ended as `started` and `ended` say, with
-    /// its heart rate read only between them.
+    /// The same session started as `started` says and lasting as `lasted`
+    /// does, with its heart rate read only between its start and its end.
     ///
     /// # Errors
     ///
-    /// [`InvalidBounds`] where the two cannot be one session's: an end at or
-    /// before the start, an end with no instant to start from, a start on
-    /// another day, or bounds that leave out a set the watch timed.
+    /// [`InvalidBounds`] where the two cannot be one session's: a length
+    /// with no instant to start from, a start on another day, or bounds that
+    /// leave out a set the watch timed.
     pub fn bounded(
         &self,
         started: Attributed<Occurred, TakenFrom>,
-        ended: Option<Attributed<Timestamp, TakenFrom>>,
+        lasted: Option<Attributed<PositiveDuration, TakenFrom>>,
     ) -> Result<Self, InvalidBounds> {
         if started.value().day() != self.occurred().day() {
             return Err(InvalidBounds::MovesDay);
         }
         let start = started.value().instant().map(StartedAt::instant);
-        if let Some(end) = &ended {
-            let start = start.ok_or(InvalidBounds::EndsWithoutAStart)?;
-            if end.copied() <= start {
-                return Err(InvalidBounds::EndsBeforeItStarts);
+        let end = match &lasted {
+            Some(lasted) => {
+                let start = start.ok_or(InvalidBounds::EndsWithoutAStart)?;
+                Some(ended(start, lasted.copied()).ok_or(InvalidBounds::EndsBeforeItStarts)?)
             }
-        }
+            None => None,
+        };
         let began = self.exercises().flat_map(CanonicalExercise::began);
         for set in began {
             let before = start.is_some_and(|start| set < start);
-            let after = ended.as_ref().is_some_and(|end| set > end.copied());
+            let after = end.is_some_and(|end| set > end);
             if before || after {
                 return Err(InvalidBounds::LeavesOutASet);
             }
@@ -507,11 +543,11 @@ impl CanonicalGymSession {
                 .find(|account| account.normalised == heart_rate.normalised_session())
                 .and_then(|account| account.occurred.instant())
                 .map(StartedAt::instant);
-            match (recording, start, &ended) {
+            match (recording, start, end) {
                 (Some(recording), Some(start), Some(end)) => Attributed::new(
                     heart_rate.value().between(
                         start.as_second() - recording.as_second(),
-                        end.copied().as_second() - recording.as_second(),
+                        end.as_second() - recording.as_second(),
                     ),
                     heart_rate.normalised_session(),
                 ),
@@ -522,7 +558,7 @@ impl CanonicalGymSession {
             occurred: started,
             exercises: self.exercises.clone(),
             heart_rate,
-            ended,
+            lasted,
             accounts: self.accounts.clone(),
         })
     }
@@ -555,7 +591,7 @@ impl CanonicalGymSession {
             occurred: self.occurred.clone(),
             exercises,
             heart_rate: self.heart_rate.clone(),
-            ended: self.ended,
+            lasted: self.lasted,
             accounts: self.accounts.clone(),
         }
     }
@@ -588,7 +624,7 @@ impl CanonicalGymSession {
         }
         for bound in [
             self.occurred.normalised(),
-            self.ended.and_then(|ended| ended.normalised()),
+            self.lasted.and_then(|lasted| lasted.normalised()),
         ]
         .into_iter()
         .flatten()

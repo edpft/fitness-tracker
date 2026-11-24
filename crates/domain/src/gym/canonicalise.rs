@@ -165,46 +165,27 @@ fn merge(accounts: &[NormalisedGymSession]) -> Option<CanonicalGymSession> {
         .iter()
         .min_by(|left, right| finest(left.occurred(), right.occurred()))?;
     let occurred = Attributed::new(started.occurred().clone(), started.id());
-    let ended = started
+    let lasted = started
         .occurred()
         .instant()
-        .zip(duration(accounts))
-        .and_then(|(start, length)| {
-            let seconds = i64::try_from(length.value().as_seconds()).ok()?;
-            let end = start
-                .instant()
-                .checked_add(jiff::SignedDuration::from_secs(seconds))
-                .ok()?;
-            Some(Attributed::new(end, length.normalised_session()))
-        });
+        .and_then(|_| duration(accounts))
+        .map(|length| Attributed::new(length.copied(), length.normalised_session()));
     Some(CanonicalGymSession::new(
         occurred,
         items,
         heart_rate(accounts),
-        ended,
+        lasted,
         accounts.iter().map(account).collect(),
     ))
 }
 
-/// One source's own start and end: its start, and its start plus the length
-/// it recorded, nothing trimmed.
+/// One source's own start and length, nothing trimmed.
 fn account(session: &NormalisedGymSession) -> super::canonical::Account {
-    let ended = session
-        .occurred()
-        .instant()
-        .zip(session.duration())
-        .and_then(|(start, length)| {
-            let seconds = i64::try_from(length.value().as_seconds()).ok()?;
-            start
-                .instant()
-                .checked_add(jiff::SignedDuration::from_secs(seconds))
-                .ok()
-        });
     super::canonical::Account {
         stream: session.stream().clone(),
         normalised: session.id(),
         occurred: session.occurred().clone(),
-        ended,
+        duration: session.duration().map(Attributed::copied),
     }
 }
 

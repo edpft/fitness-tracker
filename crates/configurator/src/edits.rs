@@ -291,10 +291,10 @@ fn here(edit: &Edit, session: CanonicalSessionId, placed: &[(usize, ExerciseIds)
     let bounds = edit
         .bounds()
         .find(|(id, _, _)| *id == session)
-        .map(|(_, started, ended)| {
+        .map(|(_, started, lasted)| {
             Here::Bounds(Bounds {
                 started: started.cloned(),
-                ended: ended.cloned(),
+                lasted: lasted.cloned(),
             })
         });
     if bounds.is_some() {

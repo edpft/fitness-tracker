@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT s.started_at_utc, s.zone, s.on_day,\n                   unixepoch(s.ended_at_utc) - unixepoch(s.started_at_utc) AS \"duration_seconds: i64\",\n                   s.average_bpm,\n                   (SELECT COUNT(*) FROM canonical_gym_exercise AS e\n                     WHERE e.session = s.id) AS \"exercises!: i64\",\n                   (SELECT COUNT(*) FROM canonical_gym_set AS t\n                     WHERE t.session = s.id) AS \"sets!: i64\"\n              FROM canonical_gym_session AS s\n             WHERE COALESCE(s.started_at_utc, s.on_day) >= ?\n               AND COALESCE(s.started_at_utc, s.on_day) < ?\n             ORDER BY COALESCE(s.started_at_utc, s.on_day), s.id\n            ",
+  "query": "\n            SELECT s.started_at_utc, s.zone, s.on_day,\n                   s.duration_seconds,\n                   s.average_bpm,\n                   (SELECT COUNT(*) FROM canonical_gym_exercise AS e\n                     WHERE e.session = s.id) AS \"exercises!: i64\",\n                   (SELECT COUNT(*) FROM canonical_gym_set AS t\n                     WHERE t.session = s.id) AS \"sets!: i64\"\n              FROM canonical_gym_session AS s\n             WHERE COALESCE(s.started_at_utc, s.on_day) >= ?\n               AND COALESCE(s.started_at_utc, s.on_day) < ?\n             ORDER BY COALESCE(s.started_at_utc, s.on_day), s.id\n            ",
   "describe": {
     "columns": [
       {
@@ -37,10 +37,15 @@
         }
       },
       {
-        "name": "duration_seconds: i64",
+        "name": "duration_seconds",
         "ordinal": 3,
         "type_info": "Integer",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "duration_seconds"
+          }
+        }
       },
       {
         "name": "average_bpm",
@@ -79,5 +84,5 @@
       false
     ]
   },
-  "hash": "1467a8cc0029493b7539f48d36ea00bc75a602814a55c9c4c59a8716ddf24edb"
+  "hash": "0efd4fa937cc346ce90d4267ae7ef1cf16ed038f13fbff601781b69b9e8c2578"
 }

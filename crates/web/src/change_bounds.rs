@@ -20,10 +20,10 @@ use axum::{
 };
 use configurator::{edits, store::Store};
 use domain::{
-    canonical::{Attributed, Occurred, TakenFrom},
+    canonical::{Occurred, TakenFrom},
     gym::{
         CanonicalGymSession,
-        edit::{self, EditReason, SparseGymSession, Taken},
+        edit::{self, EditReason, SparseGymSession, Taken, Unmoved},
     },
     landing::LandingStream,
     normalised::{OperatorZone, StartedAt},
@@ -191,31 +191,12 @@ pub fn asked(
     };
     let because = EditReason::try_from(typed.because.clone())
         .map_err(|_| Refusal::of("because", "say why".to_owned()))?;
-    let start: Attributed<Occurred, TakenFrom> = match &started {
-        Some(taken) => edit::started(session, taken).ok_or_else(|| {
-            Refusal::of(
-                "started",
-                "that source does not say when it started".to_owned(),
-            )
-        })?,
-        None => session.started().clone(),
-    };
-    let end = match &ended {
-        Some(taken) => Some(edit::ended(session, taken).ok_or_else(|| {
-            Refusal::of("ended", "that source does not say when it ended".to_owned())
-        })?),
-        None => session.ended().copied(),
-    };
-    let started = started.filter(|_| start.value() != session.occurred());
-    let ended =
-        ended.filter(|_| end.map(|end| end.copied()) != session.ended().map(Attributed::copied));
-    if started.is_none() && ended.is_none() {
-        return Err(Refusal::whole("nothing was changed".to_owned()));
-    }
-    session
-        .bounded(start, end)
-        .map_err(|invalid| Refusal::whole(format!("Not changed: {invalid}.")))?;
-    Ok((SparseGymSession::bounds(started, ended), because))
+    let sparse = edit::moved(session, started, ended).map_err(|unmoved| match unmoved {
+        Unmoved::NoStart => Refusal::of("started", unmoved.to_string()),
+        Unmoved::NoEnd => Refusal::of("ended", unmoved.to_string()),
+        Unmoved::Unchanged | Unmoved::Invalid(_) => Refusal::whole(unmoved.to_string()),
+    })?;
+    Ok((sparse, because))
 }
 
 /// The form.
@@ -235,7 +216,7 @@ pub fn form(
     let ends: Vec<(&LandingStream, Timestamp)> = session
         .accounts()
         .iter()
-        .filter_map(|account| Some((&account.stream, account.ended?)))
+        .filter_map(|account| Some((&account.stream, account.ended()?)))
         .collect();
     let now_started = session.occurred().instant().map_or_else(
         || "a day, with no time".to_owned(),

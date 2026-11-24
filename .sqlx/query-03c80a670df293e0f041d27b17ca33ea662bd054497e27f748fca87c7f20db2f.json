@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO canonical_gym_session_edit\n            (edit, session, started_from, started_at_utc, started_zone, started_on_day,\n             ended_from, duration_seconds)\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "03c80a670df293e0f041d27b17ca33ea662bd054497e27f748fca87c7f20db2f"
+}

@@ -32,10 +32,12 @@ use jiff::Timestamp;
 use crate::canonical::{Attributed, Occurred, TakenFrom};
 use crate::landing::InvalidIdentifier;
 use crate::landing::LandingStream;
-use crate::measure::{Distance, Duration, Kg, RepCount};
+use crate::measure::{Distance, Duration, Kg, PositiveDuration, RepCount};
 use crate::newtype::string_name;
 
-use super::canonical::{CanonicalExercise, CanonicalGymSession, CanonicalSet, Identified};
+use super::canonical::{
+    CanonicalExercise, CanonicalGymSession, CanonicalSet, Identified, InvalidBounds, between,
+};
 use super::exercise::Exercise;
 use super::identity::{
     CanonicalExerciseId, CanonicalSessionId, CanonicalSetId, ExerciseIds, SessionIds,
@@ -364,8 +366,10 @@ impl SparseExercise {
 pub struct SparseGymSession {
     /// When it started.
     pub started: Option<Taken<Occurred>>,
-    /// When it ended, read in the zone it started in.
-    pub ended: Option<Taken<Timestamp>>,
+    /// How long it lasted: until a source's end, or for as long as the
+    /// operator says. A start and a duration, never an end (operator,
+    /// 2026-11-24); see [`moved`].
+    pub lasted: Option<Taken<PositiveDuration>>,
     pub exercises: BTreeMap<CanonicalExerciseId, SparseExercise>,
 }
 
@@ -379,12 +383,16 @@ impl SparseGymSession {
         }
     }
 
-    /// One that says when it started or ended, and nothing else.
+    /// One that says when it started or how long it lasted, and nothing
+    /// else.
     #[must_use]
-    pub const fn bounds(started: Option<Taken<Occurred>>, ended: Option<Taken<Timestamp>>) -> Self {
+    pub const fn bounds(
+        started: Option<Taken<Occurred>>,
+        lasted: Option<Taken<PositiveDuration>>,
+    ) -> Self {
         Self {
             started,
-            ended,
+            lasted,
             exercises: BTreeMap::new(),
         }
     }
@@ -394,8 +402,8 @@ impl SparseGymSession {
         if let Some(started) = &later.started {
             self.started = Some(started.clone());
         }
-        if let Some(ended) = &later.ended {
-            self.ended = Some(ended.clone());
+        if let Some(lasted) = &later.lasted {
+            self.lasted = Some(lasted.clone());
         }
         for (exercise, sparse) in &later.exercises {
             self.exercises.entry(*exercise).or_default().then(sparse);
@@ -409,7 +417,8 @@ impl SparseGymSession {
 /// The operator, 2026-11-23: *"choose the source of the start or end time or
 /// provide my own."* **A source is named by its stream**, since a rebuild
 /// reissues every normalised id (#890) and "the watch" has to mean the watch
-/// after one.
+/// after one. **On a length, a source's is its end**: what he chooses is
+/// where the session ended, and the length is from the start in force to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Taken<T> {
     From(LandingStream),
@@ -480,20 +489,21 @@ impl Edit {
         })
     }
 
-    /// When it says a session started and ended, where it says either.
+    /// When it says a session started and how long it lasted, where it says
+    /// either.
     pub fn bounds(
         &self,
     ) -> impl Iterator<
         Item = (
             CanonicalSessionId,
             Option<&Taken<Occurred>>,
-            Option<&Taken<Timestamp>>,
+            Option<&Taken<PositiveDuration>>,
         ),
     > + '_ {
         self.sessions
             .iter()
-            .filter(|(_, session)| session.started.is_some() || session.ended.is_some())
-            .map(|(id, session)| (*id, session.started.as_ref(), session.ended.as_ref()))
+            .filter(|(_, session)| session.started.is_some() || session.lasted.is_some())
+            .map(|(id, session)| (*id, session.started.as_ref(), session.lasted.as_ref()))
     }
 
     /// Every set it says something about, with what.
@@ -512,7 +522,7 @@ impl Edit {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Field {
     Started(CanonicalSessionId),
-    Ended(CanonicalSessionId),
+    Lasted(CanonicalSessionId),
     Exercise(CanonicalExerciseId),
     Set(CanonicalSetId, SetField),
 }
@@ -531,7 +541,7 @@ impl Edit {
             .flat_map(|(id, session)| {
                 [
                     session.started.as_ref().map(|_| Field::Started(*id)),
-                    session.ended.as_ref().map(|_| Field::Ended(*id)),
+                    session.lasted.as_ref().map(|_| Field::Lasted(*id)),
                 ]
             })
             .flatten()
@@ -565,7 +575,7 @@ pub fn in_force<'a>(edits: &'a [Edit], ids: &SessionIds) -> Vec<&'a Edit> {
         .flat_map(|held| held.sets.iter().copied())
         .collect();
     let on_session = |field: &Field| match field {
-        Field::Started(session) | Field::Ended(session) => *session == ids.session,
+        Field::Started(session) | Field::Lasted(session) => *session == ids.session,
         Field::Exercise(exercise) => exercises.contains(exercise),
         Field::Set(set, _) => sets.contains(set),
     };
@@ -622,11 +632,12 @@ pub struct Edits {
     sets: BTreeMap<CanonicalSetId, SparseSet>,
 }
 
-/// When the edits say a session started and ended, where they say either.
+/// When the edits say a session started and how long it lasted, where they
+/// say either.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Bounds {
     pub started: Option<Taken<Occurred>>,
-    pub ended: Option<Taken<Timestamp>>,
+    pub lasted: Option<Taken<PositiveDuration>>,
 }
 
 impl Edits {
@@ -648,12 +659,12 @@ impl Edits {
         let mut exercises = BTreeMap::new();
         let mut sets = BTreeMap::new();
         for (id, session) in folded {
-            if session.started.is_some() || session.ended.is_some() {
+            if session.started.is_some() || session.lasted.is_some() {
                 bounds.insert(
                     id,
                     Bounds {
                         started: session.started,
-                        ended: session.ended,
+                        lasted: session.lasted,
                     },
                 );
             }
@@ -710,6 +721,10 @@ impl Edits {
 
     /// `session`, written under `ids`, as the edits say it was.
     ///
+    /// **A start the edits move, with no length of their own, keeps the
+    /// end**: a late press on the watch moves when it started and nothing
+    /// else.
+    ///
     /// **A start or end the session cannot take is left as derived** — one
     /// taken from a source that no longer accounts for it, or bounds a
     /// rebuild has made impossible — and [`Self::conflicts`] raises the
@@ -731,12 +746,19 @@ impl Edits {
             .as_ref()
             .and_then(|taken| started(&edited, taken))
             .unwrap_or_else(|| edited.started().clone());
-        let ended = bounds
-            .ended
+        let lasted = bounds
+            .lasted
             .as_ref()
-            .and_then(|taken| ended(&edited, taken))
-            .or_else(|| edited.ended().copied());
-        edited.bounded(started, ended).unwrap_or(edited)
+            .and_then(|taken| lasted(&edited, started.value(), taken))
+            .or_else(|| {
+                let end = edited.ended()?;
+                let start = started.value().instant()?.instant();
+                Some(Attributed::new(
+                    between(start, end.copied())?,
+                    end.taken_from(),
+                ))
+            });
+        edited.bounded(started, lasted).unwrap_or(edited)
     }
 
     fn exercise_over(&self, exercise: &CanonicalExercise, ids: &ExerciseIds) -> CanonicalExercise {
@@ -807,7 +829,7 @@ impl Edits {
             let gone =
                 |stream: Option<&LandingStream>| stream.is_some_and(|s| !streams.contains(s));
             if gone(bounds.started.as_ref().and_then(Taken::source))
-                || gone(bounds.ended.as_ref().and_then(Taken::source))
+                || gone(bounds.lasted.as_ref().and_then(Taken::source))
             {
                 conflicts.push(Conflict::SourceGone(*session));
             }
@@ -864,8 +886,91 @@ pub fn ended(
             .accounts()
             .iter()
             .filter(|account| account.stream == *stream)
-            .find_map(|account| Some(Attributed::new(account.ended?, account.normalised))),
+            .find_map(|account| Some(Attributed::new(account.ended()?, account.normalised))),
     }
+}
+
+/// How long `session`, started at `start`, lasted by `taken`: until a
+/// source's end, or as long as the operator said. [`None`] where no account
+/// of that source has an end after it.
+fn lasted(
+    session: &CanonicalGymSession,
+    start: &Occurred,
+    taken: &Taken<PositiveDuration>,
+) -> Option<Attributed<PositiveDuration, TakenFrom>> {
+    match taken {
+        Taken::Stated(length) => Some(Attributed::edited(*length)),
+        Taken::From(stream) => {
+            let end = ended(session, &Taken::From(stream.clone()))?;
+            let length = between(start.instant()?.instant(), end.copied())?;
+            Some(Attributed::new(length, end.taken_from()))
+        }
+    }
+}
+
+/// Why a change to when a session started and ended is not made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum Unmoved {
+    #[error("that source does not say when it started")]
+    NoStart,
+    #[error("that source does not say when it ended")]
+    NoEnd,
+    #[error("nothing was changed")]
+    Unchanged,
+    #[error("Not changed: {0}.")]
+    Invalid(#[from] InvalidBounds),
+}
+
+/// What the operator asked of when `session` started and ended, as an edit
+/// holds it: each bound that differs from what the session reads as now,
+/// the end as how long it lasted.
+///
+/// **He deals in times, the edit in a start and a length.** An end he types
+/// is a length from the start it will have. A start he moves alone keeps an
+/// end he typed before, by stating the length again; an end taken from a
+/// source, or derived, follows by itself.
+///
+/// # Errors
+///
+/// [`Unmoved`]: a source that says nothing of the bound chosen, nothing
+/// changed, or bounds the session cannot take.
+pub fn moved(
+    session: &CanonicalGymSession,
+    started: Option<Taken<Occurred>>,
+    ended_at: Option<Taken<Timestamp>>,
+) -> Result<SparseGymSession, Unmoved> {
+    let start = match &started {
+        Some(taken) => self::started(session, taken).ok_or(Unmoved::NoStart)?,
+        None => session.started().clone(),
+    };
+    let end = match &ended_at {
+        Some(taken) => Some(ended(session, taken).ok_or(Unmoved::NoEnd)?),
+        None => session.ended(),
+    };
+    let length = match (&end, start.value().instant()) {
+        (Some(end), Some(at)) => Some(Attributed::new(
+            between(at.instant(), end.copied()).ok_or(InvalidBounds::EndsBeforeItStarts)?,
+            end.taken_from(),
+        )),
+        (Some(_), None) => return Err(InvalidBounds::EndsWithoutAStart.into()),
+        (None, _) => None,
+    };
+    session.bounded(start.clone(), length)?;
+    let moves = start.value() != session.occurred();
+    let ends = end.map(|end| end.copied()) != session.ended().map(|end| end.copied());
+    let started = started.filter(|_| moves);
+    let lasted = match (ended_at, length) {
+        (Some(Taken::From(stream)), _) if ends => Some(Taken::From(stream)),
+        (Some(Taken::Stated(_)), Some(length)) if ends => Some(Taken::Stated(length.copied())),
+        _ if moves && session.lasted().is_some_and(Attributed::is_edited) => {
+            length.map(|length| Taken::Stated(length.copied()))
+        }
+        _ => None,
+    };
+    if started.is_none() && lasted.is_none() {
+        return Err(Unmoved::Unchanged);
+    }
+    Ok(SparseGymSession::bounds(started, lasted))
 }
 
 #[cfg(test)]
@@ -1297,30 +1402,43 @@ mod tests {
                 vec![],
             ),
             Some(Attributed::new(heart_rate, watch)),
-            Some(Attributed::new(instant("2025-03-31T18:00:54Z"), hevy)),
+            Some(Attributed::new(seconds(3601), hevy)),
             vec![
                 crate::gym::Account {
                     stream: stream("hevy.workouts"),
                     normalised: hevy,
                     occurred: london("2025-03-31T17:00:53Z"),
-                    ended: Some(instant("2025-03-31T18:00:54Z")),
+                    duration: Some(seconds(3601)),
                 },
                 crate::gym::Account {
                     stream: stream("garmin.activities"),
                     normalised: watch,
                     occurred: london("2025-03-31T17:47:33Z"),
-                    ended: Some(instant("2025-03-31T18:00:01Z")),
+                    duration: Some(seconds(748)),
                 },
             ],
         )
     }
 
-    fn bounds_edit(started: Option<Taken<Occurred>>, ended: Option<Taken<Timestamp>>) -> Edit {
+    fn seconds(count: u64) -> PositiveDuration {
+        PositiveDuration::from_seconds(count).expect("a length")
+    }
+
+    fn bounds_edit(
+        started: Option<Taken<Occurred>>,
+        lasted: Option<Taken<PositiveDuration>>,
+    ) -> Edit {
+        sparse_edit(1, SparseGymSession::bounds(started, lasted))
+    }
+
+    fn sparse_edit(id: i64, sparse: SparseGymSession) -> Edit {
         Edit {
-            id: EditId::from(1),
-            asserted_at: at("2026-11-24T09:00:00Z"),
+            id: EditId::from(id),
+            asserted_at: at("2026-11-24T09:00:00Z")
+                .checked_add(jiff::SignedDuration::from_secs(id))
+                .expect("an instant"),
             reason: reason(),
-            sessions: BTreeMap::from([(session_id(), SparseGymSession::bounds(started, ended))]),
+            sessions: BTreeMap::from([(session_id(), sparse)]),
             found: BTreeMap::new(),
         }
     }
@@ -1337,7 +1455,7 @@ mod tests {
         assert_eq!(edited.occurred(), &london("2025-03-31T17:47:33Z"));
         assert_eq!(edited.started().normalised(), Some(normalised(2)));
         assert_eq!(
-            edited.ended().and_then(Attributed::normalised),
+            edited.ended().and_then(|ended| ended.normalised()),
             Some(normalised(1))
         );
         assert_eq!(
@@ -1353,12 +1471,23 @@ mod tests {
     /// summary is read again from the two before.
     #[test]
     fn a_stated_end_cuts_the_heart_rate_at_it() {
-        let edited = Edits::of(&[bounds_edit(
+        let sparse = moved(
+            &bracketed(),
             Some(Taken::From(stream("garmin.activities"))),
             Some(Taken::Stated(instant("2025-03-31T17:58:00Z"))),
-        )])
-        .apply(&bracketed(), &ids());
-        assert!(edited.ended().is_some_and(Attributed::is_edited));
+        )
+        .expect("bounds it can take");
+        assert_eq!(
+            sparse.lasted,
+            Some(Taken::Stated(seconds(627))),
+            "the end is held as the length from the watch's start"
+        );
+        let edited = Edits::of(&[sparse_edit(1, sparse)]).apply(&bracketed(), &ids());
+        assert!(edited.ended().is_some_and(|ended| ended.is_edited()));
+        assert_eq!(
+            edited.ended().map(|ended| ended.copied()),
+            Some(instant("2025-03-31T17:58:00Z"))
+        );
         let heart_rate = edited.heart_rate().expect("a heart rate").value();
         assert_eq!(
             heart_rate.series().map(|series| series.samples().count()),
@@ -1379,19 +1508,87 @@ mod tests {
         let session = bracketed();
         let start = |at| Attributed::new(london(at), normalised(1));
         assert_eq!(
-            session.bounded(
-                start("2025-03-31T17:00:53Z"),
-                Some(Attributed::edited(instant("2025-03-31T16:00:00Z")))
+            moved(
+                &session,
+                None,
+                Some(Taken::Stated(instant("2025-03-31T16:00:00Z")))
             ),
-            Err(crate::gym::InvalidBounds::EndsBeforeItStarts)
+            Err(Unmoved::Invalid(
+                crate::gym::InvalidBounds::EndsBeforeItStarts
+            ))
         );
         assert_eq!(
-            session.bounded(start("2025-03-31T17:55:00Z"), session.ended().copied()),
+            moved(
+                &session,
+                None,
+                Some(Taken::Stated(instant("2025-03-31T17:00:53Z")))
+            ),
+            Err(Unmoved::Invalid(
+                crate::gym::InvalidBounds::EndsBeforeItStarts
+            )),
+            "an end at the start is no session"
+        );
+        assert_eq!(
+            session.bounded(start("2025-03-31T17:55:00Z"), session.lasted().copied()),
             Err(crate::gym::InvalidBounds::LeavesOutASet)
         );
         assert_eq!(
             session.bounded(start("2025-04-01T17:00:00Z"), None),
             Err(crate::gym::InvalidBounds::MovesDay)
+        );
+    }
+
+    /// **A start moved alone keeps the end**: one derived stays where the
+    /// merge put it, and one he typed before is stated again as the length
+    /// from the new start, so the late press moves nothing else.
+    #[test]
+    fn a_start_moved_alone_keeps_the_end() {
+        let session = bracketed();
+        let later = Edits::of(&[bounds_edit(
+            Some(Taken::Stated(london("2025-03-31T17:30:00Z"))),
+            None,
+        )])
+        .apply(&session, &ids());
+        assert_eq!(
+            later.ended().map(|ended| ended.copied()),
+            Some(instant("2025-03-31T18:00:54Z"))
+        );
+        assert_eq!(later.length(), Some(seconds(1854)));
+
+        let ended = moved(
+            &session,
+            None,
+            Some(Taken::Stated(instant("2025-03-31T17:58:00Z"))),
+        )
+        .expect("an end it can take");
+        let first = sparse_edit(1, ended);
+        let typed_end = Edits::of(std::slice::from_ref(&first)).apply(&session, &ids());
+        let started = moved(
+            &typed_end,
+            Some(Taken::Stated(london("2025-03-31T17:30:00Z"))),
+            None,
+        )
+        .expect("a start it can take");
+        assert_eq!(started.lasted, Some(Taken::Stated(seconds(1680))));
+        let both = Edits::of(&[first, sparse_edit(2, started)]).apply(&session, &ids());
+        assert_eq!(both.occurred(), &london("2025-03-31T17:30:00Z"));
+        assert_eq!(
+            both.ended().map(|ended| ended.copied()),
+            Some(instant("2025-03-31T17:58:00Z"))
+        );
+    }
+
+    /// **Nothing changed is not an edit.**
+    #[test]
+    fn bounds_as_they_read_are_no_change() {
+        let session = bracketed();
+        assert_eq!(
+            moved(
+                &session,
+                Some(Taken::From(stream("hevy.workouts"))),
+                Some(Taken::From(stream("hevy.workouts")))
+            ),
+            Err(Unmoved::Unchanged)
         );
     }
 

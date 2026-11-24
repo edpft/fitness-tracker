@@ -174,24 +174,24 @@ fn a_merged_session_round_trips_field_by_field() {
             ),
         };
         let started = at("2020-10-09T07:12:00Z").expect("an instant");
-        let ended: jiff::Timestamp = "2020-10-09T08:04:00Z".parse().expect("an instant");
+        let lasted = domain::measure::PositiveDuration::from_seconds(52 * 60).expect("a length");
         let session = CanonicalGymSession::new(
             Attributed::new(started.clone(), watch),
             NonEmpty::of(CanonicalItem::exercise(deadlift), vec![]),
             Some(heart_rate(watch).expect("a heart rate")),
-            Some(Attributed::new(ended, watch)),
+            Some(Attributed::new(lasted, watch)),
             vec![
                 domain::gym::Account {
                     stream: "spreadsheets.files".parse().expect("a stream"),
                     normalised: sheet,
                     occurred: on("2020-10-09").expect("a day"),
-                    ended: None,
+                    duration: None,
                 },
                 domain::gym::Account {
                     stream: "garmin.activities".parse().expect("a stream"),
                     normalised: watch,
                     occurred: started,
-                    ended: Some(ended),
+                    duration: Some(lasted),
                 },
             ],
         );
@@ -477,7 +477,8 @@ fn a_session_is_listed_by_its_counts_and_averages() {
                         ),
                         Some(heart_rate(watch).expect("a heart rate")),
                         Some(Attributed::new(
-                            "2020-10-09T08:04:00Z".parse().expect("an instant"),
+                            domain::measure::PositiveDuration::from_seconds(52 * 60)
+                                .expect("a length"),
                             watch,
                         )),
                         Vec::new(),
@@ -740,7 +741,7 @@ fn two_squat_sets(log: NormalisedSessionId) -> Result<CanonicalGymSession, Failu
         sets.push(set);
     }
     let started = at("2026-11-20T18:00:00Z")?;
-    let ended: jiff::Timestamp = "2026-11-20T19:00:00Z".parse()?;
+    let lasted = domain::measure::PositiveDuration::from_seconds(60 * 60)?;
     Ok(CanonicalGymSession::new(
         Attributed::new(started.clone(), log),
         NonEmpty::of(
@@ -754,12 +755,12 @@ fn two_squat_sets(log: NormalisedSessionId) -> Result<CanonicalGymSession, Failu
             vec![],
         ),
         None,
-        Some(Attributed::new(ended, log)),
+        Some(Attributed::new(lasted, log)),
         vec![domain::gym::Account {
             stream: "hevy.workouts".parse()?,
             normalised: log,
             occurred: started,
-            ended: Some(ended),
+            duration: Some(lasted),
         }],
     ))
 }
@@ -818,7 +819,7 @@ fn a_session_s_start_and_end_are_edited() {
         );
         assert!(read[0].started().is_edited());
         assert_eq!(
-            read[0].ended().and_then(Attributed::normalised),
+            read[0].ended().and_then(|ended| ended.normalised()),
             Some(ids[0])
         );
         assert_eq!(

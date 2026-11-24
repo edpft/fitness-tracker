@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT normalised_session AS \"normalised!\", stream, started_at_utc, zone, on_day,\n               ended_at_utc\n        FROM canonical_gym_session_account\n        WHERE session = ?\n        ORDER BY normalised_session\n        ",
+  "query": "\n        SELECT normalised_session AS \"normalised!\", stream, started_at_utc, zone, on_day,\n               duration_seconds\n        FROM canonical_gym_session_account\n        WHERE session = ?\n        ORDER BY normalised_session\n        ",
   "describe": {
     "columns": [
       {
@@ -59,13 +59,13 @@
         }
       },
       {
-        "name": "ended_at_utc",
+        "name": "duration_seconds",
         "ordinal": 5,
-        "type_info": "Text",
+        "type_info": "Integer",
         "origin": {
           "Table": {
             "table": "canonical_gym_session_account",
-            "name": "ended_at_utc"
+            "name": "duration_seconds"
           }
         }
       }
@@ -82,5 +82,5 @@
       true
     ]
   },
-  "hash": "b2a60dfa289001fe4412a2ad8da13ccbdc965ec854e1b8f8d15a04d629b77039"
+  "hash": "1857c96ae43f56caab0a4405a49cce1f26c80bca28296d54aeae0c7f942f2f4c"
 }

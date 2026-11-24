@@ -488,15 +488,23 @@ fn said(session: &CanonicalGymSession, here: &Here) -> String {
                     taken(zone.as_ref(), started.source(), at)
                 ));
             }
-            if let Some(ended) = &bounds.ended {
-                let at = match ended {
-                    Taken::Stated(at) => Some(*at),
+            if let Some(lasted) = &bounds.lasted {
+                // A length is shown as the end it gives the session as it
+                // starts now: the page deals in times, the edit in lengths.
+                let at = match lasted {
+                    Taken::Stated(length) => session.occurred().instant().and_then(|start| {
+                        let seconds = i64::try_from(length.as_seconds()).ok()?;
+                        start
+                            .instant()
+                            .checked_add(jiff::SignedDuration::from_secs(seconds))
+                            .ok()
+                    }),
                     Taken::From(_) => None,
                 };
                 let verb = if said.is_empty() { "Ended" } else { "ended" };
                 said.push(format!(
                     "{verb} {}",
-                    taken(zone.as_ref(), ended.source(), at)
+                    taken(zone.as_ref(), lasted.source(), at)
                 ));
             }
             said.join("; ")
