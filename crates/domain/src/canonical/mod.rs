@@ -18,6 +18,7 @@
 //! it was taken from — which is what [`Attributed`] is.
 
 pub mod attribution;
+pub mod edit;
 pub mod reach;
 pub mod session;
 pub mod time;

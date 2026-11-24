@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT average_bpm AS \"average!: i64\", highest_bpm AS \"highest!: i64\"\n               FROM padel_match",
+  "query": "SELECT average_bpm AS \"average!: i64\", highest_bpm AS \"highest!: i64\"\n               FROM padel_session",
   "describe": {
     "columns": [
       {
@@ -9,7 +9,7 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "padel_match",
+            "table": "padel_session",
             "name": "average_bpm"
           }
         }
@@ -20,7 +20,7 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "padel_match",
+            "table": "padel_session",
             "name": "highest_bpm"
           }
         }
@@ -34,5 +34,5 @@
       true
     ]
   },
-  "hash": "981775c5e1da9a96fb58c04948583b156fb2925084953d11a28250718408d878"
+  "hash": "34ebf97cb98d3255b7a01f35355b1b1e02e18180748107ca760a24b4e6c2d76f"
 }

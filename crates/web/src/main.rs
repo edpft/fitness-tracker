@@ -220,6 +220,10 @@ fn pages() -> Pages {
             change_bounds::ROUTE,
             get(change_bounds::shown).post(change_bounds::posted),
         )
+        .form(
+            change_bounds::UNDO,
+            axum::routing::post(change_bounds::undone),
+        )
         .file(body::REPLACED[0], get(to_body))
         .file(body::REPLACED[1], get(to_body))
         .form("/equipment", get(equipment_page).post(equipment_post))

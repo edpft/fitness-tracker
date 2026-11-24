@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT edit AS \"edit!\", session AS \"session!\", started_from, started_at_utc,\n               started_zone, started_on_day, ended_from, ended_at_utc\n        FROM canonical_gym_session_edit\n        ORDER BY edit, session\n        ",
+  "query": "\n        SELECT edit AS \"edit!\", session AS \"session!\", started_from, started_at_utc,\n               started_zone, started_on_day, ended_from, duration_seconds\n        FROM canonical_gym_session_edit\n        ORDER BY edit, session\n        ",
   "describe": {
     "columns": [
       {
@@ -81,13 +81,13 @@
         }
       },
       {
-        "name": "ended_at_utc",
+        "name": "duration_seconds",
         "ordinal": 7,
-        "type_info": "Text",
+        "type_info": "Integer",
         "origin": {
           "Table": {
             "table": "canonical_gym_session_edit",
-            "name": "ended_at_utc"
+            "name": "duration_seconds"
           }
         }
       }
@@ -106,5 +106,5 @@
       true
     ]
   },
-  "hash": "6f72aba5c70c0f5c700346e48425e487b40d400895d39a5e0e77e498ff0f40da"
+  "hash": "8270eca2175a15ae9c5200a7b517c05d92d113bba468fd56f37e927b60f57006"
 }

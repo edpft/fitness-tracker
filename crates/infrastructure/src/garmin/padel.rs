@@ -1,7 +1,7 @@
-//! Turning Garmin's account of a padel match into a [`PadelMatch`] (#517).
+//! Turning Garmin's account of a padel session into a [`PadelSession`] (#517).
 //!
 //! **`paddelball` is Garmin's word for it**, and the one place it is named:
-//! the watch's Padel profile files a match under that type. The operator's
+//! the watch's Padel profile files a session under that type. The operator's
 //! record holds 15, from 2026-03-22.
 //!
 //! **The list's figures and the recording's readings**: a start, a duration,
@@ -11,7 +11,7 @@
 use domain::{
     measure::MeasuredHeartRate,
     normalised::{RefusalReason, StatedZones},
-    padel::{PadelMatch, PadelMatchRecord},
+    padel::{PadelSession, PadelSessionRecord},
 };
 
 use crate::scribe::Scribe;
@@ -21,7 +21,7 @@ use super::{
     gym::{Activity, Stated, heart_rate, recorded_series, seconds, started},
 };
 
-/// Garmin's activity type for a match of padel.
+/// Garmin's activity type for a session of padel.
 const PADEL: &str = "paddelball";
 
 /// The match `account` is, or why it is not one. [`None`] where the activity
@@ -33,7 +33,7 @@ pub(super) fn translate(
     account: &ActivityAccount,
     zones: &StatedZones,
     scribe: &mut Scribe,
-) -> Option<Result<PadelMatch, RefusalReason>> {
+) -> Option<Result<PadelSession, RefusalReason>> {
     let record = account.activity();
     let activity: Activity = serde_json::from_slice(record.payload().as_bytes()).ok()?;
     (activity.kind.key == PADEL).then(|| played(&activity, account, zones, scribe))
@@ -44,7 +44,7 @@ fn played(
     account: &ActivityAccount,
     zones: &StatedZones,
     scribe: &mut Scribe,
-) -> Result<PadelMatch, RefusalReason> {
+) -> Result<PadelSession, RefusalReason> {
     let record = account.activity();
     let started_at = activity
         .started_at
@@ -60,7 +60,7 @@ fn played(
             });
         }
     };
-    Ok(PadelMatch::new(PadelMatchRecord {
+    Ok(PadelSession::new(PadelSessionRecord {
         started_at,
         duration,
         heart_rate: heart_rate(activity)

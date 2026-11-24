@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM padel_session WHERE landing_record_id IN (SELECT value FROM json_each(?))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "39fed71ff19d1d39ff0cd24fb20eea5ebf55b536e5d489c9a9da16b37d8b6ab9"
+}

@@ -22,8 +22,8 @@ pub enum Node {
     /// A table of the normalised layer, which several streams may write: it
     /// is derived from every stream whose layer writes it.
     Table(Table),
-    /// The edit overlay, an input to that canonical layer (§ II.2).
-    Edits(CanonicalLayer),
+    /// An edit overlay, an input to what it edits (§ II.2).
+    Edits(Edited),
     // § III, what we intend and what we consult: not layered.
     /// § 12.
     Authored(Authored),
@@ -39,6 +39,15 @@ pub enum Node {
     DayPart,
     // What is derived from the store and held in memory, never written (#830).
     Analysis(Analysis),
+}
+
+/// What the operator's edits are made over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Edited {
+    /// The canonical gym layer, which a rebuild applies them to.
+    Gym,
+    /// The padel sessions, which are read with them (#894).
+    Padel,
 }
 
 /// What is read from the store and worked out from it, held in memory while

@@ -24,7 +24,7 @@ use domain::{
 use infrastructure::{
     GarminActivityFileLandingStore, GarminActivityLandingStore, GarminExerciseSetLandingStore,
     GarminGymAccountReader, SqliteExtractionRunLog, SqliteGarminActivityStore,
-    SqliteMeasuredGymSessionStore, SqliteNormalisationRunLog, SqlitePadelMatches,
+    SqliteMeasuredGymSessionStore, SqliteNormalisationRunLog, SqlitePadelSessions,
     SqliteRefusalStore, SqliteTrainingDone, connect,
     garmin::{
         ActivityAccount, GarminActivityEntity, GarminGymTranslator, account::activities,
@@ -1438,13 +1438,15 @@ fn its_version_names_what_it_translates() {
 fn the_activity_version_names_what_it_translates() {
     let zones = StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("zone"));
     let mut accounts = suite().expect("the accounts");
-    accounts.push(account(&padel("2026-07-04 23:30:00"), None, None).expect("a match"));
+    accounts.push(account(&padel("2026-07-04 23:30:00"), None, None).expect("a padel session"));
     let readings = archive(&recording(
         920_000_000,
         &[(920_000_000, Some(96)), (920_000_009, Some(168))],
     ))
     .expect("an archive");
-    accounts.push(account(&padel("2026-07-04 23:30:00"), None, Some(&readings)).expect("a match"));
+    accounts.push(
+        account(&padel("2026-07-04 23:30:00"), None, Some(&readings)).expect("a padel session"),
+    );
     accounts.push(
         account(
             &activity(
@@ -1456,7 +1458,7 @@ fn the_activity_version_names_what_it_translates() {
             None,
             None,
         )
-        .expect("a match"),
+        .expect("a padel session"),
     );
     let translations: Vec<_> = accounts
         .iter()
@@ -1474,7 +1476,7 @@ fn the_activity_version_names_what_it_translates() {
 
 const PADEL: &str = "20871245560";
 
-/// A match of padel as the watch's Padel profile files one: 118 minutes.
+/// A session of padel as the watch's Padel profile files one: 118 minutes.
 fn padel(started: &str) -> Value {
     activity(
         PADEL,
@@ -1500,14 +1502,14 @@ fn activity_entities(activity: &Value) -> Result<Translation<GarminActivityEntit
 /// 2026-11-15), where it was refused as an activity this layer does not
 /// model (#517).
 #[test]
-fn a_padel_match_is_a_padel_match() {
+fn a_padel_session_is_a_padel_session() {
     let translated = activity_entities(&padel("2026-10-11 17:07:00")).expect("translated");
     let Translation::Entities { entities, refusals } = translated else {
         panic!("no match: {translated:?}");
     };
     assert!(refusals.is_empty(), "{refusals:?}");
-    let GarminActivityEntity::PadelMatch(played) = entities.first() else {
-        panic!("not a match: {entities:?}");
+    let GarminActivityEntity::PadelSession(played) = entities.first() else {
+        panic!("not a padel session: {entities:?}");
     };
     assert_eq!(
         played.started_at().wall_clock().datetime(),
@@ -1538,13 +1540,13 @@ fn a_game_the_watch_gave_no_length_is_nothing_happening() {
     assert_eq!(refusals.first().reason, RefusalReason::NothingHappened);
 }
 
-/// A match reaches the store and is read back as training done, on the day it
+/// A padel session reaches the store and is read back as training done, on the day it
 /// started in the zone it was played in: half past midnight, not the evening
 /// before. **And as History reads it** (#772), with its time and the heart
 /// rate the watch stated.
 #[test]
-fn a_padel_match_is_training_done_on_the_day_it_was_played() {
-    use application::{PlayedPadelMatches, TrainingDone as _};
+fn a_padel_session_is_training_done_on_the_day_it_was_played() {
+    use application::{PlayedPadelSessions, TrainingDone as _};
     use domain::analytical::training_done::{Kind, Session};
 
     let runtime = runtime().expect("a runtime");
@@ -1597,28 +1599,29 @@ fn a_padel_match_is_training_done_on_the_day_it_was_played() {
                 length: domain::measure::PositiveDuration::from_seconds(7_080).expect("a duration"),
             }]
         );
-        let store = SqlitePadelMatches::new(pool.clone());
+        let store = SqlitePadelSessions::new(pool.clone());
         let saturday = jiff::civil::date(2026, 7, 4);
         let sunday = jiff::civil::date(2026, 7, 5);
         assert_eq!(
-            PlayedPadelMatches::between(&store, saturday, saturday)
+            PlayedPadelSessions::between(&store, saturday, saturday)
                 .await
                 .expect("Saturday's"),
             vec![],
             "half past midnight is Sunday's"
         );
-        let matches = PlayedPadelMatches::between(&store, sunday, sunday)
+        let played = PlayedPadelSessions::between(&store, sunday, sunday)
             .await
-            .expect("matches");
-        let read: Vec<_> = matches
+            .expect("padel sessions");
+        let read: Vec<_> = played
             .iter()
             .map(|played| {
                 (
-                    played.started_at.wall_clock().datetime(),
-                    played.duration.as_seconds(),
-                    played
-                        .heart_rate
-                        .map(|summary| (summary.average().as_u32(), summary.highest().as_u32())),
+                    played.started_at().wall_clock().datetime(),
+                    played.duration().as_seconds(),
+                    played.heart_rate().map(|heart_rate| {
+                        let summary = heart_rate.stated();
+                        (summary.average().as_u32(), summary.highest().as_u32())
+                    }),
                 )
             })
             .collect();
@@ -1639,7 +1642,107 @@ fn a_padel_match_is_training_done_on_the_day_it_was_played() {
     });
 }
 
-/// A match's recording: 96 at the start, a strap saying nothing, then 168.
+/// **A change of when a padel session started and ended is read wherever
+/// the session is** (#894): History reads the times stated and training done
+/// the length between them, and undoing it brings back the watch's.
+#[test]
+fn a_padel_session_s_change_is_read_and_undone() {
+    use application::{PlayedPadelSessions, TrainingDone as _};
+    use domain::canonical::edit::EditReason;
+    use domain::measure::PositiveDuration;
+    use domain::normalised::StartedAt;
+
+    let runtime = runtime().expect("a runtime");
+    runtime.block_on(async {
+        let directory = tempfile::tempdir().expect("a directory");
+        let pool = connect(&directory.path().join("test.db"))
+            .await
+            .expect("a store");
+        let runs = SqliteExtractionRunLog::new(pool.clone());
+        append(
+            &GarminActivityLandingStore::new(pool.clone()).expect("a store"),
+            &runs,
+            record(
+                1,
+                PADEL,
+                "garmin.activities",
+                "/activitylist-service/activities/search/activities",
+                &padel("2026-07-04 23:30:00"),
+            )
+            .expect("a record"),
+        )
+        .await
+        .expect("landed");
+        Normalisation::new(
+            NormalisationPorts {
+                raw: GarminGymAccountReader::new(pool.clone()).expect("a reader"),
+                translator: GarminActivityTranslator::default(),
+                workouts: SqliteGarminActivityStore::new(pool.clone()).expect("a store"),
+                refusals: SqliteRefusalStore::new(pool.clone(), "garmin.activities")
+                    .expect("refusals"),
+                runs: SqliteNormalisationRunLog::new(pool.clone()),
+                clock: FixedClock,
+            },
+            StatedZones::throughout(OperatorZone::try_from("Europe/London").expect("a zone")),
+        )
+        .normalise(application::Rederivation::Whole)
+        .await
+        .expect("normalised");
+
+        let store = SqlitePadelSessions::new(pool.clone());
+        let sunday = jiff::civil::date(2026, 7, 5);
+        let read = async || {
+            PlayedPadelSessions::between(&store, sunday, sunday)
+                .await
+                .expect("Sunday's")
+        };
+        let played = read().await;
+        let zone = OperatorZone::try_from("Europe/London").expect("a zone");
+        let (started, duration) = played[0]
+            .moved(
+                "2026-07-04T23:40:00Z".parse().expect("an instant"),
+                "2026-07-05T01:00:00Z".parse().expect("an instant"),
+            )
+            .expect("bounds it can take");
+        assert_eq!(
+            started,
+            StartedAt::new("2026-07-04T23:40:00Z".parse().expect("an instant"), zone)
+        );
+        let id = store
+            .change(
+                "2026-11-24T09:00:00Z".parse().expect("an instant"),
+                &EditReason::try_from("pressed the watch late".to_owned()).expect("a reason"),
+                played[0].session(),
+                &started,
+                duration,
+            )
+            .await
+            .expect("a change");
+
+        let changed = read().await;
+        assert_eq!(changed[0].started_at(), &started);
+        assert_eq!(changed[0].duration().as_seconds(), 80 * 60);
+        assert_eq!(changed[0].change().map(|change| change.id), Some(id));
+        let counted = SqliteTrainingDone::new(pool.clone())
+            .sessions()
+            .await
+            .expect("sessions");
+        assert_eq!(
+            counted
+                .iter()
+                .map(|session| session.length)
+                .collect::<Vec<_>>(),
+            vec![PositiveDuration::from_seconds(80 * 60).expect("a length")]
+        );
+
+        store.undo(id).await.expect("undone");
+        let undone = read().await;
+        assert_eq!(undone[0].duration().as_seconds(), 7_080);
+        assert_eq!(undone[0].change(), None);
+    });
+}
+
+/// A padel session's recording: 96 at the start, a strap saying nothing, then 168.
 fn padel_recording() -> Result<Vec<u8>, Failure> {
     archive(&recording(
         920_000_000,
@@ -1651,10 +1754,10 @@ fn padel_recording() -> Result<Vec<u8>, Failure> {
     ))
 }
 
-/// **A match holds the readings its recording holds** (#919), beside the
+/// **A padel session holds the readings its recording holds** (#919), beside the
 /// average and highest the list states, which stay as stated.
 #[test]
-fn a_padel_match_holds_the_readings_its_recording_holds() {
+fn a_padel_session_holds_the_readings_its_recording_holds() {
     let file = padel_recording().expect("an archive");
     let translated = GarminActivityTranslator::default()
         .translate(
@@ -1666,8 +1769,8 @@ fn a_padel_match_holds_the_readings_its_recording_holds() {
         panic!("no match: {translated:?}");
     };
     assert!(refusals.is_empty(), "{refusals:?}");
-    let GarminActivityEntity::PadelMatch(translated) = entities.first() else {
-        panic!("not a match: {entities:?}");
+    let GarminActivityEntity::PadelSession(translated) = entities.first() else {
+        panic!("not a padel session: {entities:?}");
     };
     let heart_rate = translated.heart_rate().expect("a heart rate");
     assert_eq!(
@@ -1691,7 +1794,7 @@ fn a_padel_match_holds_the_readings_its_recording_holds() {
 /// A match's readings reach the store, and a second derivation replaces them
 /// rather than adding to them.
 #[test]
-fn the_readings_of_a_padel_match_reach_the_store() {
+fn the_readings_of_a_padel_session_reach_the_store() {
     let runtime = runtime().expect("a runtime");
     runtime.block_on(async {
         let file = padel_recording().expect("an archive");
@@ -1743,7 +1846,7 @@ fn the_readings_of_a_padel_match_reach_the_store() {
 
         let readings = sqlx::query!(
             r#"SELECT at_seconds AS "at!: i64", beats_per_minute AS "beats!: i64"
-               FROM padel_match_heart_rate ORDER BY at_seconds"#
+               FROM padel_session_heart_rate ORDER BY at_seconds"#
         )
         .fetch_all(&pool)
         .await
@@ -1758,11 +1861,11 @@ fn the_readings_of_a_padel_match_reach_the_store() {
         );
         let stated = sqlx::query!(
             r#"SELECT average_bpm AS "average!: i64", highest_bpm AS "highest!: i64"
-               FROM padel_match"#
+               FROM padel_session"#
         )
         .fetch_one(&pool)
         .await
-        .expect("a match");
+        .expect("a padel session");
         assert_eq!((stated.average, stated.highest), (121, 168));
     });
 }

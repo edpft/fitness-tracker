@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id AS \"id!\", started_at_utc, zone, on_day,\n                   started_normalised_session, ended_at_utc, ended_normalised_session,\n                   average_bpm, highest_bpm, heart_rate_normalised_session\n            FROM canonical_gym_session\n            WHERE id IN (\n                SELECT session FROM canonical_gym_exercise\n                 WHERE identified_normalised_session = ?\n                UNION\n                SELECT session FROM canonical_gym_set\n                 WHERE outcome_normalised_session = ?\n                    OR load_normalised_session = ?\n                    OR began_normalised_session = ?\n                    OR rir_normalised_session = ?\n                    OR set_kind_normalised_session = ?\n                    OR rest_after_normalised_session = ?\n                UNION\n                SELECT id FROM canonical_gym_session\n                 WHERE started_normalised_session = ?\n                    OR ended_normalised_session = ?\n                    OR heart_rate_normalised_session = ?\n            )\n            ORDER BY id\n            LIMIT 1\n            ",
+  "query": "\n            SELECT id AS \"id!\", started_at_utc, zone, on_day,\n                   started_normalised_session, duration_seconds, duration_normalised_session,\n                   average_bpm, highest_bpm, heart_rate_normalised_session\n            FROM canonical_gym_session\n            WHERE id IN (\n                SELECT session FROM canonical_gym_exercise\n                 WHERE identified_normalised_session = ?\n                UNION\n                SELECT session FROM canonical_gym_set\n                 WHERE outcome_normalised_session = ?\n                    OR load_normalised_session = ?\n                    OR began_normalised_session = ?\n                    OR rir_normalised_session = ?\n                    OR set_kind_normalised_session = ?\n                    OR rest_after_normalised_session = ?\n                UNION\n                SELECT id FROM canonical_gym_session\n                 WHERE started_normalised_session = ?\n                    OR duration_normalised_session = ?\n                    OR heart_rate_normalised_session = ?\n            )\n            ORDER BY id\n            LIMIT 1\n            ",
   "describe": {
     "columns": [
       {
@@ -59,24 +59,24 @@
         }
       },
       {
-        "name": "ended_at_utc",
+        "name": "duration_seconds",
         "ordinal": 5,
-        "type_info": "Text",
+        "type_info": "Integer",
         "origin": {
           "Table": {
             "table": "canonical_gym_session",
-            "name": "ended_at_utc"
+            "name": "duration_seconds"
           }
         }
       },
       {
-        "name": "ended_normalised_session",
+        "name": "duration_normalised_session",
         "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
             "table": "canonical_gym_session",
-            "name": "ended_normalised_session"
+            "name": "duration_normalised_session"
           }
         }
       },
@@ -130,5 +130,5 @@
       true
     ]
   },
-  "hash": "19ae901dd7279f32ebe8116feaa726d202e6def9ababb5913dcadb0476b6d2ca"
+  "hash": "f0bed006dec612f6f1e5a0e82d692e3987c0e27267a506fdab00e93579d452ef"
 }

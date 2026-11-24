@@ -27,7 +27,7 @@ use domain::{
         identity::{CanonicalExerciseId, CanonicalSessionId, CanonicalSetId, Placed, SourceSet},
     },
     landing::LandingStream,
-    measure::{Distance, Duration, Kg, Metres, RepCount},
+    measure::{Distance, Duration, Kg, Metres, PositiveDuration, RepCount},
 };
 use jiff::{Timestamp, civil::Date};
 use sqlx::{Sqlite, SqlitePool, Transaction};
@@ -42,7 +42,7 @@ pub struct Overlay;
 
 impl Authors for Overlay {
     fn authors() -> BTreeSet<Node> {
-        [Node::Edits(CanonicalLayer::Gym)].into()
+        [Node::Edits(application::Edited::Gym)].into()
     }
 }
 
@@ -162,12 +162,12 @@ pub(super) async fn all(pool: &SqlitePool) -> Result<Vec<Edit>, StoreError> {
     Ok(ordered)
 }
 
-/// Each assertion's starts and ends, into the sessions it holds.
+/// Each assertion's starts and lengths, into the sessions it holds.
 async fn read_bounds(pool: &SqlitePool, read: &mut BTreeMap<i64, Edit>) -> Result<(), StoreError> {
     let bounds = sqlx::query!(
         r#"
         SELECT edit AS "edit!", session AS "session!", started_from, started_at_utc,
-               started_zone, started_on_day, ended_from, ended_at_utc
+               started_zone, started_on_day, ended_from, duration_seconds
         FROM canonical_gym_session_edit
         ORDER BY edit, session
         "#
@@ -183,13 +183,13 @@ async fn read_bounds(pool: &SqlitePool, read: &mut BTreeMap<i64, Edit>) -> Resul
             row.started_zone.as_deref(),
             row.started_on_day.as_deref(),
         )?;
-        let ended = ended_of(row.ended_from, row.ended_at_utc)?;
+        let lasted = lasted_of(row.ended_from, row.duration_seconds)?;
         let session = assertion(read, row.edit)?
             .sessions
             .entry(CanonicalSessionId::try_from(row.session).map_err(|e| corrupt(&e))?)
             .or_default();
         session.started = started;
-        session.ended = ended;
+        session.lasted = lasted;
     }
     Ok(())
 }
@@ -213,19 +213,22 @@ fn started_of(
     }
 }
 
-/// A session edit's end: a stream's, or one stated.
-fn ended_of(
+/// A session edit's length: until a stream's end, or one stated.
+fn lasted_of(
     from: Option<String>,
-    at: Option<String>,
-) -> Result<Option<Taken<Timestamp>>, StoreError> {
-    match (from, at) {
+    seconds: Option<i64>,
+) -> Result<Option<Taken<PositiveDuration>>, StoreError> {
+    match (from, seconds) {
         (Some(stream), None) => Ok(Some(Taken::From(stream.parse().map_err(|e| corrupt(&e))?))),
-        (None, Some(at)) => Ok(Some(Taken::Stated(
-            at.parse::<Timestamp>().map_err(|e| corrupt(&e))?,
-        ))),
+        (None, Some(seconds)) => {
+            let seconds = u64::try_from(seconds).map_err(|e| corrupt(&e))?;
+            Ok(Some(Taken::Stated(
+                PositiveDuration::from_seconds(seconds).map_err(|e| corrupt(&e))?,
+            )))
+        }
         (None, None) => Ok(None),
         _ => Err(StoreError::Corrupt {
-            detail: "an end both taken and stated".to_owned(),
+            detail: "a length both taken and stated".to_owned(),
         }),
     }
 }
@@ -512,7 +515,7 @@ impl SqliteCanonicalGymSessionStore {
         let mut tx = writing(self.pool()).await?;
         let id = begin(&mut tx, at, reason).await?;
         for (session, sparse) in sessions {
-            if sparse.started.is_some() || sparse.ended.is_some() {
+            if sparse.started.is_some() || sparse.lasted.is_some() {
                 write_bounds(&mut tx, id, *session, sparse).await?;
             }
             for (exercise, fields) in &sparse.exercises {
@@ -638,7 +641,8 @@ impl SqliteCanonicalGymSessionStore {
     }
 }
 
-/// When a session started and ended, as an assertion states either.
+/// When a session started and how long it lasted, as an assertion states
+/// either.
 async fn write_bounds(
     tx: &mut Transaction<'_, Sqlite>,
     edit: i64,
@@ -657,16 +661,19 @@ async fn write_bounds(
         Some(Taken::Stated(Occurred::On(day))) => (None, None, None, Some(day.to_string())),
         None => (None, None, None, None),
     };
-    let (ended_from, ended_at_utc) = match &sparse.ended {
+    let (ended_from, duration_seconds) = match &sparse.lasted {
         Some(Taken::From(stream)) => (Some(stream.to_string()), None),
-        Some(Taken::Stated(at)) => (None, Some(at.to_string())),
+        Some(Taken::Stated(length)) => (
+            None,
+            Some(i64::try_from(length.as_seconds()).map_err(|e| corrupt(&e))?),
+        ),
         None => (None, None),
     };
     sqlx::query!(
         r#"
         INSERT INTO canonical_gym_session_edit
             (edit, session, started_from, started_at_utc, started_zone, started_on_day,
-             ended_from, ended_at_utc)
+             ended_from, duration_seconds)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         edit,
@@ -676,7 +683,7 @@ async fn write_bounds(
         started_zone,
         started_on_day,
         ended_from,
-        ended_at_utc
+        duration_seconds
     )
     .execute(&mut **tx)
     .await

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id AS \"id!\", started_at_utc, zone, on_day,\n                   started_normalised_session, ended_at_utc, ended_normalised_session,\n                   average_bpm, highest_bpm, heart_rate_normalised_session\n            FROM canonical_gym_session\n            ORDER BY COALESCE(started_at_utc, on_day), id\n            ",
+  "query": "\n            SELECT id AS \"id!\", started_at_utc, zone, on_day,\n                   started_normalised_session, duration_seconds, duration_normalised_session,\n                   average_bpm, highest_bpm, heart_rate_normalised_session\n            FROM canonical_gym_session\n            ORDER BY COALESCE(started_at_utc, on_day), id\n            ",
   "describe": {
     "columns": [
       {
@@ -59,24 +59,24 @@
         }
       },
       {
-        "name": "ended_at_utc",
+        "name": "duration_seconds",
         "ordinal": 5,
-        "type_info": "Text",
+        "type_info": "Integer",
         "origin": {
           "Table": {
             "table": "canonical_gym_session",
-            "name": "ended_at_utc"
+            "name": "duration_seconds"
           }
         }
       },
       {
-        "name": "ended_normalised_session",
+        "name": "duration_normalised_session",
         "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
             "table": "canonical_gym_session",
-            "name": "ended_normalised_session"
+            "name": "duration_normalised_session"
           }
         }
       },
@@ -130,5 +130,5 @@
       true
     ]
   },
-  "hash": "64136e746b41fdc804eed2111fff1a72678bdf2fb537cc467e880fef75906d39"
+  "hash": "367a833b4d5b8652481c3e13a1f6da370472ce96e8117bbb98937cadca9ed10a"
 }

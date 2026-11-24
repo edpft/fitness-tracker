@@ -5,7 +5,7 @@
 //! *"Only sessions for now."*
 
 use application::{
-    PlayedPadelMatch,
+    PlayedPadelSession,
     history::{Activity, Day, Number, Page as Listed, opened},
 };
 use configurator::edits::{Here, InForce, ToSettle};
@@ -133,7 +133,7 @@ const ONE_REP_MAX_TEST: &str = "1RM test";
 const FTP_TEST: &str = "FTP test";
 const GYM: &str = "Gym session";
 const PELOTON: &str = "Peloton session";
-const PADEL: &str = "Padel match";
+const PADEL: &str = "Padel session";
 
 /// What the activity is: the classes a cycling session was ridden to are on
 /// its page, not its name.
@@ -187,16 +187,6 @@ fn facts(activity: &Activity) -> String {
         }
     };
     facts.join(" · ")
-}
-
-fn padel_facts(played: &PlayedPadelMatch) -> Vec<String> {
-    let mut facts = vec![length(Duration::from_seconds(played.duration.as_seconds()))];
-    facts.extend(
-        played
-            .heart_rate
-            .map(|heart_rate| heart_rate.average().to_string()),
-    );
-    facts
 }
 
 /// How long every ride of the session took, warm-up and cool-down included.
@@ -264,7 +254,7 @@ pub fn session(
                             (edits(here, session, changes))
                         }
                         Ok((Some(opened::Activity::Cycling(session)), _)) => (cycling(session)),
-                        Ok((Some(opened::Activity::Padel(played)), _)) => (padel(played)),
+                        Ok((Some(opened::Activity::Padel(played)), _)) => (padel(here, played)),
                         Ok((None, _)) => p.sub { "No such activity on " (on.strftime("%A %-d %B %Y")) "." },
                         Err(error) => p.failed { "The activity could not be read: " (error) },
                     }
@@ -275,12 +265,51 @@ pub fn session(
     }
 }
 
-fn padel(played: &PlayedPadelMatch) -> Markup {
+/// An opened padel session: when, how long, and its heart rate, with a pen
+/// to change when it started and ended, and the change in force (#894).
+fn padel(here: &str, played: &PlayedPadelSession) -> Markup {
+    let zone = played.started_at().zone().as_time_zone();
+    let when = played
+        .started_at()
+        .wall_clock()
+        .strftime("%A %-d %B %Y, %H:%M")
+        .to_string();
+    let mut figures: Vec<(&str, String)> = vec![(
+        "Duration",
+        length(Duration::from_seconds(played.duration().as_seconds())),
+    )];
+    if let Some(heart_rate) = played.heart_rate() {
+        let stated = heart_rate.stated();
+        figures.push(("Heart rate", stated.average().to_string()));
+        figures.push(("Highest", stated.highest().to_string()));
+    }
     html! {
-        p.sub { (played.started_at.wall_clock().strftime("%A %-d %B %Y, %H:%M")) }
-        p.sub { (padel_facts(played).join(" · ")) }
-        @if let Some(heart_rate) = played.heart_rate {
-            p.sub { "Highest " (heart_rate.highest()) }
+        div.named {
+            p.when { (CALENDAR) (when) }
+            a.edit href=(crate::change_bounds::address(here)) aria-label="Change when"
+                title="Change when" { (PEN) }
+        }
+        dl.figures {
+            @for (label, value) in &figures { div { dt { (label) } dd { (value) } } }
+        }
+        @if let Some(change) = played.change() {
+            section.card.edits {
+                h2 { "Changes" }
+                ul {
+                    li {
+                        p {
+                            "Started at "
+                            (change.started.instant().to_zoned(zone.clone()).strftime("%H:%M:%S"))
+                            "; ended at "
+                            (played.ended().to_zoned(zone).strftime("%H:%M:%S"))
+                        }
+                        p.sub { "Because " (change.reason) }
+                        form method="post" action=(crate::change_bounds::undo_address(here, change.id)) {
+                            button { "Undo" }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -488,15 +517,23 @@ fn said(session: &CanonicalGymSession, here: &Here) -> String {
                     taken(zone.as_ref(), started.source(), at)
                 ));
             }
-            if let Some(ended) = &bounds.ended {
-                let at = match ended {
-                    Taken::Stated(at) => Some(*at),
+            if let Some(lasted) = &bounds.lasted {
+                // A length is shown as the end it gives the session as it
+                // starts now: the page deals in times, the edit in lengths.
+                let at = match lasted {
+                    Taken::Stated(length) => session.occurred().instant().and_then(|start| {
+                        let seconds = i64::try_from(length.as_seconds()).ok()?;
+                        start
+                            .instant()
+                            .checked_add(jiff::SignedDuration::from_secs(seconds))
+                            .ok()
+                    }),
                     Taken::From(_) => None,
                 };
                 let verb = if said.is_empty() { "Ended" } else { "ended" };
                 said.push(format!(
                     "{verb} {}",
-                    taken(zone.as_ref(), ended.source(), at)
+                    taken(zone.as_ref(), lasted.source(), at)
                 ));
             }
             said.join("; ")

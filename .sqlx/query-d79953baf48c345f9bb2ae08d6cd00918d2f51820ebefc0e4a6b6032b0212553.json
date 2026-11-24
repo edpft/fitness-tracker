@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO padel_session_edit\n                (session, asserted_at, reason, started_at_utc, zone, duration_seconds)\n            VALUES (?, ?, ?, ?, ?, ?)\n            RETURNING id AS \"id!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "padel_session_edit",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d79953baf48c345f9bb2ae08d6cd00918d2f51820ebefc0e4a6b6032b0212553"
+}

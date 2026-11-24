@@ -1423,7 +1423,9 @@ impl<GR: Input, GC, CR: Input, CC, WR: Input, WC> CanonicalPorts<GR, GC, CR, CC,
     #[must_use]
     pub fn reads(layer: CanonicalLayer) -> Reads {
         match layer {
-            CanonicalLayer::Gym => GR::reads().and(Reads::of([Node::Edits(CanonicalLayer::Gym)])),
+            CanonicalLayer::Gym => {
+                GR::reads().and(Reads::of([Node::Edits(crate::graph::Edited::Gym)]))
+            }
             CanonicalLayer::Cycling => CR::reads(),
             CanonicalLayer::WeighIns => WR::reads(),
         }

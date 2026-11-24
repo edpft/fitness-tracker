@@ -83,7 +83,7 @@ pub use store::{
     GarminStepsLandingStore, GarminStressLandingStore, GarminVo2MaxLandingStore,
 };
 pub use store::{
-    GarminDailySummaryAccountReader, SqlitePadelMatches, SqliteStressHistory, SqliteStressStore,
+    GarminDailySummaryAccountReader, SqlitePadelSessions, SqliteStressHistory, SqliteStressStore,
     SqliteTrainingDone,
 };
 pub use store::{WithingsEcgLandingStore, WithingsEcgSignalLandingStore};

@@ -144,8 +144,8 @@ struct SessionRow {
     zone: Option<String>,
     on_day: Option<String>,
     started_normalised_session: Option<i64>,
-    ended_at_utc: Option<String>,
-    ended_normalised_session: Option<i64>,
+    duration_seconds: Option<i64>,
+    duration_normalised_session: Option<i64>,
     average_bpm: Option<i64>,
     highest_bpm: Option<i64>,
     heart_rate_normalised_session: Option<i64>,
@@ -195,7 +195,7 @@ impl CanonicalGymReading {
             SessionRow,
             r#"
             SELECT id AS "id!", started_at_utc, zone, on_day,
-                   started_normalised_session, ended_at_utc, ended_normalised_session,
+                   started_normalised_session, duration_seconds, duration_normalised_session,
                    average_bpm, highest_bpm, heart_rate_normalised_session
             FROM canonical_gym_session
             ORDER BY COALESCE(started_at_utc, on_day), id
@@ -248,13 +248,12 @@ async fn session_of(
         )?,
         taken_from(row.started_normalised_session)?,
     );
-    let ended = row
-        .ended_at_utc
-        .as_deref()
-        .map(|ended| {
+    let lasted = row
+        .duration_seconds
+        .map(|seconds| {
             Ok::<_, StoreError>(Attributed::new(
-                ended.parse::<Timestamp>().map_err(|e| corrupt(&e))?,
-                taken_from(row.ended_normalised_session)?,
+                positive(seconds)?,
+                taken_from(row.duration_normalised_session)?,
             ))
         })
         .transpose()?;
@@ -276,7 +275,7 @@ async fn session_of(
     let items = read_items(connection, row.id).await?;
     let accounts = read_accounts(connection, row.id).await?;
     Ok(CanonicalGymSession::new(
-        occurred, items, heart_rate, ended, accounts,
+        occurred, items, heart_rate, lasted, accounts,
     ))
 }
 
@@ -297,7 +296,7 @@ async fn spine_between(
         SessionRow,
         r#"
             SELECT id AS "id!", started_at_utc, zone, on_day,
-                   started_normalised_session, ended_at_utc, ended_normalised_session,
+                   started_normalised_session, duration_seconds, duration_normalised_session,
                    average_bpm, highest_bpm, heart_rate_normalised_session
             FROM canonical_gym_session
             WHERE COALESCE(started_at_utc, on_day) >= ?
@@ -345,7 +344,7 @@ impl application::Activities for SqliteCanonicalGymSessionStore {
         let rows = sqlx::query!(
             r#"
             SELECT s.started_at_utc, s.zone, s.on_day,
-                   unixepoch(s.ended_at_utc) - unixepoch(s.started_at_utc) AS "duration_seconds: i64",
+                   s.duration_seconds,
                    s.average_bpm,
                    (SELECT COUNT(*) FROM canonical_gym_exercise AS e
                      WHERE e.session = s.id) AS "exercises!: i64",
@@ -372,13 +371,7 @@ impl application::Activities for SqliteCanonicalGymSessionStore {
             if !(from..=to).contains(&occurred.day()) {
                 continue;
             }
-            let length = row
-                .duration_seconds
-                .map(|seconds| {
-                    PositiveDuration::from_seconds(u64::try_from(seconds).map_err(|e| corrupt(&e))?)
-                        .map_err(|e| corrupt(&e))
-                })
-                .transpose()?;
+            let length = row.duration_seconds.map(positive).transpose()?;
             read.push((
                 occurred,
                 application::Activity::Gym {
@@ -505,7 +498,7 @@ async fn standing_on(
         SessionRow,
         r#"
             SELECT id AS "id!", started_at_utc, zone, on_day,
-                   started_normalised_session, ended_at_utc, ended_normalised_session,
+                   started_normalised_session, duration_seconds, duration_normalised_session,
                    average_bpm, highest_bpm, heart_rate_normalised_session
             FROM canonical_gym_session
             WHERE id IN (
@@ -522,7 +515,7 @@ async fn standing_on(
                 UNION
                 SELECT id FROM canonical_gym_session
                  WHERE started_normalised_session = ?
-                    OR ended_normalised_session = ?
+                    OR duration_normalised_session = ?
                     OR heart_rate_normalised_session = ?
             )
             ORDER BY id
@@ -866,9 +859,12 @@ async fn write_session(
         .started()
         .normalised()
         .map(NormalisedSessionId::as_i64);
-    let ended_at_utc = session.ended().map(|ended| ended.value().to_string());
-    let ended_normalised_session = session
-        .ended()
+    let duration_seconds = session
+        .lasted()
+        .map(|lasted| i64::try_from(lasted.copied().as_seconds()).map_err(|e| corrupt(&e)))
+        .transpose()?;
+    let duration_normalised_session = session
+        .lasted()
         .and_then(Attributed::normalised)
         .map(NormalisedSessionId::as_i64);
     let (average_bpm, highest_bpm, heart_rate_normalised_session) =
@@ -886,7 +882,7 @@ async fn write_session(
         r#"
         INSERT INTO canonical_gym_session (
             id, started_at_utc, zone, on_day, started_normalised_session,
-            ended_at_utc, ended_normalised_session,
+            duration_seconds, duration_normalised_session,
             average_bpm, highest_bpm, heart_rate_normalised_session
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -896,8 +892,8 @@ async fn write_session(
         zone,
         on_day,
         started_normalised_session,
-        ended_at_utc,
-        ended_normalised_session,
+        duration_seconds,
+        duration_normalised_session,
         average_bpm,
         highest_bpm,
         heart_rate_normalised_session
@@ -909,17 +905,17 @@ async fn write_session(
 }
 
 /// One account as it is written: its normalised session, its stream, its
-/// start's instant, zone or day, and its end.
+/// start's instant, zone or day, and its length.
 type AccountRow = (
     i64,
     String,
     Option<String>,
     Option<String>,
     Option<String>,
-    Option<String>,
+    Option<u64>,
 );
 
-/// Each source's own start and end, in one statement.
+/// Each source's own start and length, in one statement.
 async fn write_accounts(
     tx: &mut Transaction<'_, Sqlite>,
     session: i64,
@@ -941,7 +937,7 @@ async fn write_accounts(
             started_at_utc,
             zone,
             on_day,
-            account.ended.map(|ended| ended.to_string()),
+            account.duration.map(PositiveDuration::as_seconds),
         ));
     }
     if rows.is_empty() {
@@ -951,7 +947,7 @@ async fn write_accounts(
     sqlx::query!(
         r#"
         INSERT INTO canonical_gym_session_account
-            (session, normalised_session, stream, started_at_utc, zone, on_day, ended_at_utc)
+            (session, normalised_session, stream, started_at_utc, zone, on_day, duration_seconds)
         SELECT ?, value ->> 0, value ->> 1, value ->> 2, value ->> 3, value ->> 4, value ->> 5
           FROM json_each(?)
         "#,
@@ -964,7 +960,7 @@ async fn write_accounts(
     Ok(())
 }
 
-/// Each source's own start and end, as the session holds them.
+/// Each source's own start and length, as the session holds them.
 async fn read_accounts(
     connection: &mut SqliteConnection,
     session: i64,
@@ -972,7 +968,7 @@ async fn read_accounts(
     let rows = sqlx::query!(
         r#"
         SELECT normalised_session AS "normalised!", stream, started_at_utc, zone, on_day,
-               ended_at_utc
+               duration_seconds
         FROM canonical_gym_session_account
         WHERE session = ?
         ORDER BY normalised_session
@@ -992,10 +988,7 @@ async fn read_accounts(
                     row.zone.as_deref(),
                     row.on_day.as_deref(),
                 )?,
-                ended: row
-                    .ended_at_utc
-                    .map(|ended| ended.parse::<Timestamp>().map_err(|e| corrupt(&e)))
-                    .transpose()?,
+                duration: row.duration_seconds.map(positive).transpose()?,
             })
         })
         .collect()
@@ -1902,3 +1895,9 @@ impl application::Input for SqliteCanonicalGymSessionStore {
 }
 
 impl application::NotRaw for SqliteCanonicalGymSessionStore {}
+
+/// A length as the columns hold it, in whole seconds.
+fn positive(seconds: i64) -> Result<PositiveDuration, StoreError> {
+    let seconds = u64::try_from(seconds).map_err(|e| corrupt(&e))?;
+    PositiveDuration::from_seconds(seconds).map_err(|e| corrupt(&e))
+}

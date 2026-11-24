@@ -85,7 +85,7 @@ fn entry_of(entry: &ToSettle, today: Date) -> Markup {
         ToSettle::SourceGone { session, bounds } => html! {
             p {
                 "You took when a session "
-                @match (&bounds.started, &bounds.ended) {
+                @match (&bounds.started, &bounds.lasted) {
                     (Some(_), Some(_)) => "started and ended",
                     (Some(_), None) => "started",
                     _ => "ended",
