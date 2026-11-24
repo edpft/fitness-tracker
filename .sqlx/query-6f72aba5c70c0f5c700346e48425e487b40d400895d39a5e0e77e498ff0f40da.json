@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT edit AS \"edit!\", session AS \"session!\", started_from, started_at_utc,\n               started_zone, started_on_day, ended_from, ended_at_utc\n        FROM canonical_gym_session_edit\n        ORDER BY edit, session\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "edit!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_edit",
+            "name": "edit"
+          }
+        }
+      },
+      {
+        "name": "session!",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_edit",
+            "name": "session"
+          }
+        }
+      },
+      {
+        "name": "started_from",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_edit",
+            "name": "started_from"
+          }
+        }
+      },
+      {
+        "name": "started_at_utc",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_edit",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "started_zone",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_edit",
+            "name": "started_zone"
+          }
+        }
+      },
+      {
+        "name": "started_on_day",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_edit",
+            "name": "started_on_day"
+          }
+        }
+      },
+      {
+        "name": "ended_from",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_edit",
+            "name": "ended_from"
+          }
+        }
+      },
+      {
+        "name": "ended_at_utc",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_edit",
+            "name": "ended_at_utc"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "6f72aba5c70c0f5c700346e48425e487b40d400895d39a5e0e77e498ff0f40da"
+}

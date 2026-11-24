@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT s.id AS \"session!\", a.stream AS \"stream?\"\n            FROM canonical_gym_session AS s\n            LEFT JOIN canonical_gym_session_account AS a ON a.session = s.id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "session!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "stream?",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_account",
+            "name": "stream"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "19ad97dc8a22854159e8a54fc81d6b50f2538882bd36ff161fb55e299c8c5fc9"
+}

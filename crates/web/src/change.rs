@@ -597,6 +597,8 @@ pub async fn made(
                 .await
                 .map_err(|e| e.to_string())?;
             exercises_changed(*becomes, &reached)
+        } else if edit.bounds().next().is_some() {
+            html! { p { "When the session started and ended is changed." } }
         } else {
             html! {
                 @for (_, fields) in edit.sets() { p { "The set now reads " (fields) "." } }

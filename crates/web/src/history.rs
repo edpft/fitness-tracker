@@ -17,6 +17,7 @@ use domain::{
     },
     measure::{Duration, RepCount},
 };
+use domain::{gym::edit::Taken, normalised::StartedAt};
 use jiff::civil::Date;
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
@@ -295,10 +296,10 @@ fn gym(here: &str, on: Date, session: &CanonicalGymSession, tested: &[RepsExerci
         },
     );
     let mut figures: Vec<(&str, String)> = Vec::new();
-    if let Some(duration) = session.duration() {
+    if let Some(lasted) = session.length() {
         figures.push((
             "Duration",
-            length(Duration::from_seconds(duration.value().as_seconds())),
+            length(Duration::from_seconds(lasted.as_seconds())),
         ));
     }
     figures.push(("Exercises", session.exercises().count().to_string()));
@@ -309,7 +310,12 @@ fn gym(here: &str, on: Date, session: &CanonicalGymSession, tested: &[RepsExerci
         figures.push(("Highest", stated.highest().to_string()));
     }
     html! {
-        p.when { (CALENDAR) (when) }
+        // When it started and ended are changed from here (#894).
+        div.named {
+            p.when { (CALENDAR) (when) }
+            a.edit href=(crate::change_bounds::address(here)) aria-label="Change when"
+                title="Change when" { (PEN) }
+        }
         dl.figures {
             @for (label, value) in &figures { div { dt { (label) } dd { (value) } } }
         }
@@ -448,7 +454,7 @@ fn edits(here: &str, session: &CanonicalGymSession, changes: &[InForce]) -> Mark
                 ul {
                     @for change in changes {
                         li {
-                            p { (said(session, change.here)) }
+                            p { (said(session, &change.here)) }
                             p.sub { "Because " (change.edit.reason) }
                             form method="post" action=(format!("{here}/changed/{}", change.edit.id)) {
                                 button {
@@ -467,8 +473,33 @@ fn edits(here: &str, session: &CanonicalGymSession, changes: &[InForce]) -> Mark
 
 /// What a change says about the session, as its exercises and sets are
 /// named on it.
-fn said(session: &CanonicalGymSession, here: Here) -> String {
-    match here {
+fn said(session: &CanonicalGymSession, here: &Here) -> String {
+    match *here {
+        Here::Bounds(ref bounds) => {
+            let zone = session.occurred().instant().map(|at| at.zone().clone());
+            let mut said = Vec::new();
+            if let Some(started) = &bounds.started {
+                let at = match started {
+                    Taken::Stated(occurred) => occurred.instant().map(StartedAt::instant),
+                    Taken::From(_) => None,
+                };
+                said.push(format!(
+                    "Started {}",
+                    taken(zone.as_ref(), started.source(), at)
+                ));
+            }
+            if let Some(ended) = &bounds.ended {
+                let at = match ended {
+                    Taken::Stated(at) => Some(*at),
+                    Taken::From(_) => None,
+                };
+                said.push(format!(
+                    "Ended {}",
+                    taken(zone.as_ref(), ended.source(), at)
+                ));
+            }
+            said.join("; ")
+        }
         Here::Exercise { read, becomes } => format!("{} to {}", read.name(), becomes.name()),
         Here::Set {
             position,
@@ -484,6 +515,23 @@ fn said(session: &CanonicalGymSession, here: Here) -> String {
                 )
             },
         ),
+    }
+}
+
+/// A start or end as a change states it: a source's, or a time.
+fn taken(
+    zone: Option<&domain::normalised::OperatorZone>,
+    source: Option<&domain::landing::LandingStream>,
+    at: Option<jiff::Timestamp>,
+) -> String {
+    match (source, at, zone) {
+        (Some(stream), _, _) => format!("as {}", crate::change_bounds::called(stream)),
+        (None, Some(at), Some(zone)) => format!(
+            "at {}",
+            at.to_zoned(zone.as_time_zone()).strftime("%H:%M:%S")
+        ),
+        (None, Some(at), None) => format!("at {at}"),
+        (None, None, _) => String::new(),
     }
 }
 

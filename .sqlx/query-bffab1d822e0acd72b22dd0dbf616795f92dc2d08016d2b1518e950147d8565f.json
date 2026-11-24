@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT session AS \"session!\" FROM canonical_gym_exercise_edit WHERE edit = ?\n        UNION\n        SELECT session FROM canonical_gym_set_edit WHERE edit = ?\n        ",
+  "query": "\n        SELECT session AS \"session!\" FROM canonical_gym_exercise_edit WHERE edit = ?\n        UNION\n        SELECT session FROM canonical_gym_set_edit WHERE edit = ?\n        UNION\n        SELECT session FROM canonical_gym_session_edit WHERE edit = ?\n        ",
   "describe": {
     "columns": [
       {
@@ -16,11 +16,11 @@
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 3
     },
     "nullable": [
       false
     ]
   },
-  "hash": "4e6b473e40b24cae6318e17db84de975fd9382bf8387de47b892269513ea8728"
+  "hash": "bffab1d822e0acd72b22dd0dbf616795f92dc2d08016d2b1518e950147d8565f"
 }

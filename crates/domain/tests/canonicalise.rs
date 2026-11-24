@@ -106,6 +106,7 @@ fn log(
 ) -> Result<NormalisedGymSession, Failure> {
     Ok(NormalisedGymSession::from_log(
         id(number)?,
+        "hevy.workouts".parse::<domain::landing::LandingStream>()?,
         when,
         None,
         items,
@@ -119,6 +120,7 @@ fn watch(
 ) -> Result<NormalisedGymSession, Failure> {
     Ok(NormalisedGymSession::new(
         id(number)?,
+        "garmin.activities".parse::<domain::landing::LandingStream>()?,
         Recorder::Watch,
         when,
         None,
@@ -340,6 +342,9 @@ fn a_recording_with_no_sets_is_no_canonical_session() {
     );
     let recording = NormalisedGymSession::new(
         id(9).unwrap(),
+        "garmin.activities"
+            .parse::<domain::landing::LandingStream>()
+            .expect("a stream"),
         Recorder::Watch,
         at("2026-09-25T17:00:00Z").unwrap(),
         PositiveDuration::from_seconds(2_700)
@@ -484,6 +489,7 @@ fn recording(
     let who = id(number)?;
     Ok(NormalisedGymSession::new(
         who,
+        "garmin.activities".parse::<domain::landing::LandingStream>()?,
         Recorder::Watch,
         occurred,
         length(minutes, who),
@@ -510,6 +516,9 @@ fn the_watch_left_running_states_the_visit_not_the_recording() {
     beats.extend(flat(90, 118, 78));
     let logged = NormalisedGymSession::from_log(
         id(1).unwrap(),
+        "hevy.workouts"
+            .parse::<domain::landing::LandingStream>()
+            .expect("a stream"),
         at("2025-07-25T17:00:00Z").unwrap(),
         length(57, id(1).unwrap()),
         vec![recorded("back-squat-barbell", &[(5, 60_000)], id(1).unwrap()).unwrap()],
@@ -518,7 +527,7 @@ fn the_watch_left_running_states_the_visit_not_the_recording() {
 
     let sessions = canonical_sessions(vec![logged, watched]);
     let session = sessions.first().expect("one session");
-    let stated = session.duration().expect("a length");
+    let stated = stated(session).expect("a length");
     assert_eq!(
         stated.copied().as_seconds(),
         90 * 60,
@@ -543,6 +552,9 @@ fn a_log_that_started_before_the_watch_still_bounds_the_visit() {
     beats.extend(flat(85, 103, 95));
     let logged = NormalisedGymSession::from_log(
         id(1).unwrap(),
+        "hevy.workouts"
+            .parse::<domain::landing::LandingStream>()
+            .expect("a stream"),
         at("2025-08-08T17:00:00Z").unwrap(),
         length(54, id(1).unwrap()),
         vec![recorded("back-squat-barbell", &[(5, 60_000)], id(1).unwrap()).unwrap()],
@@ -550,10 +562,7 @@ fn a_log_that_started_before_the_watch_still_bounds_the_visit() {
     let watched = recording(2, at("2025-08-08T17:07:00Z").unwrap(), 104, &beats).unwrap();
 
     let sessions = canonical_sessions(vec![logged, watched]);
-    let stated = sessions
-        .first()
-        .and_then(CanonicalGymSession::duration)
-        .expect("a length");
+    let stated = sessions.first().and_then(stated).expect("a length");
     assert_eq!(
         stated.copied().as_seconds(),
         85 * 60,
@@ -573,6 +582,9 @@ fn two_accounts_agreeing_on_the_end_are_not_trimmed() {
     beats.extend(flat(71, 97, 90));
     let logged = NormalisedGymSession::from_log(
         id(1).unwrap(),
+        "hevy.workouts"
+            .parse::<domain::landing::LandingStream>()
+            .expect("a stream"),
         at("2026-07-20T17:00:00Z").unwrap(),
         length(98, id(1).unwrap()),
         vec![recorded("back-squat-barbell", &[(5, 60_000)], id(1).unwrap()).unwrap()],
@@ -583,7 +595,7 @@ fn two_accounts_agreeing_on_the_end_are_not_trimmed() {
     assert_eq!(
         sessions
             .first()
-            .and_then(CanonicalGymSession::duration)
+            .and_then(stated)
             .map(|stated| stated.copied().as_seconds()),
         Some(98 * 60),
         "the whole recording"
@@ -601,6 +613,9 @@ fn a_fragment_of_a_log_does_not_bound_the_visit() {
     beats.extend(flat(16, 56, 100));
     let logged = NormalisedGymSession::from_log(
         id(1).unwrap(),
+        "hevy.workouts"
+            .parse::<domain::landing::LandingStream>()
+            .expect("a stream"),
         at("2025-02-12T17:00:00Z").unwrap(),
         length(5, id(1).unwrap()),
         vec![recorded("back-squat-barbell", &[(5, 60_000)], id(1).unwrap()).unwrap()],
@@ -611,7 +626,7 @@ fn a_fragment_of_a_log_does_not_bound_the_visit() {
     assert_eq!(
         sessions
             .first()
-            .and_then(CanonicalGymSession::duration)
+            .and_then(stated)
             .map(|stated| stated.copied().as_seconds()),
         Some(57 * 60),
         "the whole recording, because the log says nothing about its end"
@@ -628,6 +643,9 @@ fn a_fragment_of_a_log_does_not_bound_the_visit() {
 fn a_log_that_started_before_the_watch_states_the_visit() {
     let logged = NormalisedGymSession::from_log(
         id(1).unwrap(),
+        "hevy.workouts"
+            .parse::<domain::landing::LandingStream>()
+            .expect("a stream"),
         at("2025-03-31T18:00:53Z").unwrap(),
         length(60, id(1).unwrap()),
         vec![recorded("back-squat-barbell", &[(5, 60_000)], id(1).unwrap()).unwrap()],
@@ -641,10 +659,7 @@ fn a_log_that_started_before_the_watch_states_the_visit() {
     .unwrap();
 
     let sessions = canonical_sessions(vec![logged, watched]);
-    let stated = sessions
-        .first()
-        .and_then(CanonicalGymSession::duration)
-        .expect("a length");
+    let stated = sessions.first().and_then(stated).expect("a length");
     assert_eq!(stated.copied().as_seconds(), 60 * 60, "the hour he logged");
     assert_eq!(
         stated.normalised_session(),
@@ -666,6 +681,9 @@ fn a_tail_no_lower_than_his_own_rest_is_not_a_drive_home() {
     beats.extend(flat(70, 103, 88));
     let logged = NormalisedGymSession::from_log(
         id(1).unwrap(),
+        "hevy.workouts"
+            .parse::<domain::landing::LandingStream>()
+            .expect("a stream"),
         at("2025-06-23T17:00:00Z").unwrap(),
         length(70, id(1).unwrap()),
         vec![recorded("back-squat-barbell", &[(5, 60_000)], id(1).unwrap()).unwrap()],
@@ -676,7 +694,7 @@ fn a_tail_no_lower_than_his_own_rest_is_not_a_drive_home() {
     assert_eq!(
         sessions
             .first()
-            .and_then(CanonicalGymSession::duration)
+            .and_then(stated)
             .map(|stated| stated.copied().as_seconds()),
         Some(104 * 60),
         "the whole recording, undeterminable rather than trimmed"
@@ -695,6 +713,9 @@ fn a_minute_the_watch_wrote_nothing_in_does_not_break_the_stretch() {
     beats.push((118, 74));
     let logged = NormalisedGymSession::from_log(
         id(1).unwrap(),
+        "hevy.workouts"
+            .parse::<domain::landing::LandingStream>()
+            .expect("a stream"),
         at("2025-07-25T17:00:00Z").unwrap(),
         length(57, id(1).unwrap()),
         vec![recorded("back-squat-barbell", &[(5, 60_000)], id(1).unwrap()).unwrap()],
@@ -705,7 +726,7 @@ fn a_minute_the_watch_wrote_nothing_in_does_not_break_the_stretch() {
     assert_eq!(
         sessions
             .first()
-            .and_then(CanonicalGymSession::duration)
+            .and_then(stated)
             .map(|stated| stated.copied().as_seconds()),
         Some(90 * 60),
         "one stretch from minute 90, silence and all"
@@ -717,6 +738,9 @@ fn a_minute_the_watch_wrote_nothing_in_does_not_break_the_stretch() {
 fn one_account_states_the_length_alone() {
     let alone = NormalisedGymSession::new(
         id(3).unwrap(),
+        "garmin.activities"
+            .parse::<domain::landing::LandingStream>()
+            .expect("a stream"),
         Recorder::Watch,
         at("2025-03-19T17:00:00Z").unwrap(),
         length(47, id(3).unwrap()),
@@ -727,15 +751,20 @@ fn one_account_states_the_length_alone() {
     assert_eq!(
         sessions
             .first()
-            .and_then(CanonicalGymSession::duration)
+            .and_then(stated)
             .map(|stated| stated.copied().as_seconds()),
         Some(47 * 60),
         "the watch's length where nothing else states one"
     );
 
-    // A sheet states a day and a length and no clock, so nothing brackets it.
+    // A sheet states a day and a length and no clock. A session ends at an
+    // instant, and with no instant to start from the length has nowhere to
+    // stand (#894): none of the operator's 401 sessions is one.
     let sheet = NormalisedGymSession::from_log(
         id(4).unwrap(),
+        "hevy.workouts"
+            .parse::<domain::landing::LandingStream>()
+            .expect("a stream"),
         on("2019-03-20").unwrap(),
         length(52, id(4).unwrap()),
         vec![recorded("back-squat-barbell", &[(5, 60_000)], id(4).unwrap()).unwrap()],
@@ -744,10 +773,10 @@ fn one_account_states_the_length_alone() {
     assert_eq!(
         sessions
             .first()
-            .and_then(CanonicalGymSession::duration)
+            .and_then(stated)
             .map(|stated| stated.copied().as_seconds()),
-        Some(52 * 60),
-        "the operator's own record where no watch recorded the visit"
+        None,
+        "no end without a start to measure it from"
     );
 }
 
@@ -920,4 +949,13 @@ fn an_exercise_two_supersets_share_is_placed_once() {
         ]
     );
     assert_eq!(session.set_count(), 8, "each set once");
+}
+
+/// How long a session lasted, attributed to the account its end was read
+/// from: what the length was before the canonical session held an end.
+fn stated(session: &CanonicalGymSession) -> Option<Attributed<PositiveDuration>> {
+    Some(Attributed::new(
+        session.length()?,
+        session.ended()?.normalised()?,
+    ))
 }

@@ -48,7 +48,10 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
+use jiff::Timestamp;
+
 use crate::canonical::{Attributed, NormalisedSessionId, Occurred, TakenFrom};
+use crate::landing::LandingStream;
 use crate::measure::{Distance, Duration, PositiveDuration, RepCount};
 use crate::normalised::StartedAt;
 use crate::sequence::{AtLeastTwo, NonEmpty};
@@ -272,6 +275,18 @@ impl CanonicalExercise {
         }
     }
 
+    /// When each of its sets began, where a watch timed it.
+    pub fn began(&self) -> Vec<Timestamp> {
+        fn of<M>(set: &CanonicalSet<M>) -> Option<Timestamp> {
+            set.began.as_ref().map(|began| began.value().instant())
+        }
+        match self {
+            Self::ForReps { sets, .. } => sets.iter().filter_map(of).collect(),
+            Self::ForDuration { sets, .. } => sets.iter().filter_map(of).collect(),
+            Self::ForDistance { sets, .. } => sets.iter().filter_map(of).collect(),
+        }
+    }
+
     /// Every normalised session this exercise and its sets drew a field from, each once.
     pub fn normalised_sessions(&self) -> Vec<NormalisedSessionId> {
         let mut sessions: Vec<NormalisedSessionId> = self.identified_by().into_iter().collect();
@@ -354,7 +369,9 @@ impl CanonicalItem {
 /// classified nothing at all.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalGymSession {
-    occurred: Occurred,
+    /// When it started, at the precision its sources knew it to, and which
+    /// normalised session said so, or the edit.
+    occurred: Attributed<Occurred, TakenFrom>,
     exercises: NonEmpty<CanonicalItem>,
     /// What the heart did while they were performed, where a watch recorded it.
     ///
@@ -363,37 +380,151 @@ pub struct CanonicalGymSession {
     /// quantities out of the merge: there is no single value two normalised sessions of it
     /// could reduce to.
     heart_rate: Option<Attributed<MeasuredHeartRate>>,
-    /// How long the visit took, as whichever normalised session stated it. Hevy and a
-    /// watch both do; a sheet and the gym's log do not.
-    duration: Option<Attributed<PositiveDuration>>,
+    /// When the visit ended, where it started at an instant and a source
+    /// said how long it took. Hevy and a watch both do; a sheet and the
+    /// gym's log do not.
+    ended: Option<Attributed<Timestamp, TakenFrom>>,
+    /// Each source's own account of when the visit started and ended, so an
+    /// edit can take either from the one the operator chooses (#894).
+    accounts: Vec<Account>,
+}
+
+/// One source's account of when a visit started and ended.
+///
+/// **Each account is a floor on the visit**: it says the operator was
+/// training over the span it covers and nothing about the rest. The
+/// canonical session's own start and end are merged from them; these are
+/// kept so the operator can choose one source's over the merge (operator,
+/// 2026-11-23: *"choose the source of the start or end time or provide my
+/// own"*).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Account {
+    pub stream: LandingStream,
+    pub normalised: NormalisedSessionId,
+    pub occurred: Occurred,
+    /// Its start and the length it stated, where it stated both: what the
+    /// source recorded, with nothing trimmed.
+    pub ended: Option<Timestamp>,
+}
+
+/// Why a start and an end cannot be one session's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidBounds {
+    #[error("it would end before it started")]
+    EndsBeforeItStarts,
+    #[error("it would end with no time to start from")]
+    EndsWithoutAStart,
+    #[error("it would start on another day")]
+    MovesDay,
+    #[error("a set the watch timed would fall outside it")]
+    LeavesOutASet,
 }
 
 impl CanonicalGymSession {
     pub const fn new(
-        occurred: Occurred,
+        occurred: Attributed<Occurred, TakenFrom>,
         exercises: NonEmpty<CanonicalItem>,
         heart_rate: Option<Attributed<MeasuredHeartRate>>,
-        duration: Option<Attributed<PositiveDuration>>,
+        ended: Option<Attributed<Timestamp, TakenFrom>>,
+        accounts: Vec<Account>,
     ) -> Self {
         Self {
             occurred,
             exercises,
             heart_rate,
-            duration,
+            ended,
+            accounts,
         }
     }
 
     /// When it happened, at the precision its sources knew it to.
     pub const fn occurred(&self) -> &Occurred {
+        self.occurred.value()
+    }
+
+    /// When it started, and where that was taken from.
+    pub const fn started(&self) -> &Attributed<Occurred, TakenFrom> {
         &self.occurred
+    }
+
+    /// When it ended, and where that was taken from.
+    pub const fn ended(&self) -> Option<&Attributed<Timestamp, TakenFrom>> {
+        self.ended.as_ref()
+    }
+
+    /// Each source's own start and end.
+    pub fn accounts(&self) -> &[Account] {
+        &self.accounts
+    }
+
+    /// How long it lasted: from its start to its end.
+    pub fn length(&self) -> Option<PositiveDuration> {
+        let started = self.occurred().instant()?.instant();
+        let ended = self.ended.as_ref()?.copied();
+        let seconds = u64::try_from(ended.as_second() - started.as_second()).ok()?;
+        PositiveDuration::from_seconds(seconds).ok()
     }
 
     pub const fn heart_rate(&self) -> Option<&Attributed<MeasuredHeartRate>> {
         self.heart_rate.as_ref()
     }
 
-    pub const fn duration(&self) -> Option<&Attributed<PositiveDuration>> {
-        self.duration.as_ref()
+    /// The same session started and ended as `started` and `ended` say, with
+    /// its heart rate read only between them.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidBounds`] where the two cannot be one session's: an end at or
+    /// before the start, an end with no instant to start from, a start on
+    /// another day, or bounds that leave out a set the watch timed.
+    pub fn bounded(
+        &self,
+        started: Attributed<Occurred, TakenFrom>,
+        ended: Option<Attributed<Timestamp, TakenFrom>>,
+    ) -> Result<Self, InvalidBounds> {
+        if started.value().day() != self.occurred().day() {
+            return Err(InvalidBounds::MovesDay);
+        }
+        let start = started.value().instant().map(StartedAt::instant);
+        if let Some(end) = &ended {
+            let start = start.ok_or(InvalidBounds::EndsWithoutAStart)?;
+            if end.copied() <= start {
+                return Err(InvalidBounds::EndsBeforeItStarts);
+            }
+        }
+        let began = self.exercises().flat_map(CanonicalExercise::began);
+        for set in began {
+            let before = start.is_some_and(|start| set < start);
+            let after = ended.as_ref().is_some_and(|end| set > end.copied());
+            if before || after {
+                return Err(InvalidBounds::LeavesOutASet);
+            }
+        }
+        let heart_rate = self.heart_rate.as_ref().map(|heart_rate| {
+            let recording = self
+                .accounts
+                .iter()
+                .find(|account| account.normalised == heart_rate.normalised_session())
+                .and_then(|account| account.occurred.instant())
+                .map(StartedAt::instant);
+            match (recording, start, &ended) {
+                (Some(recording), Some(start), Some(end)) => Attributed::new(
+                    heart_rate.value().between(
+                        start.as_second() - recording.as_second(),
+                        end.copied().as_second() - recording.as_second(),
+                    ),
+                    heart_rate.normalised_session(),
+                ),
+                _ => heart_rate.clone(),
+            }
+        });
+        Ok(Self {
+            occurred: started,
+            exercises: self.exercises.clone(),
+            heart_rate,
+            ended,
+            accounts: self.accounts.clone(),
+        })
     }
 
     /// The items performed, in order. Never empty.
@@ -424,7 +555,8 @@ impl CanonicalGymSession {
             occurred: self.occurred.clone(),
             exercises,
             heart_rate: self.heart_rate.clone(),
-            duration: self.duration,
+            ended: self.ended,
+            accounts: self.accounts.clone(),
         }
     }
 
@@ -454,8 +586,14 @@ impl CanonicalGymSession {
         if let Some(heart_rate) = &self.heart_rate {
             push(heart_rate.normalised_session());
         }
-        if let Some(duration) = &self.duration {
-            push(duration.normalised_session());
+        for bound in [
+            self.occurred.normalised(),
+            self.ended.and_then(|ended| ended.normalised()),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            push(bound);
         }
         for exercise in self.exercises.iter().flat_map(CanonicalItem::exercises) {
             for session in exercise.normalised_sessions() {
@@ -468,7 +606,7 @@ impl CanonicalGymSession {
 
 impl fmt::Display for CanonicalGymSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.occurred)?;
+        write!(f, "{}", self.occurred())?;
         match &self.heart_rate {
             Some(heart_rate) => write!(f, " — {}", heart_rate.value())?,
             None => f.write_str(" — no heart rate")?,
@@ -551,10 +689,14 @@ mod tests {
             ),
         };
         let session = CanonicalGymSession::new(
-            Occurred::On("2020-10-09".parse().expect("a day")),
+            crate::canonical::Attributed::new(
+                Occurred::On("2020-10-09".parse().expect("a day")),
+                crate::canonical::NormalisedSessionId::FIRST,
+            ),
             NonEmpty::of(CanonicalItem::exercise(exercise), vec![]),
             None,
             None,
+            Vec::new(),
         );
 
         assert_eq!(session.set_count(), 2);
@@ -577,7 +719,10 @@ mod tests {
             sets: NonEmpty::of(set(8, watch, Some((40_000, watch))).expect("a set"), vec![]),
         };
         let session = CanonicalGymSession::new(
-            Occurred::At(StartedAt::new(instant, zone().expect("a zone"))),
+            crate::canonical::Attributed::new(
+                Occurred::At(StartedAt::new(instant, zone().expect("a zone"))),
+                watch,
+            ),
             NonEmpty::of(CanonicalItem::exercise(exercise), vec![]),
             Some(Attributed::new(
                 MeasuredHeartRate::new(
@@ -590,6 +735,7 @@ mod tests {
                 watch,
             )),
             None,
+            Vec::new(),
         );
 
         assert_eq!(session.set_count(), 1);

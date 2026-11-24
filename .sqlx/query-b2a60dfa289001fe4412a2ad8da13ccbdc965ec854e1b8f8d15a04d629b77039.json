@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT normalised_session AS \"normalised!\", stream, started_at_utc, zone, on_day,\n               ended_at_utc\n        FROM canonical_gym_session_account\n        WHERE session = ?\n        ORDER BY normalised_session\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "normalised!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_account",
+            "name": "normalised_session"
+          }
+        }
+      },
+      {
+        "name": "stream",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_account",
+            "name": "stream"
+          }
+        }
+      },
+      {
+        "name": "started_at_utc",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_account",
+            "name": "started_at_utc"
+          }
+        }
+      },
+      {
+        "name": "zone",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_account",
+            "name": "zone"
+          }
+        }
+      },
+      {
+        "name": "on_day",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_account",
+            "name": "on_day"
+          }
+        }
+      },
+      {
+        "name": "ended_at_utc",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session_account",
+            "name": "ended_at_utc"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "b2a60dfa289001fe4412a2ad8da13ccbdc965ec854e1b8f8d15a04d629b77039"
+}

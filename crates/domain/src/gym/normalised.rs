@@ -23,6 +23,7 @@
 use std::collections::BTreeSet;
 
 use crate::canonical::{Attributed, NormalisedSessionId, Occurred};
+use crate::landing::LandingStream;
 use crate::measure::{PositiveDuration, RepCount};
 use crate::sequence::NonEmpty;
 
@@ -61,6 +62,7 @@ pub enum Recorder {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NormalisedGymSession {
     id: NormalisedSessionId,
+    stream: LandingStream,
     recorder: Recorder,
     occurred: Occurred,
     duration: Option<Attributed<PositiveDuration>>,
@@ -81,6 +83,7 @@ impl NormalisedGymSession {
     /// to, which is 123 of his days.
     pub const fn new(
         id: NormalisedSessionId,
+        stream: LandingStream,
         recorder: Recorder,
         occurred: Occurred,
         duration: Option<Attributed<PositiveDuration>>,
@@ -89,6 +92,7 @@ impl NormalisedGymSession {
     ) -> Self {
         Self {
             id,
+            stream,
             recorder,
             occurred,
             duration,
@@ -100,6 +104,11 @@ impl NormalisedGymSession {
     /// The id the canonical layer names this account by.
     pub const fn id(&self) -> NormalisedSessionId {
         self.id
+    }
+
+    /// The stream it was collected from: which source's account it is.
+    pub const fn stream(&self) -> &LandingStream {
+        &self.stream
     }
 
     pub const fn recorder(&self) -> Recorder {
@@ -138,11 +147,20 @@ impl NormalisedGymSession {
     /// it named, and the sets it holds of that exercise.
     pub const fn from_log(
         id: NormalisedSessionId,
+        stream: LandingStream,
         occurred: Occurred,
         duration: Option<Attributed<PositiveDuration>>,
         items: Vec<CanonicalItem>,
     ) -> Self {
-        Self::new(id, Recorder::Operator, occurred, duration, None, items)
+        Self::new(
+            id,
+            stream,
+            Recorder::Operator,
+            occurred,
+            duration,
+            None,
+            items,
+        )
     }
 
     /// A watch's session: its heart rate, and the sets it classified itself,
@@ -165,6 +183,7 @@ impl NormalisedGymSession {
     /// [`GuessedExercise::Undetermined`]: super::GuessedExercise::Undetermined
     pub fn from_watch(
         id: NormalisedSessionId,
+        stream: LandingStream,
         occurred: Occurred,
         duration: Option<Attributed<PositiveDuration>>,
         heart_rate: Option<Attributed<MeasuredHeartRate>>,
@@ -196,7 +215,15 @@ impl NormalisedGymSession {
             items.push(exercise_of(id, guess, sets));
         }
 
-        Self::new(id, Recorder::Watch, occurred, duration, heart_rate, items)
+        Self::new(
+            id,
+            stream,
+            Recorder::Watch,
+            occurred,
+            duration,
+            heart_rate,
+            items,
+        )
     }
 }
 

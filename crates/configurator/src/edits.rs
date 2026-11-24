@@ -18,7 +18,8 @@ use domain::{
     gym::{
         CanonicalExercise, CanonicalGymSession,
         edit::{
-            self, Conflict, Edit, EditId, EditReason, Edits, Found, SparseGymSession, SparseSet,
+            self, Bounds, Conflict, Edit, EditId, EditReason, Edits, Found, SparseGymSession,
+            SparseSet,
         },
         exercise::Exercise,
         identity::{
@@ -59,6 +60,15 @@ pub enum ToSettle {
     SetGone {
         set: CanonicalSetId,
         edit: SparseSet,
+    },
+    /// A session whose start or end was edited, which no rebuild holds any
+    /// more.
+    SessionGone(CanonicalSessionId),
+    /// A session whose start or end was taken from a source that no longer
+    /// accounts for it: it reads as derived until settled.
+    SourceGone {
+        session: CanonicalSessionId,
+        bounds: Bounds,
     },
 }
 
@@ -119,16 +129,21 @@ impl Overlay {
         if edits.is_empty() {
             return Ok(Vec::new());
         }
-        let held = self
-            .store
-            .adapter(SqliteCanonicalGymSessionStore::new)
+        let adapter = self.store.adapter(SqliteCanonicalGymSessionStore::new);
+        let held = adapter
             .call(
                 "SqliteCanonicalGymSessionStore::held",
                 SqliteCanonicalGymSessionStore::held,
             )
             .await?;
+        let sessions = adapter
+            .call(
+                "SqliteCanonicalGymSessionStore::sessions_held",
+                SqliteCanonicalGymSessionStore::sessions_held,
+            )
+            .await?;
         let mut settle = Vec::new();
-        for conflict in edits.conflicts(&held) {
+        for conflict in edits.conflicts(&held, &sessions) {
             match conflict {
                 Conflict::Added { exercise, set } => {
                     if let Some(edit) = renamed(&edits, exercise) {
@@ -144,6 +159,13 @@ impl Overlay {
                 }
                 Conflict::SetGone(set) => {
                     settle.extend(edits.set(set).map(|edit| ToSettle::SetGone { set, edit }));
+                }
+                Conflict::SessionGone(session) => settle.push(ToSettle::SessionGone(session)),
+                Conflict::SourceGone(session) => {
+                    settle.extend(edits.bounds(session).map(|bounds| ToSettle::SourceGone {
+                        session,
+                        bounds: bounds.clone(),
+                    }));
                 }
             }
         }
@@ -204,8 +226,10 @@ pub struct InForce {
 }
 
 /// Where on the session an edit says something.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Here {
+    /// When it started or ended.
+    Bounds(Bounds),
     /// One of its exercises: what it read as when it was changed, and what
     /// it became.
     Exercise { read: Exercise, becomes: Exercise },
@@ -251,7 +275,7 @@ impl Overlay {
         Ok(edit::in_force(&every, &ids)
             .into_iter()
             .filter_map(|edit| {
-                here(edit, &placed).map(|here| InForce {
+                here(edit, session, &placed).map(|here| InForce {
                     edit: edit.clone(),
                     here,
                     sessions: edit.reaches(),
@@ -263,7 +287,19 @@ impl Overlay {
 
 /// Where on a session holding `placed` an edit says something: an exercise
 /// it renames, before a set it changes.
-fn here(edit: &Edit, placed: &[(usize, ExerciseIds)]) -> Option<Here> {
+fn here(edit: &Edit, session: CanonicalSessionId, placed: &[(usize, ExerciseIds)]) -> Option<Here> {
+    let bounds = edit
+        .bounds()
+        .find(|(id, _, _)| *id == session)
+        .map(|(_, started, ended)| {
+            Here::Bounds(Bounds {
+                started: started.cloned(),
+                ended: ended.cloned(),
+            })
+        });
+    if bounds.is_some() {
+        return bounds;
+    }
     let renamed = edit.exercises().find_map(|(exercise, becomes)| {
         let found = edit.found.get(&exercise)?;
         placed
@@ -461,6 +497,20 @@ pub async fn unedit_set(store: &Store, set: CanonicalSetId) -> Result<(), StoreE
         .adapter(SqliteCanonicalGymSessionStore::new)
         .call("SqliteCanonicalGymSessionStore::unedit_set", |adapter| {
             adapter.unedit_set(set)
+        })
+        .await
+}
+
+/// Remove every edit of when one session started and ended.
+///
+/// # Errors
+///
+/// [`StoreError`] if the store cannot be written.
+pub async fn unedit_bounds(store: &Store, session: CanonicalSessionId) -> Result<(), StoreError> {
+    store
+        .adapter(SqliteCanonicalGymSessionStore::new)
+        .call("SqliteCanonicalGymSessionStore::unedit_bounds", |adapter| {
+            adapter.unedit_bounds(session)
         })
         .await
 }

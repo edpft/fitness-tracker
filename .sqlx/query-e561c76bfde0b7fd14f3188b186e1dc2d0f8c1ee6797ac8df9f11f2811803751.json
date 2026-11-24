@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO canonical_gym_session_account\n            (session, normalised_session, stream, started_at_utc, zone, on_day, ended_at_utc)\n        SELECT ?, value ->> 0, value ->> 1, value ->> 2, value ->> 3, value ->> 4, value ->> 5\n          FROM json_each(?)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "e561c76bfde0b7fd14f3188b186e1dc2d0f8c1ee6797ac8df9f11f2811803751"
+}

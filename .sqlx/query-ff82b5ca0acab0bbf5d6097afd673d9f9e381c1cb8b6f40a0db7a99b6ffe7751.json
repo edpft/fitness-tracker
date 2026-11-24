@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT started_at_utc, zone, on_day, duration_seconds AS \"duration!: i64\"\n            FROM canonical_gym_session\n            WHERE duration_seconds IS NOT NULL\n            ",
+  "query": "\n            SELECT started_at_utc, zone, on_day,\n                   unixepoch(ended_at_utc) - unixepoch(started_at_utc) AS \"duration!: i64\"\n            FROM canonical_gym_session\n            WHERE ended_at_utc IS NOT NULL\n            ",
   "describe": {
     "columns": [
       {
@@ -40,12 +40,7 @@
         "name": "duration!: i64",
         "ordinal": 3,
         "type_info": "Integer",
-        "origin": {
-          "Table": {
-            "table": "canonical_gym_session",
-            "name": "duration_seconds"
-          }
-        }
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -58,5 +53,5 @@
       true
     ]
   },
-  "hash": "710d3936369e72f1f0db77d9d1a292a9f5ec214535d19eadf64f921c7b42ccbc"
+  "hash": "ff82b5ca0acab0bbf5d6097afd673d9f9e381c1cb8b6f40a0db7a99b6ffe7751"
 }

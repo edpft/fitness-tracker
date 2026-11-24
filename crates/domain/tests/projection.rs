@@ -156,10 +156,14 @@ fn performed(primary: PrimaryPattern) -> impl Strategy<Value = CanonicalGymSessi
         let zone = OperatorZone::try_from("Europe/London").ok()?;
         let instant = jiff::Timestamp::from_second(seconds).ok()?;
         Some(CanonicalGymSession::new(
-            Occurred::At(StartedAt::new(instant, zone)),
+            domain::canonical::Attributed::new(
+                Occurred::At(StartedAt::new(instant, zone)),
+                domain::canonical::NormalisedSessionId::FIRST,
+            ),
             NonEmpty::new(items).ok()?,
             None,
             None,
+            Vec::new(),
         ))
     })
 }
@@ -220,10 +224,14 @@ proptest! {
 fn one_exercise(exercise: CanonicalExercise) -> Option<CanonicalGymSession> {
     let zone = OperatorZone::try_from("Europe/London").ok()?;
     Some(CanonicalGymSession::new(
-        Occurred::At(StartedAt::new(jiff::Timestamp::from_second(0).ok()?, zone)),
+        domain::canonical::Attributed::new(
+            Occurred::At(StartedAt::new(jiff::Timestamp::from_second(0).ok()?, zone)),
+            domain::canonical::NormalisedSessionId::FIRST,
+        ),
         NonEmpty::of(CanonicalItem::exercise(exercise), Vec::new()),
         None,
         None,
+        Vec::new(),
     ))
 }
 

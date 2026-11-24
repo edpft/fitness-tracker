@@ -451,10 +451,14 @@ mod tests {
             sets: NonEmpty::new(vec![set])?,
         };
         Ok(CanonicalGymSession::new(
-            occurred,
+            domain::canonical::Attributed::new(
+                occurred,
+                domain::canonical::NormalisedSessionId::FIRST,
+            ),
             NonEmpty::new(vec![CanonicalItem::exercise(exercise)])?,
             None,
             None,
+            Vec::new(),
         ))
     }
 

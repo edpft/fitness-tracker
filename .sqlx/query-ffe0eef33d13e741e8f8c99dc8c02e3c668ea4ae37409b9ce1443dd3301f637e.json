@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id AS \"id!\", started_at_utc, zone, on_day,\n                   duration_seconds, duration_normalised_session,\n                   average_bpm, highest_bpm, heart_rate_normalised_session\n            FROM canonical_gym_session\n            WHERE COALESCE(started_at_utc, on_day) >= ?\n              AND COALESCE(started_at_utc, on_day) < ?\n            ORDER BY COALESCE(started_at_utc, on_day), id\n            ",
+  "query": "\n            SELECT id AS \"id!\", started_at_utc, zone, on_day,\n                   started_normalised_session, ended_at_utc, ended_normalised_session,\n                   average_bpm, highest_bpm, heart_rate_normalised_session\n            FROM canonical_gym_session\n            WHERE COALESCE(started_at_utc, on_day) >= ?\n              AND COALESCE(started_at_utc, on_day) < ?\n            ORDER BY COALESCE(started_at_utc, on_day), id\n            ",
   "describe": {
     "columns": [
       {
@@ -48,30 +48,41 @@
         }
       },
       {
-        "name": "duration_seconds",
+        "name": "started_normalised_session",
         "ordinal": 4,
         "type_info": "Integer",
         "origin": {
           "Table": {
             "table": "canonical_gym_session",
-            "name": "duration_seconds"
+            "name": "started_normalised_session"
           }
         }
       },
       {
-        "name": "duration_normalised_session",
+        "name": "ended_at_utc",
         "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_session",
+            "name": "ended_at_utc"
+          }
+        }
+      },
+      {
+        "name": "ended_normalised_session",
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
             "table": "canonical_gym_session",
-            "name": "duration_normalised_session"
+            "name": "ended_normalised_session"
           }
         }
       },
       {
         "name": "average_bpm",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -82,7 +93,7 @@
       },
       {
         "name": "highest_bpm",
-        "ordinal": 7,
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -93,7 +104,7 @@
       },
       {
         "name": "heart_rate_normalised_session",
-        "ordinal": 8,
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -115,8 +126,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "13b162c9d4d9b96db874789420050c0dc4c6028448db92c22e8b0abfbc5f45d5"
+  "hash": "ffe0eef33d13e741e8f8c99dc8c02e3c668ea4ae37409b9ce1443dd3301f637e"
 }

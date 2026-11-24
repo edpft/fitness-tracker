@@ -19,12 +19,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use application::{Authors, CanonicalLayer, Node, StoreError};
 use domain::{
+    canonical::Occurred,
     gym::{
         Load, Rir, SignedKg,
-        edit::{Edit, EditId, EditReason, Found, Measure, SparseGymSession, SparseSet},
+        edit::{Edit, EditId, EditReason, Found, Measure, SparseGymSession, SparseSet, Taken},
         exercise::Exercise,
         identity::{CanonicalExerciseId, CanonicalSessionId, CanonicalSetId, Placed, SourceSet},
     },
+    landing::LandingStream,
     measure::{Distance, Duration, Kg, Metres, RepCount},
 };
 use jiff::{Timestamp, civil::Date};
@@ -147,6 +149,7 @@ pub(super) async fn all(pool: &SqlitePool) -> Result<Vec<Edit>, StoreError> {
                 fields,
             );
     }
+    read_bounds(pool, &mut read).await?;
     let mut ordered: Vec<Edit> = read.into_values().collect();
     if let Some(empty) = ordered.iter().find(|edit| edit.sessions.is_empty()) {
         // An assertion whose every field was dropped is removed with the
@@ -157,6 +160,74 @@ pub(super) async fn all(pool: &SqlitePool) -> Result<Vec<Edit>, StoreError> {
     }
     ordered.sort_by_key(|edit| (edit.asserted_at, edit.id));
     Ok(ordered)
+}
+
+/// Each assertion's starts and ends, into the sessions it holds.
+async fn read_bounds(pool: &SqlitePool, read: &mut BTreeMap<i64, Edit>) -> Result<(), StoreError> {
+    let bounds = sqlx::query!(
+        r#"
+        SELECT edit AS "edit!", session AS "session!", started_from, started_at_utc,
+               started_zone, started_on_day, ended_from, ended_at_utc
+        FROM canonical_gym_session_edit
+        ORDER BY edit, session
+        "#
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| store_error(&e))?;
+
+    for row in bounds {
+        let started = started_of(
+            row.started_from,
+            row.started_at_utc.as_deref(),
+            row.started_zone.as_deref(),
+            row.started_on_day.as_deref(),
+        )?;
+        let ended = ended_of(row.ended_from, row.ended_at_utc)?;
+        let session = assertion(read, row.edit)?
+            .sessions
+            .entry(CanonicalSessionId::try_from(row.session).map_err(|e| corrupt(&e))?)
+            .or_default();
+        session.started = started;
+        session.ended = ended;
+    }
+    Ok(())
+}
+
+/// A session edit's start: a stream's, or one stated as an instant or a day.
+fn started_of(
+    from: Option<String>,
+    at: Option<&str>,
+    zone: Option<&str>,
+    day: Option<&str>,
+) -> Result<Option<Taken<Occurred>>, StoreError> {
+    match (from, at, day) {
+        (Some(stream), None, None) => {
+            Ok(Some(Taken::From(stream.parse().map_err(|e| corrupt(&e))?)))
+        }
+        (None, None, None) => Ok(None),
+        (None, at, day) => Ok(Some(Taken::Stated(occurred(at, zone, day)?))),
+        _ => Err(StoreError::Corrupt {
+            detail: "a start both taken and stated".to_owned(),
+        }),
+    }
+}
+
+/// A session edit's end: a stream's, or one stated.
+fn ended_of(
+    from: Option<String>,
+    at: Option<String>,
+) -> Result<Option<Taken<Timestamp>>, StoreError> {
+    match (from, at) {
+        (Some(stream), None) => Ok(Some(Taken::From(stream.parse().map_err(|e| corrupt(&e))?))),
+        (None, Some(at)) => Ok(Some(Taken::Stated(
+            at.parse::<Timestamp>().map_err(|e| corrupt(&e))?,
+        ))),
+        (None, None) => Ok(None),
+        _ => Err(StoreError::Corrupt {
+            detail: "an end both taken and stated".to_owned(),
+        }),
+    }
 }
 
 /// The assertion a field row belongs to.
@@ -372,6 +443,58 @@ impl SqliteCanonicalGymSessionStore {
         Ok(held)
     }
 
+    /// Every session the layer holds, and the streams accounting for it,
+    /// for telling what a rebuild left an edit of its start or end standing
+    /// on.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub async fn sessions_held(
+        &self,
+    ) -> Result<BTreeMap<CanonicalSessionId, BTreeSet<LandingStream>>, StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT s.id AS "session!", a.stream AS "stream?"
+            FROM canonical_gym_session AS s
+            LEFT JOIN canonical_gym_session_account AS a ON a.session = s.id
+            "#
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| store_error(&e))?;
+        let mut held: BTreeMap<CanonicalSessionId, BTreeSet<LandingStream>> = BTreeMap::new();
+        for row in rows {
+            let streams = held
+                .entry(CanonicalSessionId::try_from(row.session).map_err(|e| corrupt(&e))?)
+                .or_default();
+            if let Some(stream) = row.stream {
+                streams.insert(stream.parse().map_err(|e| corrupt(&e))?);
+            }
+        }
+        Ok(held)
+    }
+
+    /// Remove every edit of when one session started and ended.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be written.
+    pub async fn unedit_bounds(&self, session: CanonicalSessionId) -> Result<(), StoreError> {
+        let session = session.as_i64();
+        let mut tx = writing(self.pool()).await?;
+        record_sessions(&mut tx, vec![session]).await?;
+        sqlx::query!(
+            "DELETE FROM canonical_gym_session_edit WHERE session = ?",
+            session
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| store_error(&e))?;
+        empty_assertions(&mut tx).await?;
+        tx.commit().await
+    }
+
     /// Assert what sessions were, in one assertion: each field the sparse
     /// sessions hold, and how each exercise whose name they state was found.
     ///
@@ -389,6 +512,9 @@ impl SqliteCanonicalGymSessionStore {
         let mut tx = writing(self.pool()).await?;
         let id = begin(&mut tx, at, reason).await?;
         for (session, sparse) in sessions {
+            if sparse.started.is_some() || sparse.ended.is_some() {
+                write_bounds(&mut tx, id, *session, sparse).await?;
+            }
             for (exercise, fields) in &sparse.exercises {
                 if let Some(becomes) = fields.exercise {
                     let as_found = found.get(exercise).ok_or_else(|| StoreError::Corrupt {
@@ -512,6 +638,52 @@ impl SqliteCanonicalGymSessionStore {
     }
 }
 
+/// When a session started and ended, as an assertion states either.
+async fn write_bounds(
+    tx: &mut Transaction<'_, Sqlite>,
+    edit: i64,
+    session: CanonicalSessionId,
+    sparse: &SparseGymSession,
+) -> Result<(), StoreError> {
+    let session = session.as_i64();
+    let (started_from, started_at_utc, started_zone, started_on_day) = match &sparse.started {
+        Some(Taken::From(stream)) => (Some(stream.to_string()), None, None, None),
+        Some(Taken::Stated(Occurred::At(at))) => (
+            None,
+            Some(at.instant().to_string()),
+            Some(at.zone().id().to_owned()),
+            None,
+        ),
+        Some(Taken::Stated(Occurred::On(day))) => (None, None, None, Some(day.to_string())),
+        None => (None, None, None, None),
+    };
+    let (ended_from, ended_at_utc) = match &sparse.ended {
+        Some(Taken::From(stream)) => (Some(stream.to_string()), None),
+        Some(Taken::Stated(at)) => (None, Some(at.to_string())),
+        None => (None, None),
+    };
+    sqlx::query!(
+        r#"
+        INSERT INTO canonical_gym_session_edit
+            (edit, session, started_from, started_at_utc, started_zone, started_on_day,
+             ended_from, ended_at_utc)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+        edit,
+        session,
+        started_from,
+        started_at_utc,
+        started_zone,
+        started_on_day,
+        ended_from,
+        ended_at_utc
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| store_error(&e))?;
+    Ok(())
+}
+
 /// One exercise's name, as an assertion states it.
 async fn write_exercise(
     tx: &mut Transaction<'_, Sqlite>,
@@ -629,7 +801,10 @@ async fn changed(tx: &mut Transaction<'_, Sqlite>, edit: i64) -> Result<(), Stor
         SELECT session AS "session!" FROM canonical_gym_exercise_edit WHERE edit = ?
         UNION
         SELECT session FROM canonical_gym_set_edit WHERE edit = ?
+        UNION
+        SELECT session FROM canonical_gym_session_edit WHERE edit = ?
         "#,
+        edit,
         edit,
         edit
     )
@@ -680,6 +855,7 @@ async fn empty_assertions(tx: &mut Transaction<'_, Sqlite>) -> Result<(), StoreE
         DELETE FROM canonical_gym_edit
         WHERE id NOT IN (SELECT edit FROM canonical_gym_exercise_edit)
           AND id NOT IN (SELECT edit FROM canonical_gym_set_edit)
+          AND id NOT IN (SELECT edit FROM canonical_gym_session_edit)
         "#
     )
     .execute(&mut **tx)
