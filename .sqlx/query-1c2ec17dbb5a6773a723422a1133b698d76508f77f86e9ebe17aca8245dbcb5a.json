@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO canonical_gym_said_right (exercise, kind, said_at) VALUES (?, ?, ?)\n             ON CONFLICT (exercise, kind) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "1c2ec17dbb5a6773a723422a1133b698d76508f77f86e9ebe17aca8245dbcb5a"
+}

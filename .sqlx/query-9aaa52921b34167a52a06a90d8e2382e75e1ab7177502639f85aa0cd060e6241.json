@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT exercise AS \"exercise!\", kind FROM canonical_gym_said_right",
+  "describe": {
+    "columns": [
+      {
+        "name": "exercise!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_said_right",
+            "name": "exercise"
+          }
+        }
+      },
+      {
+        "name": "kind",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "canonical_gym_said_right",
+            "name": "kind"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "9aaa52921b34167a52a06a90d8e2382e75e1ab7177502639f85aa0cd060e6241"
+}

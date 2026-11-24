@@ -189,6 +189,44 @@ where
         })
     }
 
+    /// Each gym session from `from` to `to`, both included, with the day and
+    /// number the list opens it by (#896), in the order the list reads them.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store is unavailable.
+    pub async fn gym_numbered(
+        &self,
+        from: Date,
+        to: Date,
+    ) -> Result<Vec<(Occurred, Date, Number)>, StoreError> {
+        let mut read: Vec<(Occurred, bool)> = Vec::new();
+        read.extend(
+            self.gym
+                .between(from, to)
+                .await?
+                .into_iter()
+                .map(|(occurred, _)| (occurred, true)),
+        );
+        let others = self
+            .cycling
+            .between(from, to)
+            .await?
+            .into_iter()
+            .chain(self.padel.between(from, to).await?);
+        read.extend(others.map(|(occurred, _)| (occurred, false)));
+        Ok(days(read)
+            .into_iter()
+            .flat_map(|day| {
+                day.activities
+                    .into_iter()
+                    .rev()
+                    .filter(|(_, (_, gym))| *gym)
+                    .map(move |(number, (occurred, _))| (occurred, day.on, number))
+            })
+            .collect())
+    }
+
     /// The day of the first activity of any kind.
     async fn first(&self) -> Result<Option<Date>, StoreError> {
         Ok([

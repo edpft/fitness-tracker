@@ -12,6 +12,7 @@ mod card;
 mod change;
 mod change_bounds;
 mod change_set;
+mod check;
 mod collected;
 mod composition;
 mod curves;
@@ -209,6 +210,8 @@ fn pages() -> Pages {
         .cards::<progress::Page>()
         .page::<history::Page>()
         .page::<history::Opened>()
+        .page::<check::Page>()
+        .form(check::RIGHT, axum::routing::post(check::posted))
         .form(change::ROUTE, get(change::shown).post(change::posted))
         .form(change::CHANGED, get(change::made).post(change::undone))
         .form(settle::ROUTE, axum::routing::post(settle::posted))
