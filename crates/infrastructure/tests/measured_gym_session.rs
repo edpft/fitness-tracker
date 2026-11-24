@@ -1691,7 +1691,7 @@ fn a_padel_match_holds_the_readings_its_recording_holds() {
 /// A match's readings reach the store, and a second derivation replaces them
 /// rather than adding to them.
 #[test]
-fn a_padel_matchs_readings_reach_the_store() {
+fn the_readings_of_a_padel_match_reach_the_store() {
     let runtime = runtime().expect("a runtime");
     runtime.block_on(async {
         let file = padel_recording().expect("an archive");
