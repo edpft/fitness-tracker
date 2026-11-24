@@ -11,6 +11,7 @@ pub mod access;
 pub mod analyses;
 pub mod body_weight;
 pub mod catalogue;
+pub mod checks;
 pub mod clock;
 pub mod composition;
 pub mod config;

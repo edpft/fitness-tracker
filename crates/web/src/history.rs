@@ -46,6 +46,7 @@ pub fn page(read: &Result<(Listed, Date, Vec<ToSettle>), String>) -> Markup {
             body hx-boost="true" {
                 main.history {
                     h1 { (Place::History.name()) }
+                    p.check { a href=(crate::check::HERE) { "To check" } }
                     @match read {
                         Ok((listed, today, settle)) => {
                             (crate::settle::list(settle, *today))

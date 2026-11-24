@@ -283,6 +283,10 @@ table.sets .pen { width: 44px; padding: 4px 12px 4px 0; text-align: right; verti
 ul.sessions em.test, p.test { font-style: normal; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--bg); background: var(--ink2); border-radius: 6px; padding: 2px 6px; vertical-align: 1px; }
 p.test { display: inline-block; margin: 0 0 8px; }
 main.history p.sub + section.card { margin-top: 14px; }
+/* What may need correcting (#896): each entry opens the exercise's pen, and
+   is said right under it. */
+main.history p.check { margin: 0 0 8px; }
+main.check ul.sessions form { margin: 6px 16px 14px; }
 
 
 /* One figure in more than one unit: one chart card, its unit a choice. */

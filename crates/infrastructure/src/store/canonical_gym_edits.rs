@@ -22,6 +22,7 @@ use domain::{
     canonical::Occurred,
     gym::{
         Load, Rir, SignedKg,
+        check::Kind,
         edit::{Edit, EditId, EditReason, Found, Measure, SparseGymSession, SparseSet, Taken},
         exercise::Exercise,
         identity::{CanonicalExerciseId, CanonicalSessionId, CanonicalSetId, Placed, SourceSet},
@@ -551,6 +552,57 @@ impl SqliteCanonicalGymSessionStore {
             .rows_affected();
         tx.commit().await?;
         Ok(removed > 0)
+    }
+
+    /// Each exercise the operator said is right as recorded, and of which
+    /// kind of check (#896).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be read.
+    pub async fn said_right(&self) -> Result<BTreeSet<(CanonicalExerciseId, Kind)>, StoreError> {
+        let rows =
+            sqlx::query!(r#"SELECT exercise AS "exercise!", kind FROM canonical_gym_said_right"#)
+                .fetch_all(self.pool())
+                .await
+                .map_err(|e| store_error(&e))?;
+        rows.into_iter()
+            .map(|row| {
+                let exercise =
+                    CanonicalExerciseId::try_from(row.exercise).map_err(|error| corrupt(&error))?;
+                let kind = Kind::try_from(row.kind).map_err(|error| corrupt(&error))?;
+                Ok((exercise, kind))
+            })
+            .collect()
+    }
+
+    /// The operator says `exercise` is right as recorded, whatever `kind`
+    /// found in it (#896).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] if the store cannot be written.
+    pub async fn say_right(
+        &self,
+        at: Timestamp,
+        exercise: CanonicalExerciseId,
+        kind: Kind,
+    ) -> Result<(), StoreError> {
+        let exercise = exercise.as_i64();
+        let kind = kind.as_str();
+        let at = at.to_string();
+        let mut tx = writing(self.pool()).await?;
+        sqlx::query!(
+            "INSERT INTO canonical_gym_said_right (exercise, kind, said_at) VALUES (?, ?, ?)
+             ON CONFLICT (exercise, kind) DO NOTHING",
+            exercise,
+            kind,
+            at
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| store_error(&e))?;
+        tx.commit().await
     }
 
     /// Take a set a source added into every edit of its exercise: the
