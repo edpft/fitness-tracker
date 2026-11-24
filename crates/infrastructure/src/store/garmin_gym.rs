@@ -22,15 +22,12 @@
 
 use application::{AccountReader, NormalisedEntityStore, Reached, Reading, StoreError};
 use domain::{
-    gym::{
-        Guess, GuessedExercise, Load, MeasuredGymSession, MeasuredHeartRate, MeasuredSet,
-        exercise::Implement,
-    },
+    gym::{Guess, GuessedExercise, Load, MeasuredGymSession, MeasuredSet, exercise::Implement},
     landing::{
         Endpoint, EventKind, EventProvenance, EventTime, FetchedAt, InvalidStream, LandedRecord,
         LandingRecord, LandingRecordId, LandingStream, Provenance, RawPayload, SourceRecordId,
     },
-    measure::HeartRateSeries,
+    measure::{HeartRateSeries, MeasuredHeartRate},
     normalised::{NormalisationRunId, WorkoutCount},
 };
 use sqlx::{Sqlite, SqlitePool, Transaction};
@@ -393,16 +390,7 @@ async fn write_readings(
     workout: i64,
     series: &HeartRateSeries,
 ) -> Result<(), StoreError> {
-    // **One statement per session, the series handed over as a JSON array**,
-    // as the canonical rides' are (#560).
-    let mut rows = Vec::with_capacity(series.samples().count());
-    for reading in series.samples().iter() {
-        let at = i64::try_from(reading.at.as_seconds()).map_err(|_| StoreError::Corrupt {
-            detail: "a reading further into a session than the store can hold".to_owned(),
-        })?;
-        rows.push(format!("[{at},{}]", reading.beats_per_minute.as_u32()));
-    }
-    let rows = format!("[{}]", rows.join(","));
+    let rows = readings_json(series)?;
     sqlx::query!(
         r#"
         INSERT INTO measured_gym_session_heart_rate (workout, at_seconds, beats_per_minute)
@@ -416,6 +404,21 @@ async fn write_readings(
     .await
     .map_err(|error| store_error(&error))?;
     Ok(())
+}
+
+/// A series as one JSON array of `[at_seconds, beats_per_minute]` pairs.
+///
+/// **One statement per session, the series handed over as a JSON array**, as
+/// the canonical rides' are (#560); a padel match's go the same way (#919).
+pub(super) fn readings_json(series: &HeartRateSeries) -> Result<String, StoreError> {
+    let mut rows = Vec::with_capacity(series.samples().count());
+    for reading in series.samples().iter() {
+        let at = i64::try_from(reading.at.as_seconds()).map_err(|_| StoreError::Corrupt {
+            detail: "a reading further into a session than the store can hold".to_owned(),
+        })?;
+        rows.push(format!("[{at},{}]", reading.beats_per_minute.as_u32()));
+    }
+    Ok(format!("[{}]", rows.join(",")))
 }
 
 async fn write_set(

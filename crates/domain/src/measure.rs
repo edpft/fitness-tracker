@@ -14,6 +14,7 @@ pub(crate) mod mass;
 
 pub use heart::{
     BeatsPerMinute, HeartRateSample, HeartRateSeries, HeartRateSummary, HeartRateVariability,
+    MeasuredHeartRate,
 };
 pub use mass::{InvalidMass, Kg};
 

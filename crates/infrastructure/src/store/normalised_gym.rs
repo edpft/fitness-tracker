@@ -18,10 +18,10 @@ use application::{NormalisedGymSessionReader, StoreError};
 use domain::{
     canonical::{Attributed, NormalisedSessionId},
     gym::{
-        CanonicalExercise, CanonicalItem, GuessedExercise, Identified, Load, MeasuredHeartRate,
-        MeasuredSet, NormalisedGymSession,
+        CanonicalExercise, CanonicalItem, GuessedExercise, Identified, Load, MeasuredSet,
+        NormalisedGymSession,
     },
-    measure::{Kg, PositiveDuration, RepCount},
+    measure::{Kg, MeasuredHeartRate, PositiveDuration, RepCount},
     normalised::{OperatorZone, StartedAt},
     sequence::{AtLeastTwo, NonEmpty},
 };

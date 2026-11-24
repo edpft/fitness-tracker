@@ -42,7 +42,7 @@ use domain::{
     canonical::{Attributed, NormalisedSessionId, Occurred, Reach, SessionCount, TakenFrom},
     gym::{
         self, Account, CanonicalExercise, CanonicalGymSession, CanonicalItem, CanonicalSet, Guess,
-        GuessedExercise, Identified, Load, MeasuredHeartRate, Performed, SetKind,
+        GuessedExercise, Identified, Load, Performed, SetKind,
         edit::{Edit, Edits},
         exercise::{
             Description, DistanceExercise, DurationExercise, Implement, Movement, RepsExercise,
@@ -55,7 +55,7 @@ use domain::{
     landing::{LandingStream, SourceRecordId},
     measure::{
         BeatsPerMinute, Distance, Duration, HeartRateSample, HeartRateSeries, HeartRateSummary,
-        Metres, PositiveDuration, RepCount,
+        MeasuredHeartRate, Metres, PositiveDuration, RepCount,
     },
     normalised::{OperatorZone, SourceTerm, StartedAt},
     sequence::{AtLeastTwo, NonEmpty},

@@ -24,13 +24,13 @@ use std::collections::BTreeSet;
 
 use crate::canonical::{Attributed, NormalisedSessionId, Occurred};
 use crate::landing::LandingStream;
-use crate::measure::{PositiveDuration, RepCount};
+use crate::measure::{MeasuredHeartRate, PositiveDuration, RepCount};
 use crate::sequence::NonEmpty;
 
 use super::{
     canonical::{CanonicalExercise, CanonicalItem, CanonicalSet, Identified},
     identity::SourceSet,
-    measured::{GuessedExercise, MeasuredHeartRate, MeasuredSet},
+    measured::{GuessedExercise, MeasuredSet},
     outcome::Performed,
 };
 

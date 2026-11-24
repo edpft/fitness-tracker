@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO padel_match_heart_rate (landing_record_id, at_seconds, beats_per_minute)\n            SELECT ?, value ->> 0, value ->> 1\n              FROM json_each(?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "8e197ff6e7a76fbd4d463fc60ce8733f6a4ac607bbd1d4fd54e329334068b65f"
+}

@@ -15,6 +15,7 @@ use domain::{
     device::{DeviceIdentifier, DeviceName, Measurand, Role, Sighting, Wear},
     gym::MeasuredGymSession,
     landing::{InvalidStream, LandingRecordId, LandingStream},
+    measure::MeasuredHeartRate,
     normalised::{NormalisationRunId, OperatorZone, StartedAt, WorkoutCount},
     padel::PadelMatch,
 };
@@ -79,6 +80,10 @@ impl NormalisedEntityStore for SqliteGarminActivityStore {
         for session in &sessions {
             write_session(&mut tx, run_id, &stream, session).await?;
         }
+        sqlx::query!("DELETE FROM padel_match_heart_rate")
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| store_error(&error))?;
         sqlx::query!("DELETE FROM padel_match")
             .execute(&mut *tx)
             .await
@@ -116,6 +121,14 @@ impl NormalisedEntityStore for SqliteGarminActivityStore {
         }
         super::normalised::written(&mut tx, &stream, run_id).await?;
         let removed = super::ids_json(removed.iter().map(|id| id.as_i64()));
+        sqlx::query!(
+            "DELETE FROM padel_match_heart_rate \
+             WHERE landing_record_id IN (SELECT value FROM json_each(?))",
+            removed
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| store_error(&error))?;
         sqlx::query!(
             "DELETE FROM padel_match WHERE landing_record_id IN (SELECT value FROM json_each(?))",
             removed
@@ -188,12 +201,9 @@ async fn write_match(
     let zone = played.started_at().zone().id().to_owned();
     let duration =
         i64::try_from(played.duration().as_seconds()).map_err(|error| corrupt(&error))?;
-    let average = played
-        .heart_rate()
-        .map(|summary| i64::from(summary.average().as_u32()));
-    let highest = played
-        .heart_rate()
-        .map(|summary| i64::from(summary.highest().as_u32()));
+    let stated = played.heart_rate().map(MeasuredHeartRate::stated);
+    let average = stated.map(|summary| i64::from(summary.average().as_u32()));
+    let highest = stated.map(|summary| i64::from(summary.highest().as_u32()));
     let event = super::served_by_a_feed(played.provenance())?;
     let endpoint = event.endpoint().as_str().to_owned();
     let event_kind = event.kind().as_str().to_owned();
@@ -221,6 +231,21 @@ async fn write_match(
     .execute(&mut **tx)
     .await
     .map_err(|error| store_error(&error))?;
+    if let Some(series) = played.heart_rate().and_then(MeasuredHeartRate::series) {
+        let readings = super::garmin_gym::readings_json(series)?;
+        sqlx::query!(
+            r#"
+            INSERT INTO padel_match_heart_rate (landing_record_id, at_seconds, beats_per_minute)
+            SELECT ?, value ->> 0, value ->> 1
+              FROM json_each(?)
+            "#,
+            id,
+            readings,
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| store_error(&error))?;
+    }
     Ok(())
 }
 

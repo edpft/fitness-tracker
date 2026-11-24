@@ -1265,7 +1265,7 @@ mod tests {
                 at: Duration::from_seconds(at),
                 beats_per_minute: crate::measure::BeatsPerMinute::new(beats).expect("a rate"),
             });
-        let heart_rate = crate::gym::MeasuredHeartRate::new(
+        let heart_rate = crate::measure::MeasuredHeartRate::new(
             crate::measure::HeartRateSummary::new(
                 crate::measure::BeatsPerMinute::new(100).expect("a rate"),
                 crate::measure::BeatsPerMinute::new(120).expect("a rate"),
