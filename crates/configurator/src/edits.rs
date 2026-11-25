@@ -419,6 +419,25 @@ pub async fn assert(
         .await
 }
 
+/// Assert each of these apart, for one reason and in one write, so each is
+/// undone on its own (#906).
+///
+/// # Errors
+///
+/// [`StoreError`] if the store cannot be written; then none is made.
+pub async fn assert_each(
+    store: &Store,
+    reason: &EditReason,
+    each: &[BTreeMap<CanonicalSessionId, SparseGymSession>],
+) -> Result<Vec<EditId>, StoreError> {
+    store
+        .adapter(SqliteCanonicalGymSessionStore::new)
+        .call("SqliteCanonicalGymSessionStore::assert_each", |adapter| {
+            adapter.assert_each(Timestamp::now(), reason, each)
+        })
+        .await
+}
+
 /// Every edit, in the order asserted.
 ///
 /// # Errors
