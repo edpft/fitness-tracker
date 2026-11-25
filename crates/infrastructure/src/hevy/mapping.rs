@@ -408,6 +408,7 @@ pub fn lookup(template_id: &str) -> Option<Mapped> {
         "47B036EF" => reps(RepsExercise::FrontRaiseBand, LoadReading::Absolute), // Front Raise (Band) (3)
         "4180C405" => reps(RepsExercise::GoodMorningBarbell, LoadReading::Absolute), // Good Morning (Barbell) (3)
         "08590920" => reps(RepsExercise::HangingKneeRaise, LoadReading::Absolute), // Hanging Knee Raise (3)
+        "F8356514" => reps(RepsExercise::HangingLegRaise, LoadReading::Absolute), // Hanging Leg Raise (3)
         "5260995e-36b5-49f0-b6a2-eecd5a4b9883" => {
             reps(RepsExercise::KettlebellCleanAndPress, LoadReading::Absolute)
         } // Kettlebell Clean and Press (3)

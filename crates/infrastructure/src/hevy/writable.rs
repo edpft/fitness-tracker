@@ -365,6 +365,10 @@ const fn writable(exercise: Exercise) -> Writable {
                 added: Some("08590920"),
                 assisted: None,
             }, // Hanging Knee Raise
+            RepsExercise::HangingLegRaise => Writable {
+                added: Some("F8356514"),
+                assisted: None,
+            }, // Hanging Leg Raise
             RepsExercise::HipSnatch => Writable {
                 added: Some("4567e678-1184-4306-9e18-66cc5c59e81d"),
                 assisted: None,
