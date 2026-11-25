@@ -204,3 +204,18 @@ pub const POWER_ZONE_TEST: &str = "Power Zone test";
 /// [`peak_your_power_zones`] and [`power_zone_test`], because their placements
 /// are derived rather than stated. A caller wanting all of them joins them.
 pub const SKELETONS: [Skeleton; 2] = [BOOST_YOUR_BASE, BUILD_YOUR_POWER_ZONES];
+
+/// Every class any programme here places, the test programme's included.
+///
+/// **What a substitute is not** (#436): a programme's own classes are kept for
+/// the first round of the next cycle, so none of them stands in for another.
+#[must_use]
+pub fn placed() -> std::collections::BTreeSet<&'static str> {
+    SKELETONS
+        .iter()
+        .flat_map(|skeleton| skeleton.placements().iter().copied())
+        .chain(peak_your_power_zones())
+        .chain(power_zone_test())
+        .map(|placed| placed.class_id)
+        .collect()
+}

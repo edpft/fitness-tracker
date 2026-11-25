@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT other.reference AS \"reference!: String\",\n                   other.detail    AS \"detail!: String\"\n              FROM peloton_class AS this\n              JOIN peloton_class AS other ON other.duration = this.duration\n             WHERE this.reference = ?\n               AND other.reference <> this.reference\n               AND other.detail IS NOT NULL\n             ORDER BY other.reference\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "reference!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "peloton_class",
+            "name": "reference"
+          }
+        }
+      },
+      {
+        "name": "detail!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "peloton_class",
+            "name": "detail"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "975b9a90f172943862cff210c371e7fc7fc3291c60dcab70b6bd2e698a992066"
+}

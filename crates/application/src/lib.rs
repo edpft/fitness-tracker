@@ -50,6 +50,7 @@ pub mod reschedule;
 pub mod schedule;
 pub mod sleep;
 pub mod status;
+pub mod substitute;
 pub mod working;
 
 /// What a port reads is part of the port (#809).
@@ -83,7 +84,8 @@ pub use ports::{
     ReplyStatus, RestingHeartRateHistory, ResumptionPointResetter, ResumptionPointStore, Revision,
     Revisions, RiddenSession, RiddenSessionLog, RiddenVenues, RideDelivery, RideDestination,
     RidesPlaced, RunLock, RunSummary, Served, SessionOrdinal, SleepHistory, SourceAccount,
-    SourceEvent, StreamStatus, StressHistory, Taken, Terms, TrainingDone, Translation, Translator,
-    UnderivableReason, UnderivableSlot, Unexpressed, WearRecord, WeighInHistory,
-    WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser, WorkoutPrescriber, WorkoutStore,
+    SourceEvent, Standalone, StandaloneClasses, StreamStatus, StressHistory, Taken, Terms,
+    TrainingDone, Translation, Translator, UnderivableReason, UnderivableSlot, Unexpressed,
+    WearRecord, WeighInHistory, WorkoutEventSource, WorkoutExtractor, WorkoutNormaliser,
+    WorkoutPrescriber, WorkoutStore,
 };

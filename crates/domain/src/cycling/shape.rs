@@ -257,6 +257,48 @@ pub fn diverges(candidate: &ZoneProfile, from: &ZoneProfile) -> f64 {
         .sum()
 }
 
+/// How far one ride's zone plan is from another's, in seconds (#436).
+///
+/// **Time, not shares.** [`diverges`] compares compositions at any volume; this
+/// compares two classes of the same length, where a minute moved from Z3 to Z4
+/// is the fact that matters and a share would only restate it.
+///
+/// **Work first, recovery only to break a tie.** Two classes can do the same
+/// work and rest differently — one recovers in Z1, the other in Z2 — and
+/// counting that alike with the work called a near-identical class fourteen
+/// minutes off. So the ordering is the work's difference, then the
+/// recovery's: the derived `Ord` compares the fields in that order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Apart {
+    /// Seconds of difference in Z3 and above.
+    pub work: u64,
+    /// Seconds of difference in Z1 and Z2.
+    pub recovery: u64,
+}
+
+impl Apart {
+    /// How far `candidate` is from `from`, summed zone by zone.
+    #[must_use]
+    pub fn of(candidate: &ZoneProfile, from: &ZoneProfile) -> Self {
+        let seconds = |profile: &ZoneProfile, zone: PowerZone| {
+            profile.0.get(&zone).copied().unwrap_or_default()
+        };
+        let mut apart = Self {
+            work: 0,
+            recovery: 0,
+        };
+        for zone in PowerZone::ALL {
+            let difference = seconds(candidate, zone).abs_diff(seconds(from, zone));
+            if zone >= PowerZone::Three {
+                apart.work += difference;
+            } else {
+                apart.recovery += difference;
+            }
+        }
+        apart
+    }
+}
+
 /// The zones the reference trains that the candidate does not train at all.
 ///
 /// **A structural check, not a score.** A selection that drops a zone outright

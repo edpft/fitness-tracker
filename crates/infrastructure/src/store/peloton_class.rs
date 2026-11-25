@@ -476,6 +476,45 @@ impl SqlitePelotonClassStore {
             })
     }
 
+    /// Every class the catalogue has read that runs as long as the one at
+    /// `reference`, other than that one, by reference (#436).
+    ///
+    /// Empty where the catalogue does not hold `reference`: there is no length
+    /// to match.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Corrupt`] where a stored detail will not read as a class,
+    /// and [`StoreError`] if the store is unavailable.
+    pub async fn alongside(&self, reference: &str) -> Result<Vec<ClassSession>, StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT other.reference AS "reference!: String",
+                   other.detail    AS "detail!: String"
+              FROM peloton_class AS this
+              JOIN peloton_class AS other ON other.duration = this.duration
+             WHERE this.reference = ?
+               AND other.reference <> this.reference
+               AND other.detail IS NOT NULL
+             ORDER BY other.reference
+            "#,
+            reference,
+        )
+        .fetch_all(&mut *self.store.reading().await?)
+        .await
+        .map_err(|error| store_error(&error))?;
+        rows.into_iter()
+            .map(|row| {
+                class::derive(&row.reference, &row.detail).map_err(|error| StoreError::Corrupt {
+                    detail: format!(
+                        "the catalogue's copy of class {} will not read: {error}",
+                        row.reference
+                    ),
+                })
+            })
+            .collect()
+    }
+
     /// Every class of one series and one length the catalogue holds, newest
     /// first.
     ///

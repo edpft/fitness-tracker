@@ -424,6 +424,26 @@ impl<'a> ClassCatalogue<'a> {
             })
     }
 
+    /// Every class the same length as the one at `reference`, other than it.
+    ///
+    /// **The store only**, for [`in_series`](Self::in_series)'s reason: this is
+    /// choosing, and choosing does not need Peloton.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError::Malformed`] if the catalogue cannot be read.
+    pub async fn alongside(
+        &self,
+        reference: &str,
+    ) -> Result<Vec<super::ClassSession>, SourceError> {
+        self.stored
+            .alongside(reference)
+            .await
+            .map_err(|error| SourceError::Malformed {
+                detail: format!("the class catalogue could not be read: {error}"),
+            })
+    }
+
     /// What the catalogue holds, for a message that has to explain an empty
     /// answer.
     ///
