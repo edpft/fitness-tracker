@@ -584,6 +584,7 @@ vocabulary! {
         HangSnatch => "hang-snatch", Barbell, Snatch, "Hang Snatch (Barbell)",
         HangSnatchDumbbell => "hang-snatch-dumbbell", Dumbbell, Snatch, "Hang Snatch (Dumbbell)",
         HangingKneeRaise => "hanging-knee-raise", Bodyweight, LegRaise, "Hanging Knee Raise",
+        HangingLegRaise => "hanging-leg-raise", Bodyweight, LegRaise, "Hanging Leg Raise",
         HangingLSitComplex => "hanging-l-sit-complex", Bodyweight, LSit, "Hanging L-Sit Complex",
         HipSnatch => "hip-snatch", Barbell, Snatch, "Hip Snatch (Barbell)",
         HipThrustBarbell => "hip-thrust-barbell", Barbell, HipThrust, "Hip Thrust (Barbell)",
