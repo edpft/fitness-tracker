@@ -11,7 +11,7 @@ use crate::{Failure, output};
 
 /// List every school and public holiday from today.
 pub async fn list(store: &Store) -> Result<(), Failure> {
-    output::holidays(&read(store).await?, jiff::Zoned::now().date());
+    output::holidays(&read(store).await?, jiff::ZonedDateTime::now().date());
     Ok(())
 }
 

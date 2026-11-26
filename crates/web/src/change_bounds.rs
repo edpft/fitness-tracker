@@ -90,7 +90,7 @@ pub fn by(taken: TakenFrom, session: &CanonicalGymSession) -> String {
 
 /// A clock time as the page shows it, in `zone`.
 fn clock(at: Timestamp, zone: &OperatorZone) -> String {
-    at.to_zoned(zone.as_time_zone())
+    at.to_zoned_datetime(zone.as_time_zone())
         .strftime("%H:%M:%S")
         .to_string()
 }
@@ -160,7 +160,7 @@ fn instant(
         .parse()
         .map_err(|_| Refusal::of(field, "a time of day, as 18:05".to_owned()))?;
     on.to_datetime(time)
-        .to_zoned(zone.as_time_zone())
+        .to_zoned_datetime(zone.as_time_zone())
         .map(|zoned| zoned.timestamp())
         .map_err(|_| Refusal::of(field, "a time that happened on that day".to_owned()))
 }

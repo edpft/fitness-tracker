@@ -647,7 +647,7 @@ pub(super) fn started(stamp: &str, zones: &StatedZones) -> Result<StartedAt, Ref
         unreadable(format!("{stamp:?} is not a date and time: {error}"))
     })?;
     civil
-        .to_zoned(jiff::tz::TimeZone::UTC)
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
         .map(|zoned| zones.started_at(zoned.timestamp()))
         .map_err(|error| unreadable(format!("{stamp:?} is not an instant: {error}")))
 }

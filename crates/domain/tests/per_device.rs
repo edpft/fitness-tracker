@@ -21,7 +21,7 @@ type Failure = Box<dyn std::error::Error>;
 
 fn sighting(serial: &str, name: &str, on: Date, worn: bool) -> Result<Sighting, Failure> {
     let zone = OperatorZone::try_from("Europe/London")?;
-    let at = on.at(9, 0, 0, 0).to_zoned(zone.as_time_zone())?;
+    let at = on.at(9, 0, 0, 0).to_zoned_datetime(zone.as_time_zone())?;
     Ok(Sighting {
         device: DeviceIdentifier::Serial(SerialNumber::try_from(serial.to_owned())?),
         also: Vec::new(),

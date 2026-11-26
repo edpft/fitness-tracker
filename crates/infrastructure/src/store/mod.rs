@@ -266,7 +266,7 @@ pub(crate) fn moment_of(
     let tz = jiff::tz::TimeZone::get(zone).map_err(|_| StoreError::Corrupt {
         detail: format!("{zone:?} is not a zone this build knows"),
     })?;
-    Ok(instant.to_zoned(tz).datetime())
+    Ok(instant.to_zoned_datetime(tz).datetime())
 }
 
 fn corrupt(error: &dyn std::fmt::Display) -> StoreError {

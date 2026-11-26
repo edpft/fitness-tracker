@@ -151,7 +151,7 @@ fn parse_garmin_datetime(stated: &str) -> Option<Timestamp> {
         .replacen(' ', "T", 1)
         .parse::<jiff::civil::DateTime>()
         .ok()
-        .and_then(|civil| civil.to_zoned(jiff::tz::TimeZone::UTC).ok())
+        .and_then(|civil| civil.to_zoned_datetime(jiff::tz::TimeZone::UTC).ok())
         .map(|zoned| zoned.timestamp())
 }
 

@@ -34,7 +34,7 @@ telemetry = { path = "crates/telemetry" }
 # across its own boundaries.
 #
 # `jiff` rather than chrono: § II requires an IANA zone identifier and says an
-# offset is not a substitute. jiff's Timestamp/Zoned split is exactly that
+# offset is not a substitute. jiff's Timestamp/ZonedDateTime split is exactly that
 # distinction, and it has no naive local type to reach for by accident.
 #
 # The zone database is bundled rather than read from the host. § 34 forbids an

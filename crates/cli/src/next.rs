@@ -258,7 +258,7 @@ impl Line {
 /// clock in the operator's own zone; `--date` moves the day and `--part` the
 /// part, so a run can be asked what a Saturday evening would have said.
 fn moment(zone: &OperatorZone, date: Option<&str>, part: Option<&str>) -> Result<DayPart, Failure> {
-    let here = jiff::Timestamp::now().to_zoned(zone.as_time_zone());
+    let here = jiff::Timestamp::now().to_zoned_datetime(zone.as_time_zone());
     let date = match date {
         Some(text) => config::named_date(text).map_err(|error| Failure::usage(&error))?,
         None => here.date(),

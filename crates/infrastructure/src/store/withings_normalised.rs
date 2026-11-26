@@ -159,7 +159,7 @@ impl application::NewestObservation for SqliteWeighInStore {
             .parse()
             .map_err(|error| corrupt(&error))?;
         let zone = jiff::tz::TimeZone::get(&row.zone).map_err(|error| corrupt(&error))?;
-        Ok(Some(at.to_zoned(zone).date()))
+        Ok(Some(at.to_zoned_datetime(zone).date()))
     }
 }
 

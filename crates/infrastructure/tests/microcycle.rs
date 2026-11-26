@@ -106,7 +106,7 @@ impl PerformedSessionLog for Trained {
                 continue;
             }
             let instant = started
-                .to_zoned(zone.as_time_zone())
+                .to_zoned_datetime(zone.as_time_zone())
                 .map_err(|error| StoreError::Corrupt {
                     detail: error.to_string(),
                 })?

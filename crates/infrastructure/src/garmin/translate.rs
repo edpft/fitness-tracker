@@ -110,7 +110,7 @@ fn instant(stamp: &str, field: &'static str) -> Result<jiff::Timestamp, RefusalR
         unreadable(format!("{stamp:?} is not a date and time: {error}"))
     })?;
     civil
-        .to_zoned(jiff::tz::TimeZone::UTC)
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
         .map(|zoned| zoned.timestamp())
         .map_err(|error| unreadable(format!("{stamp:?} is not an instant: {error}")))
 }

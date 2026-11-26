@@ -55,5 +55,7 @@ pub async fn correct(
 /// Today, where the operator trains: what "from today" means on the page.
 #[must_use]
 pub fn today(zone: &OperatorZone) -> Date {
-    jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date()
+    jiff::Timestamp::now()
+        .to_zoned_datetime(zone.as_time_zone())
+        .date()
 }

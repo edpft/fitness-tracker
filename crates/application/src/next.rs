@@ -1903,7 +1903,7 @@ where
     fn part(&self, at: FetchedAt) -> DayPart {
         DayPart::containing(
             at.as_timestamp()
-                .to_zoned(self.ports.zone.as_time_zone())
+                .to_zoned_datetime(self.ports.zone.as_time_zone())
                 .datetime(),
         )
     }

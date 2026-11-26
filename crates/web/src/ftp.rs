@@ -414,7 +414,10 @@ mod tests {
 
     fn tested(on: Date, watts: u32) -> Fallible<(Ftp, StartedAt)> {
         let zone = OperatorZone::try_from("Europe/London".to_owned())?;
-        let instant = on.at(8, 0, 0, 0).to_zoned(zone.as_time_zone())?.timestamp();
+        let instant = on
+            .at(8, 0, 0, 0)
+            .to_zoned_datetime(zone.as_time_zone())?
+            .timestamp();
         Ok((
             Ftp::new(Watts::from_u32(watts), on, FtpProvenance::Estimated)?,
             StartedAt::new(instant, zone),

@@ -36,7 +36,7 @@ fn garmin(
     let zone = OperatorZone::try_from("Europe/London".to_owned())?;
     let at = on
         .at(12, 0, 0, 0)
-        .to_zoned(zone.as_time_zone())?
+        .to_zoned_datetime(zone.as_time_zone())?
         .timestamp();
     Ok(Sighting {
         device: DeviceIdentifier::Serial(SerialNumber::try_from(serial.to_string())?),
@@ -60,7 +60,7 @@ fn peloton(number: u16, on: Date) -> Fallible<Sighting> {
     let zone = OperatorZone::try_from("Europe/London".to_owned())?;
     let at = on
         .at(20, 0, 0, 0)
-        .to_zoned(zone.as_time_zone())?
+        .to_zoned_datetime(zone.as_time_zone())?
         .timestamp();
     Ok(Sighting {
         device: DeviceIdentifier::Ant(AntDeviceNumber::new(

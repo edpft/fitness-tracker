@@ -22,7 +22,7 @@ impl Today {
     #[must_use]
     pub fn date(&self) -> Date {
         jiff::Timestamp::now()
-            .to_zoned(self.0.as_time_zone())
+            .to_zoned_datetime(self.0.as_time_zone())
             .date()
     }
 }
@@ -50,7 +50,7 @@ impl Now {
     pub fn day_part(&self) -> DayPart {
         DayPart::containing(
             jiff::Timestamp::now()
-                .to_zoned(self.0.as_time_zone())
+                .to_zoned_datetime(self.0.as_time_zone())
                 .datetime(),
         )
     }

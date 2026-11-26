@@ -213,7 +213,7 @@ pub async fn add(store: &Store) -> Result<(), Failure> {
         if typed.is_empty() {
             // Not a compiled-in default: it is what somebody at a prompt means
             // by pressing enter, and they can see what they are agreeing to.
-            return Ok(jiff::Zoned::now().date());
+            return Ok(jiff::ZonedDateTime::now().date());
         }
         parse_date(typed)
     })?;
@@ -299,7 +299,7 @@ fn date_or_today(typed: &str) -> Result<Date, String> {
     if typed.is_empty() {
         // What somebody at a prompt means by pressing enter, and they can see
         // what they are agreeing to.
-        return Ok(jiff::Zoned::now().date());
+        return Ok(jiff::ZonedDateTime::now().date());
     }
     parse_date(typed)
 }

@@ -145,7 +145,7 @@ impl Walk {
     ///
     /// [`StoreError`] if the store cannot be read.
     pub(crate) async fn walked(&self, zone: &OperatorZone) -> Result<Walked, StoreError> {
-        let here = jiff::Timestamp::now().to_zoned(zone.as_time_zone());
+        let here = jiff::Timestamp::now().to_zoned_datetime(zone.as_time_zone());
         self.walked_on(DayPart::containing(here.datetime())).await
     }
 
