@@ -24,7 +24,7 @@ fn measured(on: Date, hour: i8, grams: u64) -> Fallible<Weighed> {
     let zone = OperatorZone::try_from("Europe/London".to_owned())?;
     let at = on
         .at(hour, 30, 0, 0)
-        .to_zoned(zone.as_time_zone())?
+        .to_zoned_datetime(zone.as_time_zone())?
         .timestamp();
     Ok(Weighed {
         at: Occurred::At(StartedAt::new(at, zone)),

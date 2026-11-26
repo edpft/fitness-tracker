@@ -34,7 +34,7 @@ telemetry = { path = "crates/telemetry" }
 # across its own boundaries.
 #
 # `jiff` rather than chrono: § II requires an IANA zone identifier and says an
-# offset is not a substitute. jiff's Timestamp/Zoned split is exactly that
+# offset is not a substitute. jiff's Timestamp/ZonedDateTime split is exactly that
 # distinction, and it has no naive local type to reach for by accident.
 #
 # The zone database is bundled rather than read from the host. § 34 forbids an
@@ -44,7 +44,7 @@ telemetry = { path = "crates/telemetry" }
 # input to a deterministic translation, and a derivation whose wall clocks
 # depend on the host's tzdata version is not the re-derivable thing § 7
 # requires.
-jiff = { version = "0.2.35", features = ["tzdb-bundle-always"] }
+jiff = { version = "1.0.2", features = ["tzdb-bundle-always"] }
 sha2 = "0.11.0"
 # PKCE: a code verifier must be unguessable, and its challenge is the
 # base64url of its SHA-256. Neither is something to improvise.

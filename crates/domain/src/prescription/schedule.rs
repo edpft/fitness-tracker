@@ -19,7 +19,7 @@
 
 use std::{fmt, num::NonZeroU8};
 
-use jiff::{Zoned, civil::Date, tz::TimeZone};
+use jiff::{ZonedDateTime, civil::Date, tz::TimeZone};
 
 use crate::planner::{Relative, SessionRole, TrainingWeek};
 
@@ -739,7 +739,7 @@ impl Calendar {
     /// zone, and answering it from a system clock in UTC is how a session lands
     /// on the wrong day for anyone training in the evening.
     pub fn today(&self, now: jiff::Timestamp) -> Date {
-        Zoned::new(now, self.zone.clone()).date()
+        ZonedDateTime::new(now, self.zone.clone()).date()
     }
 
     /// The session an operator means when they name no date: today if the block

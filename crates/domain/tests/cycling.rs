@@ -903,7 +903,9 @@ fn ridden(
     started: jiff::civil::Date,
     average: u32,
 ) -> Result<BikePlusRide, Box<dyn std::error::Error>> {
-    let instant = started.to_zoned(jiff::tz::TimeZone::UTC)?.timestamp();
+    let instant = started
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)?
+        .timestamp();
     let sample = RideSample {
         at: Duration::from_seconds(1),
         // Not the average. Peloton states its own and it is not the mean of

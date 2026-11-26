@@ -35,7 +35,7 @@ fn started(on: Date, hour: i8) -> Fallible<StartedAt> {
     let zone = OperatorZone::try_from("Europe/London".to_owned())?;
     let at = on
         .at(hour, 0, 0, 0)
-        .to_zoned(zone.as_time_zone())?
+        .to_zoned_datetime(zone.as_time_zone())?
         .timestamp();
     Ok(StartedAt::new(at, zone))
 }

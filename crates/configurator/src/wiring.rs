@@ -1730,7 +1730,7 @@ impl application::next::Walks for WalkList {
 /// the walk must not run past what it can place.
 fn today() -> jiff::civil::Date {
     jiff::Timestamp::now()
-        .to_zoned(jiff::tz::TimeZone::UTC)
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
         .date()
 }
 

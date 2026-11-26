@@ -341,7 +341,7 @@ impl Runs {
         else {
             return true;
         };
-        let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
+        let here = jiff::Timestamp::now().to_zoned_datetime(setting.zone.as_time_zone());
         Box::pin(configurator::next::wanted(
             &self.held_next(),
             &credentials,
@@ -441,7 +441,7 @@ impl Runs {
                 return self.end(asked);
             }
         };
-        let here = jiff::Timestamp::now().to_zoned(setting.zone.as_time_zone());
+        let here = jiff::Timestamp::now().to_zoned_datetime(setting.zone.as_time_zone());
         let following = Following(&self.view);
         let held = self.held_next();
         let failed = match asked {

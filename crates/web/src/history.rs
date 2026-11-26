@@ -300,9 +300,9 @@ fn padel(here: &str, played: &PlayedPadelSession) -> Markup {
                     li {
                         p {
                             "Started at "
-                            (change.started.instant().to_zoned(zone.clone()).strftime("%H:%M:%S"))
+                            (change.started.instant().to_zoned_datetime(zone.clone()).strftime("%H:%M:%S"))
                             "; ended at "
-                            (played.ended().to_zoned(zone).strftime("%H:%M:%S"))
+                            (played.ended().to_zoned_datetime(zone).strftime("%H:%M:%S"))
                         }
                         p.sub { "Because " (change.reason) }
                         form method="post" action=(crate::change_bounds::undo_address(here, change.id)) {
@@ -567,7 +567,8 @@ fn taken(
         (Some(stream), _, _) => format!("when {} says", crate::change_bounds::called(stream)),
         (None, Some(at), Some(zone)) => format!(
             "at {}",
-            at.to_zoned(zone.as_time_zone()).strftime("%H:%M:%S")
+            at.to_zoned_datetime(zone.as_time_zone())
+                .strftime("%H:%M:%S")
         ),
         (None, Some(at), None) => format!("at {at}"),
         (None, None, _) => String::new(),

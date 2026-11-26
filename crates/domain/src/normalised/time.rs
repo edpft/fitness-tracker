@@ -15,7 +15,7 @@
 
 use std::fmt;
 
-use jiff::{Timestamp, Zoned, tz::TimeZone};
+use jiff::{Timestamp, ZonedDateTime, tz::TimeZone};
 
 /// Why a zone could not be read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -101,8 +101,8 @@ impl StartedAt {
     ///
     /// Resolved through the zone rather than through a stored offset, so a
     /// session at 6pm reads as 6pm on both sides of a switchover.
-    pub fn wall_clock(&self) -> Zoned {
-        self.instant.to_zoned(self.zone.zone().clone())
+    pub fn wall_clock(&self) -> ZonedDateTime {
+        self.instant.to_zoned_datetime(self.zone.zone().clone())
     }
 }
 

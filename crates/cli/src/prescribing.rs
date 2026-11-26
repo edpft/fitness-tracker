@@ -38,7 +38,7 @@ pub async fn workouts(store: &Store) -> Result<(), Failure> {
     let linear = versions.linear_at(now).await.map_err(failed)?;
     let sbs = versions.sbs_at(now).await.map_err(failed)?;
     let scales = versions
-        .scales_on(jiff::Zoned::now().date())
+        .scales_on(jiff::ZonedDateTime::now().date())
         .await
         .map_err(failed)?;
     let chart = domain::prescription::SbsChart::published()
@@ -87,7 +87,9 @@ pub async fn standing(store: &Store, zone: &OperatorZone, on: Option<&str>) -> R
         Some(date) => date
             .parse::<Date>()
             .map_err(|error| Failure::usage(&error))?,
-        None => jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date(),
+        None => jiff::Timestamp::now()
+            .to_zoned_datetime(zone.as_time_zone())
+            .date(),
     };
     let standing = prescriber
         .standing(on)
@@ -190,7 +192,9 @@ async fn search(
 /// Today in the operator's zone, which is the day "the next session" is
 /// counted from — and it moves at their midnight, not at UTC's.
 fn today(zone: &OperatorZone) -> Date {
-    jiff::Timestamp::now().to_zoned(zone.as_time_zone()).date()
+    jiff::Timestamp::now()
+        .to_zoned_datetime(zone.as_time_zone())
+        .date()
 }
 
 /// Put the prescription for a date where the operator trains from.

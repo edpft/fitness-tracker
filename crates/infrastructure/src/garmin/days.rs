@@ -239,7 +239,10 @@ fn start_from(since: Option<Watermark>) -> Date {
     let Some(mark) = since else {
         return EARLIEST;
     };
-    let at = mark.as_timestamp().to_zoned(jiff::tz::TimeZone::UTC).date();
+    let at = mark
+        .as_timestamp()
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+        .date();
     if at < EARLIEST { EARLIEST } else { at }
 }
 
@@ -259,7 +262,7 @@ fn last_sync(bytes: &[u8]) -> Result<Timestamp, SourceError> {
         malformed("the day's summary does not say when the watch last synced".to_owned())
     })?;
     at.parse::<jiff::civil::DateTime>()
-        .and_then(|at| at.to_zoned(jiff::tz::TimeZone::UTC))
+        .and_then(|at| at.to_zoned_datetime(jiff::tz::TimeZone::UTC))
         .map(|at| at.timestamp())
         .map_err(|error| malformed(format!("{at} is not a time this clock can place: {error}")))
 }
@@ -290,14 +293,14 @@ fn reaches(date: Date, synced: Timestamp) -> Result<Timestamp, SourceError> {
 pub fn whole_through(reached: Watermark) -> Option<Date> {
     reached
         .as_timestamp()
-        .to_zoned(jiff::tz::TimeZone::UTC)
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
         .date()
         .yesterday()
         .ok()
 }
 
 fn midnight(date: Date) -> Result<jiff::Timestamp, SourceError> {
-    date.to_zoned(jiff::tz::TimeZone::UTC)
+    date.to_zoned_datetime(jiff::tz::TimeZone::UTC)
         .map(|zoned| zoned.timestamp())
         .map_err(|error| SourceError::Malformed {
             detail: format!("{date} is not a date this clock can place: {error}"),
@@ -472,7 +475,7 @@ mod tests {
     #[test]
     fn a_later_walk_re_asks_the_watermark_s_day() {
         let at = date(2026, 10, 13)
-            .to_zoned(jiff::tz::TimeZone::UTC)
+            .to_zoned_datetime(jiff::tz::TimeZone::UTC)
             .expect("a zoned date")
             .timestamp();
         let mark = Watermark::from(EventTime::from(at));

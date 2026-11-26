@@ -1127,7 +1127,7 @@ async fn cycling_command_run(
     if let Some(("hold", holding)) = sub.subcommand() {
         let from = match holding.get_one::<String>("from") {
             Some(value) => parse_date(value)?,
-            None => jiff::Zoned::now().date(),
+            None => jiff::ZonedDateTime::now().date(),
         };
         let peloton = configurator::access::peloton(credentials)?;
         return cycling::hold(store, zone, from, &peloton).await;
@@ -1136,7 +1136,7 @@ async fn cycling_command_run(
     if let Some(("deliver", delivering)) = sub.subcommand() {
         let from = match delivering.get_one::<String>("date") {
             Some(value) => parse_date(value)?,
-            None => jiff::Zoned::now().date(),
+            None => jiff::ZonedDateTime::now().date(),
         };
         let peloton = configurator::access::peloton(credentials)?;
         return cycling::deliver(store, zone, from, delivering.get_flag("replace"), &peloton).await;
@@ -1148,7 +1148,7 @@ async fn cycling_command_run(
 
     let from = match next.get_one::<String>("date") {
         Some(value) => parse_date(value)?,
-        None => jiff::Zoned::now().date(),
+        None => jiff::ZonedDateTime::now().date(),
     };
 
     let ftp = match next.get_one::<String>("ftp") {

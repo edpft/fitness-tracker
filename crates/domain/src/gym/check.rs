@@ -501,7 +501,7 @@ mod tests {
             crate::normalised::OperatorZone::try_from("Europe/London".to_owned()).expect("a zone");
         let at = date(2018, 5, 2)
             .at(7, 0, 0, 0)
-            .to_zoned(zone.as_time_zone())
+            .to_zoned_datetime(zone.as_time_zone())
             .expect("a time")
             .timestamp();
         let mut dialled = set(kg(68, 0), SetKind::Working);

@@ -233,7 +233,7 @@ pub async fn ready(
             ))
         })?;
     let scales = store
-        .scales_on(jiff::Zoned::now().date())
+        .scales_on(jiff::ZonedDateTime::now().date())
         .await
         .map_err(|error| Failure::message(error.to_string(), exit::STORE))?;
     Ok(Ready {

@@ -502,7 +502,12 @@ impl Plan {
             (None, Some(cycling)) => cycling.span(),
             // Unrepresentable: `new` refuses a plan with neither. Answered
             // rather than panicked, because a plan is not worth an unwrap.
-            (None, None) => Span::new(self.authored_at.to_zoned(jiff::tz::TimeZone::UTC).date(), 0),
+            (None, None) => Span::new(
+                self.authored_at
+                    .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+                    .date(),
+                0,
+            ),
         }
     }
 

@@ -271,7 +271,7 @@ mod tests {
             sent: BTreeSet::from([Measurand::HeartRate]),
             at: StartedAt::new(
                 on.at(12, 0, 0, 0)
-                    .to_zoned(zone.as_time_zone())
+                    .to_zoned_datetime(zone.as_time_zone())
                     .expect("a time")
                     .timestamp(),
                 zone,

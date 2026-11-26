@@ -205,13 +205,16 @@ fn start_from(since: Option<Watermark>) -> Date {
     let Some(mark) = since else {
         return EARLIEST;
     };
-    let at = mark.as_timestamp().to_zoned(jiff::tz::TimeZone::UTC).date();
+    let at = mark
+        .as_timestamp()
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+        .date();
     if at < EARLIEST { EARLIEST } else { at }
 }
 
 /// A calendar date as an instant, which is what an event time is.
 fn midnight(date: Date) -> Result<jiff::Timestamp, SourceError> {
-    date.to_zoned(jiff::tz::TimeZone::UTC)
+    date.to_zoned_datetime(jiff::tz::TimeZone::UTC)
         .map(|zoned| zoned.timestamp())
         .map_err(|error| SourceError::Malformed {
             detail: format!("{date} is not a date this clock can place: {error}"),
@@ -292,7 +295,7 @@ mod tests {
     #[test]
     fn a_later_walk_re_asks_the_watermark_s_night() {
         let at = date(2026, 9, 14)
-            .to_zoned(jiff::tz::TimeZone::UTC)
+            .to_zoned_datetime(jiff::tz::TimeZone::UTC)
             .expect("a zoned date")
             .timestamp();
         let mark = Watermark::from(EventTime::from(at));
@@ -303,7 +306,7 @@ mod tests {
     #[test]
     fn the_floor_holds_against_an_older_watermark() {
         let at = date(2019, 1, 1)
-            .to_zoned(jiff::tz::TimeZone::UTC)
+            .to_zoned_datetime(jiff::tz::TimeZone::UTC)
             .expect("a zoned date")
             .timestamp();
         let mark = Watermark::from(EventTime::from(at));
