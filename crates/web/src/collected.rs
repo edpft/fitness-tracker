@@ -5,7 +5,7 @@
 //! its page collects (#559), and a session's are what it is prescribed from.
 
 use application::{
-    collected::{Collected, Stage, collected},
+    collected::{Collected, row as standing},
     next::{Found, Scope, Step, StepFailure},
 };
 use domain::planner::Discipline;
@@ -72,8 +72,8 @@ pub fn matrix<'a>(
                         Some(path) => a href=(path) { (row.name) },
                         None => span { (row.name) },
                     }
-                    @for stage in Stage::ALL {
-                        @match collected(&row.reads, stage, steps, going) {
+                    @for stage in standing(&row.reads, steps, going) {
+                        @match stage {
                             Some(standing) => (dot(standing)),
                             None => span {},
                         }

@@ -39,18 +39,37 @@ impl Stage {
 /// Where one stage of what a page reads stands.
 ///
 /// **Ordered from what most needs saying**: a stage is as far on as its
-/// furthest-behind part, so one failed part fails it and one unfinished part
-/// leaves it unfinished.
+/// furthest-behind part, so one failed part fails it, one unfinished part
+/// leaves it unfinished, and one no run has reached leaves it not run however
+/// many others are done.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Collected {
     Failed,
     Unfinished,
-    Done,
-    /// Not fetched, because nothing new could be there yet.
-    NotDue,
     /// No run has reached it: one that stopped before it, or none since the
     /// server started.
     NotRun,
+    Done,
+    /// Not fetched, because nothing new could be there yet.
+    NotDue,
+}
+
+impl Collected {
+    /// Where a step stands: unfinished until it has an outcome.
+    pub const fn of(outcome: Option<&Result<Found, StepFailure>>) -> Self {
+        match outcome {
+            None => Self::Unfinished,
+            Some(Err(_)) => Self::Failed,
+            Some(Ok(Found::NotDue(_))) => Self::NotDue,
+            Some(Ok(_)) => Self::Done,
+        }
+    }
+
+    /// Whether a stage standing so holds back the stages after it: one that
+    /// has not run does, and one that failed or was not due has run.
+    const fn holds_back(self) -> bool {
+        matches!(self, Self::Unfinished | Self::NotRun)
+    }
 }
 
 /// The parts `step` collects or derives, none for a step that is neither.
@@ -96,22 +115,42 @@ pub fn collected<'a>(
                 .filter(|(step, _)| parts(step).contains(part))
                 .last();
             match latest {
+                Some((_, outcome)) => Collected::of(outcome),
                 None if going => Collected::Unfinished,
                 None => Collected::NotRun,
-                Some((_, None)) => Collected::Unfinished,
-                Some((_, Some(Err(_)))) => Collected::Failed,
-                Some((_, Some(Ok(Found::NotDue(_))))) => Collected::NotDue,
-                Some((_, Some(Ok(_)))) => Collected::Done,
             }
         })
         .min()
+}
+
+/// Every stage of `scope`, in order, as [`collected`] has each.
+///
+/// **A stage is not classified before the stages ahead of it have run**
+/// (#842): while one is unfinished or not run, every stage after it says the
+/// same, whatever its own steps found. The operator, 2026-11-26: *"normalisation
+/// and canonicalisation shouldn't be classified before the fetch has run.
+/// That's different from not due."* A stage that failed or was not due has
+/// run, so holds nothing back.
+pub fn row<'a>(
+    scope: &Scope,
+    steps: &(impl IntoIterator<Item = (&'a Step, Option<&'a Result<Found, StepFailure>>)> + Clone),
+    going: bool,
+) -> [Option<Collected>; 3] {
+    let mut held: Option<Collected> = None;
+    Stage::ALL.map(|stage| {
+        let standing = collected(scope, stage, steps, going).map(|own| held.unwrap_or(own));
+        if held.is_none() {
+            held = standing.filter(|standing| standing.holds_back());
+        }
+        standing
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use domain::landing::LandingStream;
 
-    use super::{Collected, Stage, collected};
+    use super::{Collected, Stage, collected, row};
     use crate::{
         CanonicalLayer, Part,
         next::{Found, NoAccess, NotDue, Scope, Step, StepFailure},
@@ -230,6 +269,100 @@ mod tests {
         assert_eq!(
             collected(&scope, Stage::Canonicalising, &steps, false),
             Some(Collected::Done)
+        );
+    }
+    /// Sleep's parts in miniature: what it reads of the night, and the
+    /// training it is read against.
+    fn sleep() -> Scope {
+        Scope::new([
+            Part::Fetching(stream("garmin.sleep")),
+            Part::Fetching(stream("hevy.workouts")),
+            Part::Normalising(stream("garmin.sleep")),
+            Part::Normalising(stream("hevy.workouts")),
+            Part::Canonicalising(CanonicalLayer::Gym),
+        ])
+    }
+
+    /// **While a fetch goes, nothing after it is classified** (#842), green or
+    /// red. As at 07:00:02 on 2026-11-17: the gym layer was derived while
+    /// `garmin.sleep` was still being fetched.
+    #[test]
+    fn a_stage_waits_on_the_fetch_going_before_it() {
+        let hevy = Step::Fetching(stream("hevy.workouts"));
+        let normalising = Step::Normalising(stream("hevy.workouts"));
+        let canonicalising = Step::Canonicalising(domain::planner::Discipline::Gym);
+        let night = Step::Fetching(stream("garmin.sleep"));
+        let landed = Ok(Found::Changed);
+        let failed = no_access();
+        let steps = [
+            (&hevy, Some(&landed)),
+            (&normalising, Some(&failed)),
+            (&canonicalising, Some(&landed)),
+            (&night, None),
+        ];
+        assert_eq!(
+            row(&sleep(), &steps, true),
+            [Some(Collected::Unfinished); 3]
+        );
+    }
+
+    /// **A fetch no run reached leaves what follows it not run**, though
+    /// another of the row's fetches is done: as after a page's run at 07:01
+    /// on 2026-11-17 that did not fetch `garmin.sleep`.
+    #[test]
+    fn a_stage_not_run_leaves_the_rest_not_run() {
+        let hevy = Step::Fetching(stream("hevy.workouts"));
+        let normalising = Step::Normalising(stream("hevy.workouts"));
+        let canonicalising = Step::Canonicalising(domain::planner::Discipline::Gym);
+        let landed = Ok(Found::Changed);
+        let unchanged = Ok(Found::Unchanged);
+        let steps = [
+            (&hevy, Some(&landed)),
+            (&normalising, Some(&unchanged)),
+            (&canonicalising, Some(&unchanged)),
+        ];
+        assert_eq!(row(&sleep(), &steps, false), [Some(Collected::NotRun); 3]);
+    }
+
+    /// **A fetch not due, or one that failed, has run**, so what follows it
+    /// says what it found.
+    #[test]
+    fn a_fetch_not_due_or_failed_holds_nothing_back() {
+        let fetching = Step::Fetching(stream("withings.measurements"));
+        let spreadsheets = Step::Normalising(stream("spreadsheets.files"));
+        let withings = Step::Normalising(stream("withings.measurements"));
+        let weigh_ins = Step::CanonicalisingWeighIns;
+        let unchanged = Ok(Found::Unchanged);
+        for fetched in [Ok(Found::NotDue(NotDue::UntilTomorrow)), no_access()] {
+            let steps = [
+                (&fetching, Some(&fetched)),
+                (&spreadsheets, Some(&unchanged)),
+                (&withings, Some(&unchanged)),
+                (&weigh_ins, Some(&unchanged)),
+            ];
+            let [_, normalised, canonical] = row(&body_weight(), &steps, false);
+            assert_eq!(
+                (normalised, canonical),
+                (Some(Collected::Done), Some(Collected::Done))
+            );
+        }
+    }
+
+    /// **A stage the row has no part in stays absent**, and holds nothing.
+    #[test]
+    fn a_row_without_a_stage_leaves_it_absent() {
+        let night = Scope::new([
+            Part::Fetching(stream("garmin.sleep")),
+            Part::Normalising(stream("garmin.sleep")),
+        ]);
+        let none: [(&Step, Option<&Result<Found, StepFailure>>); 0] = [];
+        assert_eq!(
+            row(&night, &none, true),
+            [
+                Some(Collected::Unfinished),
+                Some(Collected::Unfinished),
+                None
+            ]
         );
     }
 }
