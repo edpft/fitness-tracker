@@ -5,11 +5,14 @@
 //!
 //! Through `gh`, which holds the operator's login. Each span is keyed on
 //! GitHub's ids, so importing a run twice leaves it once, and a run already
-//! imported is not fetched again. Actions deletes an artifact after 90 days,
+//! imported is not fetched again. Nor is it listed again: each import records
+//! where the next one lists from, which is the oldest run it could not take.
+//! Actions deletes an artifact after 90 days,
 //! so an import that waits longer records that run's checks without their
 //! cache status or their tests.
 
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -34,6 +37,17 @@ const SKIP_CHECK: &str = "Skip, unchanged since the base";
 const RUN_AUDIT: &str = "Run audit";
 const AUDIT: &str = "audit-deps";
 
+/// The span an import is, and the field it says where the next one lists
+/// from in.
+pub const IMPORT: &str = "import";
+pub const RESUME_FROM: &str = "resume_from";
+
+/// GitHub's status for a run that has finished, whatever its conclusion.
+const COMPLETED: &str = "completed";
+
+/// The most runs GitHub lists for one query.
+const LISTED_AT_MOST: usize = 1_000;
+
 #[derive(Debug, Deserialize)]
 pub struct Run {
     id: u64,
@@ -41,6 +55,7 @@ pub struct Run {
     #[serde(rename = "run_attempt")]
     attempt: u64,
     event: String,
+    status: String,
     head_branch: Option<String>,
     head_sha: String,
     head_commit: Option<Commit>,
@@ -258,14 +273,21 @@ pub fn uploaded(directory: &Path, check: &str) -> Results {
     }
 }
 
-/// How many runs an import recorded, and how many it could not read.
+/// How many runs an import recorded, how many it could not read, how many
+/// were still in progress, and where the next import lists from.
 pub struct Imported {
     pub runs: usize,
     pub passed_over: usize,
+    pub in_progress: usize,
+    pub resume_from: Option<Timestamp>,
 }
 
-/// Import every completed run not already in `database`.
+/// Import every completed run not already in `database`, of those created
+/// since where the last import said to resume from.
 pub fn import(database: &Path) -> Result<Imported, String> {
+    let from = telemetry::latest(database, IMPORT)
+        .map_err(|error| error.to_string())?
+        .and_then(|fields| fields.get(RESUME_FROM)?.as_str()?.parse::<Timestamp>().ok());
     let repository = gh(&[
         "repo",
         "view",
@@ -275,9 +297,15 @@ pub fn import(database: &Path) -> Result<Imported, String> {
         ".nameWithOwner",
     ])?;
     let repository = repository.trim();
-    let runs = listed(repository)?;
+    let runs = listed(repository, from)?;
+    let mut untaken: HashSet<u64> = runs
+        .iter()
+        .filter(|run| run.status != COMPLETED)
+        .map(|run| run.id)
+        .collect();
+    let in_progress = untaken.len();
     let mut pending = Vec::new();
-    for run in &runs {
+    for run in runs.iter().filter(|run| run.status == COMPLETED) {
         if !telemetry::is_written(database, &run.key()).map_err(|error| error.to_string())? {
             pending.push(run);
         }
@@ -303,8 +331,13 @@ pub fn import(database: &Path) -> Result<Imported, String> {
             // import tries it again: GitHub answers 502 now and then.
             let Some((first, spans)) = fetched else {
                 passed_over += 1;
+                untaken.insert(run.id);
                 continue;
             };
+            // A run whose jobs were all skipped leaves nothing to record.
+            if spans.is_empty() {
+                continue;
+            }
             if let Some(first) = first
                 && run.name != GATE
                 && telemetry::is_written(database, &format!("ci/job/{first}"))
@@ -323,27 +356,49 @@ pub fn import(database: &Path) -> Result<Imported, String> {
     Ok(Imported {
         runs: imported,
         passed_over,
+        in_progress,
+        resume_from: resume_from(&runs, |run| !untaken.contains(&run.id)).or(from),
     })
 }
 
-/// Every completed run. GitHub lists at most 1,000 for one query, so each
-/// query after the first asks for the runs created before the oldest so far.
-fn listed(repository: &str) -> Result<Vec<Run>, String> {
+/// Where the next import lists from: the oldest run this one did not take, so
+/// that the next one takes it, or else the newest it listed. Inclusive, so a
+/// run created at that instant is listed again, and passed over as written.
+fn resume_from(listed: &[Run], taken: impl Fn(&Run) -> bool) -> Option<Timestamp> {
+    listed
+        .iter()
+        .filter(|run| !taken(run))
+        .map(|run| run.created_at)
+        .min()
+        .or_else(|| listed.iter().map(|run| run.created_at).max())
+}
+
+/// Every run created since `from`, or every run there is, whether or not it
+/// has finished. GitHub lists at most [`LISTED_AT_MOST`] for one query, so
+/// each query after the first asks for the runs created up to the oldest so
+/// far, and a run on that boundary is listed twice and kept once.
+fn listed(repository: &str, from: Option<Timestamp>) -> Result<Vec<Run>, String> {
     let mut runs: Vec<Run> = Vec::new();
+    let mut seen = HashSet::new();
     let mut before: Option<Timestamp> = None;
     loop {
-        let created = before.map_or_else(String::new, |before| format!("&created=<{before}"));
+        let created = match (from, before) {
+            (None, None) => String::new(),
+            (Some(from), None) => format!("&created=>={from}"),
+            (None, Some(before)) => format!("&created=<={before}"),
+            (Some(from), Some(before)) => format!("&created={from}..{before}"),
+        };
         let page: Vec<Run> = lines(&gh(&[
             "api",
             "--paginate",
-            &format!("repos/{repository}/actions/runs?per_page=100&status=completed{created}"),
+            &format!("repos/{repository}/actions/runs?per_page=100{created}"),
             "--jq",
             ".workflow_runs[]",
         ])?)?;
         let oldest = page.iter().map(|run| run.created_at).min();
-        let fewer = oldest.is_none() || oldest == before;
-        runs.extend(page);
-        if fewer {
+        let all = page.len() < LISTED_AT_MOST || oldest.is_none() || oldest == before;
+        runs.extend(page.into_iter().filter(|run| seen.insert(run.id)));
+        if all {
             return Ok(runs);
         }
         before = oldest;
@@ -448,6 +503,7 @@ mod tests {
             "name": name,
             "run_attempt": 1,
             "event": "push",
+            "status": "completed",
             "head_branch": "main",
             "head_sha": "7fc5a449764352328b3065fffb4d166d47dbf422",
             "head_commit": {"timestamp": "2026-10-29T17:47:26Z"},
@@ -481,6 +537,40 @@ mod tests {
 
     fn nothing(_: &str) -> Results {
         Results::default()
+    }
+
+    fn created(id: u64, at: &str) -> Run {
+        let mut run = run(GATE);
+        run.id = id;
+        run.created_at = at.parse().unwrap();
+        run
+    }
+
+    #[test]
+    fn the_next_import_lists_from_the_oldest_run_this_one_did_not_take() {
+        let runs = [
+            created(1, "2026-10-29T10:00:00Z"),
+            created(2, "2026-10-29T11:00:00Z"),
+            created(3, "2026-10-29T12:00:00Z"),
+        ];
+
+        let resume_from = resume_from(&runs, |run| run.id != 2);
+
+        assert_eq!(resume_from, Some("2026-10-29T11:00:00Z".parse().unwrap()));
+    }
+
+    #[test]
+    fn having_taken_every_run_the_next_import_lists_from_the_newest() {
+        let runs = [
+            created(1, "2026-10-29T10:00:00Z"),
+            created(2, "2026-10-29T12:00:00Z"),
+        ];
+
+        assert_eq!(
+            resume_from(&runs, |_| true),
+            Some("2026-10-29T12:00:00Z".parse().unwrap())
+        );
+        assert_eq!(resume_from(&[], |_| true), None);
     }
 
     #[test]

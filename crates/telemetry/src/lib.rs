@@ -39,8 +39,8 @@ use tracing_subscriber::{Layer, layer::Context, registry::LookupSpan};
 
 /// The span names recorded, and the only ones: anything else — a dependency's
 /// own instrumentation above all — is not this tool's telemetry.
-pub const NAMES: [&str; 9] = [
-    "command", "request", "run", "step", "gate", "check", "test", "job", CALL,
+pub const NAMES: [&str; 10] = [
+    "command", "request", "run", "step", "gate", "check", "test", "job", CALL, "import",
 ];
 
 /// A call through a port (#816), named in its [`CALL`] field, with the rows
@@ -185,6 +185,36 @@ pub fn is_written(database: &Path, key: &str) -> Result<bool, sqlx::Error> {
             .await?;
         connection.close().await?;
         Ok(found.is_some())
+    })
+}
+
+/// The fields of the latest span named `name` that succeeded, so that an
+/// import can start where the last one left off.
+///
+/// # Errors
+///
+/// If the file cannot be opened or read.
+pub fn latest(database: &Path, name: &str) -> Result<Option<Map<String, Value>>, sqlx::Error> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async {
+        let mut connection = connect(database).await?;
+        let fields: Option<String> = sqlx::query_scalar(
+            "SELECT fields FROM span WHERE name = ? AND outcome = ?
+             ORDER BY started_at DESC LIMIT 1",
+        )
+        .bind(name)
+        .bind(Outcome::Succeeded.as_str())
+        .fetch_optional(&mut connection)
+        .await?;
+        connection.close().await?;
+        Ok(fields
+            .and_then(|fields| serde_json::from_str::<Value>(&fields).ok())
+            .and_then(|fields| match fields {
+                Value::Object(fields) => Some(fields),
+                _ => None,
+            }))
     })
 }
 
