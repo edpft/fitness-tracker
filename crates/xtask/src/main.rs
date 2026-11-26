@@ -158,21 +158,48 @@ fn imported() -> bool {
     let Some(database) = writable() else {
         return false;
     };
-    match import::import(&database) {
-        Ok(import::Imported { runs, passed_over }) => {
+    let started_at = Timestamp::now();
+    let imported = import::import(&database);
+    let mut fields = Map::new();
+    let outcome = match &imported {
+        Ok(import::Imported {
+            runs,
+            passed_over,
+            in_progress,
+            resume_from,
+        }) => {
             eprintln!("xtask: imported {runs} CI runs");
-            if passed_over > 0 {
+            if *passed_over > 0 {
                 eprintln!(
                     "xtask: {passed_over} could not be read, and the next import tries them again"
                 );
             }
-            true
+            if *in_progress > 0 {
+                eprintln!("xtask: {in_progress} still in progress, and the next import takes them");
+            }
+            fields.insert("runs".into(), (*runs).into());
+            fields.insert("passed_over".into(), (*passed_over).into());
+            fields.insert("in_progress".into(), (*in_progress).into());
+            if let Some(resume_from) = resume_from {
+                fields.insert(import::RESUME_FROM.into(), resume_from.to_string().into());
+            }
+            Outcome::Succeeded
         }
         Err(error) => {
             eprintln!("xtask: CI runs not imported: {error}");
-            false
+            Outcome::Failed
         }
-    }
+    };
+    recorded(&[Timed {
+        name: import::IMPORT,
+        key: None,
+        started_at,
+        ended_at: Timestamp::now(),
+        outcome: Some(outcome),
+        fields,
+        children: Vec::new(),
+    }]);
+    imported.is_ok()
 }
 
 fn check(name: &str) -> ExitCode {

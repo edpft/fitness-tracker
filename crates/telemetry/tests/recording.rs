@@ -273,6 +273,36 @@ fn a_keyed_span_written_twice_is_one_row() {
 }
 
 #[test]
+fn the_latest_span_is_the_latest_that_succeeded() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("telemetry.db");
+    let import = |at: i64, outcome: Outcome, resume_from: &str| {
+        let mut import = timed("import", None, vec![]);
+        import.started_at = jiff::Timestamp::constant(at, 0);
+        import.outcome = Some(outcome);
+        import
+            .fields
+            .insert("resume_from".into(), resume_from.into());
+        import
+    };
+
+    assert_eq!(telemetry::latest(&database, "import").unwrap(), None);
+    telemetry::write(
+        &database,
+        None,
+        &[
+            import(1_793_268_000, Outcome::Succeeded, "earlier"),
+            import(1_793_269_000, Outcome::Succeeded, "later"),
+            import(1_793_270_000, Outcome::Failed, "failed"),
+        ],
+    )
+    .unwrap();
+
+    let latest = telemetry::latest(&database, "import").unwrap().unwrap();
+    assert_eq!(latest["resume_from"], "later");
+}
+
+#[test]
 fn a_file_a_later_build_migrated_is_still_written() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("telemetry.db");
