@@ -2493,6 +2493,40 @@ pub trait RiddenVenues {
     fn ridden(&self) -> impl Future<Output = Result<BTreeSet<RideVenue>, StoreError>> + Send;
 }
 
+/// A class no published programme places, offered in place of one that does
+/// (#436).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Standalone {
+    pub at: RideVenue,
+    pub session: CyclingSession,
+}
+
+/// The classes a published programme's ride can be swapped for.
+///
+/// **The same length as the class it stands in for, and in no programme.** A
+/// length is what the source states a class runs for, so the adapter is what
+/// can answer it; and a programme's own classes are kept out so that the next
+/// cycle can open on them again.
+///
+/// **Nothing excluded for having been ridden.** That is the record's question,
+/// as it is for [`HoldingRides`], and the substitution asks it.
+pub trait StandaloneClasses {
+    /// Every standalone class the same length as the one at `venue`, each with
+    /// what it prescribes.
+    ///
+    /// Empty where the catalogue does not hold the class at `venue`, which
+    /// leaves that ride as published.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError`] if the catalogue cannot be read, or holds a class that
+    /// will not read as a session.
+    fn like(
+        &self,
+        venue: &RideVenue,
+    ) -> impl Future<Output = Result<Vec<Standalone>, SourceError>> + Send;
+}
+
 /// What one listing of the class catalogue's source found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClassesListed {

@@ -834,8 +834,8 @@ where
     Self: Sync,
     P: PlanStore + Clone + Send + Sync,
     G: GenerationParameterStore + ProgressionStore + Sync,
-    H: crate::HoldingRides + Sync,
-    R: crate::RiddenVenues + Sync,
+    H: crate::HoldingRides + crate::StandaloneClasses + Sync,
+    R: crate::RiddenVenues + crate::RiddenSessionLog + Sync,
     B: crate::PublishedProgrammes + Sync,
 {
     async fn due(

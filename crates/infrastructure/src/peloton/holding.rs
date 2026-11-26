@@ -16,7 +16,7 @@
 //! series because the browse endpoint takes an exact duration — the two are one
 //! query, not a shape and a parameter.
 
-use application::{HoldingRides, SourceError};
+use application::{HoldingRides, SourceError, Standalone, StandaloneClasses};
 use domain::{
     cycling::{CyclingSession, RideVenue},
     planner::{Relative, SessionRole},
@@ -25,7 +25,7 @@ use domain::{
 use super::{
     catalogue::ClassCatalogue,
     class::{POWER_ZONE_ENDURANCE_SERIES, POWER_ZONE_SERIES},
-    provider,
+    provider, skeleton,
 };
 
 /// How long both holding rides are, in seconds.
@@ -87,6 +87,34 @@ impl HoldingRides for PelotonHoldingRides<'_> {
         // ride is the degenerate case of it, so the joining rule is stated once.
         let (session, _) = provider::session((1, 1), std::slice::from_ref(&class))?;
         Ok(session)
+    }
+}
+
+/// The same catalogue, as what a published programme's rides are swapped for
+/// (#436).
+///
+/// **One adapter for both ports** because both are choosing out of the local
+/// catalogue: a holding week by series, a substitute by length.
+impl StandaloneClasses for PelotonHoldingRides<'_> {
+    async fn like(&self, venue: &RideVenue) -> Result<Vec<Standalone>, SourceError> {
+        let placed = skeleton::placed();
+        let offered = self
+            .classes
+            .alongside(venue.reference())
+            .await?
+            .into_iter()
+            .filter(|class| !placed.contains(class.id.as_str()))
+            // **A class that will not read as a session is not a candidate**,
+            // and an FTP test is not one either: neither can be ridden in
+            // place of a zoned class, so neither is offered.
+            .filter_map(|class| provider::session((1, 1), std::slice::from_ref(&class)).ok())
+            .filter(|(session, _)| !session.is_test())
+            .map(|(session, at)| Standalone {
+                at: at.first().clone(),
+                session,
+            })
+            .collect::<Vec<_>>();
+        Ok(offered)
     }
 }
 

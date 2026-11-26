@@ -10,7 +10,7 @@
 
 use domain::{
     cycling::{
-        BikePlusRide, Cadence, ComposedFrom, CyclingMesocycle, CyclingMicrocycle,
+        Apart, BikePlusRide, Cadence, ComposedFrom, CyclingMesocycle, CyclingMicrocycle,
         CyclingProvenance, CyclingSession, Ftp, FtpProvenance, Interval, PerformedSession,
         PlannedRide, PowerZone, Resistance, Ride, RideRecord, RideSample, RideVenue,
         SessionPosition, Speed, Watts, ZoneProfile, bottom_level, diverges, mesocycles, partition,
@@ -982,4 +982,61 @@ fn an_ordinary_ride_measures_no_ftp() {
         cool_down: None,
     };
     assert!(session.measured_ftp().is_none());
+}
+
+/// Two zones held one after the other.
+fn two(
+    first: (PowerZone, u64),
+    second: (PowerZone, u64),
+) -> Result<Ride, Box<dyn std::error::Error>> {
+    Ok(Ride::Intervals(NonEmpty::new(vec![
+        Interval::new(first.0, PositiveDuration::from_seconds(first.1)?),
+        Interval::new(second.0, PositiveDuration::from_seconds(second.1)?),
+    ])?))
+}
+
+#[test]
+fn a_class_resting_in_another_zone_is_closer_than_one_working_in_another() {
+    // Build µ3's 45-minute Power Zone ride rests in Z2; the closest class in the
+    // catalogue does the same work and rests in Z1 (#436).
+    let original = two((PowerZone::Two, 300), (PowerZone::Four, 600)).expect("a ride");
+    let rests_differently = two((PowerZone::One, 300), (PowerZone::Four, 600)).expect("a ride");
+    let works_differently = two((PowerZone::Two, 300), (PowerZone::Five, 600)).expect("a ride");
+
+    let from = ZoneProfile::of([&original]);
+    let resting = Apart::of(&ZoneProfile::of([&rests_differently]), &from);
+    let working = Apart::of(&ZoneProfile::of([&works_differently]), &from);
+
+    assert_eq!(
+        resting,
+        Apart {
+            work: 0,
+            recovery: 600
+        }
+    );
+    assert_eq!(
+        working,
+        Apart {
+            work: 1200,
+            recovery: 0
+        }
+    );
+    assert!(
+        resting < working,
+        "{resting:?} should be closer than {working:?}"
+    );
+}
+
+#[test]
+fn a_ride_is_no_distance_from_itself() {
+    let ride = two((PowerZone::Three, 420), (PowerZone::Two, 180)).expect("a ride");
+    let profile = ZoneProfile::of([&ride]);
+
+    assert_eq!(
+        Apart::of(&profile, &profile),
+        Apart {
+            work: 0,
+            recovery: 0
+        }
+    );
 }

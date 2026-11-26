@@ -33,7 +33,8 @@ use application::{
     Reached, Reading, Reads, RecordedDevices, RefusalStore, RenderingDigest,
     RestingHeartRateHistory, ResumptionPointStore, Revision, Revisions, RiddenSession,
     RiddenSessionLog, RiddenVenues, RideDestination, Served, SessionOrdinal, SleepHistory,
-    SourceError, StoreError, StressHistory, TrainingDone, WearRecord, WeighInHistory, WorkoutStore,
+    SourceError, Standalone, StandaloneClasses, StoreError, StressHistory, TrainingDone,
+    WearRecord, WeighInHistory, WorkoutStore,
     graph::{Calendar, Generation, Node, Table},
 };
 use domain::analytical::Weighed;
@@ -849,6 +850,12 @@ spanned! {
     HoldingRides {
         fn candidates(&self, role: SessionRole) -> Result<Vec<RideVenue>, SourceError>;
         fn session_at(&self, venue: &RideVenue) -> Result<CyclingSession, SourceError>;
+    }
+}
+
+spanned! {
+    StandaloneClasses {
+        fn like(&self, venue: &RideVenue) -> Result<Vec<Standalone>, SourceError>;
     }
 }
 

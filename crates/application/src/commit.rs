@@ -13,8 +13,10 @@
 use domain::planner::Arrangement as _;
 use std::num::NonZeroU32;
 
+use std::collections::BTreeSet;
+
 use domain::{
-    cycling::{CyclingMesocycle, CyclingProvenance},
+    cycling::{CyclingMesocycle, CyclingProvenance, RideVenue},
     macrocycle::{Concurrent, Cycling, Gym, Macrocycle, PlannedMacrocycle, Whole},
     normalised::OperatorZone,
     plan::{Plan, Span},
@@ -32,11 +34,13 @@ use jiff::civil::{Date, Weekday};
 
 use crate::{
     GenerationParameterStore, HoldingRides, PlanStore, ProgressionStore, PublishedCycling,
-    PublishedProgrammes, RiddenVenues, SourceError, StoreError,
+    PublishedProgrammes, RiddenSessionLog, RiddenVenues, SourceError, StandaloneClasses,
+    StoreError,
     holding::NoHoldingRide,
     microcycle::Standing,
     published::{self, BuildError, EASIER, HARDER},
     reschedule::ReschedulingPlans,
+    substitute,
 };
 
 /// Microcycles and cycling sessions in a committed mesocycle: the shape the
@@ -90,6 +94,8 @@ pub struct Due {
     diary: Diary,
     pub concurrent: Concurrent,
     pub span: Span,
+    /// Every plan in force, which the cycle of classes is replayed from.
+    plans: Vec<Plan>,
 }
 
 /// `plan` with `gym` and `cycling` after what it holds.
@@ -129,9 +135,11 @@ fn extended(
 pub struct CommitPorts<P, G, H, R, B> {
     pub plans: P,
     pub parameters: G,
-    /// The catalogue a hold's holding weeks are chosen from.
+    /// The catalogue a hold's holding weeks are chosen from, and a published
+    /// programme's substitutes (#436).
     pub holding: H,
-    /// What has been ridden, which a holding week does not offer again.
+    /// What has been ridden, which a holding week does not offer again, nor a
+    /// substitute in the same cycle.
     pub ridden: R,
     pub published: B,
 }
@@ -148,8 +156,8 @@ impl<P, G, H, R, B> Committing<P, G, H, R, B>
 where
     P: PlanStore + Clone + Sync,
     G: GenerationParameterStore + ProgressionStore + Sync,
-    H: HoldingRides + Sync,
-    R: RiddenVenues + Sync,
+    H: HoldingRides + StandaloneClasses + Sync,
+    R: RiddenVenues + RiddenSessionLog + Sync,
     B: PublishedProgrammes + Sync,
 {
     pub const fn new(ports: CommitPorts<P, G, H, R, B>, zone: OperatorZone) -> Self {
@@ -202,6 +210,7 @@ where
                 diary: diary.clone(),
                 concurrent,
                 span: Span::new(start, concurrent.weeks()),
+                plans: plans.to_vec(),
             })
     }
 
@@ -214,7 +223,13 @@ where
     /// both halves built.
     pub async fn commit(&self, due: &Due) -> Result<(), CommitError> {
         let (gym, cycling) = self
-            .build(&due.plan, &due.diary, due.concurrent, due.span.start())
+            .build(
+                &due.plan,
+                &due.plans,
+                &due.diary,
+                due.concurrent,
+                due.span.start(),
+            )
             .await?;
         Ok(self
             .ports
@@ -291,7 +306,7 @@ where
             .filter(|last| last.start() >= macrocycle.start())
             .and_then(|last| self.cycling_of(last));
         while let Some(concurrent) = macrocycle.next(chain, previous, start) {
-            let (gym, cycling) = self.build(&plan, diary, concurrent, start).await?;
+            let (gym, cycling) = self.build(&plan, plans, diary, concurrent, start).await?;
             plan = extended(&plan, chain, gym, cycling)?;
             previous = Some(concurrent.cycling());
             start = weeks_after(start, concurrent.weeks())?;
@@ -304,13 +319,21 @@ where
     async fn build(
         &self,
         plan: &Plan,
+        plans: &[Plan],
         diary: &Diary,
         concurrent: Concurrent,
         start: Date,
     ) -> Result<(Vec<GymMesocycle>, Vec<CyclingMesocycle>), CommitError> {
-        let cycling = self
+        let mut cycling = Vec::new();
+        for built in self
             .cycling_side(plan, diary, concurrent.cycling(), start)
-            .await?;
+            .await?
+        {
+            cycling.push(
+                self.rotated(built, concurrent.cycling(), plan, plans)
+                    .await?,
+            );
+        }
         // **The gym runs the same weeks as the bike** (#732): a selection's
         // positions in the whole programme, each the week of the chart it falls
         // on, so the two reach their troughs together.
@@ -330,6 +353,65 @@ where
     /// Which cycling mesocycle a committed one is ([`cycling_kind`]).
     fn cycling_of(&self, mesocycle: &CyclingMesocycle) -> Option<Cycling> {
         cycling_kind(mesocycle, |programme| self.ports.published.which(programme))
+    }
+
+    /// `built` on substitutes where it is not its kind's first round in the
+    /// cycle (#436), and as published where it is.
+    ///
+    /// **After the test is put in, not before**: the substitution leaves a
+    /// session of two classes as it is, so Base 2's test week keeps its test.
+    ///
+    /// **The history is every plan's**, `plan` standing for the stored plan of
+    /// its name: a cycle runs across macrocycles, and the plan being projected
+    /// holds mesocycles nothing has stored yet.
+    async fn rotated(
+        &self,
+        built: CyclingMesocycle,
+        kind: Cycling,
+        plan: &Plan,
+        plans: &[Plan],
+    ) -> Result<CyclingMesocycle, CommitError> {
+        let start = built.start();
+        let mut held: Vec<&CyclingMesocycle> = plans
+            .iter()
+            .filter(|other| other.name() != plan.name())
+            .chain(std::iter::once(plan))
+            .filter_map(Plan::cycling)
+            .flat_map(domain::plan::Mesocycles::mesocycles)
+            .filter(|mesocycle| mesocycle.start() < start)
+            .collect();
+        held.sort_by_key(|mesocycle| mesocycle.start());
+        let history: Vec<(Cycling, Date)> = held
+            .iter()
+            .filter_map(|mesocycle| {
+                self.cycling_of(mesocycle)
+                    .map(|kind| (kind, mesocycle.start()))
+            })
+            .collect();
+        let Some(round) = substitute::round(&history, kind, start) else {
+            return Ok(built);
+        };
+        if round.number == 1 {
+            return Ok(built);
+        }
+
+        // Planned in this cycle, and ridden in it: neither is offered again.
+        let mut taken: BTreeSet<RideVenue> = held
+            .iter()
+            .filter(|mesocycle| mesocycle.start() >= round.since)
+            .flat_map(|mesocycle| mesocycle.microcycles().iter())
+            .flat_map(|week| week.rides().values())
+            .flat_map(|ride| ride.at().iter().cloned())
+            .collect();
+        taken.extend(
+            self.ports
+                .ridden
+                .ridden_between(round.since, start)
+                .await?
+                .into_iter()
+                .flat_map(|ridden| ridden.at),
+        );
+        Ok(substitute::substituted(&built, &self.ports.holding, &mut taken).await?)
     }
 
     /// The gym's half: SBS, or a hold's linear holding weeks and its test week.

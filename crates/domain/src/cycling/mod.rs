@@ -45,7 +45,7 @@ pub use performed::PerformedSession;
 pub use ride::{BikePlusRide, Cadence, ComposedFrom, Resistance, RideRecord, RideSample, Speed};
 pub use session::{CyclingSession, Interval, Ride, clock};
 pub use shape::{
-    Answer, PublishedProgramme, Refused, ZoneProfile, bottom_level, diverges, is_mesocycle,
+    Answer, Apart, PublishedProgramme, Refused, ZoneProfile, bottom_level, diverges, is_mesocycle,
     mesocycles, partition, span, zones_lost,
 };
 pub use venue::{InvalidVenue, RideVenue};
