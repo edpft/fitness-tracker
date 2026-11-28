@@ -1271,8 +1271,6 @@ struct Garmin<'a> {
     base_url: String,
     auth: std::sync::Arc<GarminAuth>,
     store: &'a Store,
-    resumption: Spanned<SqliteResumptionPointStore>,
-    runs: Spanned<SqliteExtractionRunLog>,
 }
 
 impl<'a> Garmin<'a> {
@@ -1308,8 +1306,6 @@ impl<'a> Garmin<'a> {
                 GarminCredentials::new(email, password),
             )),
             store,
-            resumption: store.adapter(SqliteResumptionPointStore::new),
-            runs: store.adapter(SqliteExtractionRunLog::new),
         })
     }
 
@@ -1518,18 +1514,7 @@ impl<'a> Garmin<'a> {
         S: WorkoutEventSource + Send + Sync + 'static,
         S::Resume: Send + Sync,
     {
-        application::next::Walk {
-            stream: landing.stream().clone(),
-            expects: expects(landing.stream()),
-            extraction: Erased::new(Extraction::new(ExtractionPorts {
-                source,
-                landing,
-                resumption: self.resumption.clone(),
-                runs: self.runs.clone(),
-                lock: self.store.run_lock(),
-                clock: SystemClock,
-            })),
-        }
+        erased_walk(source, landing, self.store)
     }
 }
 
@@ -1750,7 +1735,15 @@ async fn withings_measurements(
             stream: WithingsMeasurementLandingStore::STREAM,
         }),
         Command::Extract(access) => {
-            collect_withings(access, landing, resumption, runs, store, walks).await
+            let listed = withings_walks(access, store)?;
+            let mut each = Vec::with_capacity(listed.len());
+            for application::next::Walk {
+                stream, extraction, ..
+            } in listed
+            {
+                each.push(walk(stream, extraction, walks).await);
+            }
+            Ok(Outcome::ExtractedEach(each))
         }
         Command::Normalise(declared, rederivation) => {
             let zones = stated_zones(store, &declared).await?;
@@ -1817,66 +1810,62 @@ async fn withings_measurements(
 /// Every Withings walk, in the one order that matters: the measurements, then
 /// the ECG list, then the signals the list names.
 ///
+/// **One place builds them**, so `extract` and `next` run the same walks and
+/// cannot drift apart: until #761 `next` walked the measurements alone, and no
+/// ECG the scale took reached the store unless `extract` was run by hand.
+///
 /// **One `WithingsAuth`, shared.** The refresh token rotates on every use, so
 /// three walks each refreshing for itself would each spend the one before's.
 ///
 /// **Nothing derives the ECGs yet**, so they land behind the entry that already
 /// walks Withings, as Garmin's metrics do behind its activities (#269).
-async fn collect_withings(
+fn withings_walks(
     access: SourceAccess,
-    landing: Spanned<WithingsMeasurementLandingStore>,
-    resumption: Spanned<SqliteResumptionPointStore>,
-    runs: Spanned<SqliteExtractionRunLog>,
     store: &Store,
-    walks: &dyn WalkReporter,
-) -> Result<Outcome, WiringError> {
+) -> Result<Vec<application::next::Walk<Erased>>, WiringError> {
     let (base_url, auth) = withings_auth(access)?;
+    Ok(vec![
+        erased_walk(
+            WithingsMeasurements::new(base_url.clone(), std::sync::Arc::clone(&auth)),
+            store.try_adapter(WithingsMeasurementLandingStore::new)?,
+            store,
+        ),
+        erased_walk(
+            WithingsEcgs::new(base_url.clone(), std::sync::Arc::clone(&auth)),
+            store.try_adapter(WithingsEcgLandingStore::new)?,
+            store,
+        ),
+        erased_walk(
+            WithingsEcgSignals::new(base_url, auth),
+            store.try_adapter(WithingsEcgSignalLandingStore::new)?,
+            store,
+        ),
+    ])
+}
 
-    let measured = walk(
-        landing.stream().clone(),
-        Extraction::new(ExtractionPorts {
-            source: WithingsMeasurements::new(base_url.clone(), std::sync::Arc::clone(&auth)),
+/// A walk from `source` into `landing`, keeping its books in `store`, its
+/// extraction erased so it can stand in a list beside walks of other types.
+fn erased_walk<S>(
+    source: S,
+    landing: impl LandingStore + Send + Sync + 'static,
+    store: &Store,
+) -> application::next::Walk<Erased>
+where
+    S: WorkoutEventSource + Send + Sync + 'static,
+    S::Resume: Send + Sync,
+{
+    application::next::Walk {
+        stream: landing.stream().clone(),
+        expects: expects(landing.stream()),
+        extraction: Erased::new(Extraction::new(ExtractionPorts {
+            source,
             landing,
-            resumption: resumption.clone(),
-            runs: runs.clone(),
+            resumption: store.adapter(SqliteResumptionPointStore::new),
+            runs: store.adapter(SqliteExtractionRunLog::new),
             lock: store.run_lock(),
             clock: SystemClock,
-        }),
-        walks,
-    )
-    .await;
-
-    let ecgs_landing = store.try_adapter(WithingsEcgLandingStore::new)?;
-    let ecgs = walk(
-        ecgs_landing.stream().clone(),
-        Extraction::new(ExtractionPorts {
-            source: WithingsEcgs::new(base_url.clone(), std::sync::Arc::clone(&auth)),
-            landing: ecgs_landing,
-            resumption: resumption.clone(),
-            runs: runs.clone(),
-            lock: store.run_lock(),
-            clock: SystemClock,
-        }),
-        walks,
-    )
-    .await;
-
-    let signals_landing = store.try_adapter(WithingsEcgSignalLandingStore::new)?;
-    let signals = walk(
-        signals_landing.stream().clone(),
-        Extraction::new(ExtractionPorts {
-            source: WithingsEcgSignals::new(base_url, auth),
-            landing: signals_landing,
-            resumption,
-            runs,
-            lock: store.run_lock(),
-            clock: SystemClock,
-        }),
-        walks,
-    )
-    .await;
-
-    Ok(Outcome::ExtractedEach(vec![measured, ecgs, signals]))
+        })),
+    }
 }
 
 /// Hevy's workout events, as one walk.
@@ -1966,29 +1955,6 @@ fn withings_auth(
     Ok((base_url, std::sync::Arc::new(auth)))
 }
 
-/// Withings' measure groups, walked with the application's own credential.
-fn withings_walk(
-    access: SourceAccess,
-    landing: Spanned<WithingsMeasurementLandingStore>,
-    resumption: Spanned<SqliteResumptionPointStore>,
-    runs: Spanned<SqliteExtractionRunLog>,
-    store: &Store,
-) -> Result<application::next::Walk<impl WorkoutExtractor + Sync + use<>>, WiringError> {
-    let (base_url, auth) = withings_auth(access)?;
-    Ok(application::next::Walk {
-        stream: landing.stream().clone(),
-        expects: expects(landing.stream()),
-        extraction: Extraction::new(ExtractionPorts {
-            source: WithingsMeasurements::new(base_url, auth),
-            landing,
-            resumption,
-            runs,
-            lock: store.run_lock(),
-            clock: SystemClock,
-        }),
-    })
-}
-
 /// Body Scan weigh-ins, derived from what raw holds.
 fn withings_normalisation(
     store: &Store,
@@ -2024,28 +1990,13 @@ fn withings_normalisation(
 pub fn withings_records(
     access: Result<SourceAccess, NoAccess>,
     store: &Store,
-) -> Result<
-    Records<
-        Daily<
-            application::next::Walk<impl WorkoutExtractor + Sync + use<>>,
-            Spanned<SqliteWeighInStore>,
-        >,
-    >,
-    WiringError,
-> {
+) -> Result<Records<impl application::next::Walks + Sync + use<>>, WiringError> {
     let entry = LandingStream::try_from(WithingsMeasurementLandingStore::STREAM)?;
     let newest = store.try_adapter(SqliteWeighInStore::new)?;
     let walks = match access {
         Err(why) => Err(why),
-        Ok(access) => accessible(withings_walk(
-            access,
-            store.try_adapter(WithingsMeasurementLandingStore::new)?,
-            store.adapter(SqliteResumptionPointStore::new),
-            store.adapter(SqliteExtractionRunLog::new),
-            store,
-        ))?
-        .map(|walks| Daily {
-            walks,
+        Ok(access) => accessible(withings_walks(access, store))?.map(|walks| Daily {
+            walks: WalkList(walks),
             newest,
             awaits: Awaits::Today,
         }),
@@ -2782,6 +2733,50 @@ mod tests {
                 "finished garmin.activities refused",
                 "started garmin.exercise_sets",
                 "finished garmin.exercise_sets refused",
+            ]
+        );
+    }
+
+    /// **`next` walks the ECGs and their signals behind the weigh-ins** (#761),
+    /// the same walks as `extract withings.measurements` in the same order.
+    /// Until then it walked the measurements alone, and the store held no ECG
+    /// the scale had taken.
+    #[test]
+    fn next_walks_every_withings_stream_extract_does() {
+        use application::next::Walks as _;
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let database = directory.path().join("store.db");
+        let token = directory.path().join("withings.token");
+        let walked = runtime.block_on(async {
+            let store = super::Store::open(&database).await.expect("a store");
+            let access = crate::config::SourceAccess::OAuthClient {
+                base_url: "http://127.0.0.1:9".to_owned(),
+                auth_base_url: "http://127.0.0.1:9".to_owned(),
+                client: crate::config::OAuthClient {
+                    client_id: "client".to_owned(),
+                    client_secret: "not-a-real-secret".to_owned(),
+                    redirect_uri: "http://127.0.0.1:9/callback".to_owned(),
+                },
+                token,
+                origin: crate::config::Origin::Stored,
+            };
+            let records = super::withings_records(Ok(access), &store).expect("the walks build");
+            let walks = records.walks.expect("access to Withings");
+            (0..walks.count())
+                .map(|at| walks.stream(at).expect("a stream").to_string())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(
+            walked,
+            [
+                WithingsMeasurementLandingStore::STREAM,
+                super::WithingsEcgLandingStore::STREAM,
+                super::WithingsEcgSignalLandingStore::STREAM,
             ]
         );
     }
